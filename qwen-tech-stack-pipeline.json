@@ -1,0 +1,149 @@
+{
+  "name": "Qwen Tech Stack Recommender",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "tech-stack-recommender",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-node",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [250, 300],
+      "webhookId": "tech-stack-recommender"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"model\": \"qwen-plus\",\n  \"messages\": [\n    {\n      \"role\": \"system\",\n      \"content\": \"Você é um especialista em arquitetura de software e desenvolvimento. Sua tarefa é analisar as necessidades do projeto e recomendar o melhor stack tecnológico. Forneça uma resposta estruturada em JSON com os seguintes campos: frontend, backend, database, cloud_provider, devops_tools, justification. Seja específico e justifique cada escolha baseada nas necessidades informadas.\"\n    },\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.body.project_requirements }}\"\n    }\n  ],\n  \"temperature\": 0.7,\n  \"max_tokens\": 2000\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "qwen-api-node",
+      "name": "Qwen API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [450, 300],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "qwen-api-credential",
+          "name": "Qwen API Key"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\n// Extrair o conteúdo da resposta do Qwen\nlet content = '';\nif (response.choices && response.choices.length > 0) {\n  content = response.choices[0].message.content;\n}\n\n// Tentar parsear o JSON da resposta\nlet techStack = {};\ntry {\n  // Remover possíveis marcações de código markdown\n  const cleanContent = content.replace(/```json\\n?/g, '').replace(/```\\n?/g, '').trim();\n  techStack = JSON.parse(cleanContent);\n} catch (error) {\n  // Se não conseguir parsear, retorna o conteúdo bruto\n  techStack = {\n    raw_response: content,\n    parsing_error: error.message\n  };\n}\n\nreturn {\n  json: {\n    success: true,\n    project_requirements: $input.first().json.body?.project_requirements || 'Não informado',\n    recommended_stack: techStack,\n    model_used: 'qwen-plus',\n    timestamp: new Date().toISOString()\n  }\n};"
+      },
+      "id": "code-parser-node",
+      "name": "Parse Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($input.first().json, null, 2) }}",
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "response-node",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [850, 300]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Qwen API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qwen API": {
+      "main": [
+        [
+          {
+            "node": "Parse Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "tech-stack-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "n8n-instance"
+  },
+  "tags": [
+    {
+      "name": "AI",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "Qwen",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    },
+    {
+      "name": "Tech Stack",
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "id": "tech-stack-recommender-workflow"
+}
