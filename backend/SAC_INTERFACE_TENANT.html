@@ -1,0 +1,980 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAC - Central de Atendimento | GCA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        /* Modal Container */
+        .sac-modal {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 700px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Header */
+        .sac-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 24px;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sac-header h1 {
+            font-size: 24px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .sac-header .close-btn {
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .sac-header .close-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+        }
+
+        /* Tabs */
+        .sac-tabs {
+            display: flex;
+            border-bottom: 1px solid #e0e0e0;
+            background: #f8f9fa;
+        }
+
+        .sac-tab {
+            flex: 1;
+            padding: 16px;
+            text-align: center;
+            cursor: pointer;
+            border: none;
+            background: none;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .sac-tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: white;
+        }
+
+        .sac-tab:hover {
+            background: white;
+        }
+
+        /* Content */
+        .sac-content {
+            padding: 24px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Form Groups */
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 500;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .form-group .required {
+            color: #e74c3c;
+            margin-left: 4px;
+        }
+
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: 'Segoe UI', sans-serif;
+            font-size: 14px;
+            transition: all 0.3s;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: 'Courier New', monospace;
+        }
+
+        /* Severity Buttons */
+        .severity-buttons {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
+        .severity-btn {
+            padding: 12px;
+            border: 2px solid #ddd;
+            background: white;
+            border-radius: 6px;
+            cursor: pointer;
+            text-align: center;
+            font-weight: 500;
+            font-size: 12px;
+            transition: all 0.3s;
+        }
+
+        .severity-btn:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .severity-btn.selected {
+            border-color: #667eea;
+            background: #667eea;
+            color: white;
+        }
+
+        .severity-btn.low.selected { border-color: #27ae60; background: #27ae60; }
+        .severity-btn.medium.selected { border-color: #f39c12; background: #f39c12; }
+        .severity-btn.high.selected { border-color: #e67e22; background: #e67e22; }
+        .severity-btn.critical.selected { border-color: #e74c3c; background: #e74c3c; }
+
+        .severity-info {
+            background: #f0f4ff;
+            border-left: 4px solid #667eea;
+            padding: 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: #555;
+            margin-top: -8px;
+            margin-bottom: 16px;
+        }
+
+        /* Character Counter */
+        .char-counter {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 6px;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .char-counter .count {
+            font-weight: 500;
+        }
+
+        .char-counter.warning .count {
+            color: #e74c3c;
+        }
+
+        /* File Upload */
+        .file-upload-area {
+            border: 2px dashed #ddd;
+            border-radius: 6px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+
+        .file-upload-area:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.02);
+        }
+
+        .file-upload-area.dragover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .file-upload-area input[type="file"] {
+            display: none;
+        }
+
+        .file-upload-label {
+            cursor: pointer;
+            display: block;
+        }
+
+        .file-upload-label span {
+            display: block;
+            font-weight: 500;
+            color: #667eea;
+            margin-bottom: 6px;
+        }
+
+        .file-list {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .file-item {
+            background: white;
+            border: 1px solid #ddd;
+            padding: 8px 12px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            font-size: 12px;
+        }
+
+        .file-item .remove {
+            cursor: pointer;
+            color: #e74c3c;
+            font-weight: bold;
+        }
+
+        /* My Tickets Tab */
+        .tickets-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .ticket-item {
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .ticket-item:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.02);
+        }
+
+        .ticket-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .ticket-number {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .ticket-severity {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            color: white;
+        }
+
+        .ticket-severity.low { background: #27ae60; }
+        .ticket-severity.medium { background: #f39c12; }
+        .ticket-severity.high { background: #e67e22; }
+        .ticket-severity.critical { background: #e74c3c; }
+
+        .ticket-title {
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .ticket-meta {
+            display: flex;
+            gap: 16px;
+            font-size: 12px;
+            color: #999;
+        }
+
+        .ticket-status {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 11px;
+            font-weight: 600;
+            background: #e8f4f8;
+            color: #0097a7;
+        }
+
+        .ticket-status.open { background: #fff3cd; color: #856404; }
+        .ticket-status.analyzing { background: #cfe2ff; color: #084298; }
+        .ticket-status.waiting { background: #f8d7da; color: #842029; }
+        .ticket-status.resolved { background: #d1e7dd; color: #0f5132; }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #999;
+        }
+
+        .empty-state svg {
+            width: 60px;
+            height: 60px;
+            margin-bottom: 16px;
+            opacity: 0.3;
+        }
+
+        /* Buttons */
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 12px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        /* Success Message */
+        .success-message {
+            background: #d1e7dd;
+            border: 1px solid #badbcc;
+            color: #0f5132;
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            display: none;
+        }
+
+        .success-message.show {
+            display: block;
+            animation: slideDown 0.3s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Tooltip */
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            cursor: help;
+            margin-left: 4px;
+            color: #667eea;
+        }
+
+        .tooltip::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 125%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .tooltip::before {
+            content: '';
+            position: absolute;
+            bottom: 115%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 6px solid transparent;
+            border-top-color: #333;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.3s;
+            z-index: 1000;
+        }
+
+        .tooltip:hover::after,
+        .tooltip:hover::before {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .severity-buttons {
+                grid-template-columns: repeat(2, 1fr);
+            }
+
+            .sac-modal {
+                max-width: 100%;
+                max-height: 100vh;
+                border-radius: 12px 12px 0 0;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            .sac-tabs {
+                flex-wrap: wrap;
+            }
+
+            .sac-tab {
+                flex: 0 0 calc(50% - 6px);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="sac-modal">
+        <!-- Header -->
+        <div class="sac-header">
+            <h1>🆘 Central de Atendimento</h1>
+            <button class="close-btn" onclick="closeSAC()">×</button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="sac-tabs">
+            <button class="sac-tab active" onclick="switchTab(event, 'new-ticket')">
+                📋 Novo Ticket
+            </button>
+            <button class="sac-tab" onclick="switchTab(event, 'my-tickets')">
+                📄 Meus Tickets
+            </button>
+            <button class="sac-tab" onclick="switchTab(event, 'documentation')">
+                📚 Documentação
+            </button>
+        </div>
+
+        <!-- Content -->
+        <div class="sac-content">
+            <!-- New Ticket Tab -->
+            <div id="new-ticket" class="tab-content active">
+                <h2 style="margin-bottom: 20px; color: #333;">Abrir Novo Ticket</h2>
+
+                <div class="success-message" id="successMessage">
+                    ✅ Ticket #12345 criado com sucesso! Você receberá atualizações por e-mail.
+                </div>
+
+                <!-- Severity Selection -->
+                <div class="form-group">
+                    <label>Nível de Severidade <span class="required">*</span>
+                        <span class="tooltip" data-tooltip="Quanto afeta seu trabalho?">ℹ️</span>
+                    </label>
+                    <div class="severity-buttons">
+                        <button class="severity-btn low" onclick="selectSeverity(this, 'low')">
+                            <div style="font-size: 16px; margin-bottom: 4px;">🟢</div>
+                            BAIXO
+                        </button>
+                        <button class="severity-btn medium" onclick="selectSeverity(this, 'medium')">
+                            <div style="font-size: 16px; margin-bottom: 4px;">🟡</div>
+                            MÉDIO
+                        </button>
+                        <button class="severity-btn high" onclick="selectSeverity(this, 'high')">
+                            <div style="font-size: 16px; margin-bottom: 4px;">🟠</div>
+                            ALTO
+                        </button>
+                        <button class="severity-btn critical" onclick="selectSeverity(this, 'critical')">
+                            <div style="font-size: 16px; margin-bottom: 4px;">🔴</div>
+                            CRÍTICO
+                        </button>
+                    </div>
+                    <div class="severity-info" id="severityInfo">
+                        Selecione um nível para ver mais informações
+                    </div>
+                </div>
+
+                <!-- Project Selection -->
+                <div class="form-group">
+                    <label>Projeto Afetado <span class="required">*</span></label>
+                    <select id="projectSelect" onchange="updateFunctionalities()">
+                        <option value="">-- Selecione um projeto --</option>
+                        <option value="ecommerce">Ecommerce Platform</option>
+                        <option value="api">API Portal</option>
+                        <option value="dashboard">Dashboard Administrativo</option>
+                    </select>
+                </div>
+
+                <!-- Functionality Selection -->
+                <div class="form-group">
+                    <label>Funcionalidade Afetada <span class="required">*</span></label>
+                    <select id="functionalitySelect">
+                        <option value="">-- Selecione uma funcionalidade --</option>
+                        <option value="code-gen">Code Generation</option>
+                        <option value="validation">Validation</option>
+                        <option value="github">Repositório</option>
+                        <option value="dashboard">Dashboard</option>
+                        <option value="arguidor">Arguidor</option>
+                        <option value="other">Outra...</option>
+                    </select>
+                </div>
+
+                <!-- Problem Description -->
+                <div class="form-group">
+                    <label>Descreva o Problema <span class="required">*</span>
+                        <span class="tooltip" data-tooltip="20-5000 caracteres. Inclua: o que fez, o que aconteceu, o que deveria acontecer">ℹ️</span>
+                    </label>
+                    <textarea
+                        id="problemDescription"
+                        placeholder="Estava tentando gerar código para um módulo de login. Cliquei em 'Gerar Código' e a página ficou carregando por mais de 5 minutos, depois fechou sozinha. Esperava que o código fosse gerado e exibido. Tentei 3 vezes, mesma coisa. Uso Chrome no Windows 11."
+                        onkeyup="updateCharCounter()"
+                    ></textarea>
+                    <div class="char-counter">
+                        <span>Mínimo: 20 caracteres | Máximo: 5000</span>
+                        <span class="count"><span id="charCount">0</span>/5000</span>
+                    </div>
+                </div>
+
+                <!-- Error Messages -->
+                <div class="form-group">
+                    <label>Mensagens de Erro Recebidas
+                        <span class="tooltip" data-tooltip="Cole a mensagem de erro exatamente como aparece">ℹ️</span>
+                    </label>
+                    <textarea
+                        id="errorMessages"
+                        placeholder="Error: Failed to generate code
+Status: 500 Internal Server Error
+At: 2026-04-05 15:22:33
+Code: ERR_GEN_TIMEOUT"
+                        style="font-family: 'Courier New', monospace; font-size: 12px;"
+                    ></textarea>
+                    <div style="font-size: 12px; color: #999; margin-top: 6px;">
+                        (Cole a mensagem de erro exatamente como aparece na tela)
+                    </div>
+                </div>
+
+                <!-- Erratic Behavior -->
+                <div class="form-group">
+                    <label>Comportamento Errático
+                        <span class="tooltip" data-tooltip="Descreva o que está estranho ou diferente do esperado">ℹ️</span>
+                    </label>
+                    <textarea
+                        id="erraticBehavior"
+                        placeholder="Ao abrir a aba de 'Code Generation', o combo de 'Projeto' mostra só 2 projetos quando deveria mostrar 8. Se eu sair e entro novamente, mostra correto. Isso acontece 80% das vezes."
+                    ></textarea>
+                </div>
+
+                <!-- File Upload -->
+                <div class="form-group">
+                    <label>Anexar Screenshot/Arquivo
+                        <span class="tooltip" data-tooltip="Máx 5 arquivos, 10MB total. PNG, JPG, MP4, TXT, JSON">ℹ️</span>
+                    </label>
+                    <div class="file-upload-area" id="uploadArea" ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
+                        <label class="file-upload-label">
+                            <span>📁 Clique para selecionar ou arraste arquivos</span>
+                            <small style="color: #999;">PNG, JPG, MP4, TXT, JSON (máx 10MB total)</small>
+                            <input type="file" id="fileInput" multiple onchange="handleFileSelect(event)">
+                        </label>
+                    </div>
+                    <div class="file-list" id="fileList"></div>
+                </div>
+
+                <!-- Browser Info -->
+                <div class="form-group">
+                    <label>Informação do Navegador</label>
+                    <input type="text" id="browserInfo" value="Chrome 124.0.0.0 - Windows 11" readonly style="background: #f5f5f5;">
+                    <div style="font-size: 12px; color: #999; margin-top: 6px;">
+                        (Preenchido automaticamente)
+                    </div>
+                </div>
+
+                <!-- Buttons -->
+                <div class="button-group">
+                    <button class="btn btn-secondary" onclick="clearForm()">Limpar</button>
+                    <button class="btn btn-primary" onclick="submitTicket()">Enviar Ticket</button>
+                </div>
+            </div>
+
+            <!-- My Tickets Tab -->
+            <div id="my-tickets" class="tab-content">
+                <h2 style="margin-bottom: 20px; color: #333;">Meus Tickets</h2>
+
+                <div class="tickets-list" id="ticketsList">
+                    <div class="ticket-item" onclick="expandTicket(this)">
+                        <div class="ticket-header">
+                            <div>
+                                <span class="ticket-number">#12345</span>
+                                <span class="ticket-severity high">ALTO</span>
+                            </div>
+                            <span class="ticket-status resolved">RESOLVIDO</span>
+                        </div>
+                        <div class="ticket-title">Código não gera - Timeout excedido</div>
+                        <div class="ticket-meta">
+                            <span>Projeto: Ecommerce Platform</span>
+                            <span>Criado: há 2 dias</span>
+                            <span>Respondido por: Carlos Silva</span>
+                        </div>
+                    </div>
+
+                    <div class="ticket-item" onclick="expandTicket(this)">
+                        <div class="ticket-header">
+                            <div>
+                                <span class="ticket-number">#12344</span>
+                                <span class="ticket-severity medium">MÉDIO</span>
+                            </div>
+                            <span class="ticket-status analyzing">EM ANÁLISE</span>
+                        </div>
+                        <div class="ticket-title">Filtro não funciona no Dashboard</div>
+                        <div class="ticket-meta">
+                            <span>Projeto: API Portal</span>
+                            <span>Criado: há 4 horas</span>
+                            <span>Respondido por: João Silva</span>
+                        </div>
+                    </div>
+
+                    <div class="ticket-item" onclick="expandTicket(this)">
+                        <div class="ticket-header">
+                            <div>
+                                <span class="ticket-number">#12343</span>
+                                <span class="ticket-severity low">BAIXO</span>
+                            </div>
+                            <span class="ticket-status resolved">RESOLVIDO</span>
+                        </div>
+                        <div class="ticket-title">Typo na interface - Mensagem incorreta</div>
+                        <div class="ticket-meta">
+                            <span>Projeto: Dashboard Administrativo</span>
+                            <span>Criado: há 1 semana</span>
+                            <span>Respondido por: Maria Santos</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Documentation Tab -->
+            <div id="documentation" class="tab-content">
+                <h2 style="margin-bottom: 20px; color: #333;">Documentação e FAQ</h2>
+
+                <div style="line-height: 1.8; color: #555;">
+                    <h3 style="margin-top: 20px; margin-bottom: 12px; color: #333;">📊 Níveis de Severidade</h3>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li><strong>🟢 BAIXO:</strong> Não impede trabalho (typos, cores erradas) — Resposta: 24h</li>
+                        <li><strong>🟡 MÉDIO:</strong> Reduz produtividade (lentidão, filtro errado) — Resposta: 12h</li>
+                        <li><strong>🟠 ALTO:</strong> Bloqueia funcionalidade (não consegue gerar) — Resposta: 4h</li>
+                        <li><strong>🔴 CRÍTICO:</strong> Sistema indisponível (app não abre) — Resposta: 1h</li>
+                    </ul>
+
+                    <h3 style="margin-top: 20px; margin-bottom: 12px; color: #333;">✅ Como Descrever Bem</h3>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>O que você estava tentando fazer</li>
+                        <li>O que aconteceu (inesperado)</li>
+                        <li>O que deveria ter acontecido</li>
+                        <li>Quantas vezes ocorreu</li>
+                        <li>Em que browser/dispositivo</li>
+                    </ul>
+
+                    <h3 style="margin-top: 20px; margin-bottom: 12px; color: #333;">❌ Como NÃO Descrever</h3>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>❌ "Não funciona!" (muito vago)</li>
+                        <li>❌ Mensagens de erro incompletas</li>
+                        <li>❌ Múltiplos tickets iguais</li>
+                        <li>❌ Credenciais ou dados sensíveis</li>
+                    </ul>
+
+                    <h3 style="margin-top: 20px; margin-bottom: 12px; color: #333;">📎 Anexos Permitidos</h3>
+                    <ul style="margin-left: 20px; margin-bottom: 20px;">
+                        <li>✅ Screenshots (PNG, JPG)</li>
+                        <li>✅ Logs de erro (TXT)</li>
+                        <li>✅ Vídeos (MP4 - máx 5 min)</li>
+                        <li>✅ Configurações (JSON)</li>
+                        <li>❌ Executáveis ou código-fonte completo</li>
+                    </ul>
+
+                    <h3 style="margin-top: 20px; margin-bottom: 12px; color: #333;">🎯 Tempo de Resposta (SLA)</h3>
+                    <ul style="margin-left: 20px;">
+                        <li><strong>BAIXO:</strong> 24-72 horas</li>
+                        <li><strong>MÉDIO:</strong> 12-48 horas</li>
+                        <li><strong>ALTO:</strong> 2-12 horas</li>
+                        <li><strong>CRÍTICO:</strong> 15 min - 4 horas</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Severity Info Map
+        const severityInfo = {
+            low: '🟢 BAIXO: Não impede seu trabalho (ex: typo, cor errada). Resposta esperada em 24-72 horas.',
+            medium: '🟡 MÉDIO: Reduz sua produtividade (ex: lentidão, filtro não funciona). Resposta esperada em 12-48 horas.',
+            high: '🟠 ALTO: Bloqueia uma funcionalidade importante (ex: não consegue gerar código). Resposta esperada em 2-12 horas.',
+            critical: '🔴 CRÍTICO: Sistema indisponível ou totalmente bloqueado. Resposta esperada em 15 min - 4 horas.'
+        };
+
+        let selectedSeverity = null;
+        let uploadedFiles = [];
+
+        // Tab Switching
+        function switchTab(event, tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Remove active from all buttons
+            document.querySelectorAll('.sac-tab').forEach(btn => {
+                btn.classList.remove('active');
+            });
+
+            // Show selected tab
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+        }
+
+        // Severity Selection
+        function selectSeverity(button, severity) {
+            document.querySelectorAll('.severity-btn').forEach(btn => {
+                btn.classList.remove('selected');
+            });
+            button.classList.add('selected');
+            selectedSeverity = severity;
+
+            // Update info
+            const infoEl = document.getElementById('severityInfo');
+            infoEl.textContent = severityInfo[severity];
+            infoEl.style.borderLeftColor = button.style.borderColor;
+        }
+
+        // Character Counter
+        function updateCharCounter() {
+            const textarea = document.getElementById('problemDescription');
+            const count = textarea.value.length;
+            document.getElementById('charCount').textContent = count;
+
+            const counter = document.querySelector('.char-counter');
+            if (count > 4500) {
+                counter.classList.add('warning');
+            } else {
+                counter.classList.remove('warning');
+            }
+        }
+
+        // File Upload
+        function handleDragOver(event) {
+            event.preventDefault();
+            document.getElementById('uploadArea').classList.add('dragover');
+        }
+
+        function handleDragLeave(event) {
+            document.getElementById('uploadArea').classList.remove('dragover');
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            document.getElementById('uploadArea').classList.remove('dragover');
+            const files = event.dataTransfer.files;
+            handleFileSelect({ target: { files: files } });
+        }
+
+        function handleFileSelect(event) {
+            const files = event.target.files;
+            const fileList = document.getElementById('fileList');
+            let totalSize = uploadedFiles.reduce((sum, f) => sum + f.size, 0);
+
+            for (let file of files) {
+                if (uploadedFiles.length >= 5) {
+                    alert('Máximo de 5 arquivos permitido');
+                    break;
+                }
+                if (totalSize + file.size > 10 * 1024 * 1024) {
+                    alert('Tamanho total máximo de 10MB excedido');
+                    break;
+                }
+
+                uploadedFiles.push(file);
+                totalSize += file.size;
+
+                const item = document.createElement('div');
+                item.className = 'file-item';
+                item.innerHTML = `
+                    <span>📎 ${file.name} (${(file.size / 1024).toFixed(1)} KB)</span>
+                    <span class="remove" onclick="removeFile('${file.name}')">✕</span>
+                `;
+                fileList.appendChild(item);
+            }
+
+            event.target.value = '';
+        }
+
+        function removeFile(fileName) {
+            uploadedFiles = uploadedFiles.filter(f => f.name !== fileName);
+            document.querySelectorAll('.file-item').forEach(item => {
+                if (item.textContent.includes(fileName)) {
+                    item.remove();
+                }
+            });
+        }
+
+        // Form Submission
+        function submitTicket() {
+            const projectSelect = document.getElementById('projectSelect');
+            const functionalitySelect = document.getElementById('functionalitySelect');
+            const description = document.getElementById('problemDescription');
+
+            if (!selectedSeverity) {
+                alert('Selecione um nível de severidade');
+                return;
+            }
+            if (!projectSelect.value) {
+                alert('Selecione um projeto');
+                return;
+            }
+            if (!functionalitySelect.value) {
+                alert('Selecione uma funcionalidade');
+                return;
+            }
+            if (description.value.length < 20) {
+                alert('Descrição deve ter pelo menos 20 caracteres');
+                return;
+            }
+
+            // Simulate ticket creation
+            const ticketNumber = Math.floor(Math.random() * 100000);
+            const successMsg = document.getElementById('successMessage');
+            successMsg.innerHTML = `✅ Ticket #${ticketNumber} criado com sucesso! Você receberá atualizações por e-mail.`;
+            successMsg.classList.add('show');
+
+            // Clear form
+            setTimeout(() => {
+                clearForm();
+                successMsg.classList.remove('show');
+            }, 3000);
+        }
+
+        function clearForm() {
+            selectedSeverity = null;
+            uploadedFiles = [];
+            document.querySelectorAll('.severity-btn').forEach(btn => btn.classList.remove('selected'));
+            document.getElementById('projectSelect').value = '';
+            document.getElementById('functionalitySelect').value = '';
+            document.getElementById('problemDescription').value = '';
+            document.getElementById('errorMessages').value = '';
+            document.getElementById('erraticBehavior').value = '';
+            document.getElementById('fileList').innerHTML = '';
+            document.getElementById('charCount').textContent = '0';
+            document.getElementById('severityInfo').textContent = 'Selecione um nível para ver mais informações';
+        }
+
+        function updateFunctionalities() {
+            // Could dynamically update based on project
+        }
+
+        function expandTicket(element) {
+            // Placeholder for expanding ticket details
+            alert('Funcionalidade de expandir será implementada');
+        }
+
+        function closeSAC() {
+            // Placeholder for closing modal
+            alert('Modal será fechado');
+        }
+
+        // Initialize
+        document.getElementById('browserInfo').value = navigator.userAgent.split(' ').slice(0, 2).join(' ');
+    </script>
+</body>
+</html>

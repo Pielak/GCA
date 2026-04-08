@@ -1,0 +1,120 @@
+<mxfile host="app.diagrams.net">
+  <diagram name="GCA BPMN">
+    <mxGraphModel dx="1600" dy="900" grid="1" gridSize="10">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- SWIMLANES -->
+        <mxCell id="lane1" value="Frontend (React)" style="swimlane;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="0" y="0" width="300" height="800" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="lane2" value="Backend (FastAPI)" style="swimlane;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="300" y="0" width="400" height="800" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="lane3" value="GCA Engine (IA + Gatekeeper)" style="swimlane;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="700" y="0" width="450" height="800" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="lane4" value="Infra (DB / Redis / Docker)" style="swimlane;horizontal=0;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="0" width="350" height="800" as="geometry"/>
+        </mxCell>
+
+        <!-- START -->
+        <mxCell id="start" value="Start" style="ellipse;fillColor=#d5e8d4;" vertex="1" parent="lane1">
+          <mxGeometry x="80" y="40" width="120" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- LOGIN -->
+        <mxCell id="login" value="Login (email/senha)" style="rounded=1;" vertex="1" parent="lane1">
+          <mxGeometry x="60" y="140" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- AUTH -->
+        <mxCell id="auth" value="Validar credenciais + JWT" style="rounded=1;" vertex="1" parent="lane2">
+          <mxGeometry x="80" y="140" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- OCG -->
+        <mxCell id="ocg" value="Selecionar / Criar OCG" style="rounded=1;fillColor=#dae8fc;" vertex="1" parent="lane2">
+          <mxGeometry x="80" y="240" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- INGESTAO -->
+        <mxCell id="ingest" value="Upload de documentos" style="rounded=1;" vertex="1" parent="lane1">
+          <mxGeometry x="60" y="340" width="180" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- LGPD -->
+        <mxCell id="lgpd" value="Detecção de PII / LGPD" style="rhombus;fillColor=#fff2cc;" vertex="1" parent="lane3">
+          <mxGeometry x="80" y="340" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- MERGE -->
+        <mxCell id="merge" value="Merge Engine (doc mestre)" style="rounded=1;" vertex="1" parent="lane3">
+          <mxGeometry x="80" y="460" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- GATEKEEPER -->
+        <mxCell id="gate" value="Gatekeeper (7 pilares + score)" style="rounded=1;fillColor=#f8cecc;" vertex="1" parent="lane3">
+          <mxGeometry x="80" y="560" width="240" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- DECISION -->
+        <mxCell id="decision" value="Aprovado?" style="rhombus;" vertex="1" parent="lane3">
+          <mxGeometry x="100" y="660" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- ARGUIDOR -->
+        <mxCell id="arguidor" value="Arguidor Técnico" style="rounded=1;fillColor=#ffe6cc;" vertex="1" parent="lane3">
+          <mxGeometry x="320" y="660" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- CODEGEN -->
+        <mxCell id="codegen" value="Code Generator" style="rounded=1;fillColor=#d5e8d4;" vertex="1" parent="lane3">
+          <mxGeometry x="80" y="780" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- REVIEW -->
+        <mxCell id="review" value="Revisão humana" style="rounded=1;" vertex="1" parent="lane2">
+          <mxGeometry x="80" y="780" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- QA -->
+        <mxCell id="qa" value="QA em container isolado" style="rounded=1;" vertex="1" parent="lane4">
+          <mxGeometry x="80" y="780" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- DEPLOY -->
+        <mxCell id="deploy" value="Deploy / Execução" style="rounded=1;fillColor=#dae8fc;" vertex="1" parent="lane4">
+          <mxGeometry x="80" y="900" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- MONITOR -->
+        <mxCell id="monitor" value="Monitoramento + Alertas" style="rounded=1;" vertex="1" parent="lane4">
+          <mxGeometry x="80" y="1000" width="220" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- EDGES -->
+        <mxCell id="e1" edge="1" parent="1" source="start" target="login"/>
+        <mxCell id="e2" edge="1" parent="1" source="login" target="auth"/>
+        <mxCell id="e3" edge="1" parent="1" source="auth" target="ocg"/>
+        <mxCell id="e4" edge="1" parent="1" source="ocg" target="ingest"/>
+        <mxCell id="e5" edge="1" parent="1" source="ingest" target="lgpd"/>
+        <mxCell id="e6" edge="1" parent="1" source="lgpd" target="merge"/>
+        <mxCell id="e7" edge="1" parent="1" source="merge" target="gate"/>
+        <mxCell id="e8" edge="1" parent="1" source="gate" target="decision"/>
+        <mxCell id="e9" edge="1" parent="1" source="decision" target="codegen"/>
+        <mxCell id="e10" edge="1" parent="1" source="decision" target="arguidor"/>
+        <mxCell id="e11" edge="1" parent="1" source="arguidor" target="merge"/>
+        <mxCell id="e12" edge="1" parent="1" source="codegen" target="review"/>
+        <mxCell id="e13" edge="1" parent="1" source="review" target="qa"/>
+        <mxCell id="e14" edge="1" parent="1" source="qa" target="deploy"/>
+        <mxCell id="e15" edge="1" parent="1" source="deploy" target="monitor"/>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

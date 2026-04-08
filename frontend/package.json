@@ -1,0 +1,128 @@
+{
+  "name": "gca-frontend",
+  "private": true,
+  "version": "4.0.0",
+  "type": "module",
+  "main": "electron/main.js",
+  "homepage": "./",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 5173",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
+    "type-check": "tsc --noEmit",
+    "electron-dev": "concurrently \"npm run dev\" \"wait-on http://localhost:5173 && electron .\"",
+    "electron-build": "npm run build && electron-builder",
+    "electron-build-win": "npm run build && electron-builder --win",
+    "electron-build-linux": "npm run build && electron-builder --linux",
+    "electron-build-mac": "npm run build && electron-builder --mac"
+  },
+  "dependencies": {
+    "@headlessui/react": "^2.2.9",
+    "@hookform/resolvers": "^3.9.1",
+    "@tanstack/react-query": "^5.61.5",
+    "@types/react-syntax-highlighter": "^15.5.13",
+    "axios": "^1.7.9",
+    "clsx": "^2.1.1",
+    "date-fns": "^4.1.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-dropzone": "^14.3.5",
+    "react-hook-form": "^7.54.1",
+    "react-hot-toast": "^2.4.1",
+    "react-router-dom": "^6.28.0",
+    "react-syntax-highlighter": "^15.6.1",
+    "recharts": "^2.13.3",
+    "tailwind-merge": "^2.5.4",
+    "zod": "^3.23.8",
+    "zustand": "^5.0.2",
+    "@codemirror/lang-python": "latest",
+    "@codemirror/lang-javascript": "latest",
+    "@codemirror/lang-java": "latest",
+    "@codemirror/lang-rust": "latest",
+    "@codemirror/lang-go": "latest",
+    "@codemirror/lang-sql": "latest",
+    "@codemirror/lang-html": "latest",
+    "@codemirror/lang-css": "latest",
+    "@codemirror/lang-xml": "latest",
+    "@codemirror/lang-json": "latest",
+    "@codemirror/lang-markdown": "latest",
+    "codemirror": "latest",
+    "@codemirror/view": "latest",
+    "@codemirror/state": "latest",
+    "@codemirror/commands": "latest",
+    "@codemirror/language": "latest",
+    "@codemirror/theme-one-dark": "latest"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@typescript-eslint/eslint-plugin": "^8.16.0",
+    "@typescript-eslint/parser": "^8.16.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9.15.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.16",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3",
+    "terser": "^5.27.0",
+    "electron": "^27.0.0",
+    "electron-builder": "^24.0.0",
+    "electron-log": "^4.4.8",
+    "concurrently": "^8.2.2",
+    "wait-on": "^7.2.0"
+  },
+  "build": {
+    "appId": "com.gca.app",
+    "productName": "GCA",
+    "files": [
+      "build/**/*",
+      "electron/**/*",
+      "!node_modules"
+    ],
+    "directories": {
+      "buildResources": "assets"
+    },
+    "win": {
+      "target": [
+        {
+          "target": "msi",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "certificateFile": "${env.WIN_CERT_FILE}",
+      "certificatePassword": "${env.WIN_CERT_PASS}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "GPD"
+    },
+    "linux": {
+      "target": [
+        "deb",
+        "rpm",
+        "AppImage"
+      ],
+      "category": "Development"
+    },
+    "deb": {
+      "depends": [
+        "postgresql-client"
+      ]
+    }
+  }
+}

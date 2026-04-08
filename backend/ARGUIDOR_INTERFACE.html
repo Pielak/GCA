@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arguidor - Seleção de Stack & Tecnologias | GCA</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+        }
+
+        .header h1 {
+            color: #667eea;
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 16px;
+        }
+
+        .breadcrumb {
+            color: #999;
+            font-size: 13px;
+            margin-top: 10px;
+        }
+
+        .breadcrumb span {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .section {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+            margin-bottom: 20px;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .section-header {
+            padding: 30px 40px;
+            border-bottom: 1px solid #f0f0f0;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .step-icon {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .section-header h2 {
+            color: #333;
+            font-size: 22px;
+            margin: 0;
+        }
+
+        .section-header p {
+            color: #999;
+            font-size: 13px;
+            margin-left: auto;
+        }
+
+        .section-content {
+            padding: 40px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: #333;
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input[type="text"],
+        textarea,
+        select {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="text"]:focus,
+        textarea:focus,
+        select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+        }
+
+        .language-card {
+            border: 2px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .language-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .language-card.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+        }
+
+        .language-icon {
+            font-size: 40px;
+            margin-bottom: 10px;
+        }
+
+        .language-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            padding: 15px;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+            margin-bottom: 12px;
+        }
+
+        .checkbox-item:hover {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.05);
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            margin-right: 12px;
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .checkbox-label {
+            flex: 1;
+            cursor: pointer;
+        }
+
+        .checkbox-label strong {
+            display: block;
+            color: #333;
+            margin-bottom: 4px;
+        }
+
+        .tech-badge {
+            display: inline-block;
+            background: #667eea;
+            color: white;
+            padding: 4px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            margin-top: 4px;
+            font-weight: 600;
+        }
+
+        .tech-card {
+            border: 1px solid #e0e0e0;
+            padding: 15px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .tech-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .tech-card.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+        }
+
+        .tech-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 13px;
+            margin-bottom: 4px;
+        }
+
+        .tech-desc {
+            color: #999;
+            font-size: 12px;
+        }
+
+        .recommended-badge {
+            display: inline-block;
+            background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-left: 4px;
+            font-weight: 600;
+        }
+
+        .persona-card {
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+        }
+
+        .persona-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .persona-card.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+        }
+
+        .persona-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+        }
+
+        .persona-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 13px;
+        }
+
+        .persona-desc {
+            color: #999;
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .n8n-suggestion {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .n8n-suggestion h3 {
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .suggestion-item {
+            background: rgba(255, 255, 255, 0.15);
+            padding: 10px 12px;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .suggestion-item:last-child {
+            margin-bottom: 0;
+        }
+
+        .compatibility-alert {
+            background: #d4edda;
+            border-left: 4px solid #28a745;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+            font-size: 13px;
+            color: #155724;
+        }
+
+        .summary {
+            background: linear-gradient(135deg, #667eea08 0%, #764ba208 100%);
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+
+        .summary h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .summary-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 13px;
+        }
+
+        .summary-item:last-child {
+            border-bottom: none;
+        }
+
+        .summary-label {
+            color: #666;
+            font-weight: 500;
+        }
+
+        .summary-value {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        button {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            flex: 1;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-secondary {
+            background: #f0f0f0;
+            color: #333;
+            flex: 1;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .next-steps {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .next-step-card {
+            border: 1px solid #e0e0e0;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            transition: all 0.3s;
+        }
+
+        .next-step-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 5px 20px rgba(0, 0, 0, 0.1);
+        }
+
+        .next-step-card h4 {
+            color: #667eea;
+            margin-bottom: 10px;
+            font-size: 13px;
+        }
+
+        .next-step-card p {
+            color: #666;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .footer {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+            padding: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 24px;
+            }
+
+            .section-content {
+                padding: 20px;
+            }
+
+            .grid-2,
+            .grid-3 {
+                grid-template-columns: 1fr;
+            }
+
+            .next-steps {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- HEADER -->
+        <div class="header">
+            <h1>🎯 Arguidor - Seleção de Stack & Tecnologias</h1>
+            <div class="breadcrumb">
+                Fase 4 do GPD: <span>Definir Arquitetura e Tecnologias para o Projeto</span>
+            </div>
+        </div>
+
+        <!-- STEP 1: CONTEXTO DO PROJETO -->
+        <div class="section">
+            <div class="section-header">
+                <div class="step-icon">1</div>
+                <h2>Contexto do Projeto</h2>
+                <p>Informações básicas do projeto</p>
+            </div>
+            <div class="section-content">
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Nome do Projeto</label>
+                        <input type="text" value="Ecommerce Platform" placeholder="Ex: Ecommerce Platform">
+                    </div>
+                    <div class="form-group">
+                        <label>Slug (URL-friendly)</label>
+                        <input type="text" value="ecommerce-platform" placeholder="auto-gerado" readonly>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Descrição</label>
+                    <textarea placeholder="Descreva brevemente o propósito do projeto...">Plataforma de e-commerce com catálogo de produtos, carrinho de compras, pagamento e gestão de pedidos. Suporte a múltiplos fornecedores.</textarea>
+                </div>
+
+                <div class="grid-2">
+                    <div class="form-group">
+                        <label>Domínio/Indústria</label>
+                        <select>
+                            <option selected>Ecommerce</option>
+                            <option>Fintech</option>
+                            <option>SaaS</option>
+                            <option>IoT</option>
+                            <option>Healthcare</option>
+                            <option>Educação</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Tipo de Arquitetura</label>
+                        <select>
+                            <option selected>Monolito Corporativo</option>
+                            <option>Microserviços</option>
+                            <option>Serverless</option>
+                            <option>Desktop/Desktop Híbrido</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 2: LINGUAGEM PRINCIPAL -->
+        <div class="section">
+            <div class="section-header">
+                <div class="step-icon">2</div>
+                <h2>Linguagem Principal</h2>
+                <p>Dispara análise N8N da stack recomendada</p>
+            </div>
+            <div class="section-content">
+                <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                    Selecione a linguagem principal. O N8N analisará a stack tecnológica recomendada para esta escolha através de web scraping.
+                </p>
+
+                <div class="grid-3">
+                    <div class="language-card selected">
+                        <div class="language-icon">🐍</div>
+                        <div class="language-name">Python</div>
+                    </div>
+                    <div class="language-card">
+                        <div class="language-icon">☕</div>
+                        <div class="language-name">Java</div>
+                    </div>
+                    <div class="language-card">
+                        <div class="language-icon">🟢</div>
+                        <div class="language-name">Node.js</div>
+                    </div>
+                    <div class="language-card">
+                        <div class="language-icon">🔵</div>
+                        <div class="language-name">Go</div>
+                    </div>
+                    <div class="language-card">
+                        <div class="language-icon">🦀</div>
+                        <div class="language-name">Rust</div>
+                    </div>
+                    <div class="language-card">
+                        <div class="language-icon">🔷</div>
+                        <div class="language-name">C#</div>
+                    </div>
+                </div>
+
+                <div class="n8n-suggestion">
+                    <h3>📡 N8N Web Scraping - Stack Recomendado para Python</h3>
+                    <div class="suggestion-item">✓ FastAPI - Framework web assíncrono e rápido</div>
+                    <div class="suggestion-item">✓ SQLAlchemy - ORM robusto e flexível</div>
+                    <div class="suggestion-item">✓ PostgreSQL - Banco relacional confiável</div>
+                    <div class="suggestion-item">✓ Celery - Task queue distribuída</div>
+                    <div class="suggestion-item">✓ Redis - Cache e broker de mensagens</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 3: INFRAESTRUTURA -->
+        <div class="section">
+            <div class="section-header">
+                <div class="step-icon">3</div>
+                <h2>Infraestrutura</h2>
+                <p>Componentes de banco de dados e serviços</p>
+            </div>
+            <div class="section-content">
+                <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                    Selecione os componentes de infraestrutura necessários para o projeto.
+                </p>
+
+                <label class="checkbox-item">
+                    <input type="checkbox" checked>
+                    <div class="checkbox-label">
+                        <strong>Banco de Dados</strong>
+                        <div class="tech-badge">PostgreSQL</div>
+                    </div>
+                </label>
+
+                <label class="checkbox-item">
+                    <input type="checkbox" checked>
+                    <div class="checkbox-label">
+                        <strong>Cache</strong>
+                        <div class="tech-badge">Redis</div>
+                    </div>
+                </label>
+
+                <label class="checkbox-item">
+                    <input type="checkbox" checked>
+                    <div class="checkbox-label">
+                        <strong>Message Queue</strong>
+                        <div class="tech-badge">RabbitMQ</div>
+                    </div>
+                </label>
+
+                <label class="checkbox-item">
+                    <input type="checkbox">
+                    <div class="checkbox-label">
+                        <strong>Search Engine</strong>
+                        <div class="tech-badge">Elasticsearch</div>
+                    </div>
+                </label>
+
+                <label class="checkbox-item">
+                    <input type="checkbox">
+                    <div class="checkbox-label">
+                        <strong>API Gateway</strong>
+                        <div class="tech-badge">Kong / AWS API Gateway</div>
+                    </div>
+                </label>
+            </div>
+        </div>
+
+        <!-- STEP 4: TECNOLOGIAS ADICIONAIS -->
+        <div class="section">
+            <div class="section-header">
+                <div class="step-icon">4</div>
+                <h2>Tecnologias Adicionais</h2>
+                <p>Filtradas por compatibilidade com Python + FastAPI</p>
+            </div>
+            <div class="section-content">
+                <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                    Tecnologias adicionais compatíveis com a stack principal selecionada.
+                </p>
+
+                <div class="grid-3">
+                    <div class="tech-card selected">
+                        <div class="tech-name">FastAPI <span class="recommended-badge">Recomendado</span></div>
+                        <div class="tech-desc">Framework web async moderno</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="tech-name">Django</div>
+                        <div class="tech-desc">Framework web completo e robusto</div>
+                    </div>
+                    <div class="tech-card selected">
+                        <div class="tech-name">SQLAlchemy</div>
+                        <div class="tech-desc">ORM relacional poderoso</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="tech-name">Pydantic</div>
+                        <div class="tech-desc">Validação de dados com tipos</div>
+                    </div>
+                    <div class="tech-card selected">
+                        <div class="tech-name">Celery</div>
+                        <div class="tech-desc">Task queue distribuída</div>
+                    </div>
+                    <div class="tech-card">
+                        <div class="tech-name">APScheduler</div>
+                        <div class="tech-desc">Job scheduling e automação</div>
+                    </div>
+                </div>
+
+                <div class="compatibility-alert">
+                    ✓ Todas as tecnologias selecionadas são compatíveis com Python 3.9+ e FastAPI. Stack validada em produção.
+                </div>
+            </div>
+        </div>
+
+        <!-- STEP 5: PERSONAS DO PROJETO -->
+        <div class="section">
+            <div class="section-header">
+                <div class="step-icon">5</div>
+                <h2>Personas do Projeto</h2>
+                <p>Roles e permissões de usuários</p>
+            </div>
+            <div class="section-content">
+                <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                    Defina os tipos de usuários (personas/roles) do sistema e suas responsabilidades.
+                </p>
+
+                <div class="grid-3">
+                    <div class="persona-card selected">
+                        <div class="persona-icon">👤</div>
+                        <div class="persona-name">Admin</div>
+                        <div class="persona-desc">Acesso total ao sistema</div>
+                    </div>
+                    <div class="persona-card selected">
+                        <div class="persona-icon">🏪</div>
+                        <div class="persona-name">Vendedor</div>
+                        <div class="persona-desc">Gerencia catálogo e pedidos</div>
+                    </div>
+                    <div class="persona-card selected">
+                        <div class="persona-icon">💳</div>
+                        <div class="persona-name">Cliente</div>
+                        <div class="persona-desc">Compra, avalia, retorna</div>
+                    </div>
+                </div>
+
+                <div class="summary">
+                    <h3>📋 Resumo da Configuração</h3>
+                    <div class="summary-item">
+                        <span class="summary-label">Projeto:</span>
+                        <span class="summary-value">Ecommerce Platform</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Linguagem:</span>
+                        <span class="summary-value">Python 3.9+</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Framework:</span>
+                        <span class="summary-value">FastAPI</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Banco de Dados:</span>
+                        <span class="summary-value">PostgreSQL + Redis + RabbitMQ</span>
+                    </div>
+                    <div class="summary-item">
+                        <span class="summary-label">Personas:</span>
+                        <span class="summary-value">3 roles definidas</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- PRÓXIMOS PASSOS -->
+        <div class="section">
+            <div class="section-header">
+                <div class="step-icon">→</div>
+                <h2>Próximos Passos</h2>
+                <p>Fluxo para Code Generation</p>
+            </div>
+            <div class="section-content">
+                <p style="color: #666; font-size: 14px; margin-bottom: 20px;">
+                    Com a stack e arquitetura definidas, você está pronto para prosseguir para a geração de código:
+                </p>
+
+                <div class="next-steps">
+                    <div class="next-step-card">
+                        <h4>📝 Module Plan</h4>
+                        <p>Arquitetura de módulos e estrutura de pastas baseada na stack</p>
+                    </div>
+                    <div class="next-step-card">
+                        <h4>⚙️ Code Generation</h4>
+                        <p>Gerar arquivos base do projeto e estrutura de código</p>
+                    </div>
+                    <div class="next-step-card">
+                        <h4>🧪 Test Generation</h4>
+                        <p>Gerar testes unitários e integrados automaticamente</p>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button class="btn-secondary">← Voltar para Gatekeeper</button>
+                    <button class="btn-primary">Prosseguir para Module Plan →</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            🔄 Fase 4 do GPD - Arguidor (Stack & Tecnologias) | Draft para validação
+        </div>
+    </div>
+</body>
+</html>

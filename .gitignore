@@ -1,0 +1,91 @@
+# Environment Variables
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Poetry
+poetry.lock
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Node/Frontend
+node_modules/
+npm-debug.log
+yarn-error.log
+.next/
+dist/
+build/
+
+# Storage
+/tmp/
+/storage/
+gca-storage/
+
+# Logs
+*.log
+logs/
+
+# Credentials
+*.pem
+*.key
+*.cert
+credentials.json
+secrets.json
+senhas.pdf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.dockerignore
+
+# Credentials docs (contain secrets)
+AI_PROVIDERS.md
+CREDENTIALS_INTEGRATED.md
+CREDENTIALS_SUMMARY.md
+FINAL_SUMMARY.md
+GITHUB_SETUP_COMPLETE.md
+INTEGRATION_COMPLETE.md
+GITHUB_INTEGRATION.md
+SETUP_COMPLETE_SUMMARY.md
+backend/QUICKSTART_DEV.md

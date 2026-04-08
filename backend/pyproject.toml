@@ -1,0 +1,97 @@
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+name = "gca"
+version = "0.1.0"
+description = "GCA - Gerenciador Central de Arquiteturas"
+authors = ["Luiz Carlos Pielak <luiz@agilizeti.com.br>"]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# Web Framework
+fastapi = "^0.104.1"
+uvicorn = "^0.24.0"
+python-multipart = "^0.0.6"
+
+# Database
+sqlalchemy = "^2.0.23"
+psycopg2-binary = "^2.9.9"
+asyncpg = "^0.29.0"
+alembic = "^1.13.0"
+
+# Auth & Security
+python-jose = {extras = ["cryptography"], version = "^3.3.0"}
+passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+pydantic = {extras = ["email"], version = "^2.5.0"}
+pydantic-settings = "^2.1.0"
+
+# Cryptography
+cryptography = "^41.0.7"
+
+# Data Validation
+email-validator = "^2.1.0"
+
+# Async
+aioredis = "^2.0.1"
+redis = "^5.0.1"
+
+# HTTP Client
+httpx = "^0.25.2"
+requests = "^2.31.0"
+
+# Logging
+structlog = "^23.2.0"
+python-json-logger = "^2.0.7"
+
+# Environment
+python-dotenv = "^1.0.0"
+
+# AI/ML
+anthropic = "^0.25.0"
+
+# Utils
+pydantic-extra-types = "^2.1.0"
+pytz = "^2023.3"
+tenacity = "^9.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.3"
+pytest-asyncio = "^0.21.1"
+pytest-cov = "^4.1.0"
+black = "^23.12.0"
+flake8 = "^6.1.0"
+mypy = "^1.7.1"
+isort = "^5.13.2"
+
+[tool.poetry.group.test.dependencies]
+httpx = "^0.25.2"
+
+[tool.black]
+line-length = 120
+target-version = ['py311']
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["app/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+    "ignore::ResourceWarning",
+]

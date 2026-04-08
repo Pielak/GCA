@@ -1,0 +1,96 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: gca-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gca
+      POSTGRES_USER: gca
+      POSTGRES_PASSWORD: gca_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - gca-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gca"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: gca-redis
+    restart: unless-stopped
+    # Porta não exposta no host — Redis do sistema já ocupa 6379
+    # Backend acessa via rede Docker (redis:6379)
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gca-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gca:gca_secret@postgres:5432/gca
+      REDIS_URL: redis://redis:6379/0
+      APP_ENV: development
+      DEBUG: "True"
+      MAX_RETRIES: ${MAX_RETRIES:-3}
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: gca
+      POSTGRES_USER: gca
+      POSTGRES_PASSWORD: gca_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Frontend (React + Vite)
+  frontend:
+    image: node:20-alpine
+    container_name: gca-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    working_dir: /app
+    environment:
+      VITE_API_URL: http://localhost:8000
+      VITE_APP_URL: http://localhost:5173
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install && npm run build && npm run preview -- --host 0.0.0.0 --port 5173"
+
+  # n8n Workflow Automation
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    volumes:
+      - /home/luiz/.n8n:/home/node/.n8n
+
+volumes:
+  gca-postgres-data:
+
+networks:
+  default:
+    name: gca-network

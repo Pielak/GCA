@@ -1,0 +1,1081 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>GCA — Questionário Técnico do Projeto</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #121a2b;
+      --panel-2: #182235;
+      --text: #e8eefc;
+      --muted: #a9b7d4;
+      --line: #2a3854;
+      --accent: #60a5fa;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: linear-gradient(180deg, var(--bg), #0f172a 45%, #101828);
+      color: var(--text);
+      line-height: 1.45;
+    }
+    .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+    .hero, .card, .status-box, .note {
+      background: rgba(18, 26, 43, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.22);
+    }
+    .hero { padding: 24px; margin-bottom: 18px; }
+    h1, h2, h3 { margin: 0 0 12px 0; }
+    h1 { font-size: 28px; }
+    h2 {
+      font-size: 21px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 16px;
+    }
+    h3 { font-size: 16px; color: #dbe8ff; }
+    p, li { color: var(--muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 14px;
+    }
+    .col-12 { grid-column: span 12; }
+    .col-8 { grid-column: span 8; }
+    .col-6 { grid-column: span 6; }
+    .col-4 { grid-column: span 4; }
+    .col-3 { grid-column: span 3; }
+    @media (max-width: 860px) {
+      .col-8, .col-6, .col-4, .col-3 { grid-column: span 12; }
+    }
+    .card { padding: 18px; margin-bottom: 18px; }
+    label.lbl {
+      display: block;
+      font-size: 13px;
+      color: #dce7ff;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+    input[type="text"], input[type="url"], input[type="email"], select, textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      outline: none;
+    }
+    textarea { min-height: 88px; resize: vertical; }
+    .checks, .radios {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 8px 12px;
+      margin-top: 8px;
+    }
+    .checks label, .radios label {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      background: rgba(24,34,53,0.9);
+      border-radius: 10px;
+      color: var(--text);
+      cursor: pointer;
+    }
+    input[type="checkbox"], input[type="radio"] {
+      margin-top: 3px;
+      accent-color: var(--accent);
+    }
+    .status-bar {
+      height: 14px;
+      background: #0f172a;
+      border-radius: 999px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      margin: 10px 0 8px;
+    }
+    .status-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--bad), var(--warn), var(--ok));
+      transition: width .25s ease;
+    }
+    .status-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+    }
+    @media (max-width: 860px) { .status-grid { grid-template-columns: 1fr 1fr; } }
+    .status-box { padding: 14px; }
+    .status-box strong { display: block; font-size: 22px; margin-bottom: 4px; }
+    .pill {
+      display: inline-block;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid var(--line);
+      background: #162033;
+      color: #dbe8ff;
+    }
+    .pill.ok { color: #bbf7d0; border-color: #166534; }
+    .pill.warn { color: #fde68a; border-color: #92400e; }
+    .pill.bad { color: #fecaca; border-color: #991b1b; }
+
+    /* Status badge styles — visible to GP only */
+    .status-badge {
+      display: inline-block;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: bold;
+      color: white;
+    }
+    .status-badge.pending {
+      background-color: #dc2626;  /* Vermelho bold */
+      color: white;
+    }
+    .status-badge.incomplete {
+      background-color: #dc2626;  /* Vermelho bold */
+      color: white;
+    }
+    .status-badge.ok {
+      background-color: #16a34a;  /* Verde bold */
+      color: white;
+    }
+
+    /* Admin-only visibility toggle */
+    .admin-only {
+      display: block;
+    }
+    .admin-only.hidden-from-gp {
+      display: none;
+    }
+
+    /* Conflict highlighting */
+    .field-with-conflict {
+      border-left: 4px solid var(--warn) !important;
+      padding-left: 12px;
+    }
+    .field-with-conflict label.lbl {
+      color: var(--warn);
+    }
+    .field-with-conflict label.lbl::before {
+      content: '⚠️ ';
+    }
+    .conflict-note {
+      color: var(--warn);
+      font-size: 12px;
+      margin-top: 4px;
+      display: block;
+    }
+    .actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px; }
+    button {
+      border: 0;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .primary { background: var(--accent); color: #081120; }
+    .secondary { background: #23314b; color: var(--text); border: 1px solid var(--line); }
+    .note { padding: 16px; margin-bottom: 18px; }
+    .hidden { display: none; }
+    .help-btn {
+      margin-left: 8px;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: #1d4ed8;
+      color: white;
+      font-size: 13px;
+      font-weight: 700;
+      padding: 0;
+      vertical-align: middle;
+    }
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.75);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      padding: 18px;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      width: min(760px, 100%);
+      max-height: 85vh;
+      overflow: auto;
+      background: #0f172a;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+    }
+    .modal-box h3 { font-size: 22px; margin-bottom: 12px; }
+    .modal-box p, .modal-box li { color: var(--muted); }
+    .modal-actions { margin-top: 16px; display: flex; justify-content: flex-end; }
+
+    .thinking-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 23, 0.78);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 10000;
+      padding: 24px;
+      backdrop-filter: blur(4px);
+    }
+    .thinking-overlay.open { display: flex; }
+    .thinking-panel {
+      width: min(520px, 100%);
+      background: rgba(15, 23, 42, 0.96);
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      padding: 28px 24px;
+      box-shadow: 0 24px 70px rgba(0,0,0,0.45);
+      text-align: center;
+    }
+    .thinking-title {
+      font-size: 28px;
+      font-weight: 800;
+      margin: 18px 0 8px;
+      color: #eff6ff;
+    }
+    .thinking-subtitle {
+      font-size: 14px;
+      color: var(--muted);
+      min-height: 22px;
+    }
+    .atom-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 160px;
+    }
+    .atom {
+      position: relative;
+      width: 140px;
+      height: 140px;
+      filter: drop-shadow(0 0 12px rgba(96,165,250,0.22));
+    }
+    .nucleus {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 30px;
+      height: 30px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #93c5fd 0%, #60a5fa 45%, #1d4ed8 100%);
+      box-shadow: 0 0 18px rgba(96,165,250,0.55);
+      animation: pulse-nucleus 2.2s ease-in-out infinite;
+    }
+    .orbit {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 118px;
+      height: 42px;
+      margin-left: -59px;
+      margin-top: -21px;
+      border: 2px solid rgba(148, 197, 255, 0.42);
+      border-radius: 50%;
+      transform-style: preserve-3d;
+      box-shadow: inset 0 0 10px rgba(96,165,250,0.06);
+    }
+    .orbit.orbit1 { animation: orbit1-spin 4s linear infinite; }
+    .orbit.orbit2 { animation: orbit2-spin 5.6s linear infinite reverse; }
+    .orbit.orbit3 { animation: orbit3-spin 4.8s linear infinite; }
+    .electron {
+      position: absolute;
+      top: 50%;
+      left: 100%;
+      width: 12px;
+      height: 12px;
+      margin-top: -6px;
+      margin-left: -6px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 30% 30%, #ffffff 0%, #bfdbfe 42%, #38bdf8 100%);
+      box-shadow: 0 0 14px rgba(125, 211, 252, 0.95);
+    }
+    .thinking-progress {
+      margin-top: 16px;
+      height: 10px;
+      width: 100%;
+      background: #0b1220;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .thinking-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #1d4ed8, #60a5fa, #22c55e);
+      transition: width .45s ease;
+    }
+    @keyframes orbit1-spin {
+      from { transform: rotate(0deg) rotateX(70deg); }
+      to   { transform: rotate(360deg) rotateX(70deg); }
+    }
+    @keyframes orbit2-spin {
+      from { transform: rotate(60deg) rotateX(70deg); }
+      to   { transform: rotate(420deg) rotateX(70deg); }
+    }
+    @keyframes orbit3-spin {
+      from { transform: rotate(120deg) rotateX(70deg); }
+      to   { transform: rotate(480deg) rotateX(70deg); }
+    }
+    @keyframes pulse-nucleus {
+      0%, 100% { transform: translate(-50%, -50%) scale(1); }
+      50% { transform: translate(-50%, -50%) scale(1.12); }
+    }
+
+    .footer { color: #94a3b8; font-size: 12px; padding: 12px 0 28px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <h1>GCA — Questionário Técnico do Projeto</h1>
+      <p>
+        Formulário externo de coleta por <strong>tenant/projeto</strong>, para posterior ingestão no GCA.
+        As respostas, o resultado da análise, os gaps detectados e as sugestões do workflow n8n
+        são <strong>válidos somente para este projeto</strong> e não podem ser compartilhados com outros tenants.
+      </p>
+      <p>
+        Regra central: o questionário deve ser respondido fora do GCA, revisado pelas áreas envolvidas e então ingerido na etapa inicial do projeto.
+        O n8n do GCA deverá verificar incoerências, lacunas e conflitos entre respostas, retornando um parecer técnico ao GP.
+      </p>
+      <p>
+        O uso de <strong>IA é obrigatório em todos os projetos</strong>. A escolha do provedor é do tenant/projeto,
+        e o responsável deverá fornecer as chaves ou tokens no fluxo seguro de parametrização do tenant,
+        nunca neste formulário externo.
+      </p>
+      <div class="actions">
+        <span class="pill">Escopo compartimentalizado por tenant</span>
+        <span class="pill">Análise de gaps via n8n</span>
+        <span class="pill">Resultado revisável por áreas envolvidas</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Status do Questionário <button type="button" class="help-btn" onclick="openHelp('status')">?</button></h2>
+
+      <!-- GP-facing status only -->
+      <div style="margin-bottom: 16px;">
+        <label class="lbl">Seu Questionário</label>
+        <div id="gpStatusBadge" class="status-badge pending">Pendente</div>
+      </div>
+
+      <!-- Admin-only metrics (hidden from GP by default) -->
+      <div id="adminMetrics" class="admin-only hidden-from-gp" style="margin-bottom: 16px;">
+        <div class="status-bar"><div id="statusFill" class="status-fill"></div></div>
+        <div class="status-grid">
+          <div class="status-box"><strong id="pct">0%</strong><span>Percentual respondido</span></div>
+          <div class="status-box"><strong id="mandatory">0/0</strong><span>Perguntas obrigatórias</span></div>
+          <div class="status-box"><strong id="gapCount">0</strong><span>Gaps / incoerências</span></div>
+          <div class="status-box"><strong id="overallBadge" class="pill bad">Incompleto</strong><span>Análise técnica</span></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="primary" onclick="runGuidedAnalysis()">Analisar consistência</button>
+        <button type="button" class="secondary" onclick="window.print()">Imprimir / Salvar em PDF</button>
+        <button type="button" class="secondary" onclick="downloadJson()">Exportar JSON</button>
+      </div>
+    </section>
+
+    <div class="note">
+      <strong>Regras de acesso e auditoria</strong>
+      <ul>
+        <li>O projeto só pode ser acessado por seus integrantes com o nível de acesso adequado e pelo Admin do GCA, inclusive para coaching e investigação de incidentes.</li>
+        <li>Os logs operacionais de todos os projetos devem ser consolidados na camada administrativa do GCA para auditoria e análise de problemas sob responsabilidade da equipe de Admin.</li>
+        <li>Nenhum campo deste formulário deve conter senhas, tokens, chaves ou credenciais em texto claro.</li>
+      </ul>
+    </div>
+
+    <form id="questionnaireForm">
+      <section class="card">
+        <h2>1. Identificação do Projeto <button type="button" class="help-btn" onclick="openHelp('sec1')">?</button></h2>
+        <div class="grid">
+          <div class="col-6"><label class="lbl">Nome do projeto *</label><input data-required="true" type="text" name="project_name"></div>
+          <div class="col-3"><label class="lbl">Slug do projeto *</label><input data-required="true" type="text" name="project_slug"></div>
+          <div class="col-3"><label class="lbl">Criticidade *</label><select data-required="true" name="criticality"><option value="">Selecione</option><option>Baixa</option><option>Média</option><option>Alta</option><option>Crítica</option></select></div>
+          <div class="col-6"><label class="lbl">Área de negócio *</label><input data-required="true" type="text" name="business_area"></div>
+          <div class="col-6"><label class="lbl">GP responsável *</label><input data-required="true" type="text" name="gp_name"></div>
+          <div class="col-12"><label class="lbl">Descrição resumida *</label><textarea data-required="true" name="project_summary"></textarea></div>
+          <div class="col-6">
+            <label class="lbl">Classificação da informação *</label>
+            <div class="radios" data-required-group="classification">
+              <label><input type="radio" name="classification" value="Pública">Pública</label>
+              <label><input type="radio" name="classification" value="Interna">Interna</label>
+              <label><input type="radio" name="classification" value="Confidencial">Confidencial</label>
+              <label><input type="radio" name="classification" value="Restrita">Restrita</label>
+            </div>
+          </div>
+          <div class="col-6">
+            <label class="lbl">Tipo de iniciativa *</label>
+            <div class="checks" data-required-group="initiative_type">
+              <label><input type="checkbox" name="initiative_type" value="Novo produto / novo sistema">Novo produto / novo sistema</label>
+              <label><input type="checkbox" name="initiative_type" value="Melhoria em sistema existente">Melhoria em sistema existente</label>
+              <label><input type="checkbox" name="initiative_type" value="Nova funcionalidade em sistema existente">Nova funcionalidade em sistema existente</label>
+              <label><input type="checkbox" name="initiative_type" value="Refatoração técnica">Refatoração técnica</label>
+              <label><input type="checkbox" name="initiative_type" value="Migração / modernização">Migração / modernização</label>
+              <label><input type="checkbox" name="initiative_type" value="POC / MVP">POC / MVP</label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>2. Pergunta Inicial Obrigatória sobre Legado <button type="button" class="help-btn" onclick="openHelp('sec2')">?</button></h2>
+        <div class="grid">
+          <div class="col-12">
+            <label class="lbl">Esse projeto é direcionado a fazer melhorias ou alterar um projeto já existente? *</label>
+            <div class="radios" data-required-group="existing_project">
+              <label><input type="radio" name="existing_project" value="Sim">Sim</label>
+              <label><input type="radio" name="existing_project" value="Não">Não</label>
+            </div>
+          </div>
+        </div>
+
+        <div id="legacySection" class="grid hidden" style="margin-top:14px;">
+          <div class="col-6"><label class="lbl">Nome do sistema existente *</label><input type="text" name="legacy_system_name"></div>
+          <div class="col-6"><label class="lbl">URL do repositório principal *</label><input type="url" name="legacy_repo_url"></div>
+          <div class="col-12"><label class="lbl">Objetivo da alteração *</label>
+            <div class="checks" data-required-group="legacy_goal">
+              <label><input type="checkbox" name="legacy_goal" value="Correção">Correção</label>
+              <label><input type="checkbox" name="legacy_goal" value="Evolução funcional">Evolução funcional</label>
+              <label><input type="checkbox" name="legacy_goal" value="Refatoração">Refatoração</label>
+              <label><input type="checkbox" name="legacy_goal" value="Redução de débito técnico">Redução de débito técnico</label>
+              <label><input type="checkbox" name="legacy_goal" value="Adequação de segurança / compliance">Adequação de segurança / compliance</label>
+              <label><input type="checkbox" name="legacy_goal" value="Melhoria de performance">Melhoria de performance</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Acesso ao repositório *</label>
+            <div class="radios" data-required-group="repo_access">
+              <label><input type="radio" name="repo_access" value="Read-only">Read-only</label>
+              <label><input type="radio" name="repo_access" value="Read + metadata">Read + metadata</label>
+              <label><input type="radio" name="repo_access" value="Read + PR">Read + PR</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Documentação técnica atualizada?</label>
+            <div class="radios">
+              <label><input type="radio" name="tech_docs_status" value="Sim">Sim</label>
+              <label><input type="radio" name="tech_docs_status" value="Parcial">Parcial</label>
+              <label><input type="radio" name="tech_docs_status" value="Não">Não</label>
+            </div>
+          </div>
+          <div class="col-12"><label class="lbl">O n8n do GCA poderá executar</label>
+            <div class="checks">
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Ler estrutura do repositório">Ler estrutura do repositório</label>
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Mapear dependências e versões">Mapear dependências e versões</label>
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Identificar frameworks e bibliotecas">Identificar frameworks e bibliotecas</label>
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Detectar itens deprecated">Detectar itens deprecated</label>
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Consolidar documentação técnica">Consolidar documentação técnica</label>
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Consolidar documentação negocial">Consolidar documentação negocial</label>
+              <label><input type="checkbox" name="n8n_legacy_actions" value="Gerar relatório técnico para o GP">Gerar relatório técnico para o GP</label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>3. Entrega, Arquitetura e Stack <button type="button" class="help-btn" onclick="openHelp('sec3')">?</button></h2>
+        <div class="grid">
+          <div class="col-12"><label class="lbl">Entregáveis esperados *</label>
+            <div class="checks" data-required-group="deliverables">
+              <label><input type="checkbox" name="deliverables" value="Executável desktop">Executável desktop</label>
+              <label><input type="checkbox" name="deliverables" value="Aplicação web">Aplicação web</label>
+              <label><input type="checkbox" name="deliverables" value="API">API</label>
+              <label><input type="checkbox" name="deliverables" value="Microserviço">Microserviço</label>
+              <label><input type="checkbox" name="deliverables" value="Aplicativo mobile">Aplicativo mobile</label>
+              <label><input type="checkbox" name="deliverables" value="Dashboard administrativo">Dashboard administrativo</label>
+              <label><input type="checkbox" name="deliverables" value="Documentação técnica">Documentação técnica</label>
+              <label><input type="checkbox" name="deliverables" value="Documentação negocial">Documentação negocial</label>
+              <label><input type="checkbox" name="deliverables" value="Plano de testes">Plano de testes</label>
+              <label><input type="checkbox" name="deliverables" value="Pipelines CI/CD">Pipelines CI/CD</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Arquitetura alvo *</label>
+            <div class="checks" data-required-group="architecture_target">
+              <label><input type="checkbox" name="architecture_target" value="Monólito">Monólito</label>
+              <label><input type="checkbox" name="architecture_target" value="Monólito modular">Monólito modular</label>
+              <label><input type="checkbox" name="architecture_target" value="Microserviços">Microserviços</label>
+              <label><input type="checkbox" name="architecture_target" value="Event-driven">Event-driven</label>
+              <label><input type="checkbox" name="architecture_target" value="Hexagonal">Hexagonal</label>
+              <label><input type="checkbox" name="architecture_target" value="Clean Architecture">Clean Architecture</label>
+              <label><input type="checkbox" name="architecture_target" value="Serverless">Serverless</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Modo de execução *</label>
+            <div class="checks" data-required-group="execution_mode">
+              <label><input type="checkbox" name="execution_mode" value="Stand-alone">Stand-alone</label>
+              <label><input type="checkbox" name="execution_mode" value="On-premises">On-premises</label>
+              <label><input type="checkbox" name="execution_mode" value="Cloud">Cloud</label>
+              <label><input type="checkbox" name="execution_mode" value="Híbrido">Híbrido</label>
+              <label><input type="checkbox" name="execution_mode" value="Containerizado">Containerizado</label>
+              <label><input type="checkbox" name="execution_mode" value="Offline">Offline</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Ferramentas de frontend</label>
+            <div class="checks">
+              <label><input type="checkbox" name="frontend_stack" value="React">React</label>
+              <label><input type="checkbox" name="frontend_stack" value="Vue">Vue</label>
+              <label><input type="checkbox" name="frontend_stack" value="Angular">Angular</label>
+              <label><input type="checkbox" name="frontend_stack" value="Next.js">Next.js</label>
+              <label><input type="checkbox" name="frontend_stack" value="Vite + React">Vite + React</label>
+              <label><input type="checkbox" name="frontend_stack" value="Electron">Electron</label>
+              <label><input type="checkbox" name="frontend_stack" value="Flutter">Flutter</label>
+              <label><input type="checkbox" name="frontend_stack" value="React Native">React Native</label>
+              <label><input type="checkbox" name="frontend_stack" value="Tailwind CSS">Tailwind CSS</label>
+              <label><input type="checkbox" name="frontend_stack" value="Material UI">Material UI</label>
+              <label><input type="checkbox" name="frontend_stack" value="Shadcn/ui">Shadcn/ui</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Ferramentas de backend</label>
+            <div class="checks">
+              <label><input type="checkbox" name="backend_stack" value="FastAPI">FastAPI</label>
+              <label><input type="checkbox" name="backend_stack" value="Django">Django</label>
+              <label><input type="checkbox" name="backend_stack" value="Flask">Flask</label>
+              <label><input type="checkbox" name="backend_stack" value="NestJS">NestJS</label>
+              <label><input type="checkbox" name="backend_stack" value="Express">Express</label>
+              <label><input type="checkbox" name="backend_stack" value="Spring Boot">Spring Boot</label>
+              <label><input type="checkbox" name="backend_stack" value="ASP.NET">ASP.NET</label>
+              <label><input type="checkbox" name="backend_stack" value="Python">Python</label>
+              <label><input type="checkbox" name="backend_stack" value="Node.js">Node.js</label>
+              <label><input type="checkbox" name="backend_stack" value="Java">Java</label>
+              <label><input type="checkbox" name="backend_stack" value="C#">C#</label>
+              <label><input type="checkbox" name="backend_stack" value="Go">Go</label>
+            </div>
+          </div>
+          <div class="col-4"><label class="lbl">Banco de dados</label>
+            <div class="checks">
+              <label><input type="checkbox" name="database_stack" value="PostgreSQL">PostgreSQL</label>
+              <label><input type="checkbox" name="database_stack" value="MySQL">MySQL</label>
+              <label><input type="checkbox" name="database_stack" value="SQL Server">SQL Server</label>
+              <label><input type="checkbox" name="database_stack" value="Oracle">Oracle</label>
+              <label><input type="checkbox" name="database_stack" value="MongoDB">MongoDB</label>
+              <label><input type="checkbox" name="database_stack" value="SQLite">SQLite</label>
+            </div>
+          </div>
+          <div class="col-4"><label class="lbl">Infra de apoio</label>
+            <div class="checks">
+              <label><input type="checkbox" name="infra_support" value="Redis">Redis</label>
+              <label><input type="checkbox" name="infra_support" value="Kafka">Kafka</label>
+              <label><input type="checkbox" name="infra_support" value="Docker">Docker</label>
+              <label><input type="checkbox" name="infra_support" value="Kubernetes">Kubernetes</label>
+              <label><input type="checkbox" name="infra_support" value="SMTP">SMTP</label>
+              <label><input type="checkbox" name="infra_support" value="Storage externo">Storage externo</label>
+            </div>
+          </div>
+          <div class="col-4"><label class="lbl">IA e automação *</label>
+            <div class="checks" data-required-group="ai_automation">
+              <label><input type="checkbox" name="ai_automation" value="Anthropic">Anthropic</label>
+              <label><input type="checkbox" name="ai_automation" value="OpenAI">OpenAI</label>
+              <label><input type="checkbox" name="ai_automation" value="Gemini">Gemini</label>
+              <label><input type="checkbox" name="ai_automation" value="DeepSeek">DeepSeek</label>
+              <label><input type="checkbox" name="ai_automation" value="Grok">Grok</label>
+              <label><input type="checkbox" name="ai_automation" value="n8n">n8n</label>
+            </div>
+            <p style="margin-top:8px; font-size:12px;">Pelo menos um provedor de IA deve ser selecionado. As chaves/tokens serão fornecidos depois, no tenant, em fluxo seguro.</p>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>4. Segurança, Integrações, Qualidade e Operação <button type="button" class="help-btn" onclick="openHelp('sec4')">?</button></h2>
+        <div class="grid">
+          <div class="col-6"><label class="lbl">Controles de segurança *</label>
+            <div class="checks" data-required-group="security_controls">
+              <label><input type="checkbox" name="security_controls" value="Autenticação">Autenticação</label>
+              <label><input type="checkbox" name="security_controls" value="Autorização / RBAC">Autorização / RBAC</label>
+              <label><input type="checkbox" name="security_controls" value="MFA">MFA</label>
+              <label><input type="checkbox" name="security_controls" value="Criptografia em trânsito">Criptografia em trânsito</label>
+              <label><input type="checkbox" name="security_controls" value="Criptografia em repouso">Criptografia em repouso</label>
+              <label><input type="checkbox" name="security_controls" value="Vault de segredos">Vault de segredos</label>
+              <label><input type="checkbox" name="security_controls" value="Auditoria append-only">Auditoria append-only</label>
+              <label><input type="checkbox" name="security_controls" value="Quarentena de dados sensíveis">Quarentena de dados sensíveis</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Integrações previstas</label>
+            <div class="checks">
+              <label><input type="checkbox" name="integrations" value="GitHub">GitHub</label>
+              <label><input type="checkbox" name="integrations" value="GitLab">GitLab</label>
+              <label><input type="checkbox" name="integrations" value="Bitbucket">Bitbucket</label>
+              <label><input type="checkbox" name="integrations" value="Jira">Jira</label>
+              <label><input type="checkbox" name="integrations" value="Figma">Figma</label>
+              <label><input type="checkbox" name="integrations" value="Slack">Slack</label>
+              <label><input type="checkbox" name="integrations" value="Teams">Teams</label>
+              <label><input type="checkbox" name="integrations" value="APIs de terceiros">APIs de terceiros</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Tipos de testes esperados *</label>
+            <div class="checks" data-required-group="test_types">
+              <label><input type="checkbox" name="test_types" value="Smoke / Sanity">Smoke / Sanity</label>
+              <label><input type="checkbox" name="test_types" value="Unitários">Unitários</label>
+              <label><input type="checkbox" name="test_types" value="Integração">Integração</label>
+              <label><input type="checkbox" name="test_types" value="Contrato / API">Contrato / API</label>
+              <label><input type="checkbox" name="test_types" value="Regressão">Regressão</label>
+              <label><input type="checkbox" name="test_types" value="E2E">E2E</label>
+              <label><input type="checkbox" name="test_types" value="UAT">UAT</label>
+              <label><input type="checkbox" name="test_types" value="Segurança">Segurança</label>
+              <label><input type="checkbox" name="test_types" value="SAST / SCA">SAST / SCA</label>
+              <label><input type="checkbox" name="test_types" value="DAST">DAST</label>
+              <label><input type="checkbox" name="test_types" value="Performance / Carga">Performance / Carga</label>
+              <label><input type="checkbox" name="test_types" value="Stress / Soak">Stress / Soak</label>
+              <label><input type="checkbox" name="test_types" value="Resiliência / Recuperação">Resiliência / Recuperação</label>
+              <label><input type="checkbox" name="test_types" value="Acessibilidade">Acessibilidade</label>
+              <label><input type="checkbox" name="test_types" value="Compatibilidade">Compatibilidade</label>
+              <label><input type="checkbox" name="test_types" value="Observabilidade">Observabilidade</label>
+            </div>
+          </div>
+          <div class="col-6"><label class="lbl">Observabilidade e operação</label>
+            <div class="checks">
+              <label><input type="checkbox" name="observability" value="Logs estruturados">Logs estruturados</label>
+              <label><input type="checkbox" name="observability" value="Métricas">Métricas</label>
+              <label><input type="checkbox" name="observability" value="Tracing">Tracing</label>
+              <label><input type="checkbox" name="observability" value="Health checks">Health checks</label>
+              <label><input type="checkbox" name="observability" value="Alertas">Alertas</label>
+              <label><input type="checkbox" name="observability" value="Dashboard operacional">Dashboard operacional</label>
+              <label><input type="checkbox" name="observability" value="Dashboard executivo">Dashboard executivo</label>
+              <label><input type="checkbox" name="observability" value="Backup / Restore">Backup / Restore</label>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>5. Observações, Status e Restrições <button type="button" class="help-btn" onclick="openHelp('sec5')">?</button></h2>
+        <div class="grid">
+          <div class="col-6">
+            <label class="lbl">Observações / status do questionário</label>
+            <textarea name="observations" placeholder="Ex.: 82% respondido, aguardando validação de segurança; ou questionário apto para ingestão inicial."></textarea>
+            <p style="margin-top:8px; font-size:12px;">Se o percentual respondido for menor que 80%, o questionário deve ser recusado e o motivo deve constar neste campo.</p>
+          </div>
+          <div class="col-6">
+            <label class="lbl">Restrições</label>
+            <textarea name="restrictions" placeholder="Ex.: não enviar código-fonte completo para IA externa; execução on-premises obrigatória; sem uso de serviços gerenciados fora do país."></textarea>
+            <p style="margin-top:8px; font-size:12px;">Registrar exceções, impedimentos técnicos, restrições de compliance, restrições de IA, limitações de acesso a repositório, políticas de rede, dados, storage e integrações.</p>
+          </div>
+          <div class="col-12">
+            <label class="lbl">Notas adicionais para revisão pelas áreas envolvidas</label>
+            <textarea name="cross_area_notes" placeholder="Campo livre para observações de arquitetura, segurança, compliance, QA, operação e gestão."></textarea>
+          </div>
+        </div>
+      </section>
+    </form>
+
+    <section class="card">
+      <h2>Análise de Gaps do n8n / GCA <button type="button" class="help-btn" onclick="openHelp('n8n')">?</button></h2>
+      <p>Resultado preliminar de consistência, a ser usado como base para o workflow do n8n no tenant.</p>
+      <p>O n8n deverá validar completude, coerência entre stack e entregáveis, aderência mínima de segurança, presença de IA obrigatória, consistência com legado e registrar parecer de aprovação, aprovação com ressalvas ou recusa.</p>
+      <div id="analysisResult" class="note" style="margin:0;"><p>Nenhuma análise executada ainda.</p></div>
+    </section>
+
+    <div id="thinkingOverlay" class="thinking-overlay" aria-hidden="true">
+      <div class="thinking-panel">
+        <div class="atom-wrap">
+          <div class="atom" aria-hidden="true">
+            <div class="nucleus"></div>
+            <div class="orbit orbit1"><div class="electron"></div></div>
+            <div class="orbit orbit2"><div class="electron"></div></div>
+            <div class="orbit orbit3"><div class="electron"></div></div>
+          </div>
+        </div>
+        <div class="thinking-title">Pensando...</div>
+        <div id="thinkingStep" class="thinking-subtitle">Preparando análise do questionário...</div>
+        <div class="thinking-progress"><div id="thinkingProgressFill" class="thinking-progress-fill"></div></div>
+      </div>
+    </div>
+
+    <div id="helpModal" class="modal-overlay" onclick="closeHelp(event)">
+      <div class="modal-box" onclick="event.stopPropagation()">
+        <h3 id="helpTitle">Ajuda</h3>
+        <div id="helpBody"></div>
+        <div class="modal-actions">
+          <button type="button" class="primary" onclick="forceCloseHelp()">Fechar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      GCA — Gestão de Código Assistida • Modelo HTML do questionário técnico externo por tenant/projeto.
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('questionnaireForm');
+    const fill = document.getElementById('statusFill');
+    const pct = document.getElementById('pct');
+    const mandatory = document.getElementById('mandatory');
+    const gapCount = document.getElementById('gapCount');
+    const overallBadge = document.getElementById('overallBadge');
+
+    const helpContent = {
+      status: {
+        title: 'Ajuda — Status do Questionário',
+        body: `<p>Esta área mostra a maturidade do preenchimento.</p>
+          <ul>
+            <li><strong>Percentual respondido:</strong> mede o preenchimento geral do formulário.</li>
+            <li><strong>Obrigatórias:</strong> mede os campos mínimos para ingestão inicial.</li>
+            <li><strong>Gaps:</strong> mostra incoerências encontradas pela validação local.</li>
+            <li><strong>Regra de recusa:</strong> se o percentual respondido ficar abaixo de 80%, o questionário deve ser recusado e o motivo precisa ser descrito em Observações.</li>
+          </ul>`
+      },
+      sec1: {
+        title: 'Ajuda — Seção 1: Identificação do Projeto',
+        body: `<p>Use esta seção para identificar o projeto de forma inequívoca dentro do tenant.</p>
+          <ul>
+            <li>Preencha nome, slug, criticidade, área de negócio e responsável.</li>
+            <li>Essas informações ajudam o GCA a classificar o contexto, o risco e o nível de governança do projeto.</li>
+            <li>A descrição deve ser clara o suficiente para que arquitetura, segurança, QA e gestão entendam o propósito do trabalho.</li>
+          </ul>`
+      },
+      sec2: {
+        title: 'Ajuda — Seção 2: Projeto Existente / Legado',
+        body: `<p>Esta é a pergunta inicial obrigatória do questionário.</p>
+          <ul>
+            <li>Se a resposta for <strong>Sim</strong>, o repositório principal passa a ser obrigatório.</li>
+            <li>O n8n poderá analisar estrutura, dependências, frameworks, itens deprecated e lacunas documentais.</li>
+            <li>O acesso deve ser preferencialmente <strong>read-only</strong> para análise controlada.</li>
+            <li>O relatório técnico produzido ajudará o GP a distribuir ações para a equipe.</li>
+          </ul>`
+      },
+      sec3: {
+        title: 'Ajuda — Seção 3: Entrega, Arquitetura e Stack',
+        body: `<p>Esta seção define o perfil técnico que o pipeline do GCA usará para sugerir a implementação.</p>
+          <ul>
+            <li>Marque os entregáveis reais esperados, não desejos genéricos.</li>
+            <li>A arquitetura deve refletir o porte, a criticidade e o tipo de solução.</li>
+            <li>Ferramentas de frontend, backend, banco, Redis, Kafka, IA e n8n servem de base para aprovação ou recomendação de stack.</li>
+            <li>Todo projeto deve usar IA, mas o provedor é de escolha do tenant.</li>
+          </ul>`
+      },
+      sec4: {
+        title: 'Ajuda — Seção 4: Segurança, Integrações, Qualidade e Operação',
+        body: `<p>Esta seção orienta os requisitos mínimos de proteção, integração e qualidade.</p>
+          <ul>
+            <li>Autenticação, autorização e auditoria são esperados na maioria dos cenários.</li>
+            <li>Os tipos de teste ajudam o GCA a definir o plano de QA e as evidências.</li>
+            <li>Observabilidade e operação servem para monitorar incidentes e estabilizar a solução.</li>
+            <li>As integrações marcadas influenciam conectores, webhooks e backlog técnico.</li>
+          </ul>`
+      },
+      sec5: {
+        title: 'Ajuda — Seção 5: Observações, Status e Restrições',
+        body: `<p>Use esta seção para registrar decisões que não cabem nas caixas de seleção.</p>
+          <ul>
+            <li><strong>Observações:</strong> registrar situação atual do questionário, pendências, motivo de recusa, dependências externas e ressalvas.</li>
+            <li><strong>Restrições:</strong> registrar exceções técnicas, regulatórias, limitações de acesso, limites de IA, políticas de rede, storage, dados e integrações.</li>
+            <li><strong>Notas adicionais:</strong> espaço para arquitetura, segurança, compliance, operação e gestão complementarem o entendimento do projeto.</li>
+          </ul>`
+      },
+      n8n: {
+        title: 'Ajuda — Lógica do n8n / GCA',
+        body: `<p>O workflow do n8n deve usar este formulário como artefato inicial de análise.</p>
+          <ul>
+            <li>Validar completude mínima e recusar automaticamente questionários abaixo de 80%.</li>
+            <li>Verificar coerência entre entregáveis, arquitetura, stack, segurança, IA, testes e observabilidade.</li>
+            <li>Se houver legado, validar presença de repositório e escopo de análise.</li>
+            <li>Classificar o resultado como <strong>Aprovado</strong>, <strong>Aprovado com ressalvas</strong> ou <strong>Recusado</strong>.</li>
+            <li>Gerar parecer técnico ao GP com gaps, recomendações e próximos passos.</li>
+          </ul>`
+      }
+    };
+
+    function openHelp(key) {
+      const modal = document.getElementById('helpModal');
+      const title = document.getElementById('helpTitle');
+      const body = document.getElementById('helpBody');
+      const item = helpContent[key] || { title: 'Ajuda', body: '<p>Sem conteúdo disponível.</p>' };
+      title.innerHTML = item.title;
+      body.innerHTML = item.body;
+      modal.classList.add('open');
+    }
+    function forceCloseHelp() {
+      document.getElementById('helpModal').classList.remove('open');
+    }
+    function closeHelp(event) {
+      if (event.target.id === 'helpModal') forceCloseHelp();
+    }
+
+    function getRequiredElements() {
+      const singles = [...form.querySelectorAll('[data-required="true"]')];
+      const groups = [...form.querySelectorAll('[data-required-group]')];
+      return { singles, groups };
+    }
+
+    function isSingleAnswered(el) {
+      return String(el.value || '').trim() !== '';
+    }
+
+    function isGroupAnswered(group) {
+      const firstInput = group.querySelector('input');
+      if (!firstInput) return false;
+      const name = firstInput.name;
+      const type = firstInput.type;
+      if (type === 'radio') return !!form.querySelector(`input[name="${name}"]:checked`);
+      return form.querySelectorAll(`input[name="${name}"]:checked`).length > 0;
+    }
+
+    function updateProgress() {
+      const { singles, groups } = getRequiredElements();
+
+      const totalTextual = form.querySelectorAll('input[type="text"], input[type="url"], input[type="email"], textarea, select').length;
+      const allChoiceGroupsNames = new Set();
+      form.querySelectorAll('input[type="checkbox"], input[type="radio"]').forEach(inp => allChoiceGroupsNames.add(inp.name));
+      const allInputsCount = totalTextual + allChoiceGroupsNames.size;
+
+      let answered = 0;
+      form.querySelectorAll('input[type="text"], input[type="url"], input[type="email"], textarea, select').forEach(el => {
+        if (String(el.value || '').trim() !== '') answered++;
+      });
+
+      allChoiceGroupsNames.forEach(name => {
+        if (form.querySelectorAll(`input[name="${name}"]:checked`).length > 0) answered++;
+      });
+
+      let mandatoryAnswered = 0;
+      singles.forEach(el => { if (isSingleAnswered(el)) mandatoryAnswered++; });
+      groups.forEach(group => { if (isGroupAnswered(group)) mandatoryAnswered++; });
+
+      const mandatoryTotal = singles.length + groups.length;
+      const percent = allInputsCount ? Math.round((answered / allInputsCount) * 100) : 0;
+      fill.style.width = percent + '%';
+      pct.textContent = percent + '%';
+      mandatory.textContent = `${mandatoryAnswered}/${mandatoryTotal}`;
+
+      // Admin-facing status
+      overallBadge.className = 'pill';
+      if (percent < 80) {
+        overallBadge.textContent = 'Recusado (<80%)';
+        overallBadge.classList.add('bad');
+      } else if (mandatoryAnswered === mandatoryTotal) {
+        overallBadge.textContent = 'Apto para validação';
+        overallBadge.classList.add('ok');
+      } else {
+        overallBadge.textContent = 'Aprovado com ressalvas';
+        overallBadge.classList.add('warn');
+      }
+
+      // GP-facing status (3 states: Pendente, Incompleto, OK)
+      const gpStatusBadge = document.getElementById('gpStatusBadge');
+      gpStatusBadge.className = 'status-badge';
+
+      if (answered === 0) {
+        // No answers started
+        gpStatusBadge.textContent = 'Pendente';
+        gpStatusBadge.classList.add('pending');
+      } else if (mandatoryAnswered < mandatoryTotal || percent < 80) {
+        // Partially filled or below threshold
+        gpStatusBadge.textContent = 'Incompleto';
+        gpStatusBadge.classList.add('incomplete');
+      } else {
+        // All mandatory + meeting threshold = OK
+        gpStatusBadge.textContent = 'OK';
+        gpStatusBadge.classList.add('ok');
+      }
+    }
+
+    function selectedValues(name) {
+      return [...form.querySelectorAll(`input[name="${name}"]:checked`)].map(el => el.value);
+    }
+    function selectedOne(name) {
+      const checked = form.querySelector(`input[name="${name}"]:checked`);
+      return checked ? checked.value : '';
+    }
+    function valueOf(name) {
+      const el = form.elements[name];
+      return el ? String(el.value || '').trim() : '';
+    }
+
+    function runGuidedAnalysis() {
+      const steps = [
+        'Validando completude do questionário...',
+        'Analisando coerência entre entregáveis e stack...',
+        'Verificando uso obrigatório de IA...',
+        'Conferindo segurança mínima e observabilidade...',
+        'Preparando parecer técnico do n8n...'
+      ];
+      const overlay = document.getElementById('thinkingOverlay');
+      const stepEl = document.getElementById('thinkingStep');
+      const fillEl = document.getElementById('thinkingProgressFill');
+
+      overlay.classList.add('open');
+      let idx = 0;
+
+      function nextStep() {
+        stepEl.textContent = steps[idx];
+        fillEl.style.width = `${Math.round(((idx + 1) / steps.length) * 100)}%`;
+        idx += 1;
+        if (idx < steps.length) {
+          setTimeout(nextStep, 650);
+        } else {
+          setTimeout(() => {
+            analyzeQuestionnaire();
+            overlay.classList.remove('open');
+            fillEl.style.width = '0%';
+            stepEl.textContent = 'Preparando análise do questionário...';
+          }, 500);
+        }
+      }
+      nextStep();
+    }
+
+    function analyzeQuestionnaire() {
+      const gaps = [];
+      const conflictingFields = new Map(); // track which fields have conflicts
+      const legacy = selectedOne('existing_project');
+      const deliverables = selectedValues('deliverables');
+      const frontend = selectedValues('frontend_stack');
+      const backend = selectedValues('backend_stack');
+      const db = selectedValues('database_stack');
+      const infra = selectedValues('infra_support');
+      const tests = selectedValues('test_types');
+      const security = selectedValues('security_controls');
+      const ai = selectedValues('ai_automation');
+      const execution = selectedValues('execution_mode');
+      const legacyRepo = valueOf('legacy_repo_url');
+      const restrictions = valueOf('restrictions');
+      const observationsField = form.elements['observations'];
+      const percent = parseInt((pct.textContent || '0').replace('%', ''), 10) || 0;
+
+      // Validation rules with field tracking
+      if (percent < 80) gaps.unshift('Percentual respondido inferior a 80%. O questionário deve ser recusado nesta etapa.');
+      if (legacy === 'Sim' && !legacyRepo) { gaps.push('Projeto marcado como evolução/melhoria, mas o repositório principal não foi informado.'); conflictingFields.set('legacy_repo_url', 'Repositório obrigatório para legado'); }
+      if (legacy === 'Sim' && selectedValues('n8n_legacy_actions').length === 0) gaps.push('Projeto legado sem autorização explícita do escopo de análise técnica a ser executado pelo n8n.');
+      if (deliverables.includes('Aplicação web') && frontend.length === 0) { gaps.push('Aplicação web informada, mas nenhuma ferramenta de frontend foi selecionada.'); conflictingFields.set('frontend_stack', 'Frontend obrigatório para web app'); }
+      if ((deliverables.includes('API') || deliverables.includes('Microserviço')) && backend.length === 0) { gaps.push('API/microserviço informado, mas nenhuma ferramenta de backend foi selecionada.'); conflictingFields.set('backend_stack', 'Backend obrigatório para API/microserviço'); }
+      if ((deliverables.includes('API') || deliverables.includes('Aplicação web') || deliverables.includes('Microserviço')) && db.length === 0) { gaps.push('Entrega com aplicação persistente provável, mas nenhum banco de dados foi selecionado.'); conflictingFields.set('database_stack', 'Banco de dados obrigatório'); }
+      if (!ai.some(v => ['Anthropic', 'OpenAI', 'Gemini', 'DeepSeek', 'Grok'].includes(v))) { gaps.push('Todos os projetos devem usar IA; selecione ao menos um provedor de IA.'); conflictingFields.set('ai_automation', 'IA é obrigatória em todos os projetos'); }
+      if (infra.includes('Kafka') && !tests.includes('Resiliência / Recuperação')) { gaps.push('Kafka/mensageria selecionado sem testes de resiliência/recuperação.'); conflictingFields.set('infra_support', 'Kafka requer testes de resiliência'); }
+      if (infra.includes('Redis') && !tests.includes('Performance / Carga')) { gaps.push('Redis/cache selecionado sem testes de performance/carga.'); conflictingFields.set('infra_support', 'Redis requer testes de performance'); }
+      if (ai.some(v => ['Anthropic', 'OpenAI', 'Gemini', 'DeepSeek', 'Grok'].includes(v)) && restrictions === '') { gaps.push('IA externa selecionada sem declaração de restrições ou política resumida no campo Restrições.'); conflictingFields.set('restrictions', 'Restrições obrigatórias quando IA externa é usada'); }
+      if (!security.includes('Autenticação')) { gaps.push('Nenhum controle de autenticação foi marcado.'); conflictingFields.set('security_controls', 'Autenticação é obrigatória'); }
+      if (!security.includes('Autorização / RBAC')) { gaps.push('Nenhum controle de autorização / RBAC foi marcado.'); conflictingFields.set('security_controls', 'RBAC é obrigatório'); }
+      if (!tests.includes('Unitários') || !tests.includes('Integração')) { gaps.push('Boas práticas mínimas indicam seleção de testes unitários e de integração.'); conflictingFields.set('test_types', 'Testes unitários e integração são essenciais'); }
+      if (execution.includes('Offline') && deliverables.includes('Aplicação web') && !deliverables.includes('Executável desktop')) { gaps.push('Modo offline foi marcado sem um perfil de entrega que deixe clara a estratégia de execução local.'); conflictingFields.set('execution_mode', 'Offline com web app requer estratégia clara'); }
+      if (deliverables.includes('Executável desktop') && !execution.includes('Stand-alone')) { gaps.push('Executável desktop informado sem o modo de execução stand-alone.'); conflictingFields.set('execution_mode', 'Executável requer modo stand-alone'); }
+      if (selectedValues('observability').length === 0) { gaps.push('Nenhum item de observabilidade/operação foi selecionado.'); conflictingFields.set('observability', 'Observabilidade é obrigatória'); }
+
+      gapCount.textContent = String(gaps.length);
+
+      // Highlight conflicting fields
+      clearFieldHighlights();
+      conflictingFields.forEach((message, fieldName) => {
+        highlightField(fieldName, message);
+      });
+
+      // Calculate adherence score (hidden from GP)
+      const adherenceScore = calculateAdherenceScore(gaps.length, percent);
+
+      if (percent < 80) {
+        const refusalReason = 'Recusado automaticamente: percentual respondido inferior a 80%. Completar o questionário antes da ingestão.';
+        if (!String(observationsField.value || '').includes(refusalReason)) {
+          observationsField.value = (String(observationsField.value || '').trim() ? String(observationsField.value || '').trim() + '\n' : '') + refusalReason;
+        }
+      }
+
+      let decision = 'Aprovado';
+      if (percent < 80) decision = 'Recusado';
+      else if (gaps.length > 0) decision = 'Aprovado com ressalvas';
+
+      const target = document.getElementById('analysisResult');
+      const scoreNote = percent >= 80 && gaps.length === 0 ? `<p><em>Análise interna: aderência de ${adherenceScore}% — score oculto do GP, apenas status visível.</em></p>` : '';
+
+      if (!gaps.length) {
+        target.innerHTML = `<p><strong>Parecer preliminar do n8n:</strong> ${decision}</p><p>Sem gaps críticos detectados nesta verificação preliminar. O questionário está coerente para seguir à revisão das áreas envolvidas e posterior ingestão no tenant do GCA.</p>${scoreNote}<p><strong>Lógica de ingestão:</strong> armazenar JSON do questionário, vincular ao tenant/projeto, gerar hash do artefato, disparar validação n8n, registrar decisão e disponibilizar relatório ao GP.</p>`;
+      } else {
+        target.innerHTML = `<p><strong>Parecer preliminar do n8n:</strong> ${decision}</p><ol>${gaps.map(g => `<li>${g}</li>`).join('')}</ol><p><strong>Lógica de ingestão:</strong> receber o questionário externo, validar completude, classificar contexto do projeto, cruzar respostas, gerar score, emitir decisão e registrar parecer versionado no tenant.</p><p><strong>Lógica de aprovação de stack:</strong> aprovar quando houver coerência entre arquitetura, entregáveis, stack, IA obrigatória, segurança mínima, testes mínimos e observabilidade; aprovar com ressalvas quando faltarem detalhes não bloqueantes; recusar quando houver ausência de repositório em legado, ausência de IA, segurança mínima ausente ou completude abaixo de 80%.</p>`;
+      }
+      updateProgress();
+    }
+
+    function calculateAdherenceScore(gapCount, percentCompleted) {
+      // Simple formula: (100% completion - gaps penalty) * percent completed
+      // For now: 100 - (gaps * 5) = basic score
+      const baseScore = Math.max(0, 100 - (gapCount * 5));
+      const weightedScore = Math.round((baseScore * percentCompleted) / 100);
+      return Math.max(0, Math.min(100, weightedScore));
+    }
+
+    function clearFieldHighlights() {
+      form.querySelectorAll('.field-with-conflict').forEach(el => {
+        el.classList.remove('field-with-conflict');
+        const note = el.querySelector('.conflict-note');
+        if (note) note.remove();
+      });
+    }
+
+    function highlightField(fieldName, conflictMessage) {
+      const field = form.querySelector(`[name="${fieldName}"]`);
+      if (!field) return;
+
+      let container = field.closest('.col-12, .col-6, .col-4, .col-3');
+      if (!container) container = field.closest('.grid > div');
+      if (!container) return;
+
+      container.classList.add('field-with-conflict');
+      const noteEl = document.createElement('small');
+      noteEl.className = 'conflict-note';
+      noteEl.textContent = '⚠️ ' + conflictMessage;
+      field.parentNode.insertBefore(noteEl, field.nextSibling);
+    }
+
+    function serializeForm() {
+      const data = {};
+      for (const [key, value] of new FormData(form).entries()) {
+        if (Object.prototype.hasOwnProperty.call(data, key)) {
+          if (!Array.isArray(data[key])) data[key] = [data[key]];
+          data[key].push(value);
+        } else {
+          data[key] = value;
+        }
+      }
+      return {
+        metadata: {
+          model: 'GCA — Questionário Técnico do Projeto',
+          scope: 'tenant/project isolated',
+          generated_at: new Date().toISOString()
+        },
+        data
+      };
+    }
+
+    function downloadJson() {
+      const payload = JSON.stringify(serializeForm(), null, 2);
+      const blob = new Blob([payload], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'gca_questionario_tecnico_tenant.json';
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    form.addEventListener('input', updateProgress);
+    form.addEventListener('change', (e) => {
+      if (e.target.name === 'existing_project') {
+        document.getElementById('legacySection').classList.toggle('hidden', e.target.value !== 'Sim');
+      }
+      updateProgress();
+    });
+
+    updateProgress();
+  </script>
+</body>
+</html>

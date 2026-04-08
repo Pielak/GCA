@@ -1,0 +1,429 @@
+{
+  "name": "GCA - OCG Generation Pipeline (Complete)",
+  "nodes": [
+    {
+      "parameters": {},
+      "name": "Start",
+      "type": "n8n-nodes-base.start",
+      "typeVersion": 1,
+      "position": [50, 200],
+      "id": "start-node"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "questionnaire-webhook",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook: Questionnaire Submit",
+      "type": "n8n-nodes-base.httpWebhook",
+      "typeVersion": 1,
+      "position": [200, 200],
+      "id": "webhook-questionnaire"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/analyze",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            },
+            {
+              "name": "answers",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "name": "Agent 0: Analyzer",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [400, 200],
+      "id": "agent-0-analyzer"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/1",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "1"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 1: P1 Business",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 100],
+      "id": "agent-1-p1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/2",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "2"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 2: P2 Rules",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 180],
+      "id": "agent-2-p2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/3",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "3"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 3: P3 Features",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 260],
+      "id": "agent-3-p3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/4",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "4"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 4: P4 NFR",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 340],
+      "id": "agent-4-p4"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/5",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "5"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 5: P5 Architecture",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 420],
+      "id": "agent-5-p5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/6",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "6"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 6: P6 Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 500],
+      "id": "agent-6-p6"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/pillar/7",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "pillar_id",
+              "value": "7"
+            },
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "questions",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers }}"
+            },
+            {
+              "name": "responses",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.answers.reduce((acc, q) => ({...acc, [q.question_id]: q.text}), {}) }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 7: P7 Security",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [600, 580],
+      "id": "agent-7-p7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/agents/consolidate",
+        "authentication": "none",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "questionnaire_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.questionnaire_id }}"
+            },
+            {
+              "name": "project_id",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_id }}"
+            },
+            {
+              "name": "analyzer_output",
+              "value": "={{ $node.\"Agent 0: Analyzer\".json }}"
+            },
+            {
+              "name": "pillar_results",
+              "value": "={{ [$node.\"Agent 1: P1 Business\".json, $node.\"Agent 2: P2 Rules\".json, $node.\"Agent 3: P3 Features\".json, $node.\"Agent 4: P4 NFR\".json, $node.\"Agent 5: P5 Architecture\".json, $node.\"Agent 6: P6 Data\".json, $node.\"Agent 7: P7 Security\".json] }}"
+            },
+            {
+              "name": "project_metadata",
+              "value": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata }}"
+            }
+          ]
+        }
+      },
+      "name": "Agent 8: Consolidator",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [900, 300],
+      "id": "agent-8-consolidator"
+    },
+    {
+      "parameters": {
+        "subject": "GCA OCG Generated: {{ $node.\"Agent 8: Consolidator\".json.PROJECT_PROFILE.name }}",
+        "emailTo": "={{ $node.\"Webhook: Questionnaire Submit\".json.project_metadata.submitted_by }}",
+        "htmlBody": "<h2>OCG Generated Successfully!</h2>\n<p><strong>Project:</strong> {{ $node.\"Agent 8: Consolidator\".json.PROJECT_PROFILE.name }}</p>\n<p><strong>Overall Score:</strong> {{ $node.\"Agent 8: Consolidator\".json.COMPOSITE_SCORE.overall }}/100</p>\n<p><strong>Status:</strong> {{ $node.\"Agent 8: Consolidator\".json.COMPOSITE_SCORE.status }}</p>\n<p><strong>Can Proceed to Code Gen:</strong> {{ $node.\"Agent 8: Consolidator\".json.APPROVAL_STATUS.can_proceed_to_codegen ? 'Yes ✅' : 'No ❌' }}</p>\n<hr />\n<h3>Pillar Scores</h3>\n<ul>\n<li>P1 Business: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P1_Business.score }}/100</li>\n<li>P2 Rules: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P2_Rules.score }}/100</li>\n<li>P3 Features: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P3_Features.score }}/100</li>\n<li>P4 NFR: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P4_NFR.score }}/100</li>\n<li>P5 Architecture: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P5_Architecture.score }}/100</li>\n<li>P6 Data: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P6_Data.score }}/100</li>\n<li>P7 Security: {{ $node.\"Agent 8: Consolidator\".json.PILLAR_SCORES.P7_Security.score }}/100</li>\n</ul>"
+      },
+      "name": "Send Email Notification",
+      "type": "n8n-nodes-base.sendEmail",
+      "typeVersion": 1,
+      "position": [1100, 300],
+      "id": "send-email"
+    },
+    {
+      "parameters": {
+        "body": "{{ $node.\"Agent 8: Consolidator\".json }}",
+        "statusCode": 200
+      },
+      "name": "Response: OCG Ready",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [1100, 400],
+      "id": "response-ocg"
+    }
+  ],
+  "connections": {
+    "Start": {
+      "main": [[{"node": "Webhook: Questionnaire Submit", "type": "main", "index": 0}]]
+    },
+    "Webhook: Questionnaire Submit": {
+      "main": [[{"node": "Agent 0: Analyzer", "type": "main", "index": 0}]]
+    },
+    "Agent 0: Analyzer": {
+      "main": [
+        [
+          {"node": "Agent 1: P1 Business", "type": "main", "index": 0},
+          {"node": "Agent 2: P2 Rules", "type": "main", "index": 0},
+          {"node": "Agent 3: P3 Features", "type": "main", "index": 0},
+          {"node": "Agent 4: P4 NFR", "type": "main", "index": 0},
+          {"node": "Agent 5: P5 Architecture", "type": "main", "index": 0},
+          {"node": "Agent 6: P6 Data", "type": "main", "index": 0},
+          {"node": "Agent 7: P7 Security", "type": "main", "index": 0}
+        ]
+      ]
+    },
+    "Agent 1: P1 Business": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 2: P2 Rules": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 3: P3 Features": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 4: P4 NFR": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 5: P5 Architecture": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 6: P6 Data": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 7: P7 Security": {
+      "main": [[{"node": "Agent 8: Consolidator", "type": "main", "index": 0}]]
+    },
+    "Agent 8: Consolidator": {
+      "main": [[{"node": "Send Email Notification", "type": "main", "index": 0}, {"node": "Response: OCG Ready", "type": "main", "index": 0}]]
+    }
+  },
+  "active": true,
+  "settings": {
+    "saveDataErrorExecution": "all",
+    "saveDataSuccessExecution": "all"
+  },
+  "tags": ["GCA", "OCG", "Agent-Pipeline"],
+  "description": "Complete OCG generation pipeline using 8 specialized Claude agents. Webhook triggers → Agent 0 classifies → Agents 1-7 analyze in parallel → Agent 8 consolidates → Email notification."
+}

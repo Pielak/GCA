@@ -1,0 +1,126 @@
+"""
+Git Router — Conexão e operações com repositórios Git por projeto
+"""
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from uuid import UUID
+from pydantic import BaseModel
+from typing import Optional
+import structlog
+
+from app.db.database import get_db
+from app.services.git_service import GitService
+from app.middleware.auth import get_current_user_from_token
+
+logger = structlog.get_logger(__name__)
+
+router = APIRouter(tags=["git"])
+
+
+class GitConnectRequest(BaseModel):
+    provider: str  # github, gitlab, bitbucket, azure_devops, other
+    repository_url: str
+    pat: str
+    default_branch: str = "main"
+
+
+class GitConnectResponse(BaseModel):
+    success: bool
+    message: str
+    provider: str | None = None
+    branch: str | None = None
+
+
+class GitStatusResponse(BaseModel):
+    connected: bool
+    provider: str | None = None
+    repository_url: str | None = None
+    branch: str | None = None
+    last_verified: str | None = None
+    last_commit_at: str | None = None
+
+
+@router.post(
+    "/projects/{project_id}/git/connect",
+    response_model=GitConnectResponse,
+)
+async def connect_git_repository(
+    project_id: UUID,
+    req: GitConnectRequest,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Conecta um repositório Git ao projeto.
+    Valida o PAT fazendo chamada de teste ao provider.
+    """
+    git_service = GitService(db)
+    result = await git_service.connect_repository(
+        project_id=project_id,
+        provider=req.provider,
+        repository_url=req.repository_url,
+        pat=req.pat,
+        default_branch=req.default_branch,
+    )
+
+    if not result["success"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"],
+        )
+
+    return GitConnectResponse(**result)
+
+
+@router.get(
+    "/projects/{project_id}/git/status",
+    response_model=GitStatusResponse,
+)
+async def get_git_status(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Status da conexão Git do projeto."""
+    git_service = GitService(db)
+    result = await git_service.verify_connection(project_id)
+    return GitStatusResponse(**result)
+
+
+@router.post(
+    "/projects/{project_id}/git/verify",
+    response_model=GitConnectResponse,
+)
+async def verify_git_connection(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Testa a conexão atual com o repositório."""
+    git_service = GitService(db)
+    result = await git_service.verify_connection(project_id)
+    return GitConnectResponse(
+        success=result["connected"],
+        message="Conexão verificada" if result["connected"] else "Falha na conexão",
+        provider=result.get("provider"),
+        branch=result.get("branch"),
+    )
+
+
+@router.delete(
+    "/projects/{project_id}/git/disconnect",
+)
+async def disconnect_git_repository(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove configuração Git do projeto. Apenas Admin global."""
+    git_service = GitService(db)
+    success = await git_service.disconnect(project_id)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Configuração Git não encontrada",
+        )
+    return {"success": True}

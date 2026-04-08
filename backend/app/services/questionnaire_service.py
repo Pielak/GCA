@@ -1,0 +1,435 @@
+"""Questionnaire Service for n8n Integration"""
+from datetime import datetime, timezone
+from uuid import UUID
+from typing import Optional, Tuple, Dict, Any
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+import structlog
+import json
+import asyncio
+
+from app.models.base import Project, User, Questionnaire
+from app.services.email_service import EmailService
+from app.core.config import settings
+
+logger = structlog.get_logger(__name__)
+
+
+class QuestionnaireService:
+    """Service for managing questionnaire submissions and n8n analysis"""
+
+    @staticmethod
+    async def submit_questionnaire(
+        db: AsyncSession,
+        project_id: UUID,
+        gp_email: str,
+        responses: Dict[str, Any],
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Submit technical questionnaire for n8n analysis.
+        Returns (success, questionnaire_id, error_message)
+        
+        Note: Requires Questionnaire model in database (future implementation)
+        For now, we return success and simulate questionnaire_id
+        """
+        try:
+            # Verify project exists
+            result = await db.execute(
+                select(Project).where(Project.id == project_id)
+            )
+            project = result.scalar_one_or_none()
+            if not project:
+                logger.warning("questionnaire.project_not_found", project_id=str(project_id))
+                return False, None, "Projeto não encontrado"
+
+            # Verify GP exists
+            result = await db.execute(
+                select(User).where(User.email == gp_email)
+            )
+            gp_user = result.scalar_one_or_none()
+            if not gp_user:
+                logger.warning("questionnaire.gp_not_found", email=gp_email)
+                return False, None, "Gestor de Projeto não encontrado"
+
+            # Generate questionnaire_id (would be database id in real implementation)
+            import secrets
+            questionnaire_id = secrets.token_hex(8)
+
+            # Log questionnaire submission
+            logger.info(
+                "questionnaire.submitted",
+                questionnaire_id=questionnaire_id,
+                project_id=str(project_id),
+                gp_email=gp_email,
+            )
+
+            # Opção A: Análise built-in (imediato)
+            # Triggers: (1) Analyse questionnaire, (2) Save to DB, (3) Send email notification
+            try:
+                # Import here to avoid circular dependency
+                from app.routers.webhooks import analyze_questionnaire
+
+                # Run analysis
+                result = analyze_questionnaire(responses)
+
+                # Save questionnaire to database
+                questionnaire = Questionnaire(
+                    project_id=project_id,
+                    gp_email=gp_email,
+                    responses=json.dumps(responses),
+                    adherence_score=result["adherenceScore"],
+                    status=result["status"],
+                    approved=result["approved"],
+                    validations=json.dumps(result["validations"]),
+                    observations=result["observations"],
+                    restrictions=result["restrictions"],
+                    highlighted_fields=json.dumps(result["highlightedFields"]),
+                    submitted_at=datetime.now(timezone.utc),
+                    analyzed_at=datetime.now(timezone.utc),
+                )
+                db.add(questionnaire)
+                await db.commit()
+
+                logger.info(
+                    "questionnaire.saved_to_db",
+                    questionnaire_id=str(questionnaire.id),
+                    project_id=str(project_id),
+                    adherence_score=result["adherenceScore"],
+                )
+
+                # Determine notification type based on approval status
+                if result["approved"]:
+                    notification_type = "approved"
+                else:
+                    notification_type = "revision_needed"
+
+                # Trigger email asynchronously (non-blocking)
+                asyncio.create_task(
+                    QuestionnaireService._send_analysis_email(
+                        gp_email=gp_email,
+                        project_id=str(project_id),
+                        questionnaire_id=str(questionnaire.id),
+                        notification_type=notification_type,
+                        analysis_result=result,
+                    )
+                )
+
+                # OPTION C: Trigger n8n for enhanced analysis (asynchronous)
+                asyncio.create_task(
+                    QuestionnaireService._trigger_n8n_analysis(
+                        questionnaire_id=str(questionnaire.id),
+                        project_id=str(project_id),
+                        gp_email=gp_email,
+                        responses=responses,
+                    )
+                )
+
+                # Se aprovado na verificação tecnológica, disparar geração do OCG
+                # via pipeline de 8 agentes IA (assíncrono, não bloqueia a resposta)
+                if result["approved"]:
+                    asyncio.create_task(
+                        QuestionnaireService._generate_ocg(
+                            questionnaire_id=questionnaire.id,
+                            project_id=project_id,
+                            gp_email=gp_email,
+                        )
+                    )
+
+                logger.info(
+                    "questionnaire.analysis_triggered",
+                    questionnaire_id=str(questionnaire.id),
+                    adherence_score=result["adherenceScore"],
+                    approved=result["approved"],
+                    ocg_triggered=result["approved"],
+                )
+
+                # Use real DB UUID as the questionnaire_id
+                questionnaire_id = str(questionnaire.id)
+
+            except Exception as e:
+                logger.warning(
+                    "questionnaire.analysis_failed",
+                    error=str(e),
+                    questionnaire_id=questionnaire_id
+                )
+                # Don't fail submission if analysis fails
+                pass
+
+            return True, questionnaire_id, None
+
+        except Exception as e:
+            await db.rollback()
+            logger.error("questionnaire.submit_failed", error=str(e))
+            return False, None, str(e)
+
+    @staticmethod
+    async def _send_analysis_email(
+        gp_email: str,
+        project_id: str,
+        questionnaire_id: str,
+        notification_type: str,
+        analysis_result: Dict[str, Any],
+    ) -> None:
+        """
+        Send email notification after analysis.
+        Runs asynchronously.
+        """
+        try:
+            email_service = EmailService()
+
+            if notification_type == "approved":
+                logger.info(
+                    "questionnaire.sending_approval_email",
+                    email=gp_email,
+                    project_id=project_id,
+                )
+                email_service.send_questionnaire_approved_email(
+                    gp_email=gp_email,
+                    project_id=project_id,
+                    adherence_score=analysis_result["adherenceScore"],
+                    observations=analysis_result["observations"],
+                )
+
+            elif notification_type == "revision_needed":
+                logger.info(
+                    "questionnaire.sending_revision_email",
+                    email=gp_email,
+                    project_id=project_id,
+                )
+                email_service.send_questionnaire_revision_needed_email(
+                    gp_email=gp_email,
+                    project_id=project_id,
+                    adherence_score=analysis_result["adherenceScore"],
+                    conflicts=analysis_result["validations"].get("logicConflicts", []),
+                    gaps=analysis_result["validations"].get("gaps", []),
+                    observations=analysis_result["observations"],
+                )
+
+            logger.info(
+                "questionnaire.email_sent",
+                email=gp_email,
+                notification_type=notification_type,
+            )
+
+        except Exception as e:
+            logger.error(
+                "questionnaire.email_failed",
+                error=str(e),
+                email=gp_email,
+            )
+            # Don't propagate email errors
+
+    @staticmethod
+    async def get_questionnaire_status(
+        db: AsyncSession,
+        questionnaire_id: str,
+        is_admin: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Get questionnaire status and n8n analysis results from database.
+        Admin sees: adherence_score + gaps (hidden details)
+        GP sees: only status + observations + restrictions
+        """
+        try:
+            # Fetch questionnaire from database
+            from uuid import UUID
+            try:
+                q_uuid = UUID(questionnaire_id)
+            except ValueError:
+                logger.warning("questionnaire.invalid_id", questionnaire_id=questionnaire_id)
+                return {
+                    "questionnaire_id": questionnaire_id,
+                    "status": "pending",
+                    "submission_date": datetime.now(timezone.utc).isoformat(),
+                    "observations": "Questionnaire not found",
+                    "restrictions": "",
+                    "highlighted_fields": [],
+                }
+
+            result = await db.execute(
+                select(Questionnaire).where(Questionnaire.id == q_uuid)
+            )
+            questionnaire = result.scalar_one_or_none()
+
+            if not questionnaire:
+                logger.warning("questionnaire.not_found", questionnaire_id=questionnaire_id)
+                return {
+                    "questionnaire_id": questionnaire_id,
+                    "status": "pending",
+                    "submission_date": datetime.now(timezone.utc).isoformat(),
+                    "observations": "Questionnaire not found",
+                    "restrictions": "",
+                    "highlighted_fields": [],
+                }
+
+            # Parse highlighted_fields if available
+            highlighted_fields = []
+            try:
+                if questionnaire.highlighted_fields:
+                    highlighted_fields = json.loads(questionnaire.highlighted_fields)
+            except (json.JSONDecodeError, TypeError):
+                highlighted_fields = []
+
+            response = {
+                "questionnaire_id": str(questionnaire.id),
+                "status": questionnaire.status,
+                "submission_date": questionnaire.submitted_at.isoformat(),
+                "observations": questionnaire.observations or "No observations",
+                "restrictions": questionnaire.restrictions or "No restrictions",
+                "highlighted_fields": highlighted_fields,
+            }
+
+            # Add internal details for admin
+            if is_admin:
+                try:
+                    validations = {}
+                    if questionnaire.validations:
+                        validations = json.loads(questionnaire.validations)
+                except (json.JSONDecodeError, TypeError):
+                    validations = {"logicConflicts": [], "gaps": [], "incompatibilities": []}
+
+                response["internal"] = {
+                    "adherence_score": questionnaire.adherence_score,
+                    "approved": questionnaire.approved,
+                    "gaps_count": len(validations.get("gaps", [])),
+                    "conflicts_count": len(validations.get("logicConflicts", [])),
+                    "analyzed_at": questionnaire.analyzed_at.isoformat() if questionnaire.analyzed_at else None,
+                }
+
+            return response
+
+        except Exception as e:
+            logger.error("questionnaire.status_fetch_failed", error=str(e), questionnaire_id=questionnaire_id)
+            return {
+                "questionnaire_id": questionnaire_id,
+                "status": "pending",
+                "submission_date": datetime.now(timezone.utc).isoformat(),
+                "observations": "Error fetching questionnaire",
+                "restrictions": "",
+                "highlighted_fields": [],
+            }
+
+    @staticmethod
+    async def _trigger_n8n_analysis(
+        questionnaire_id: str,
+        project_id: str,
+        gp_email: str,
+        responses: Dict[str, Any],
+    ) -> None:
+        """
+        Trigger n8n workflow for enhanced analysis with Qwen AI (OPTION C).
+        Runs asynchronously in background after initial submission.
+
+        n8n will:
+        1. Receive questionnaire data
+        2. Run Qwen AI for deeper insights and recommendations
+        3. Call back to /api/v1/webhooks/questionnaire-result with enhanced results
+        """
+        try:
+            from app.services.n8n_service import N8nService
+
+            success, error = await N8nService.trigger_questionnaire_analysis(
+                questionnaire_id=questionnaire_id,
+                project_id=project_id,
+                gp_email=gp_email,
+                responses=responses,
+            )
+
+            if success:
+                logger.info(
+                    "questionnaire.n8n_triggered",
+                    questionnaire_id=questionnaire_id,
+                )
+            else:
+                logger.warning(
+                    "questionnaire.n8n_trigger_failed",
+                    questionnaire_id=questionnaire_id,
+                    error=error,
+                )
+
+        except Exception as e:
+            logger.error(
+                "questionnaire.n8n_dispatch_error",
+                questionnaire_id=questionnaire_id,
+                error=str(e),
+            )
+            # Don't propagate n8n errors - built-in analysis already completed
+
+    @staticmethod
+    async def _generate_ocg(
+        questionnaire_id: UUID,
+        project_id: UUID,
+        gp_email: str,
+    ) -> None:
+        """
+        Dispara geração do OCG via pipeline de 8 agentes IA.
+        Executa assincronamente após verificação tecnológica aprovar o questionário.
+
+        Pipeline:
+        1. Agent 0 (Analyzer): classifica respostas por pilar
+        2. Agents 1-7 (Pillar Specialists): analisam cada pilar em paralelo
+        3. Agent 8 (Consolidator): consolida em OCG final e salva no banco
+        """
+        try:
+            logger.info(
+                "questionnaire.ocg_generation_starting",
+                questionnaire_id=str(questionnaire_id),
+                project_id=str(project_id),
+            )
+
+            # Criar nova sessão de banco (necessário pois estamos em task assíncrona)
+            from app.db.database import AsyncSessionLocal
+            async with AsyncSessionLocal() as db:
+                from app.services.ocg_service import OCGService
+                ocg_service = OCGService(db)
+
+                ocg_response = await ocg_service.generate_ocg_from_questionnaire(
+                    questionnaire_id=questionnaire_id,
+                    project_id=project_id,
+                )
+
+                # Atualizar status do questionário para 'ocg_generated'
+                from sqlalchemy import select
+                from app.models.base import Questionnaire
+                stmt = select(Questionnaire).where(Questionnaire.id == questionnaire_id)
+                result = await db.execute(stmt)
+                questionnaire = result.scalar_one_or_none()
+                if questionnaire:
+                    questionnaire.status = "ocg_generated"
+                    await db.commit()
+
+                logger.info(
+                    "questionnaire.ocg_generation_complete",
+                    questionnaire_id=str(questionnaire_id),
+                    ocg_id=str(ocg_response.ocg_id),
+                    overall_score=ocg_response.COMPOSITE_SCORE.get("overall", 0),
+                    status=ocg_response.COMPOSITE_SCORE.get("status", "UNKNOWN"),
+                )
+
+                # Enviar email ao GP com resultado do OCG
+                try:
+                    from app.services.email_service import EmailService
+                    from app.models.base import Project
+                    proj_result = await db.execute(
+                        select(Project).where(Project.id == project_id)
+                    )
+                    project = proj_result.scalar_one_or_none()
+                    project_name = project.name if project else f"Projeto {project_id}"
+
+                    EmailService.send_ocg_generated_email(
+                        to_email=gp_email,
+                        project_name=project_name,
+                        ocg_data=ocg_response.dict() if hasattr(ocg_response, 'dict') else {},
+                        project_id=str(project_id),
+                    )
+                except Exception as email_err:
+                    logger.warning("questionnaire.ocg_email_failed", error=str(email_err))
+
+        except Exception as e:
+            logger.error(
+                "questionnaire.ocg_generation_failed",
+                questionnaire_id=str(questionnaire_id),
+                error=str(e),
+            )
+            # Não propagar erro — a verificação tecnológica já foi concluída
+            # O OCG pode ser regenerado manualmente depois

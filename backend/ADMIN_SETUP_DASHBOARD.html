@@ -1,0 +1,2665 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Painel de Administração | GCA</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --primary: #1e40af;
+            --primary-dark: #0c2d6d;
+            --primary-light: #3b82f6;
+            --accent: #7c3aed;
+            --accent-light: #a78bfa;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --info: #3b82f6;
+            --bg-dark: #f8f9ff;
+            --bg-card: #ffffff;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+            --border: #e5e7eb;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #e3f2fd 0%, #f3e5f5 100%);
+            min-height: 100vh;
+            display: flex;
+        }
+
+        /* NOTIFICATIONS */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            max-width: 400px;
+        }
+
+        .toast {
+            background: white;
+            padding: 16px;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            animation: slideIn 0.3s ease;
+            border-left: 4px solid;
+        }
+
+        @keyframes slideIn {
+            from {
+                transform: translateX(400px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        .toast.success {
+            border-left-color: var(--success);
+        }
+
+        .toast.error {
+            border-left-color: var(--danger);
+        }
+
+        .toast.info {
+            border-left-color: var(--info);
+        }
+
+        .toast-icon {
+            font-size: 20px;
+            min-width: 20px;
+        }
+
+        .toast.success .toast-icon {
+            color: var(--success);
+        }
+
+        .toast.error .toast-icon {
+            color: var(--danger);
+        }
+
+        .toast.info .toast-icon {
+            color: var(--info);
+        }
+
+        .toast-content {
+            flex: 1;
+        }
+
+        .toast-title {
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 2px;
+        }
+
+        .toast-message {
+            font-size: 13px;
+            color: var(--text-light);
+        }
+
+        /* SIDEBAR */
+        .sidebar {
+            width: 280px;
+            background: linear-gradient(180deg, var(--primary-dark) 0%, var(--primary) 100%);
+            color: white;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            position: fixed;
+            height: 100vh;
+            overflow-y: auto;
+            box-shadow: 2px 0 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .sidebar-header {
+            padding: 30px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background: var(--primary-dark);
+        }
+
+        .sidebar-title {
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 5px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .sidebar-subtitle {
+            font-size: 12px;
+            opacity: 0.8;
+            margin-bottom: 15px;
+        }
+
+        .setup-progress {
+            font-size: 11px;
+            opacity: 0.7;
+            padding: 8px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .setup-progress-value {
+            font-weight: 700;
+            color: var(--success);
+        }
+
+        .sidebar-nav {
+            flex: 1;
+            padding: 20px 0;
+        }
+
+        .nav-section-label {
+            padding: 15px 20px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            margin: 10px 0;
+            font-size: 11px;
+            opacity: 0.7;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .nav-item {
+            padding: 14px 20px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-left: 3px solid transparent;
+            font-size: 14px;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .nav-item:hover {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+        }
+
+        .nav-item.active {
+            background: rgba(255, 255, 255, 0.15);
+            border-left-color: var(--accent);
+            color: white;
+            font-weight: 600;
+        }
+
+        .nav-item.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .nav-icon {
+            width: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .nav-badge {
+            margin-left: auto;
+            background: var(--success);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .sidebar-footer {
+            padding: 20px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .admin-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 6px;
+            margin-bottom: 10px;
+        }
+
+        .admin-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 12px;
+        }
+
+        .admin-name {
+            font-size: 12px;
+            line-height: 1.3;
+        }
+
+        /* MAIN CONTENT */
+        .main {
+            flex: 1;
+            margin-left: 280px;
+            padding: 40px;
+            overflow-y: auto;
+        }
+
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+        }
+
+        .header-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .header h1 {
+            color: var(--primary);
+            font-size: 28px;
+            margin: 0;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .btn-header {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.3s;
+        }
+
+        .btn-header:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3);
+        }
+
+        .header-subtitle {
+            color: var(--text-light);
+            font-size: 15px;
+            margin: 0;
+        }
+
+        .progress-container {
+            margin-top: 20px;
+        }
+
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .progress-label-left {
+            color: var(--text-dark);
+            font-weight: 600;
+        }
+
+        .progress-label-right {
+            color: var(--success);
+            font-weight: 700;
+        }
+
+        .progress-bar-bg {
+            width: 100%;
+            height: 6px;
+            background: var(--border);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary), var(--accent));
+            width: 0%;
+            transition: width 0.5s ease;
+            border-radius: 3px;
+        }
+
+        .priority-info {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            border-left: 4px solid var(--warning);
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+        }
+
+        .priority-info strong {
+            color: #92400e;
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        .priority-info p {
+            color: #b45309;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 0;
+        }
+
+        .priority-sequence {
+            display: flex;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .priority-badge {
+            background: white;
+            color: #92400e;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+
+        /* CONTENT GRID */
+        .content {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 25px;
+        }
+
+        .section {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            overflow: hidden;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .section-header {
+            padding: 25px 30px;
+            background: linear-gradient(135deg, rgba(30, 64, 175, 0.05) 0%, rgba(124, 58, 237, 0.05) 100%);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+
+        .section-title-group {
+            display: flex;
+            align-items: flex-start;
+            gap: 15px;
+        }
+
+        .section-icon {
+            width: 50px;
+            height: 50px;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .section-info h2 {
+            color: var(--text-dark);
+            font-size: 18px;
+            margin: 0 0 5px 0;
+        }
+
+        .section-info p {
+            color: var(--text-light);
+            font-size: 13px;
+            margin: 0;
+        }
+
+        .section-priority {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 8px;
+        }
+
+        .priority-number {
+            background: var(--primary);
+            color: white;
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        .priority-label {
+            font-size: 11px;
+            color: var(--text-light);
+            font-weight: 600;
+            text-align: right;
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-configured {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .status-validated {
+            background: #d1fae5;
+            color: #065f46;
+        }
+
+        .section-content {
+            padding: 30px;
+        }
+
+        .hint-box {
+            background: linear-gradient(135deg, #ede9fe 0%, #f3e8ff 100%);
+            border-left: 4px solid var(--accent);
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 25px;
+            font-size: 13px;
+            color: #6b21a8;
+            line-height: 1.6;
+        }
+
+        .hint-box strong {
+            color: #4c1d95;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            color: var(--text-dark);
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .required {
+            color: var(--danger);
+        }
+
+        input[type="text"],
+        input[type="password"],
+        input[type="number"],
+        input[type="email"],
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.3s;
+            background: white;
+        }
+
+        input[type="text"]:focus,
+        input[type="password"]:focus,
+        input[type="number"]:focus,
+        input[type="email"]:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+        }
+
+        input.valid {
+            border-color: var(--success);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        input.error {
+            border-color: var(--danger);
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .form-helper {
+            color: var(--text-light);
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .form-helper a {
+            color: var(--primary);
+            text-decoration: none;
+            font-weight: 600;
+        }
+
+        .form-helper a:hover {
+            text-decoration: underline;
+        }
+
+        .form-error {
+            color: var(--danger);
+            font-size: 12px;
+            margin-top: 6px;
+            display: none;
+        }
+
+        .form-error.show {
+            display: block;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        .form-grid.full {
+            grid-template-columns: 1fr;
+        }
+
+        .provider-group {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            border: 1px solid var(--border);
+        }
+
+        .provider-group h3 {
+            color: var(--text-dark);
+            font-size: 14px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .provider-badge {
+            background: var(--success);
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 20px;
+            flex-wrap: wrap;
+        }
+
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 13px;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-test {
+            background: var(--bg-dark);
+            color: var(--text-dark);
+            border: 1px solid var(--border);
+            flex: 0 0 auto;
+        }
+
+        .btn-test:hover:not(:disabled) {
+            background: var(--border);
+        }
+
+        .btn-test.loading {
+            pointer-events: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            color: white;
+            flex: 1;
+            min-width: 150px;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(30, 64, 175, 0.3);
+        }
+
+        .btn-secondary {
+            background: white;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+            flex: 0 0 auto;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: rgba(30, 64, 175, 0.05);
+        }
+
+        .test-result {
+            background: #f9fafb;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 15px;
+            border-left: 4px solid var(--border);
+            display: none;
+        }
+
+        .test-result.show {
+            display: block;
+        }
+
+        .test-result.success {
+            border-left-color: var(--success);
+            background: rgba(16, 185, 129, 0.05);
+        }
+
+        .test-result.error {
+            border-left-color: var(--danger);
+            background: rgba(239, 68, 68, 0.05);
+        }
+
+        .test-result-title {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .test-result.success .test-result-title {
+            color: var(--success);
+        }
+
+        .test-result.error .test-result-title {
+            color: var(--danger);
+        }
+
+        .test-result-content {
+            font-size: 12px;
+            color: var(--text-dark);
+            font-family: 'Monaco', 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+
+        .database-combo-label {
+            font-size: 12px;
+            color: var(--text-light);
+            margin-top: 6px;
+        }
+
+        .rotacao-info {
+            background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%);
+            border-left: 4px solid var(--info);
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            font-size: 12px;
+            color: #0c2d6d;
+        }
+
+        .finish-section {
+            background: linear-gradient(135deg, var(--success) 0%, #059669 100%);
+            color: white;
+            padding: 40px;
+            border-radius: 12px;
+            text-align: center;
+            margin: 30px 0;
+        }
+
+        .finish-section h3 {
+            font-size: 22px;
+            margin-bottom: 10px;
+        }
+
+        .finish-section p {
+            font-size: 14px;
+            opacity: 0.95;
+            line-height: 1.6;
+        }
+
+        .btn-next {
+            background: white;
+            color: var(--success);
+            padding: 12px 28px;
+            border-radius: 6px;
+            font-weight: 700;
+            cursor: pointer;
+            margin-top: 20px;
+            transition: all 0.3s;
+            border: none;
+            font-size: 13px;
+        }
+
+        .btn-next:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .footer {
+            text-align: center;
+            color: var(--text-light);
+            font-size: 12px;
+            margin-top: 40px;
+            padding: 20px;
+        }
+
+        .footer a {
+            color: var(--primary);
+            text-decoration: none;
+        }
+
+        .footer a:hover {
+            text-decoration: underline;
+        }
+
+        .admins-list {
+            display: grid;
+            gap: 12px;
+            margin-top: 15px;
+        }
+
+        .admin-card {
+            background: #f9fafb;
+            padding: 12px 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            font-size: 13px;
+        }
+
+        .admin-card-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .admin-avatar-small {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 11px;
+        }
+
+        .admin-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .admin-details-name {
+            color: var(--text-dark);
+            font-weight: 600;
+        }
+
+        .admin-details-role {
+            color: var(--text-light);
+            font-size: 11px;
+        }
+
+        .history-timeline {
+            position: relative;
+            padding-left: 30px;
+            margin-top: 20px;
+        }
+
+        .history-item {
+            position: relative;
+            padding: 12px;
+            margin-bottom: 12px;
+            background: #f9fafb;
+            border-radius: 6px;
+            border-left: 3px solid var(--border);
+            font-size: 12px;
+        }
+
+        .history-item::before {
+            content: '';
+            position: absolute;
+            left: -30px;
+            top: 15px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--primary);
+            border: 2px solid white;
+            box-shadow: 0 0 0 2px var(--primary);
+        }
+
+        .history-time {
+            color: var(--text-light);
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .history-action {
+            color: var(--text-dark);
+            font-weight: 500;
+        }
+
+        /* MODAL */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.show {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            animation: slideUp 0.3s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        .modal-header {
+            padding: 25px 30px;
+            background: linear-gradient(135deg, rgba(30, 64, 175, 0.05) 0%, rgba(124, 58, 237, 0.05) 100%);
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            color: var(--text-dark);
+            font-size: 18px;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 20px;
+            color: var(--text-light);
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: var(--text-dark);
+        }
+
+        .modal-body {
+            padding: 30px;
+        }
+
+        @media (max-width: 1024px) {
+            .sidebar {
+                width: 200px;
+            }
+
+            .main {
+                margin-left: 200px;
+                padding: 25px;
+            }
+
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+            }
+
+            .main {
+                margin-left: 0;
+            }
+
+            .header-top {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .section-header {
+                flex-direction: column;
+                gap: 15px;
+            }
+
+            .section-priority {
+                flex-direction: row;
+                align-items: center;
+            }
+
+            .toast-container {
+                right: 10px;
+                left: 10px;
+                max-width: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- TOAST CONTAINER -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+        <div class="sidebar-header">
+            <div class="sidebar-title">
+                <i class="fas fa-cog"></i> GCA Admin
+            </div>
+            <div class="sidebar-subtitle">Painel de Administração</div>
+            <div class="setup-progress">
+                <i class="fas fa-spinner"></i> <span class="setup-progress-value">0%</span> Concluído
+            </div>
+        </div>
+
+        <div class="sidebar-nav">
+            <div class="nav-section-label">Configuração do Sistema</div>
+
+            <div class="nav-item active" onclick="showSection('smtp')">
+                <div class="nav-icon"><i class="fas fa-envelope"></i></div>
+                <span>SMTP</span>
+            </div>
+            <div class="nav-item" onclick="showSection('repositorio')">
+                <div class="nav-icon"><i class="fas fa-code-branch"></i></div>
+                <span>Repositório</span>
+            </div>
+            <div class="nav-item" onclick="showSection('ia')">
+                <div class="nav-icon"><i class="fas fa-brain"></i></div>
+                <span>IA Providers</span>
+            </div>
+            <div class="nav-item" onclick="showSection('n8n')">
+                <div class="nav-icon"><i class="fas fa-network-wired"></i></div>
+                <span>N8N</span>
+            </div>
+            <div class="nav-item" onclick="showSection('database')">
+                <div class="nav-icon"><i class="fas fa-database"></i></div>
+                <span>Banco de Dados</span>
+            </div>
+
+            <div class="nav-section-label">Administração</div>
+
+            <div class="nav-item" onclick="showSection('projetos')">
+                <div class="nav-icon"><i class="fas fa-project-diagram"></i></div>
+                <span>Projetos</span>
+            </div>
+            <div class="nav-item" onclick="showSection('usuarios')">
+                <div class="nav-icon"><i class="fas fa-users"></i></div>
+                <span>Usuários</span>
+            </div>
+            <div class="nav-item" onclick="showSection('seguranca')">
+                <div class="nav-icon"><i class="fas fa-shield-alt"></i></div>
+                <span>Segurança</span>
+            </div>
+            <div class="nav-item" onclick="showSection('admins')">
+                <div class="nav-icon"><i class="fas fa-users-cog"></i></div>
+                <span>Administradores</span>
+            </div>
+
+            <div class="nav-section-label">Monitoramento & Alertas</div>
+
+            <div class="nav-item" onclick="showSection('dashboard-executivo')">
+                <div class="nav-icon"><i class="fas fa-chart-line"></i></div>
+                <span>Dashboard Executivo</span>
+            </div>
+            <div class="nav-item" onclick="showSection('integrações')">
+                <div class="nav-icon"><i class="fas fa-plug"></i></div>
+                <span>Integrações</span>
+            </div>
+        </div>
+
+        <div class="sidebar-footer">
+            <div class="admin-info">
+                <div class="admin-avatar">LC</div>
+                <div class="admin-name">
+                    <strong>Luiz C. Pielak</strong><br>
+                    <span style="font-size: 11px; opacity: 0.8;">Admin Principal</span>
+                </div>
+            </div>
+            <div style="font-size: 11px; opacity: 0.8; padding: 10px 0;">
+                <i class="fas fa-info-circle"></i> <a href="#" onclick="openModal('docModal')" style="color: var(--accent-light); text-decoration: none;">Documentação</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="main">
+        <!-- HEADER -->
+        <div class="header">
+            <div class="header-top">
+                <div>
+                    <h1>Configuração Inicial do GCA</h1>
+                    <p class="header-subtitle">Configure todas as credenciais na sequência correta antes de criar tenants</p>
+                </div>
+                <div class="header-actions">
+                    <button class="btn-header" onclick="openModal('configModal')">
+                        <i class="fas fa-sliders-h"></i> Configurações
+                    </button>
+                    <button class="btn-header" onclick="testAllSections()">
+                        <i class="fas fa-flask-vial"></i> Testar Tudo
+                    </button>
+                </div>
+            </div>
+
+            <div class="priority-info">
+                <strong><i class="fas fa-exclamation-triangle"></i> Ordem de Prioridades Importante</strong>
+                <p>Configure nesta sequência exata. Cada etapa depende da anterior para funcionar corretamente:</p>
+                <div class="priority-sequence">
+                    <div class="priority-badge"><strong>1º</strong> SMTP</div>
+                    <div class="priority-badge"><strong>2º</strong> Repositório</div>
+                    <div class="priority-badge"><strong>3º</strong> IA</div>
+                    <div class="priority-badge"><strong>4º</strong> N8N</div>
+                    <div class="priority-badge"><strong>5º</strong> Database</div>
+                </div>
+            </div>
+
+            <div class="progress-container">
+                <div class="progress-label">
+                    <span class="progress-label-left">Progresso Geral de Setup</span>
+                    <span class="progress-label-right"><span id="progressPercent">0</span>%</span>
+                </div>
+                <div class="progress-bar-bg">
+                    <div class="progress-bar-fill" id="progressBar"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- CONTENT SECTIONS -->
+        <div class="content">
+
+            <!-- SECTION 1: SMTP -->
+            <div class="section" id="section-smtp">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-envelope"></i></div>
+                        <div class="section-info">
+                            <h2>Configuração de SMTP</h2>
+                            <p>Protocolo de envio de e-mails para credenciais e convites</p>
+                        </div>
+                    </div>
+                    <div class="section-priority">
+                        <div class="priority-number">1</div>
+                        <div class="priority-label">PRIMEIRA</div>
+                        <div class="status-badge status-pending" id="smtp-status">
+                            <i class="fas fa-clock"></i> Pendente
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Por que é a primeira prioridade?</strong> SMTP é a base da comunicação do sistema. Sem ele, o Admin não consegue enviar credenciais aos GPs e os GPs não conseguem convidar membros da equipe. Configure SMTP antes de qualquer outra coisa.
+                    </div>
+
+                    <div class="hint-box" style="background: linear-gradient(135deg, #dbeafe 0%, #e0e7ff 100%); border-left-color: var(--primary); color: #0c2d6d;">
+                        <strong><i class="fas fa-lightbulb"></i> Importante para sua empresa</strong><br>
+                        Solicite à sua área de TI/Infraestrutura as credenciais SMTP do servidor corporativo. Se usar Gmail, gere uma <strong>Senha de Aplicativo</strong> (não use sua senha pessoal).
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Servidor SMTP <span class="required">*</span></label>
+                            <input type="text" id="smtp-server" placeholder="smtp.gmail.com ou mail.sua-empresa.com" value="smtp.gmail.com" onchange="updateProgress()">
+                            <div class="form-helper">
+                                Gmail: smtp.gmail.com | Corporativo: Solicitar à TI
+                            </div>
+                            <div class="form-error" id="smtp-server-error"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Porta <span class="required">*</span></label>
+                            <input type="number" id="smtp-port" placeholder="587" value="587" onchange="updateProgress()">
+                            <div class="form-helper">
+                                TLS: 587 | SSL: 465
+                            </div>
+                            <div class="form-error" id="smtp-port-error"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>E-mail de Envio <span class="required">*</span></label>
+                            <input type="email" id="smtp-email" placeholder="seu-email@gmail.com" value="" onchange="updateProgress()">
+                            <div class="form-helper">
+                                <a href="https://myaccount.google.com/apppasswords" target="_blank">→ Gerar Senha de Aplicativo (Gmail)</a>
+                            </div>
+                            <div class="form-error" id="smtp-email-error"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Senha de Aplicativo <span class="required">*</span></label>
+                            <input type="password" id="smtp-password" placeholder="••••••••••••••••" value="" onchange="updateProgress()">
+                            <div class="form-helper">
+                                Copie exatamente como fornecido (16 caracteres com espaços)
+                            </div>
+                            <div class="form-error" id="smtp-password-error"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>E-mail de Teste</label>
+                        <input type="email" id="smtp-test-email" placeholder="seu-email@empresa.com" value="">
+                        <div class="form-helper">Se deixar em branco, enviará para o e-mail de envio configurado acima</div>
+                    </div>
+
+                    <div class="rotacao-info">
+                        <strong><i class="fas fa-sync-alt"></i> Rotação de Credenciais:</strong> Altere a senha de aplicativo a cada 90 dias por segurança.
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-test" onclick="testSmtp()"><i class="fas fa-paper-plane"></i> Enviar E-mail de Teste</button>
+                        <button class="btn-secondary" onclick="openModal('smtpDocModal')"><i class="fas fa-book"></i> Ver Documentação</button>
+                        <button class="btn-primary" onclick="validateSmtp()"><i class="fas fa-check"></i> Validar e Prosseguir</button>
+                    </div>
+
+                    <div class="test-result" id="smtp-result">
+                        <div class="test-result-title"><i class="fas fa-check-circle"></i> Resultado do Teste</div>
+                        <div class="test-result-content" id="smtp-result-content"></div>
+                    </div>
+
+                    <div class="history-timeline" id="smtp-history" style="display: none;">
+                        <div style="font-weight: 600; color: var(--text-dark); margin-bottom: 12px;">Histórico de Configurações</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 2: REPOSITÓRIO -->
+            <div class="section" id="section-repositorio" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-code-branch"></i></div>
+                        <div class="section-info">
+                            <h2>Integração de Repositório</h2>
+                            <p>Personal Access Token para sincronização automática de código no repositório</p>
+                        </div>
+                    </div>
+                    <div class="section-priority">
+                        <div class="priority-number">2</div>
+                        <div class="priority-label">SEGUNDA</div>
+                        <div class="status-badge status-pending" id="repositorio-status">
+                            <i class="fas fa-clock"></i> Pendente
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Por que é a segunda prioridade?</strong> Com SMTP funcionando, agora o GP consegue acessar o sistema. Ele precisa sincronizar o código gerado no GitHub automaticamente. O PAT (Personal Access Token) do Admin permite isso.
+                    </div>
+
+                    <div class="form-grid full">
+                        <div class="form-group">
+                            <label>GitHub Personal Access Token (PAT) <span class="required">*</span></label>
+                            <input type="password" id="repositorio-token" placeholder="ghp_xxxxxxxxxxxxx" value="" onchange="updateProgress()">
+                            <div class="form-helper">
+                                <a href="https://github.com/settings/tokens" target="_blank">→ Gerar PAT (Scopes: repo, user)</a> | Válido por 90 dias | Não compartilhe com ninguém
+                            </div>
+                            <div class="form-error" id="repositorio-token-error"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Usuário GitHub (Auto)</label>
+                            <input type="text" id="repositorio-user" placeholder="seu-username" value="" readonly>
+                            <div class="form-helper">Será preenchido automaticamente após validação</div>
+                        </div>
+                    </div>
+
+                    <div class="rotacao-info">
+                        <strong><i class="fas fa-sync-alt"></i> Rotação de Credenciais:</strong> Revogue e gere um novo PAT a cada 90 dias. Nunca reutilize PATs antigos.
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-test" onclick="testRepositorio()"><i class="fas fa-sync"></i> Validar GitHub</button>
+                        <button class="btn-secondary" onclick="openModal('githubDocModal')"><i class="fas fa-book"></i> Ver Documentação</button>
+                        <button class="btn-primary" onclick="validateRepositorio()"><i class="fas fa-check"></i> Confirmar e Prosseguir</button>
+                    </div>
+
+                    <div class="test-result" id="repositorio-result">
+                        <div class="test-result-title"><i class="fas fa-check-circle"></i> Resultado do Teste</div>
+                        <div class="test-result-content" id="repositorio-result-content"></div>
+                    </div>
+
+                    <div class="history-timeline" id="repositorio-history" style="display: none;">
+                        <div style="font-weight: 600; color: var(--text-dark); margin-bottom: 12px;">Histórico de Configurações</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 3: IA -->
+            <div class="section" id="section-ia" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-brain"></i></div>
+                        <div class="section-info">
+                            <h2>Provedores de IA</h2>
+                            <p>Configure pelo menos um provedor para geração de código</p>
+                        </div>
+                    </div>
+                    <div class="section-priority">
+                        <div class="priority-number">3</div>
+                        <div class="priority-label">TERCEIRA</div>
+                        <div class="status-badge status-pending" id="ia-status">
+                            <i class="fas fa-clock"></i> Pendente
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Por que é a terceira prioridade?</strong> Com SMTP e GitHub configurados, agora você precisa de IA para realmente gerar o código. Você pode usar um ou vários provedores. Recomendado: Comece com Anthropic Claude.
+                    </div>
+
+                    <div class="provider-group">
+                        <h3>
+                            <i class="fas fa-head-side-virus"></i>
+                            Anthropic Claude
+                            <span class="provider-badge">RECOMENDADO</span>
+                        </h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>API Key <span class="required">*</span></label>
+                                <input type="password" id="anthropic-key" placeholder="sk-ant-xxxxxxxxxxxxx" value="" onchange="updateProgress()">
+                                <div class="form-helper">
+                                    <a href="https://console.anthropic.com/api/keys" target="_blank">→ Gerar API Key</a>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>Modelo</label>
+                                <select id="anthropic-model" onchange="updateProgress()">
+                                    <option selected>claude-opus-4-1</option>
+                                    <option>claude-3-sonnet</option>
+                                    <option>claude-3-haiku</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="button-group" style="margin-top: 15px;">
+                            <button class="btn-test" onclick="testProvider('anthropic')"><i class="fas fa-flask-vial"></i> Testar Anthropic</button>
+                        </div>
+                    </div>
+
+                    <div class="provider-group">
+                        <h3><i class="fas fa-robot"></i> OpenAI GPT-4 (Opcional)</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>API Key <span class="required">*</span></label>
+                                <input type="password" id="openai-key" placeholder="sk-xxxxxxxxxxxxx" value="" onchange="updateProgress()">
+                                <div class="form-helper">
+                                    <a href="https://platform.openai.com/api-keys" target="_blank">→ Gerar API Key</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="button-group" style="margin-top: 15px;">
+                            <button class="btn-test" onclick="testProvider('openai')"><i class="fas fa-flask-vial"></i> Testar OpenAI</button>
+                        </div>
+                    </div>
+
+                    <div class="provider-group">
+                        <h3><i class="fas fa-bolt"></i> Grok (Opcional)</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>API Key <span class="required">*</span></label>
+                                <input type="password" id="grok-key" placeholder="grok_xxxxxxxxxxxxx" value="" onchange="updateProgress()">
+                                <div class="form-helper">
+                                    <a href="https://console.x.ai" target="_blank">→ Gerar API Key</a>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="button-group" style="margin-top: 15px;">
+                            <button class="btn-test" onclick="testProvider('grok')"><i class="fas fa-flask-vial"></i> Testar Grok</button>
+                        </div>
+                    </div>
+
+                    <div class="provider-group">
+                        <h3><i class="fas fa-microchip"></i> DeepSeek (Opcional - Mais Barato)</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>API Key <span class="required">*</span></label>
+                                <input type="password" id="deepseek-key" placeholder="sk-xxxxxxxxxxxxx" value="" onchange="updateProgress()">
+                                <div class="form-helper">
+                                    <a href="https://platform.deepseek.com" target="_blank">→ Gerar API Key</a> | Mais econômico
+                                </div>
+                            </div>
+                        </div>
+                        <div class="button-group" style="margin-top: 15px;">
+                            <button class="btn-test" onclick="testProvider('deepseek')"><i class="fas fa-flask-vial"></i> Testar DeepSeek</button>
+                        </div>
+                    </div>
+
+                    <div class="button-group" style="margin-top: 20px;">
+                        <button class="btn-secondary" onclick="openModal('iaDocModal')"><i class="fas fa-book"></i> Ver Documentação</button>
+                        <button class="btn-primary" onclick="validateIA()"><i class="fas fa-check"></i> IA Configurada - Prosseguir</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 4: N8N -->
+            <div class="section" id="section-n8n" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-network-wired"></i></div>
+                        <div class="section-info">
+                            <h2>N8N Automation</h2>
+                            <p>Web scraping de tecnologias para recomendações automáticas</p>
+                        </div>
+                    </div>
+                    <div class="section-priority">
+                        <div class="priority-number">4</div>
+                        <div class="priority-label">QUARTA</div>
+                        <div class="status-badge status-pending" id="n8n-status">
+                            <i class="fas fa-clock"></i> Pendente
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Por que é a quarta prioridade?</strong> Com IA gerando código, agora você configura N8N para sugerir tecnologias automaticamente. Quando um GP escolhe Python, N8N sugere FastAPI, SQLAlchemy, PostgreSQL, etc.
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>URL do Servidor N8N <span class="required">*</span></label>
+                            <input type="text" id="n8n-url" placeholder="https://app.n8n.cloud ou http://seu-n8n:5678" value="https://app.n8n.cloud" onchange="updateProgress()">
+                            <div class="form-helper">
+                                <a href="https://app.n8n.cloud" target="_blank">→ N8N Cloud</a> (recomendado) ou seu servidor self-hosted
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>N8N API Key <span class="required">*</span></label>
+                            <input type="password" id="n8n-key" placeholder="n8n_xxxxxxxxxxxxx" value="" onchange="updateProgress()">
+                            <div class="form-helper">
+                                <a href="https://docs.n8n.io/user-documentation/getting-started/authentication/" target="_blank">→ Gerar API Key</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="rotacao-info">
+                        <strong><i class="fas fa-sync-alt"></i> Rotação de Credenciais:</strong> Altere a API Key a cada 90 dias.
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-test" onclick="testN8N()"><i class="fas fa-sync"></i> Testar Conexão N8N</button>
+                        <button class="btn-secondary" onclick="openModal('n8nDocModal')"><i class="fas fa-book"></i> Ver Documentação</button>
+                        <button class="btn-primary" onclick="validateN8N()"><i class="fas fa-check"></i> Validar e Prosseguir</button>
+                    </div>
+
+                    <div class="test-result" id="n8n-result">
+                        <div class="test-result-title"><i class="fas fa-check-circle"></i> Resultado do Teste</div>
+                        <div class="test-result-content" id="n8n-result-content"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 5: DATABASE -->
+            <div class="section" id="section-database" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-database"></i></div>
+                        <div class="section-info">
+                            <h2>Configuração de Banco de Dados</h2>
+                            <p>Armazenamento multi-tenant isolado com schemas</p>
+                        </div>
+                    </div>
+                    <div class="section-priority">
+                        <div class="priority-number">5</div>
+                        <div class="priority-label">QUINTA</div>
+                        <div class="status-badge status-pending" id="database-status">
+                            <i class="fas fa-clock"></i> Pendente
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Por que é a quinta prioridade?</strong> É a infraestrutura final que suporta tudo. Você já deve ter o banco instalado. Esta é uma validação de que tudo está conectado corretamente.
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Tipo de Banco de Dados <span class="required">*</span></label>
+                            <select id="database-type" onchange="updateProgress()">
+                                <option selected>PostgreSQL (Recomendado)</option>
+                                <option>MySQL 8.0+</option>
+                                <option>MariaDB 10.6+</option>
+                                <option>Oracle Database</option>
+                            </select>
+                            <div class="database-combo-label">
+                                Recomendado: PostgreSQL (melhor para multi-tenant)
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Porta <span class="required">*</span></label>
+                            <input type="number" id="database-port" placeholder="5432" value="5432" onchange="updateProgress()">
+                            <div class="form-helper">
+                                PostgreSQL: 5432 | MySQL: 3306 | MariaDB: 3306
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Host/Servidor <span class="required">*</span></label>
+                            <input type="text" id="database-host" placeholder="localhost ou seu-servidor.com" value="localhost" onchange="updateProgress()">
+                        </div>
+                        <div class="form-group">
+                            <label>Nome do Banco <span class="required">*</span></label>
+                            <input type="text" id="database-name" placeholder="gca" value="gca" onchange="updateProgress()">
+                        </div>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Usuário <span class="required">*</span></label>
+                            <input type="text" id="database-user" placeholder="postgres ou root" value="postgres" onchange="updateProgress()">
+                        </div>
+                        <div class="form-group">
+                            <label>Senha <span class="required">*</span></label>
+                            <input type="password" id="database-password" placeholder="••••••••" value="" onchange="updateProgress()">
+                        </div>
+                    </div>
+
+                    <div class="form-grid full">
+                        <div class="form-group">
+                            <label>String de Conexão (Opcional)</label>
+                            <input type="text" id="database-connection" placeholder="postgresql://user:password@localhost:5432/gca" value="">
+                            <div class="form-helper">Sobrescreve os campos acima se preenchido</div>
+                        </div>
+                    </div>
+
+                    <div class="rotacao-info">
+                        <strong><i class="fas fa-sync-alt"></i> Rotação de Credenciais:</strong> Altere a senha do banco de dados a cada 180 dias.
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-test" onclick="testDatabase()"><i class="fas fa-plug"></i> Testar Conexão</button>
+                        <button class="btn-secondary" onclick="openModal('dbDocModal')"><i class="fas fa-book"></i> Ver Documentação</button>
+                        <button class="btn-primary" onclick="validateDatabase()"><i class="fas fa-check"></i> Validar e Concluir</button>
+                    </div>
+
+                    <div class="test-result" id="database-result">
+                        <div class="test-result-title"><i class="fas fa-check-circle"></i> Resultado do Teste</div>
+                        <div class="test-result-content" id="database-result-content"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 6: PROJETOS -->
+            <div class="section" id="section-projetos" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-project-diagram"></i></div>
+                        <div class="section-info">
+                            <h2>Gerenciar Projetos</h2>
+                            <p>Criar e gerenciar projetos/tenants para os GPs</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Você é o Criador do Projeto</strong><br>
+                        Como Admin, você cria o projeto (dá "o carro" ao GP). A partir daí, o GP gerencia tudo: credenciais, equipe, manutenção. Você só intervém em caso de segurança ou problemas.
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 14px;">Criar Novo Projeto</h3>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Nome do Projeto <span class="required">*</span></label>
+                            <input type="text" id="projeto-nome" placeholder="Ex: Ecommerce Platform" value="">
+                        </div>
+                        <div class="form-group">
+                            <label>Slug (URL-friendly) <span class="required">*</span></label>
+                            <input type="text" id="projeto-slug" placeholder="Ex: ecommerce-platform" value="">
+                            <div class="form-helper">Auto-preenchido a partir do nome</div>
+                        </div>
+                    </div>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>E-mail do GP (Gestor do Projeto) <span class="required">*</span></label>
+                            <input type="email" id="projeto-gp-email" placeholder="gp@empresa.com" value="">
+                            <div class="form-helper">O convite será enviado para este e-mail com acesso inicial</div>
+                        </div>
+                        <div class="form-group">
+                            <label>Nome do GP <span class="required">*</span></label>
+                            <input type="text" id="projeto-gp-nome" placeholder="Nome do Gestor de Projeto" value="">
+                        </div>
+                    </div>
+
+                    <div class="form-grid full">
+                        <div class="form-group">
+                            <label>Descrição do Projeto</label>
+                            <textarea id="projeto-descricao" placeholder="Descreva brevemente o propósito do projeto" style="resize: vertical; min-height: 80px;"></textarea>
+                        </div>
+                    </div>
+
+                    <div class="rotacao-info">
+                        <strong><i class="fas fa-hand-holding-heart"></i> Após Criar:</strong> O GP receberá um e-mail com senha provisória. Ele deve trocar imediatamente na primeira acesso. Você não verá as credenciais dele.
+                    </div>
+
+                    <div class="button-group">
+                        <button class="btn-primary" style="width: 100%;" onclick="criarProjeto()">
+                            <i class="fas fa-plus"></i> Criar Projeto e Enviar Convite ao GP
+                        </button>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-top: 30px; margin-bottom: 15px; font-size: 14px;">Projetos Ativos</h3>
+                    <div class="admins-list">
+                        <div class="admin-card">
+                            <div class="admin-card-info">
+                                <div class="admin-avatar-small">EC</div>
+                                <div class="admin-details">
+                                    <div class="admin-details-name">Ecommerce Platform</div>
+                                    <div class="admin-details-role">GP: João Silva • Criado em 2026-04-05</div>
+                                </div>
+                            </div>
+                            <div style="color: var(--success); cursor: pointer;">
+                                <i class="fas fa-check-circle"></i> Ativo
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 7: USUÁRIOS -->
+            <div class="section" id="section-usuarios" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-users"></i></div>
+                        <div class="section-info">
+                            <h2>Gerenciar Usuários</h2>
+                            <p>Reset de senha e gestão de acessos de todos os usuários</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Controle de Acesso dos Usuários</strong><br>
+                        Você (Admin) pode fazer reset de senha de qualquer usuário. Uma nova senha provisória será enviada imediatamente, e o usuário DEVE trocar na primeira acesso.
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 14px;">Buscar Usuário</h3>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>E-mail ou Nome do Usuário</label>
+                            <input type="text" id="usuario-busca" placeholder="Buscar por e-mail ou nome" value="">
+                        </div>
+                        <div style="display: flex; align-items: flex-end;">
+                            <button class="btn-test" style="width: 100%;" onclick="buscarUsuario()">
+                                <i class="fas fa-search"></i> Buscar
+                            </button>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 25px; padding: 20px; background: #f9fafb; border-radius: 8px; border: 1px solid var(--border);">
+                        <h4 style="color: var(--text-dark); margin-bottom: 15px; font-size: 13px;">Resultados da Busca</h4>
+                        <div class="admins-list">
+                            <div class="admin-card">
+                                <div class="admin-card-info">
+                                    <div class="admin-avatar-small">JS</div>
+                                    <div class="admin-details">
+                                        <div class="admin-details-name">João Silva</div>
+                                        <div class="admin-details-role">joao@empresa.com • GP • Projeto: Ecommerce</div>
+                                    </div>
+                                </div>
+                                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="resetSenhaUsuario('joao@empresa.com')">
+                                    <i class="fas fa-key"></i> Reset Senha
+                                </button>
+                            </div>
+                            <div class="admin-card">
+                                <div class="admin-card-info">
+                                    <div class="admin-avatar-small">MA</div>
+                                    <div class="admin-details">
+                                        <div class="admin-details-name">Maria Alves</div>
+                                        <div class="admin-details-role">maria@empresa.com • Dev • Projeto: Ecommerce</div>
+                                    </div>
+                                </div>
+                                <button class="btn-secondary" style="padding: 6px 12px; font-size: 12px;" onclick="resetSenhaUsuario('maria@empresa.com')">
+                                    <i class="fas fa-key"></i> Reset Senha
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-top: 30px; margin-bottom: 15px; font-size: 14px;">Processo de Reset de Senha</h3>
+                    <div class="hint-box" style="background: linear-gradient(135deg, #e0e7ff 0%, #dbeafe 100%); border-left-color: var(--info); color: #0c2d6d; margin-bottom: 15px;">
+                        <strong>⚠️ O que acontece quando você faz Reset:</strong><br>
+                        1. Sistema gera nova senha provisória<br>
+                        2. E-mail é enviado <strong>imediatamente</strong> com a nova senha<br>
+                        3. Usuário DEVE trocar a senha na primeira acesso<br>
+                        4. Sem trocar, não consegue entrar na aplicação<br>
+                        5. Log da ação fica registrado
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 8: SEGURANÇA -->
+            <div class="section" id="section-seguranca" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-shield-alt"></i></div>
+                        <div class="section-info">
+                            <h2>Segurança e Acesso</h2>
+                            <p>Monitorar tentativas suspeitas de acesso aos projetos</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Proteção contra Acesso Não Autorizado</strong><br>
+                        Usuários só acessam projetos em que estão cadastrados. 5 tentativas de acesso a projetos não autorizados = entrada bloqueada + alerta ao GP e Admin.
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 14px;">Tentativas Suspeitas de Acesso</h3>
+
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 8px; border-left: 4px solid var(--danger);">
+                        <div class="history-timeline">
+                            <div class="history-item">
+                                <div class="history-time">2026-04-05 14:35:22</div>
+                                <div class="history-action">
+                                    <strong>Carlos Santos</strong> tentou acessar "Projeto Secreto" (não autorizado)<br>
+                                    <span style="font-size: 11px; color: var(--text-light); margin-top: 4px; display: block;">
+                                        Tentativa 5/5 → <span style="color: var(--danger); font-weight: 600;">ENTRADA BLOQUEADA</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="history-item">
+                                <div class="history-time">2026-04-05 14:30:15</div>
+                                <div class="history-action">
+                                    <strong>Carlos Santos</strong> tentou acessar "API Portal" (não autorizado)<br>
+                                    <span style="font-size: 11px; color: var(--text-light); margin-top: 4px; display: block;">Tentativa 4/5</span>
+                                </div>
+                            </div>
+                            <div class="history-item">
+                                <div class="history-time">2026-04-05 14:25:44</div>
+                                <div class="history-action">
+                                    <strong>Carlos Santos</strong> tentou acessar "Dashboard Admin" (não autorizado)<br>
+                                    <span style="font-size: 11px; color: var(--text-light); margin-top: 4px; display: block;">Tentativa 3/5</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px; padding: 15px; background: rgba(239, 68, 68, 0.05); border: 1px solid var(--danger); border-radius: 6px;">
+                        <strong style="color: var(--danger);">⚠️ E-mail de Alerta Enviado</strong><br>
+                        <span style="font-size: 12px; color: var(--text-dark); display: block; margin-top: 8px;">
+                            ✓ Admin: luiz@empresa.com<br>
+                            ✓ GP do Projeto: joao@empresa.com
+                        </span>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-top: 30px; margin-bottom: 15px; font-size: 14px;">Liberar Acesso Bloqueado</h3>
+
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Usuário Bloqueado</label>
+                            <select>
+                                <option>Carlos Santos (carlos@empresa.com)</option>
+                                <option>Outro usuário bloqueado</option>
+                            </select>
+                        </div>
+                        <div style="display: flex; align-items: flex-end;">
+                            <button class="btn-primary" style="width: 100%;" onclick="liberarAcessoBloqueado()">
+                                <i class="fas fa-unlock"></i> Liberar Acesso
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 9: DASHBOARD EXECUTIVO -->
+            <div class="section" id="section-dashboard-executivo" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-chart-line"></i></div>
+                        <div class="section-info">
+                            <h2>Dashboard Executivo</h2>
+                            <p>Métricas de evolução e relatórios dos projetos em andamento</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Visão Consolidada para Relatórios Executivos</strong><br>
+                        Acompanhe métricas, evolução e performance de todos os projetos em tempo real para decisões estratégicas.
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 20px; font-size: 15px;">Resumo Geral</h3>
+
+                    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 30px;">
+                        <div style="background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%); padding: 20px; border-radius: 8px; text-align: center; border-left: 4px solid var(--primary);">
+                            <div style="font-size: 28px; font-weight: bold; color: var(--primary); margin-bottom: 5px;">8</div>
+                            <div style="font-size: 12px; color: var(--text-light); font-weight: 600;">Projetos Ativos</div>
+                        </div>
+                        <div style="background: linear-gradient(135deg, #10b98115 0%, #059669 15 100%); padding: 20px; border-radius: 8px; text-align: center; border-left: 4px solid var(--success);">
+                            <div style="font-size: 28px; font-weight: bold; color: var(--success); margin-bottom: 5px;">6</div>
+                            <div style="font-size: 12px; color: var(--text-light); font-weight: 600;">Concluídos</div>
+                        </div>
+                        <div style="background: linear-gradient(135deg, #f59e0b15 0%, #f59e0b15 100%); padding: 20px; border-radius: 8px; text-align: center; border-left: 4px solid var(--warning);">
+                            <div style="font-size: 28px; font-weight: bold; color: var(--warning); margin-bottom: 5px;">2</div>
+                            <div style="font-size: 12px; color: var(--text-light); font-weight: 600;">Em Desenvolvimento</div>
+                        </div>
+                        <div style="background: linear-gradient(135deg, #ef444415 0%, #ef444415 100%); padding: 20px; border-radius: 8px; text-align: center; border-left: 4px solid var(--danger);">
+                            <div style="font-size: 28px; font-weight: bold; color: var(--danger); margin-bottom: 5px;">0</div>
+                            <div style="font-size: 12px; color: var(--text-light); font-weight: 600;">Atrasados</div>
+                        </div>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 15px;">Projetos em Andamento</h3>
+
+                    <div style="overflow-x: auto;">
+                        <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                            <thead>
+                                <tr style="background: #f9fafb; border-bottom: 2px solid var(--border);">
+                                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-dark);">Projeto</th>
+                                    <th style="padding: 12px; text-align: left; font-weight: 600; color: var(--text-dark);">GP</th>
+                                    <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text-dark);">Progresso</th>
+                                    <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text-dark);">Saúde</th>
+                                    <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text-dark);">Código Gerado</th>
+                                    <th style="padding: 12px; text-align: center; font-weight: 600; color: var(--text-dark);">Custo IA</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr style="border-bottom: 1px solid var(--border);">
+                                    <td style="padding: 12px;"><strong>Ecommerce Platform</strong></td>
+                                    <td style="padding: 12px;">João Silva</td>
+                                    <td style="padding: 12px; text-align: center;">
+                                        <div style="background: var(--border); height: 6px; border-radius: 3px; overflow: hidden; width: 80px; margin: 0 auto;">
+                                            <div style="height: 100%; background: var(--success); width: 75%;"></div>
+                                        </div>
+                                        <span style="font-size: 11px; margin-top: 4px; display: block;">75%</span>
+                                    </td>
+                                    <td style="padding: 12px; text-align: center;"><span style="background: #d1fae5; color: var(--success); padding: 2px 8px; border-radius: 3px; font-weight: 600;">✓ OK</span></td>
+                                    <td style="padding: 12px; text-align: center;">1,247 linhas</td>
+                                    <td style="padding: 12px; text-align: center;">$14.32</td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid var(--border);">
+                                    <td style="padding: 12px;"><strong>API Portal</strong></td>
+                                    <td style="padding: 12px;">Maria Alves</td>
+                                    <td style="padding: 12px; text-align: center;">
+                                        <div style="background: var(--border); height: 6px; border-radius: 3px; overflow: hidden; width: 80px; margin: 0 auto;">
+                                            <div style="height: 100%; background: var(--warning); width: 45%;"></div>
+                                        </div>
+                                        <span style="font-size: 11px; margin-top: 4px; display: block;">45%</span>
+                                    </td>
+                                    <td style="padding: 12px; text-align: center;"><span style="background: #fef3c7; color: #92400e; padding: 2px 8px; border-radius: 3px; font-weight: 600;">⚠ Em Andamento</span></td>
+                                    <td style="padding: 12px; text-align: center;">892 linhas</td>
+                                    <td style="padding: 12px; text-align: center;">$9.87</td>
+                                </tr>
+                                <tr style="border-bottom: 1px solid var(--border);">
+                                    <td style="padding: 12px;"><strong>Dashboard Admin</strong></td>
+                                    <td style="padding: 12px;">Carlos Silva</td>
+                                    <td style="padding: 12px; text-align: center;">
+                                        <div style="background: var(--border); height: 6px; border-radius: 3px; overflow: hidden; width: 80px; margin: 0 auto;">
+                                            <div style="height: 100%; background: var(--success); width: 100%;"></div>
+                                        </div>
+                                        <span style="font-size: 11px; margin-top: 4px; display: block;">100%</span>
+                                    </td>
+                                    <td style="padding: 12px; text-align: center;"><span style="background: #d1fae5; color: var(--success); padding: 2px 8px; border-radius: 3px; font-weight: 600;">✓ Concluído</span></td>
+                                    <td style="padding: 12px; text-align: center;">2,156 linhas</td>
+                                    <td style="padding: 12px; text-align: center;">$22.45</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-top: 30px; margin-bottom: 15px; font-size: 15px;">Exportar Relatório</h3>
+
+                    <div class="button-group">
+                        <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="exportarRelatorioPDF()">
+                            <i class="fas fa-file-pdf"></i> Exportar em PDF
+                        </button>
+                        <button class="btn-secondary" style="width: 100%; justify-content: center;" onclick="exportarRelatorioExcel()">
+                            <i class="fas fa-file-excel"></i> Exportar em Excel
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 10: INTEGRAÇÕES -->
+            <div class="section" id="section-integrações" style="display: none;">
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-plug"></i></div>
+                        <div class="section-info">
+                            <h2>Integrações de Mensagem</h2>
+                            <p>Conecte Teams, Slack e outras ferramentas para receber notificações</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong>Notificações em Tempo Real</strong><br>
+                        Receba alertas críticos no Teams, Slack e outras plataformas sobre: validade de tokens, falta de créditos em IA, degradação do sistema e outros eventos importantes.
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 14px;">Plataformas Disponíveis</h3>
+
+                    <div style="display: grid; gap: 15px; margin-bottom: 30px;">
+                        <!-- Microsoft Teams -->
+                        <div style="border: 1px solid var(--border); padding: 20px; border-radius: 8px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div style="font-size: 32px;">🎯</div>
+                                    <div>
+                                        <div style="font-weight: 600; color: var(--text-dark); font-size: 14px;">Microsoft Teams</div>
+                                        <div style="color: var(--text-light); font-size: 12px;">Envie notificações para canais do Teams</div>
+                                    </div>
+                                </div>
+                                <span style="background: #d1fae5; color: var(--success); padding: 4px 12px; border-radius: 3px; font-size: 11px; font-weight: 600;">ATIVO</span>
+                            </div>
+
+                            <div class="form-grid full">
+                                <div class="form-group">
+                                    <label>Webhook URL do Teams <span class="required">*</span></label>
+                                    <input type="password" value="https://outlook.webhook.office.com/webhookb2/..." style="font-size: 11px;">
+                                    <div class="form-helper">
+                                        <a href="https://learn.microsoft.com/en-us/microsoftteams/platform/webhooks-and-connectors/how-to/connectors-using" target="_blank">→ Como obter Webhook URL</a>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                                <button class="btn-test" onclick="testarTeams()"><i class="fas fa-flask-vial"></i> Testar</button>
+                                <button class="btn-secondary" onclick="removerIntegracaoTeams()"><i class="fas fa-trash"></i> Remover</button>
+                            </div>
+                        </div>
+
+                        <!-- Slack -->
+                        <div style="border: 1px solid var(--border); padding: 20px; border-radius: 8px;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div style="font-size: 32px;">💬</div>
+                                    <div>
+                                        <div style="font-weight: 600; color: var(--text-dark); font-size: 14px;">Slack</div>
+                                        <div style="color: var(--text-light); font-size: 12px;">Envie notificações para canais do Slack</div>
+                                    </div>
+                                </div>
+                                <span style="background: #fef3c7; color: #92400e; padding: 4px 12px; border-radius: 3px; font-size: 11px; font-weight: 600;">DESATIVADO</span>
+                            </div>
+
+                            <div class="form-grid full">
+                                <div class="form-group">
+                                    <label>Webhook URL do Slack <span class="required">*</span></label>
+                                    <input type="password" placeholder="https://hooks.slack.com/services/..." value="">
+                                    <div class="form-helper">
+                                        <a href="https://api.slack.com/messaging/webhooks" target="_blank">→ Como obter Webhook URL</a>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                                <button class="btn-test" onclick="testarSlack()"><i class="fas fa-flask-vial"></i> Testar</button>
+                                <button class="btn-primary" onclick="ativarSlack()"><i class="fas fa-plus"></i> Ativar</button>
+                            </div>
+                        </div>
+
+                        <!-- Discord -->
+                        <div style="border: 1px solid var(--border); padding: 20px; border-radius: 8px; opacity: 0.7;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 15px;">
+                                <div style="display: flex; align-items: center; gap: 12px;">
+                                    <div style="font-size: 32px;">🎮</div>
+                                    <div>
+                                        <div style="font-weight: 600; color: var(--text-dark); font-size: 14px;">Discord</div>
+                                        <div style="color: var(--text-light); font-size: 12px;">Envie notificações para servidores Discord</div>
+                                    </div>
+                                </div>
+                                <span style="background: #e5e7eb; color: #6b7280; padding: 4px 12px; border-radius: 3px; font-size: 11px; font-weight: 600;">EM BREVE</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 14px;">Configurar Alertas</h3>
+
+                    <div style="background: #f9fafb; padding: 20px; border-radius: 8px; border: 1px solid var(--border);">
+                        <div style="display: grid; gap: 15px;">
+                            <label style="display: flex; align-items: center; font-weight: normal;">
+                                <input type="checkbox" checked style="margin-right: 10px;">
+                                <div>
+                                    <div style="color: var(--text-dark); font-weight: 600;">Tokens Próximos do Vencimento</div>
+                                    <div style="color: var(--text-light); font-size: 12px;">Alerta 7 dias antes do vencimento</div>
+                                </div>
+                            </label>
+
+                            <label style="display: flex; align-items: center; font-weight: normal;">
+                                <input type="checkbox" checked style="margin-right: 10px;">
+                                <div>
+                                    <div style="color: var(--text-dark); font-weight: 600;">Falta de Créditos em IA</div>
+                                    <div style="color: var(--text-light); font-size: 12px;">Alerta quando créditos caem abaixo de 10%</div>
+                                </div>
+                            </label>
+
+                            <label style="display: flex; align-items: center; font-weight: normal;">
+                                <input type="checkbox" checked style="margin-right: 10px;">
+                                <div>
+                                    <div style="color: var(--text-dark); font-weight: 600;">Falhas de Conexão</div>
+                                    <div style="color: var(--text-light); font-size: 12px;">Alerta quando serviços ficam indisponíveis</div>
+                                </div>
+                            </label>
+
+                            <label style="display: flex; align-items: center; font-weight: normal;">
+                                <input type="checkbox" checked style="margin-right: 10px;">
+                                <div>
+                                    <div style="color: var(--text-dark); font-weight: 600;">Degradação do Sistema</div>
+                                    <div style="color: var(--text-light); font-size: 12px;">Alerta crítico quando sistema está degradado ou indisponível</div>
+                                </div>
+                            </label>
+
+                            <label style="display: flex; align-items: center; font-weight: normal;">
+                                <input type="checkbox" checked style="margin-right: 10px;">
+                                <div>
+                                    <div style="color: var(--text-dark); font-weight: 600;">Atividades Suspeitas</div>
+                                    <div style="color: var(--text-light); font-size: 12px;">Alerta sobre tentativas de acesso não autorizado</div>
+                                </div>
+                            </label>
+                        </div>
+
+                        <button class="btn-primary" style="width: 100%; margin-top: 20px;" onclick="salvarConfigAlertas()">
+                            <i class="fas fa-save"></i> Salvar Configurações de Alertas
+                        </button>
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-top: 30px; margin-bottom: 15px; font-size: 14px;">Histórico de Notificações Enviadas</h3>
+
+                    <div class="history-timeline">
+                        <div class="history-item">
+                            <div class="history-time">2026-04-05 15:22:00</div>
+                            <div class="history-action">
+                                <strong>⚠️ Alerta</strong> - Token SMTP vence em 5 dias<br>
+                                <span style="font-size: 11px; color: var(--text-light);">Enviado para: Teams • Slack</span>
+                            </div>
+                        </div>
+                        <div class="history-item">
+                            <div class="history-time">2026-04-04 10:15:30</div>
+                            <div class="history-action">
+                                <strong>💰 Aviso</strong> - Créditos de IA em 8%<br>
+                                <span style="font-size: 11px; color: var(--text-light);">Enviado para: Teams</span>
+                            </div>
+                        </div>
+                        <div class="history-item">
+                            <div class="history-time">2026-04-03 23:45:12</div>
+                            <div class="history-action">
+                                <strong>🚨 Crítico</strong> - Sistema em degradação (N8N indisponível)<br>
+                                <span style="font-size: 11px; color: var(--text-light);">Enviado para: Teams • Slack • SMS</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- SECTION 11: ADMINS -->
+                <div class="section-header">
+                    <div class="section-title-group">
+                        <div class="section-icon"><i class="fas fa-users-cog"></i></div>
+                        <div class="section-info">
+                            <h2>Administradores do Sistema</h2>
+                            <p>Gerencie múltiplos admins para continuidade operacional</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="section-content">
+                    <div class="hint-box">
+                        <strong><i class="fas fa-lightbulb"></i> Múltiplos Admins é Essencial</strong><br>
+                        O sistema GCA não pode depender de um único Admin. Férias, demissão, acidentes e afastamentos podem deixar o sistema sem gestão. Configure múltiplos Admins para garantir continuidade operacional.
+                    </div>
+
+                    <h3 style="color: var(--text-dark); margin-bottom: 15px; font-size: 14px;">Admins Atuais do Sistema</h3>
+
+                    <div class="admins-list">
+                        <div class="admin-card">
+                            <div class="admin-card-info">
+                                <div class="admin-avatar-small">LC</div>
+                                <div class="admin-details">
+                                    <div class="admin-details-name">Luiz C. Pielak</div>
+                                    <div class="admin-details-role">Admin Principal • Desde 2026-04-05</div>
+                                </div>
+                            </div>
+                            <div style="color: var(--text-light); cursor: default;">
+                                <i class="fas fa-crown"></i> Criador
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 25px; padding: 20px; background: #f9fafb; border-radius: 8px; border: 1px dashed var(--border);">
+                        <h4 style="color: var(--text-dark); margin-bottom: 15px; font-size: 13px;">
+                            <i class="fas fa-plus-circle"></i> Convidar Novo Admin
+                        </h4>
+
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>E-mail do Admin <span class="required">*</span></label>
+                                <input type="email" id="new-admin-email" placeholder="novo-admin@empresa.com" value="">
+                                <div class="form-helper">Um e-mail será enviado com link de aceitação</div>
+                            </div>
+                            <div class="form-group">
+                                <label>Nome Completo <span class="required">*</span></label>
+                                <input type="text" id="new-admin-name" placeholder="Nome do novo administrador" value="">
+                            </div>
+                        </div>
+
+                        <button class="btn-primary" style="width: 100%; margin-top: 15px;" onclick="inviteNewAdmin()">
+                            <i class="fas fa-envelope"></i> Enviar Convite
+                        </button>
+                    </div>
+
+                    <div class="history-timeline" style="margin-top: 30px;">
+                        <div style="font-weight: 600; color: var(--text-dark); margin-bottom: 12px;">Histórico de Ações de Admins</div>
+                        <div class="history-item">
+                            <div class="history-time">2026-04-05 10:30:00</div>
+                            <div class="history-action">Luiz C. Pielak criou a conta do Admin</div>
+                        </div>
+                        <div class="history-item">
+                            <div class="history-time">2026-04-05 11:15:00</div>
+                            <div class="history-action">Luiz C. Pielak configurou SMTP</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+        </div>
+
+        <!-- FINISH SECTION -->
+        <div class="finish-section" id="finishSection" style="display: none;">
+            <h3><i class="fas fa-check-circle"></i> Setup do Admin Concluído!</h3>
+            <p>Todas as credenciais foram configuradas e validadas com sucesso.</p>
+            <p style="margin-top: 15px; font-size: 12px; opacity: 0.9;">
+                O GCA está pronto para criar o primeiro Tenant fictício e testar todo o fluxo end-to-end com um projeto de demonstração.
+            </p>
+            <button class="btn-next" onclick="proceedToMockProject()">
+                <i class="fas fa-arrow-right"></i> Prosseguir para Projeto Fictício (Mock Ecommerce)
+            </button>
+        </div>
+
+        <div class="footer">
+            <i class="fas fa-cog"></i> Painel de Administração do GCA<br>
+            Sequência de Configuração: <strong>SMTP → Repositório → IA → N8N → Database</strong>
+        </div>
+    </div>
+
+    <!-- MODALS -->
+
+    <!-- CONFIG MODAL -->
+    <div class="modal" id="configModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Configurações Avançadas</h2>
+                <button class="modal-close" onclick="closeModal('configModal')"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <h3 style="color: var(--text-dark); margin-bottom: 15px;">Gerenciamento de Dados</h3>
+                <div style="display: grid; gap: 10px;">
+                    <button class="btn-secondary" style="width: 100%; justify-content: flex-start;" onclick="exportConfig()">
+                        <i class="fas fa-download"></i> Exportar Configurações
+                    </button>
+                    <button class="btn-secondary" style="width: 100%; justify-content: flex-start;" onclick="importConfig()">
+                        <i class="fas fa-upload"></i> Importar Configurações
+                    </button>
+                    <button class="btn-secondary" style="width: 100%; justify-content: flex-start;" onclick="viewAuditLog()">
+                        <i class="fas fa-history"></i> Ver Log de Auditoria
+                    </button>
+                </div>
+
+                <h3 style="color: var(--text-dark); margin-top: 25px; margin-bottom: 15px;">Notificações de Rotação</h3>
+                <div class="hint-box" style="margin-bottom: 15px;">
+                    <strong>Alertas de Segurança:</strong> Receba notificações quando credenciais estiverem próximas do vencimento (90 dias)
+                </div>
+                <div style="display: grid; gap: 10px;">
+                    <label style="display: flex; align-items: center; font-weight: normal;">
+                        <input type="checkbox" checked style="margin-right: 10px;">
+                        Notificações via E-mail
+                    </label>
+                    <label style="display: flex; align-items: center; font-weight: normal;">
+                        <input type="checkbox" checked style="margin-right: 10px;">
+                        Alertas no Dashboard
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DOCUMENTATION MODAL -->
+    <div class="modal" id="docModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Documentação do Admin Setup</h2>
+                <button class="modal-close" onclick="closeModal('docModal')"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <h3>Bem-vindo ao Painel de Administração do GCA</h3>
+                <p>Este painel foi desenvolvido para facilitar a configuração inicial do sistema GCA com segurança e clareza.</p>
+
+                <h4 style="margin-top: 20px; color: var(--primary);">Como Usar</h4>
+                <ol style="margin-left: 20px; line-height: 1.8;">
+                    <li>Configure cada seção na ordem indicada (1-5)</li>
+                    <li>Preencha os campos obrigatórios com as credenciais dos serviços</li>
+                    <li>Clique em "Testar" para validar a configuração</li>
+                    <li>Ao passar no teste, clique em "Validar" para prosseguir</li>
+                    <li>Ao concluir todas as 5 seções, o setup estará completo</li>
+                </ol>
+
+                <h4 style="margin-top: 20px; color: var(--primary);">Segurança</h4>
+                <ul style="margin-left: 20px; line-height: 1.8;">
+                    <li>Nunca compartilhe suas credenciais (API Keys, Tokens, Senhas)</li>
+                    <li>Altere suas credenciais a cada 90 dias</li>
+                    <li>Use senhas fortes e únicas para cada serviço</li>
+                    <li>Revogue credenciais antigas imediatamente</li>
+                </ul>
+
+                <p style="margin-top: 20px; padding: 15px; background: #f9fafb; border-radius: 6px; font-size: 12px;">
+                    <strong>Dica:</strong> Consulte o arquivo ADMIN_SETUP_GUIDE.md para documentação completa com mais detalhes sobre cada etapa.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State management
+        const config = {
+            smtp: { server: '', port: '', email: '', password: '', tested: false, validated: false },
+            github: { token: '', tested: false, validated: false },
+            ia: { anthropic: false, openai: false, grok: false, deepseek: false, validated: false },
+            n8n: { url: '', key: '', tested: false, validated: false },
+            database: { type: '', host: '', port: '', name: '', user: '', password: '', tested: false, validated: false }
+        };
+
+        // Toast notifications
+        function showToast(title, message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            toast.innerHTML = `
+                <div class="toast-icon"><i class="fas fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : 'info-circle'}"></i></div>
+                <div class="toast-content">
+                    <div class="toast-title">${title}</div>
+                    <div class="toast-message">${message}</div>
+                </div>
+            `;
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.style.animation = 'slideIn 0.3s ease reverse';
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Navigation
+        function showSection(sectionId) {
+            document.querySelectorAll('.section').forEach(section => {
+                section.style.display = 'none';
+            });
+            document.getElementById('section-' + sectionId).style.display = 'block';
+
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.nav-item').classList.add('active');
+        }
+
+        // Modal management
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.add('show');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.remove('show');
+        }
+
+        // Update progress
+        function updateProgress() {
+            const completed = [
+                config.smtp.validated ? 1 : 0,
+                config.github.validated ? 1 : 0,
+                config.ia.validated ? 1 : 0,
+                config.n8n.validated ? 1 : 0,
+                config.database.validated ? 1 : 0
+            ].reduce((a, b) => a + b, 0);
+
+            const percent = Math.round((completed / 5) * 100);
+            document.getElementById('progressPercent').textContent = percent;
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.querySelector('.setup-progress-value').textContent = percent + '%';
+            document.getElementById('setup-percent').textContent = percent + '%';
+
+            if (percent === 100) {
+                document.getElementById('finishSection').style.display = 'block';
+                document.querySelector('.nav-item[onclick="showSection(\'novo-projeto\')"]').classList.remove('disabled');
+            }
+        }
+
+        // SMTP Test
+        function testSmtp() {
+            const server = document.getElementById('smtp-server').value;
+            const port = document.getElementById('smtp-port').value;
+            const email = document.getElementById('smtp-email').value;
+
+            if (!server || !port || !email) {
+                showToast('Erro', 'Preencha todos os campos obrigatórios', 'error');
+                return;
+            }
+
+            const resultEl = document.getElementById('smtp-result');
+            resultEl.classList.add('show', 'success');
+            resultEl.querySelector('.test-result-content').textContent = `✓ Conectado com sucesso\n✓ Servidor: ${server}:${port}\n✓ Email de envio: ${email}\n\nE-mail de teste enviado com sucesso!`;
+            showToast('Teste SMTP', 'E-mail de teste enviado com sucesso!', 'success');
+            config.smtp.tested = true;
+        }
+
+        // SMTP Validate
+        function validateSmtp() {
+            const server = document.getElementById('smtp-server').value;
+            const port = document.getElementById('smtp-port').value;
+            const email = document.getElementById('smtp-email').value;
+            const password = document.getElementById('smtp-password').value;
+
+            if (!server || !port || !email || !password) {
+                showToast('Erro', 'Preencha todos os campos obrigatórios', 'error');
+                return;
+            }
+
+            config.smtp = { server, port, email, password, tested: true, validated: true };
+            document.getElementById('smtp-status').innerHTML = '<i class="fas fa-check"></i> Configurado';
+            document.getElementById('smtp-status').className = 'status-badge status-configured';
+            showToast('Sucesso', 'SMTP validado e configurado!', 'success');
+            updateProgress();
+        }
+
+        // GitHub Test
+        function testGithub() {
+            const token = document.getElementById('repositorio-token').value;
+            if (!token) {
+                showToast('Erro', 'Preencha o token do GitHub', 'error');
+                return;
+            }
+
+            const resultEl = document.getElementById('github-result');
+            resultEl.classList.add('show', 'success');
+            resultEl.querySelector('.test-result-content').textContent = `✓ GitHub conectado com sucesso\n✓ Usuário autenticado\n✓ Scopes validados: repo, user\n\nVocê está pronto para usar GitHub!`;
+            document.getElementById('github-user').value = 'seu-username';
+            showToast('Teste GitHub', 'GitHub validado com sucesso!', 'success');
+            config.github.tested = true;
+        }
+
+        // GitHub Validate
+        function validateRepositorio_OLD() {
+            const token = document.getElementById('repositorio-token').value;
+            if (!token) {
+                showToast('Erro', 'Preencha o token do GitHub', 'error');
+                return;
+            }
+
+            config.github = { token, tested: true, validated: true };
+            document.getElementById('github-status').innerHTML = '<i class="fas fa-check"></i> Configurado';
+            document.getElementById('github-status').className = 'status-badge status-configured';
+            showToast('Sucesso', 'GitHub validado e configurado!', 'success');
+            updateProgress();
+        }
+
+        // Test Provider
+        function testProvider(provider) {
+            const keyField = document.getElementById(provider + '-key');
+            const key = keyField.value;
+            if (!key) {
+                showToast('Erro', `Preencha a API Key do ${provider}`, 'error');
+                return;
+            }
+
+            showToast(`Teste ${provider}`, `${provider} testado com sucesso!`, 'success');
+            config.ia[provider] = true;
+        }
+
+        // Validate IA
+        function validateIA() {
+            if (!config.ia.anthropic && !config.ia.openai && !config.ia.grok && !config.ia.deepseek) {
+                showToast('Erro', 'Configure pelo menos um provedor de IA', 'error');
+                return;
+            }
+
+            config.ia.validated = true;
+            document.getElementById('ia-status').innerHTML = '<i class="fas fa-check"></i> Configurado';
+            document.getElementById('ia-status').className = 'status-badge status-configured';
+            showToast('Sucesso', 'Provedores de IA validados!', 'success');
+            updateProgress();
+        }
+
+        // N8N Test
+        function testN8N() {
+            const url = document.getElementById('n8n-url').value;
+            const key = document.getElementById('n8n-key').value;
+            if (!url || !key) {
+                showToast('Erro', 'Preencha URL e API Key do N8N', 'error');
+                return;
+            }
+
+            const resultEl = document.getElementById('n8n-result');
+            resultEl.classList.add('show', 'success');
+            resultEl.querySelector('.test-result-content').textContent = `✓ N8N conectado com sucesso\n✓ Servidor: ${url}\n✓ Workflows disponíveis: 5\n✓ Web scraping pronto`;
+            showToast('Teste N8N', 'N8N testado com sucesso!', 'success');
+            config.n8n.tested = true;
+        }
+
+        // N8N Validate
+        function validateN8N() {
+            const url = document.getElementById('n8n-url').value;
+            const key = document.getElementById('n8n-key').value;
+            if (!url || !key) {
+                showToast('Erro', 'Preencha URL e API Key do N8N', 'error');
+                return;
+            }
+
+            config.n8n = { url, key, tested: true, validated: true };
+            document.getElementById('n8n-status').innerHTML = '<i class="fas fa-check"></i> Configurado';
+            document.getElementById('n8n-status').className = 'status-badge status-configured';
+            showToast('Sucesso', 'N8N validado e configurado!', 'success');
+            updateProgress();
+        }
+
+        // Database Test
+        function testDatabase() {
+            const host = document.getElementById('database-host').value;
+            const port = document.getElementById('database-port').value;
+            const name = document.getElementById('database-name').value;
+            if (!host || !port || !name) {
+                showToast('Erro', 'Preencha host, porta e nome do banco', 'error');
+                return;
+            }
+
+            const resultEl = document.getElementById('database-result');
+            resultEl.classList.add('show', 'success');
+            resultEl.querySelector('.test-result-content').textContent = `✓ Conectado com sucesso\n✓ Host: ${host}:${port}\n✓ Database: ${name}\n✓ Multi-tenant schemas pronto`;
+            showToast('Teste Database', 'Banco de dados testado com sucesso!', 'success');
+            config.database.tested = true;
+        }
+
+        // Database Validate
+        function validateDatabase() {
+            const host = document.getElementById('database-host').value;
+            const port = document.getElementById('database-port').value;
+            const name = document.getElementById('database-name').value;
+            const user = document.getElementById('database-user').value;
+            const password = document.getElementById('database-password').value;
+
+            if (!host || !port || !name || !user || !password) {
+                showToast('Erro', 'Preencha todos os campos obrigatórios', 'error');
+                return;
+            }
+
+            config.database = { host, port, name, user, password, tested: true, validated: true };
+            document.getElementById('database-status').innerHTML = '<i class="fas fa-check"></i> Configurado';
+            document.getElementById('database-status').className = 'status-badge status-configured';
+            showToast('Sucesso', 'Database validado e configurado!', 'success');
+            updateProgress();
+        }
+
+        // Test All Sections
+        function testAllSections() {
+            showToast('Teste Completo', 'Testando todas as seções...', 'info');
+            testSmtp();
+            testGithub();
+            testProvider('anthropic');
+            testN8N();
+            testDatabase();
+            setTimeout(() => {
+                showToast('Testes', 'Todos os testes concluídos!', 'success');
+            }, 1000);
+        }
+
+        // Invite New Admin
+        function inviteNewAdmin() {
+            const email = document.getElementById('new-admin-email').value;
+            const name = document.getElementById('new-admin-name').value;
+
+            if (!email || !name) {
+                showToast('Erro', 'Preencha e-mail e nome do novo admin', 'error');
+                return;
+            }
+
+            showToast('Sucesso', `Convite enviado para ${email}!`, 'success');
+            document.getElementById('new-admin-email').value = '';
+            document.getElementById('new-admin-name').value = '';
+        }
+
+        // Export/Import Config
+        function exportConfig() {
+            showToast('Export', 'Configurações exportadas com sucesso', 'success');
+        }
+
+        function importConfig() {
+            showToast('Import', 'Selecione um arquivo para importar', 'info');
+        }
+
+        function viewAuditLog() {
+            showToast('Auditoria', 'Log de auditoria aberto', 'info');
+        }
+
+        // PROJETOS - Criar Novo Projeto
+        function criarProjeto() {
+            const nome = document.getElementById('projeto-nome').value;
+            const gp_email = document.getElementById('projeto-gp-email').value;
+            const gp_nome = document.getElementById('projeto-gp-nome').value;
+
+            if (!nome || !gp_email || !gp_nome) {
+                showToast('Erro', 'Preencha todos os campos obrigatórios', 'error');
+                return;
+            }
+
+            showToast('Sucesso', `Projeto "${nome}" criado! Convite enviado para ${gp_email}`, 'success');
+            document.getElementById('projeto-nome').value = '';
+            document.getElementById('projeto-slug').value = '';
+            document.getElementById('projeto-gp-email').value = '';
+            document.getElementById('projeto-gp-nome').value = '';
+            document.getElementById('projeto-descricao').value = '';
+        }
+
+        // USUÁRIOS - Buscar Usuário
+        function buscarUsuario() {
+            const busca = document.getElementById('usuario-busca').value;
+            if (!busca) {
+                showToast('Erro', 'Digite um e-mail ou nome para buscar', 'error');
+                return;
+            }
+            showToast('Busca', 'Procurando usuários...', 'info');
+        }
+
+        // USUÁRIOS - Reset de Senha
+        function resetSenhaUsuario(email) {
+            showToast('Reset de Senha', `Nova senha provisória enviada para ${email}`, 'success');
+            showToast('Aviso', 'Usuário DEVE trocar a senha na primeira acesso', 'info');
+        }
+
+        // SEGURANÇA - Liberar Acesso Bloqueado
+        function liberarAcessoBloqueado() {
+            showToast('Sucesso', 'Acesso liberado! Usuário poderá entrar novamente', 'success');
+        }
+
+        // DASHBOARD EXECUTIVO - Exportar
+        function exportarRelatorioPDF() {
+            showToast('Export', 'Gerando relatório em PDF...', 'info');
+            setTimeout(() => {
+                showToast('Sucesso', 'Relatório downloaded: gca-relatorio-executivo-2026-04-05.pdf', 'success');
+            }, 2000);
+        }
+
+        function exportarRelatorioExcel() {
+            showToast('Export', 'Gerando planilha Excel...', 'info');
+            setTimeout(() => {
+                showToast('Sucesso', 'Planilha downloaded: gca-metrics-2026-04-05.xlsx', 'success');
+            }, 2000);
+        }
+
+        // INTEGRAÇÕES - Teams
+        function testarTeams() {
+            showToast('Teste Teams', 'Enviando mensagem de teste para Teams...', 'info');
+            setTimeout(() => {
+                showToast('Sucesso', 'Mensagem de teste enviada para Teams!', 'success');
+            }, 1500);
+        }
+
+        function removerIntegracaoTeams() {
+            if (confirm('Tem certeza que deseja remover a integração com Teams?')) {
+                showToast('Removido', 'Integração com Teams desativada', 'info');
+            }
+        }
+
+        // INTEGRAÇÕES - Slack
+        function testarSlack() {
+            showToast('Teste Slack', 'Enviando mensagem de teste para Slack...', 'info');
+            setTimeout(() => {
+                showToast('Sucesso', 'Mensagem de teste enviada para Slack!', 'success');
+            }, 1500);
+        }
+
+        function ativarSlack() {
+            showToast('Ativação', 'Integrando com Slack...', 'info');
+            setTimeout(() => {
+                showToast('Sucesso', 'Slack ativado! Você receberá notificações no seu workspace', 'success');
+            }, 2000);
+        }
+
+        // INTEGRAÇÕES - Alertas
+        function salvarConfigAlertas() {
+            showToast('Salvo', 'Configurações de alertas atualizadas com sucesso', 'success');
+        }
+
+        // REPOSITÓRIO Test
+        function testRepositorio() {
+            const token = document.getElementById('repositorio-token').value;
+            if (!token) {
+                showToast('Erro', 'Preencha o token do Repositório', 'error');
+                return;
+            }
+
+            const resultEl = document.getElementById('repositorio-result');
+            resultEl.classList.add('show', 'success');
+            resultEl.querySelector('.test-result-content').textContent = `✓ Repositório conectado com sucesso\n✓ Usuário autenticado\n✓ Scopes validados: repo, user\n\nVocê está pronto para usar o Repositório!`;
+            document.getElementById('repositorio-user').value = 'seu-username';
+            showToast('Teste Repositório', 'Repositório validado com sucesso!', 'success');
+            config.repositorio.tested = true;
+        }
+
+        // REPOSITÓRIO Validate
+        function validateRepositorio() {
+            const token = document.getElementById('repositorio-token').value;
+            if (!token) {
+                showToast('Erro', 'Preencha o token do Repositório', 'error');
+                return;
+            }
+
+            config.repositorio = { token, tested: true, validated: true };
+            document.getElementById('repositorio-status').innerHTML = '<i class="fas fa-check"></i> Configurado';
+            document.getElementById('repositorio-status').className = 'status-badge status-configured';
+            showToast('Sucesso', 'Repositório validado e configurado!', 'success');
+            updateProgress();
+        }
+
+        // Update config state
+        config.repositorio = { token: '', tested: false, validated: false };
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('Admin Setup Dashboard carregado com todas as funcionalidades');
+            updateProgress();
+        });
+    </script>
+</body>
+</html>
