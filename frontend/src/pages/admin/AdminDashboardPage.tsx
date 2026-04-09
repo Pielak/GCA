@@ -441,6 +441,7 @@ function AIProvidersTab() {
 export function AdminDashboardPage() {
   const navigate = useNavigate()
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
+  const [pendingCount, setPendingCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'dashboard' | 'settings' | 'ai'>('dashboard')
 
@@ -457,8 +458,12 @@ export function AdminDashboardPage() {
 
   const loadMetrics = async () => {
     try {
-      const res = await apiClient.get('/admin/dashboard/metrics')
-      setMetrics({ ...emptyMetrics, ...(res.data || {}) })
+      const [metricsRes, pendingRes] = await Promise.all([
+        apiClient.get('/admin/dashboard/metrics'),
+        apiClient.get('/admin/projects/pending').catch(() => ({ data: { count: 0 } })),
+      ])
+      setMetrics({ ...emptyMetrics, ...(metricsRes.data || {}) })
+      setPendingCount(pendingRes.data?.count || 0)
     } catch {
       setMetrics(emptyMetrics)
     } finally {
@@ -519,7 +524,9 @@ export function AdminDashboardPage() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard icon={<FolderOpen className="w-5 h-5 text-indigo-400" />} label="Total de Projetos" value={metrics.totalProjects} sub="todos os tenants" color="indigo" />
         <KPICard icon={<CheckCircle2 className="w-5 h-5 text-emerald-400" />} label="Projetos Ativos" value={metrics.activeProjects} sub="em operacao" color="emerald" />
-        <KPICard icon={<AlertTriangle className="w-5 h-5 text-amber-400" />} label="Degradados" value={metrics.degradedProjects} sub="requerem atencao" color="amber" />
+        <div onClick={() => navigate('/admin/projects')} className="cursor-pointer">
+          <KPICard icon={<AlertTriangle className="w-5 h-5 text-amber-400" />} label="Pendentes de Aprovação" value={pendingCount} sub={pendingCount > 0 ? 'clique para revisar' : 'nenhum pendente'} color="amber" />
+        </div>
         <KPICard icon={<Users className="w-5 h-5 text-blue-400" />} label="Usuarios" value={metrics.totalUsers} sub={`${metrics.inactiveUsers} inativos`} color="blue" />
       </div>
 

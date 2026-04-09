@@ -1,7 +1,6 @@
 import React from 'react';
-import { ProjectStatus, ArtifactStatus, GatekeeperStatus, CodeGenStatus, TestStatus, WebhookStatus, CredentialStatus } from '../../data/mockData';
 
-type AnyStatus = ProjectStatus | ArtifactStatus | GatekeeperStatus | CodeGenStatus | TestStatus | WebhookStatus | CredentialStatus | string;
+type AnyStatus = string;
 
 const STATUS_CONFIG: Record<string, { label: string; className: string }> = {
   // Project
