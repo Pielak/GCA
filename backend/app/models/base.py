@@ -214,6 +214,37 @@ class UserProjectContext(Base):
         return f"<UserProjectContext user={self.user_id} project={self.active_project_id}>"
 
 
+class ProjectExternalRepo(Base):
+    """Repositório externo vinculado ao projeto (read-only)"""
+    __tablename__ = "project_external_repos"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    repo_url = Column(String(500), nullable=False)
+    provider = Column(String(20), nullable=False)  # github, gitlab, bitbucket
+    branch = Column(String(100), nullable=False, default="main")
+    access_token_encrypted = Column(Text, nullable=True)  # vault pgp_sym_encrypt
+    status = Column(String(20), nullable=False, default="pending")  # pending, reading, completed, error, partial
+    last_read_at = Column(DateTime(timezone=True), nullable=True)
+    files_total = Column(Integer, default=0)
+    files_processed = Column(Integer, default=0)
+    files_skipped = Column(Integer, default=0)
+    error_message = Column(Text, nullable=True)
+    added_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", foreign_keys=[project_id])
+
+    __table_args__ = (
+        Index("idx_ext_repos_project", project_id),
+        Index("idx_ext_repos_status", status),
+    )
+
+    def __repr__(self):
+        return f"<ProjectExternalRepo {self.repo_url} ({self.status})>"
+
+
 class BacklogItem(Base):
     """Item do backlog vivo do projeto (spec seção 7.2)"""
     __tablename__ = "backlog_items"

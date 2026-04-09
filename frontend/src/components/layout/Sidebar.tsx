@@ -182,6 +182,7 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionário" icon={<ClipboardList className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/external-repos`} label="Repositórios Externos" icon={<GitBranch className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ingestion`} label="Ingestão" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="Gatekeeper" icon={<Shield className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/arguider`} label="Arguidor" icon={<Zap className="w-3 h-3" />} />
