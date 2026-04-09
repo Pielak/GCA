@@ -24,6 +24,7 @@ import { QuestionnairePage } from './pages/projects/QuestionnairePage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { NovoProjetoPage } from './pages/NovoProjetoPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
+import { TesterReviewPage } from './pages/projects/TesterReviewPage';
 
 export const router = createBrowserRouter([
   {
@@ -70,6 +71,7 @@ export const router = createBrowserRouter([
           { path: 'arguider', Component: ArguiderPage },
           { path: 'codegen', Component: CodeGeneratorPage },
           { path: 'qa', Component: QAReadinessPage },
+          { path: 'tester-review', Component: TesterReviewPage },
           { path: 'legacy', Component: LegacyPage },
           { path: 'roadmap', Component: RoadmapPage },
           { path: 'docs', Component: LiveDocsPage },

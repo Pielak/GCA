@@ -155,6 +155,7 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/arguider`} label="M7 - Arguidor" icon={<Zap className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/codegen`} label="M8 - Code Gen" icon={<Code2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/qa`} label="M9 - QA" icon={<TestTube2 className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Tester Review" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/legacy`} label="M10 - Legado" icon={<History className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/roadmap`} label="M11 - Roadmap" icon={<Clock className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/docs`} label="M12 - Docs" icon={<BookOpen className="w-3 h-3" />} />
