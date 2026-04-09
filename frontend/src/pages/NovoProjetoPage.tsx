@@ -9,6 +9,34 @@ import { BLOCKS, NA_VALUE, type QuestionDef } from '@/data/questionnaireBlocks'
 
 type Step = 'identify' | 'questionnaire' | 'submitted'
 
+function HelpBubble({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="relative inline-block ml-1.5 align-middle">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        onBlur={() => setTimeout(() => setOpen(false), 200)}
+        className="w-5 h-5 rounded-full bg-slate-700 hover:bg-violet-600/40 text-slate-400 hover:text-violet-300 inline-flex items-center justify-center transition-colors focus:outline-none focus:ring-1 focus:ring-violet-500"
+        aria-label="Ajuda"
+      >
+        <HelpCircle className="w-3.5 h-3.5" />
+      </button>
+      {open && (
+        <div className="absolute z-50 left-1/2 -translate-x-1/2 bottom-full mb-2 w-72 bg-slate-800 border border-slate-600 rounded-lg p-3 shadow-xl">
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs text-slate-300 leading-relaxed">{text}</p>
+            <button onClick={() => setOpen(false)} className="flex-shrink-0 text-slate-500 hover:text-slate-300">
+              <X className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="absolute left-1/2 -translate-x-1/2 top-full w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-slate-600" />
+        </div>
+      )}
+    </span>
+  )
+}
+
 export function NovoProjetoPage() {
   const navigate = useNavigate()
 
@@ -106,9 +134,9 @@ export function NovoProjetoPage() {
   }
 
   // Questionnaire helpers
-  const isQuestionVisible = (q: QuestionDef): boolean => {
-    if (!q.conditionalOn) return true
-    return responses[q.conditionalOn.question] === q.conditionalOn.value
+  const isQuestionDisabled = (q: QuestionDef): boolean => {
+    if (q.conditionalOn) return responses[q.conditionalOn.question] !== q.conditionalOn.value
+    return false
   }
 
   const isQuestionLinked = (q: QuestionDef): boolean => {
@@ -374,15 +402,12 @@ export function NovoProjetoPage() {
 
         {/* Block tabs */}
         <div className="flex gap-1.5 overflow-x-auto pb-1">
-          {BLOCKS.map((b, i) => {
-            const isA2Disabled = b.id === 'A.2' && responses['3'] !== 'Sim'
-            return (
-              <button key={b.id} onClick={() => !isA2Disabled && setCurrentBlock(i)} disabled={isA2Disabled}
-                className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-lg transition-colors ${isA2Disabled ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed' : i === currentBlock ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
-                title={isA2Disabled ? 'Habilitado quando Q3 = "Sim"' : b.title}
-              >{b.id}</button>
-            )
-          })}
+          {BLOCKS.map((b, i) => (
+            <button key={b.id} onClick={() => setCurrentBlock(i)}
+              className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-lg transition-colors ${i === currentBlock ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700'}`}
+              title={b.title}
+            >{b.id}</button>
+          ))}
         </div>
 
         {/* Current block */}
@@ -390,49 +415,46 @@ export function NovoProjetoPage() {
           <h2 className="text-lg font-semibold text-white mb-1">{block.title}</h2>
           <p className="text-slate-400 text-sm mb-6">{block.description}</p>
 
-          {block.id === 'A.2' && responses['3'] !== 'Sim' && (
-            <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center gap-2 mb-6">
-              <Info className="w-4 h-4 text-amber-400 flex-shrink-0" />
-              <p className="text-amber-300 text-sm">Este bloco só é habilitado quando Q3 = "Sim" (projeto existente).</p>
-            </div>
-          )}
-
           {submitError && (
             <div className="mb-4 bg-red-900/40 border border-red-800/50 rounded-lg p-3">
-              <p className="text-red-300 text-sm">{submitError}</p>
+              <p className="text-red-300 text-sm">{typeof submitError === 'string' ? submitError : JSON.stringify(submitError)}</p>
             </div>
           )}
 
           <div className="space-y-7">
-            {block.questions.filter(isQuestionVisible).map(q => {
+            {block.questions.map(q => {
+              const disabled = isQuestionDisabled(q)
               const linked = isQuestionLinked(q)
+              const inactive = disabled || linked
+
               return (
-                <div key={q.id} className={linked ? 'opacity-50' : ''}>
+                <div key={q.id} className={`transition-opacity ${inactive ? 'opacity-40' : ''}`}>
                   <label className="block text-sm text-slate-200 font-medium mb-2">
                     <span className="text-violet-400 mr-1 font-bold">Q{q.id}.</span>{q.label}
-                    {q.help && (
-                      <span className="relative inline-block ml-1.5 align-middle group">
-                        <span className="w-5 h-5 rounded-full bg-slate-700 text-slate-400 inline-flex items-center justify-center cursor-help" title={q.help}>
-                          <HelpCircle className="w-3.5 h-3.5" />
-                        </span>
-                      </span>
-                    )}
+                    {q.help && <HelpBubble text={q.help} />}
                   </label>
 
-                  {linked && (
-                    <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/60 border border-slate-700/50 rounded-lg">
-                      <Info className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                      <p className="text-xs text-slate-500 italic">{q.linkedTo?.message || 'Resposta já providenciada em perguntas anteriores.'}</p>
+                  {disabled && (
+                    <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/40 border border-slate-700/30 rounded-lg">
+                      <Info className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                      <p className="text-xs text-slate-600 italic">Não se aplica — {q.conditionalOn ? `requer Q${q.conditionalOn.question} = "${q.conditionalOn.value}"` : ''}</p>
                     </div>
                   )}
 
-                  {q.type === 'text' && !linked && (
+                  {linked && !disabled && (
+                    <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/40 border border-slate-700/30 rounded-lg">
+                      <Info className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                      <p className="text-xs text-slate-600 italic">{q.linkedTo?.message || 'Resposta já providenciada em perguntas anteriores.'}</p>
+                    </div>
+                  )}
+
+                  {q.type === 'text' && !inactive && (
                     <input type="text" value={(responses[q.id] as string) || ''} onChange={e => handleTextChange(q.id, e.target.value)}
                       className="w-full bg-dark-200 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
                       placeholder={q.placeholder || ''} />
                   )}
 
-                  {q.type === 'single' && !linked && q.options && (
+                  {q.type === 'single' && !inactive && q.options && (
                     <div className="flex flex-wrap gap-2">
                       {q.options.map(opt => {
                         const isNA = opt === NA_VALUE
@@ -445,7 +467,7 @@ export function NovoProjetoPage() {
                     </div>
                   )}
 
-                  {q.type === 'multi' && !linked && q.options && (
+                  {q.type === 'multi' && !inactive && q.options && (
                     <div className="flex flex-wrap gap-2">
                       {q.options.map(opt => {
                         const currentVals = (responses[q.id] as string[]) || []
@@ -462,6 +484,15 @@ export function NovoProjetoPage() {
                           className={`px-3 py-1.5 text-sm rounded-lg border transition-colors italic ${((responses[q.id] as string[]) || []).includes(NA_VALUE) ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-dark-200 border-slate-700 text-slate-400 hover:border-slate-500'}`}
                         >Não se aplica</button>
                       )}
+                    </div>
+                  )}
+
+                  {/* Perguntas desabilitadas mostram NA pré-marcado */}
+                  {inactive && (q.type === 'single' || q.type === 'multi') && (
+                    <div className="flex flex-wrap gap-2">
+                      <span className="px-3 py-1.5 text-sm rounded-lg border bg-slate-600/20 border-slate-600/30 text-slate-500 italic">
+                        Não se aplica
+                      </span>
                     </div>
                   )}
                 </div>
