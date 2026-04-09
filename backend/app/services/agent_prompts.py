@@ -530,6 +530,11 @@ CONSOLIDATOR_USER_PROMPT_TEMPLATE = """Consolidate final OCG for project:
 
 ---
 
+**PROJECT STACK & REQUIREMENTS** (from questionnaire):
+{project_metadata_json}
+
+---
+
 **ANALYZER CLASSIFICATION**:
 {analyzer_output_json}
 
@@ -544,11 +549,13 @@ TASK:
 1. Calculate composite score using weights: P1(10%) + P2(15%) + P3(20%) + P4(20%) + P5(15%) + P6(10%) + P7(10%)
 2. Determine approval status using strict rules (BLOCKED > READY > NEEDS_REVIEW > AT_RISK)
 3. Extract 3-5 highest severity findings across all pillars
-4. Generate specific, actionable stack recommendations (backend, frontend, database, cache, infrastructure)
-5. Define testing requirements for each pillar
-6. Create compliance checklist from P2 findings
-7. Summarize architecture overview from P5
-8. Identify project risks and mitigations
-9. Provide approval decision with clear next steps
+4. Generate STACK_RECOMMENDATION based on the PROJECT STACK section above — use the GP's chosen technologies (frontend_stack, backend_language, backend_framework, database, etc.) and validate against pillar findings
+5. Define TESTING_REQUIREMENTS based on test_types from questionnaire
+6. Create COMPLIANCE_CHECKLIST from P2 findings and security_controls
+7. Generate ARCHITECTURE_OVERVIEW from architecture choices and P5 findings
+8. Identify RISK_ANALYSIS with project risks and mitigations
+9. Provide APPROVAL_STATUS with clear next steps and DELIVERABLES list
+
+The JSON output MUST use these exact top-level keys: PROJECT_PROFILE, PILLAR_SCORES, COMPOSITE_SCORE, STACK_RECOMMENDATION, CRITICAL_FINDINGS, TESTING_REQUIREMENTS, COMPLIANCE_CHECKLIST, DELIVERABLES, ARCHITECTURE_OVERVIEW, RISK_ANALYSIS, APPROVAL_STATUS.
 
 OUTPUT: Complete OCG JSON with all required fields populated and actionable."""

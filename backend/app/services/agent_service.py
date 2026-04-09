@@ -418,6 +418,7 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 project_name=req.project_metadata.get("project_name", "Unknown"),
                 project_type=req.project_metadata.get("project_type", "Unknown"),
                 team_size=req.project_metadata.get("team_size", "Unknown"),
+                project_metadata_json=json.dumps(req.project_metadata, ensure_ascii=False, indent=2, cls=UUIDEncoder),
                 analyzer_output_json=json.dumps(analyzer_json, ensure_ascii=False, indent=2, cls=UUIDEncoder),
                 pillar_results_json=json.dumps(pillar_json, ensure_ascii=False, indent=2, cls=UUIDEncoder),
             )
@@ -468,7 +469,10 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 generated_at=datetime.now(timezone.utc),
                 PROJECT_PROFILE=ocg_json.get("PROJECT_PROFILE") or ocg_json.get("project_profile") or req.project_metadata or {},
                 PILLAR_SCORES=ocg_json.get("PILLAR_SCORES") or ocg_json.get("pillar_scores") or pillar_scores_from_agents,
-                COMPOSITE_SCORE=ocg_json.get("COMPOSITE_SCORE") or ocg_json.get("composite_score") or {"overall": overall_score, "is_blocking": any_blocking},
+                COMPOSITE_SCORE=self._normalize_composite_score(
+                    ocg_json.get("COMPOSITE_SCORE") or ocg_json.get("composite_score"),
+                    overall_score, any_blocking
+                ),
                 STACK_RECOMMENDATION=ocg_json.get("STACK_RECOMMENDATION") or ocg_json.get("stack_recommendation") or ocg_json.get("stack", {}),
                 CRITICAL_FINDINGS=ocg_json.get("CRITICAL_FINDINGS") or ocg_json.get("critical_findings") or [f for pr in req.pillar_results for f in pr.findings if f.get("severity") == "critical"],
                 TESTING_REQUIREMENTS=ocg_json.get("TESTING_REQUIREMENTS") or ocg_json.get("testing_requirements") or ocg_json.get("testing", {}),
@@ -494,8 +498,8 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 "agent.consolidator_success",
                 questionnaire_id=str(req.questionnaire_id),
                 ocg_id=str(ocg_response.ocg_id),
-                overall_score=ocg_response.COMPOSITE_SCORE.get("overall", 0),
-                is_blocking=ocg_response.COMPOSITE_SCORE.get("is_blocking", False),
+                overall_score=self._safe_get(ocg_response.COMPOSITE_SCORE, "overall", 0),
+                is_blocking=self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking", False),
                 tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
@@ -540,9 +544,9 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 p5_architecture_score=_get_pillar_score(ps, 5),
                 p6_data_score=_get_pillar_score(ps, 6),
                 p7_security_score=_get_pillar_score(ps, 7),
-                overall_score=ocg_response.COMPOSITE_SCORE.get("overall") or ocg_response.COMPOSITE_SCORE.get("value") or 0,
-                status=ocg_response.COMPOSITE_SCORE.get("status") or ("BLOCKED" if ocg_response.COMPOSITE_SCORE.get("is_blocking") else "NEEDS_REVIEW"),
-                is_blocking=ocg_response.COMPOSITE_SCORE.get("is_blocking", False),
+                overall_score=self._safe_get(ocg_response.COMPOSITE_SCORE, "overall") or self._safe_get(ocg_response.COMPOSITE_SCORE, "value") or (ocg_response.COMPOSITE_SCORE if isinstance(ocg_response.COMPOSITE_SCORE, (int, float)) else 0),
+                status=self._safe_get(ocg_response.COMPOSITE_SCORE, "status") or ("BLOCKED" if self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking") else "NEEDS_REVIEW"),
+                is_blocking=bool(self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking")),
                 ocg_data=json.dumps(ocg_response.dict(), ensure_ascii=False, cls=UUIDEncoder),
                 generated_at=ocg_response.generated_at,
             )
@@ -556,6 +560,27 @@ Return complete JSON analysis with score, classification, findings, and recommen
         except Exception as e:
             logger.error("agent.ocg_save_error", error=str(e))
             raise
+
+    @staticmethod
+    def _normalize_composite_score(raw, fallback_score: float, fallback_blocking: bool) -> dict:
+        """Normaliza COMPOSITE_SCORE para dict — LLMs podem retornar float, dict ou None"""
+        if isinstance(raw, dict) and raw:
+            # Garantir que tem 'overall'
+            if 'overall' not in raw and 'value' in raw:
+                raw['overall'] = raw['value']
+            if 'overall' not in raw:
+                raw['overall'] = fallback_score
+            return raw
+        if isinstance(raw, (int, float)):
+            return {"overall": raw, "is_blocking": fallback_blocking}
+        return {"overall": fallback_score, "is_blocking": fallback_blocking}
+
+    @staticmethod
+    def _safe_get(obj, key, default=None):
+        """Get de dict seguro — retorna default se obj não for dict"""
+        if isinstance(obj, dict):
+            return obj.get(key, default)
+        return default
 
     async def log_analysis(
         self,

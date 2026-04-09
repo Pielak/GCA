@@ -75,10 +75,48 @@ class OCGService:
                 for qid, response_text in responses_data.items()
             ]
 
-            # Project metadata from questionnaire context
+            # Project metadata extraído das respostas do questionário
+            r = responses_data
             project_metadata = {
-                "project_name": f"Project {questionnaire_id}",
+                "project_name": r.get("1", f"Project {questionnaire_id}"),
+                "project_slug": r.get("2", ""),
                 "submitted_by": questionnaire.gp_email,
+                "project_type": r.get("4", []),
+                "criticality": r.get("5", ""),
+                "classification": r.get("6", ""),
+                # Stack definida pelo GP no questionário
+                "deliverables": r.get("15", r.get("22", [])),
+                "architecture": r.get("16", []),
+                "execution_model": r.get("17", []),
+                "multi_tenant": r.get("18", ""),
+                "high_availability": r.get("19", ""),
+                "async_processing": r.get("20", ""),
+                "has_frontend": r.get("21", ""),
+                "frontend_type": r.get("22", []),
+                "frontend_stack": r.get("23", []),
+                "frontend_language": r.get("24", ""),
+                "frontend_requirements": r.get("25", []),
+                "has_backend": r.get("26", ""),
+                "backend_language": r.get("27", ""),
+                "backend_framework": r.get("28", []),
+                "backend_type": r.get("29", []),
+                "backend_requirements": r.get("30", []),
+                "database": r.get("31", ""),
+                "database_profile": r.get("32", []),
+                "uses_redis": r.get("33", ""),
+                "redis_purpose": r.get("34", []),
+                "uses_messaging": r.get("35", ""),
+                "messaging_purpose": r.get("36", []),
+                "uses_ai": r.get("39", ""),
+                "ai_purpose": r.get("40", []),
+                "ai_provider": r.get("41", []),
+                "ai_restrictions": r.get("42", []),
+                "security_controls": r.get("43", []),
+                "observability": r.get("44", []),
+                "test_types": r.get("45", []),
+                "quality_gate": r.get("46", ""),
+                "formal_qa": r.get("47", ""),
+                "expected_deliverables": r.get("48", []),
             }
 
             logger.info(
