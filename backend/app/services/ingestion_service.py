@@ -244,6 +244,50 @@ class IngestionService:
                                document_id=str(document_id),
                                project_id=str(project_id))
 
+                    # === OCG REATIVO: Atualizar OCG via IA ===
+                    try:
+                        from app.services.ocg_updater_service import OCGUpdaterService
+                        from app.services.propagation_service import PropagationService
+                        from app.models.base import ArguiderAnalysis
+                        import json as _json
+
+                        # Carregar análise do Arguidor
+                        arguider_result = await db.execute(
+                            select(ArguiderAnalysis).where(ArguiderAnalysis.document_id == document_id)
+                        )
+                        analysis = arguider_result.scalar_one_or_none()
+                        analysis_data = {}
+                        if analysis:
+                            try:
+                                analysis_data = {
+                                    "classification": _json.loads(analysis.document_classification) if analysis.document_classification else {},
+                                    "gaps": _json.loads(analysis.gaps) if analysis.gaps else [],
+                                    "module_candidates": _json.loads(analysis.module_candidates) if analysis.module_candidates else [],
+                                }
+                            except _json.JSONDecodeError:
+                                pass
+
+                        # Atualizar OCG via IA
+                        updater = OCGUpdaterService(db)
+                        update_result = await updater.update_ocg_from_arguider(project_id, analysis_data)
+
+                        # Propagar se houve mudanças
+                        if update_result and update_result.get("changes"):
+                            propagator = PropagationService(db)
+                            await propagator.propagate(
+                                project_id=project_id,
+                                changes=update_result["changes"],
+                                ocg_version=update_result.get("version_to"),
+                            )
+
+                        logger.info("ingestion.ocg_reactive_complete",
+                                   document_id=str(document_id),
+                                   ocg_updated=bool(update_result))
+
+                    except Exception as e:
+                        logger.warning("ingestion.ocg_reactive_error",
+                                      document_id=str(document_id), error=str(e))
+
         except Exception as e:
             logger.error("ingestion.analysis_async_error", document_id=str(document_id), error=str(e))
 
