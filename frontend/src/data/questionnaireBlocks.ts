@@ -1,18 +1,22 @@
 /**
- * Definição compartilhada das 49 perguntas do Questionário Técnico GCA.
+ * Definição compartilhada das 54 perguntas do Questionário Técnico GCA.
  * Usado por QuestionnairePage e NovoProjetoPage.
+ * 9 seções: A.1-A.8 + A.12
+ * 16 regras de validação cruzada (V1-V16)
  */
 
 export interface QuestionDef {
   id: string
   label: string
   help: string
-  type: 'text' | 'single' | 'multi'
+  type: 'text' | 'single' | 'multi' | 'textarea' | 'computed'
   options?: string[]
   placeholder?: string
   conditionalOn?: { question: string; value: string }
+  conditionalOnNot?: { question: string; value: string }
   allowNA?: boolean
   linkedTo?: { question: string; value: string; message?: string }
+  readonly?: boolean
 }
 
 export interface BlockDef {
@@ -20,6 +24,16 @@ export interface BlockDef {
   title: string
   description: string
   questions: QuestionDef[]
+}
+
+export type ValidationSeverity = 'blocker' | 'gap' | 'caveat'
+
+export interface ValidationRule {
+  id: string
+  severity: ValidationSeverity
+  affectedQuestions: number[]
+  message: string
+  check: (answers: Record<string, any>, percentage?: number) => boolean
 }
 
 export const NA_VALUE = 'Não se aplica'
@@ -165,5 +179,117 @@ export const BLOCKS: BlockDef[] = [
       { id: '48', label: 'Entregáveis esperados do pipeline GCA', help: 'O que o GCA deve gerar? Documentos técnicos, sugestões de arquitetura, planos de teste, etc.', type: 'multi', options: ['Sugestão de arquitetura', 'Sugestão de stack tecnológico', 'Documento técnico consolidado', 'Documento negocial consolidado', 'Gap analysis (análise de lacunas)', 'Backlog inicial sugerido', 'Plano de testes', 'Plano de segurança', 'Plano de observabilidade', 'Plano de deploy'] },
       { id: '49', label: 'Formato de retorno desejado', help: '"Painel no GCA" = visualização direta na plataforma. Pode selecionar múltiplos.', type: 'multi', options: ['Painel no GCA', 'HTML', 'Markdown', 'DOCX', 'PDF', 'JSON estruturado', 'YAML'] },
     ],
+  },
+  {
+    id: 'A.12',
+    title: 'A.12 — Campos Finais Obrigatórios',
+    description: 'Restrições, observações e validação final antes de submeter.',
+    questions: [
+      { id: '50', label: 'Restrições do projeto', help: 'Informe restrições técnicas, regulatórias, orçamentárias ou de prazo que devem ser respeitadas.', type: 'textarea', placeholder: 'Ex: Dados sensíveis requerem mascaramento. Prazo máximo de 6 meses. Orçamento limitado a R$ 50k.' },
+      { id: '51', label: 'Observações adicionais', help: 'Qualquer informação complementar relevante. Se o questionário for recusado, o motivo será adicionado aqui automaticamente.', type: 'textarea', placeholder: 'Informações complementares (opcional)' },
+      { id: '52', label: 'Percentual respondido', help: 'Calculado automaticamente. Mostra o percentual de questões aplicáveis que foram respondidas. Mínimo 80% para aprovação.', type: 'computed', readonly: true },
+      { id: '54', label: 'Áreas que validaram este questionário', help: 'Indique quais áreas da sua organização revisaram e aprovaram as respostas.', type: 'multi', options: ['Arquitetura', 'Desenvolvimento', 'QA', 'Segurança', 'Infraestrutura', 'Compliance', 'Negócios'] },
+    ],
+  },
+]
+
+// ============================================================================
+// 16 Regras de Validação Cruzada (V1–V16)
+// ============================================================================
+
+const has = (answers: Record<string, any>, qId: string): boolean => {
+  const v = answers[qId]
+  if (!v) return false
+  if (typeof v === 'string') return v.length > 0
+  if (Array.isArray(v)) return v.length > 0
+  return false
+}
+
+const includes = (answers: Record<string, any>, qId: string, val: string): boolean => {
+  const v = answers[qId]
+  if (Array.isArray(v)) return v.includes(val)
+  return v === val
+}
+
+export const VALIDATION_RULES: ValidationRule[] = [
+  {
+    id: 'V1', severity: 'blocker', affectedQuestions: [8],
+    message: 'Projeto de melhoria (Q3=Sim) exige repositório principal (Q8)',
+    check: (a) => a['3'] === 'Sim' && !has(a, '8'),
+  },
+  {
+    id: 'V2', severity: 'blocker', affectedQuestions: [41],
+    message: 'Todo projeto deve indicar provedor de IA (Q41 não pode estar vazio)',
+    check: (a) => !has(a, '41'),
+  },
+  {
+    id: 'V3', severity: 'gap', affectedQuestions: [23],
+    message: 'Projeto com frontend (Q21=Sim) deve indicar stack (Q23)',
+    check: (a) => a['21'] === 'Sim' && !has(a, '23'),
+  },
+  {
+    id: 'V4', severity: 'gap', affectedQuestions: [27, 28],
+    message: 'Projeto com backend (Q26=Sim) deve indicar linguagem (Q27) e framework (Q28)',
+    check: (a) => a['26'] === 'Sim' && (!has(a, '27') || !has(a, '28')),
+  },
+  {
+    id: 'V5', severity: 'gap', affectedQuestions: [31],
+    message: 'Backend com auditoria exige indicar persistência (Q31)',
+    check: (a) => includes(a, '30', 'Auditoria') && !has(a, '31'),
+  },
+  {
+    id: 'V6', severity: 'gap', affectedQuestions: [31],
+    message: 'Trilhas de auditoria (Q43) exige indicar persistência (Q31)',
+    check: (a) => includes(a, '43', 'Trilhas de auditoria') && !has(a, '31'),
+  },
+  {
+    id: 'V7', severity: 'caveat', affectedQuestions: [32],
+    message: 'Com Redis (Q33=Sim), recomenda-se indicar perfil de uso do banco (Q32)',
+    check: (a) => a['33'] === 'Sim' && !has(a, '32'),
+  },
+  {
+    id: 'V8', severity: 'caveat', affectedQuestions: [45],
+    message: 'Com Redis, recomenda-se incluir testes de performance/carga (Q45)',
+    check: (a) => a['33'] === 'Sim' && !includes(a, '45', 'Performance/Carga'),
+  },
+  {
+    id: 'V9', severity: 'caveat', affectedQuestions: [20],
+    message: 'Kafka (Q35=Sim) sem processamento assíncrono (Q20=Não) é inconsistente',
+    check: (a) => a['35'] === 'Sim' && a['20'] === 'Não',
+  },
+  {
+    id: 'V10', severity: 'caveat', affectedQuestions: [45],
+    message: 'Com Kafka/mensageria, recomenda-se testes de resiliência/recuperação',
+    check: (a) => a['35'] === 'Sim' && !includes(a, '45', 'Resiliência/Recuperação'),
+  },
+  {
+    id: 'V11', severity: 'gap', affectedQuestions: [43],
+    message: 'Portal autenticado (Q22) exige JWT, OAuth2 ou SSO nos controles de segurança (Q43)',
+    check: (a) => includes(a, '22', 'Portal autenticado') && !includes(a, '43', 'JWT') && !includes(a, '43', 'OAuth2') && !includes(a, '43', 'SSO (login único)'),
+  },
+  {
+    id: 'V12', severity: 'gap', affectedQuestions: [42],
+    message: 'IA externa (Q39=Sim) exige restrições de dados (Q42)',
+    check: (a) => a['39'] === 'Sim' && !has(a, '42'),
+  },
+  {
+    id: 'V13', severity: 'gap', affectedQuestions: [44],
+    message: 'Observabilidade é obrigatória (Q44 não pode estar vazio)',
+    check: (a) => !has(a, '44'),
+  },
+  {
+    id: 'V14', severity: 'caveat', affectedQuestions: [45],
+    message: 'Recomenda-se incluir testes unitários E de integração (Q45)',
+    check: (a) => !includes(a, '45', 'Unitários') || !includes(a, '45', 'Integração'),
+  },
+  {
+    id: 'V15', severity: 'gap', affectedQuestions: [35],
+    message: 'Arquitetura event-driven (Q16) exige mensageria (Q35=Sim)',
+    check: (a) => includes(a, '16', 'Event-driven') && a['35'] !== 'Sim',
+  },
+  {
+    id: 'V16', severity: 'blocker', affectedQuestions: [52],
+    message: 'Percentual respondido inferior a 80% — recusa automática',
+    check: (_a, pct?: number) => (pct ?? 100) < 80,
   },
 ]
