@@ -16,6 +16,7 @@ import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
 import { RepositoryPage } from './pages/projects/RepositoryPage';
+import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
 import { ArguiderPage } from './pages/projects/ArguiderPage';
 import { CodeGeneratorPage } from './pages/projects/CodeGeneratorPage';
@@ -91,6 +92,7 @@ export const router = createBrowserRouter([
           { path: 'tester-review', Component: TesterReviewPage },
           { path: 'roadmap', Component: RoadmapPage },
           { path: 'docs', Component: LiveDocsPage },
+          { path: 'settings', Component: ProjectSettingsPage },
         ],
       },
     ],

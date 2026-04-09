@@ -192,6 +192,7 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Revisão de Testes" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/roadmap`} label="Roadmap" icon={<Clock className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
                       </div>
                     )}
                   </div>
