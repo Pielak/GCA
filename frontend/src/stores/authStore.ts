@@ -1,6 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 
+export interface ProjectRole {
+  project_id: string
+  project_name: string
+  project_slug: string
+  role: string
+  status: string
+}
+
 export interface User {
   id: string
   email: string
@@ -8,6 +16,7 @@ export interface User {
   is_admin: boolean
   is_active: boolean
   first_access_completed: boolean
+  project_roles: ProjectRole[]
 }
 
 export interface AuthStore {

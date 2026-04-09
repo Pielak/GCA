@@ -1,6 +1,8 @@
 """Authentication Middleware"""
 from typing import Optional
-from fastapi import HTTPException, status, Request
+from fastapi import HTTPException, status, Request, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from uuid import UUID
 import structlog
 
@@ -60,3 +62,34 @@ async def get_current_user_from_token(request: Request) -> Optional[UUID]:
             detail="Invalid token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+
+async def require_admin(
+    request: Request,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+) -> UUID:
+    """
+    Verifica que o usuário autenticado é admin.
+    Retorna user_id se admin, 403 caso contrário.
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import User
+
+    if not current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(select(User).where(User.id == current_user_id))
+        user = result.scalar_one_or_none()
+
+    if not user or not user.is_admin:
+        logger.warning("auth.admin_access_denied", user_id=str(current_user_id))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores",
+        )
+
+    return current_user_id

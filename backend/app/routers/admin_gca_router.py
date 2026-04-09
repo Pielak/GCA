@@ -8,7 +8,7 @@ from typing import Dict, Optional
 import structlog
 
 from app.db.database import get_db
-from app.middleware.auth import get_current_user_from_token
+from app.middleware.auth import get_current_user_from_token, require_admin
 from uuid import UUID
 
 logger = structlog.get_logger(__name__)
@@ -65,7 +65,7 @@ class ThresholdsRequest(BaseModel):
 
 @router.get("/admin/gca/settings")
 async def get_gca_settings(
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Configurações atuais do GCA: pesos dos pilares, thresholds, agentes."""
@@ -75,7 +75,7 @@ async def get_gca_settings(
 @router.put("/admin/gca/settings/pillar-weights")
 async def update_pillar_weights(
     req: PillarWeightsRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Atualiza pesos dos pilares. Soma deve ser exatamente 100."""
@@ -94,7 +94,7 @@ async def update_pillar_weights(
 @router.put("/admin/gca/settings/thresholds")
 async def update_thresholds(
     req: ThresholdsRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Atualiza thresholds de score."""

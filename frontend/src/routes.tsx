@@ -1,5 +1,7 @@
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter, Navigate } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
+import { RequireAdmin } from './components/guards/RequireAdmin';
+import { useAuthStore } from './stores/authStore';
 import { LoginPage } from './pages/LoginPage';
 import { ResetPasswordPage } from './app/pages/auth/ResetPasswordPage';
 import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
@@ -51,11 +53,25 @@ export const router = createBrowserRouter([
     path: '/',
     Component: AppLayout,
     children: [
-      { index: true, Component: AdminDashboardPage },
-      { path: 'admin', Component: AdminDashboardPage },
-      { path: 'admin/projects', Component: AdminProjectsPage },
-      { path: 'admin/users', Component: AdminUsersPage },
-      { path: 'admin/audit', Component: AdminAuditPage },
+      // Rota index: redireciona admin para /admin, outros para /projects
+      { index: true, element: <IndexRedirect /> },
+      // Admin routes — protegidas por RequireAdmin
+      {
+        path: 'admin',
+        element: <RequireAdmin><AdminDashboardPage /></RequireAdmin>,
+      },
+      {
+        path: 'admin/projects',
+        element: <RequireAdmin><AdminProjectsPage /></RequireAdmin>,
+      },
+      {
+        path: 'admin/users',
+        element: <RequireAdmin><AdminUsersPage /></RequireAdmin>,
+      },
+      {
+        path: 'admin/audit',
+        element: <RequireAdmin><AdminAuditPage /></RequireAdmin>,
+      },
       { path: 'projects', Component: ProjectListPage },
       {
         path: 'projects/:id',
@@ -80,3 +96,17 @@ export const router = createBrowserRouter([
     ],
   },
 ]);
+
+/**
+ * Redireciona a rota "/" com base no papel do usuário:
+ * - Admin → /admin
+ * - Outros → /projects
+ */
+function IndexRedirect() {
+  const user = useAuthStore((s) => s.user);
+
+  if (user?.is_admin) {
+    return <Navigate to="/admin" replace />;
+  }
+  return <Navigate to="/projects" replace />;
+}

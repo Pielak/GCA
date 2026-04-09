@@ -47,6 +47,15 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ProjectRole(BaseModel):
+    """Project membership with role"""
+    project_id: str
+    project_name: str
+    project_slug: str
+    role: str
+    status: str
+
+
 class LoginUserInfo(BaseModel):
     """User info returned on login"""
     id: str
@@ -55,6 +64,7 @@ class LoginUserInfo(BaseModel):
     is_admin: bool = False
     is_active: bool = True
     first_access_completed: bool = False
+    project_roles: list[ProjectRole] = []
 
 
 class LoginResponse(BaseModel):

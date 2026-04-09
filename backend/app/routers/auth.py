@@ -10,6 +10,7 @@ from app.schemas.user import (
     LoginRequest,
     LoginResponse,
     LoginUserInfo,
+    ProjectRole,
     RefreshTokenRequest,
     BootstrapAdminRequest,
     UserResponse,
@@ -35,6 +36,28 @@ from uuid import UUID
 logger = structlog.get_logger(__name__)
 
 router = APIRouter()
+
+
+async def _get_user_project_roles(db: AsyncSession, user_id: UUID) -> list[ProjectRole]:
+    """Busca projetos e papéis do usuário."""
+    from app.models.base import ProjectMember, Project
+
+    result = await db.execute(
+        select(ProjectMember, Project)
+        .join(Project, ProjectMember.project_id == Project.id)
+        .where(ProjectMember.user_id == user_id)
+    )
+    rows = result.all()
+    return [
+        ProjectRole(
+            project_id=str(pm.project_id),
+            project_name=proj.name,
+            project_slug=proj.slug or "",
+            role=pm.role,
+            status=proj.status or "active",
+        )
+        for pm, proj in rows
+    ]
 
 
 @router.post("/bootstrap-admin", response_model=LoginResponse)
@@ -102,6 +125,9 @@ async def login(
     # Create tokens
     access_token, refresh_token, expires_in = AuthService.create_tokens(user)
 
+    # Buscar projetos e papéis do usuário
+    project_roles = await _get_user_project_roles(db, user.id)
+
     return LoginResponse(
         access_token=access_token,
         refresh_token=refresh_token,
@@ -111,6 +137,7 @@ async def login(
             id=str(user.id), email=user.email, full_name=user.full_name,
             is_admin=user.is_admin, is_active=user.is_active,
             first_access_completed=user.first_access_completed,
+            project_roles=project_roles,
         ),
     )
 

@@ -63,34 +63,60 @@ class AcceptInviteResponse(BaseModel):
 @router.get("/")
 @router.get("")
 async def list_projects(
+    current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """List all projects accessible to the current user."""
-    from app.models.base import Project
+    """List projects accessible to the current user (filtered by membership)."""
+    from app.models.base import Project, ProjectMember, User
     from sqlalchemy import select
+    from sqlalchemy.orm import selectinload
 
-    result = await db.execute(select(Project).order_by(Project.created_at.desc()))
-    projects = result.scalars().all()
+    # Verificar se é admin
+    user_result = await db.execute(select(User).where(User.id == current_user_id))
+    user = user_result.scalar_one_or_none()
+
+    if user and user.is_admin:
+        # Admin vê todos os projetos (somente leitura, para gestão)
+        result = await db.execute(select(Project).order_by(Project.created_at.desc()))
+        projects = result.scalars().all()
+        return {
+            "projects": [
+                {
+                    "id": str(p.id),
+                    "name": p.name,
+                    "slug": p.slug,
+                    "description": p.description or "",
+                    "status": p.status or "draft",
+                    "role": "admin",
+                    "phase": 1,
+                    "gatekeeperScore": 0,
+                }
+                for p in projects
+            ]
+        }
+
+    # Usuário comum: só projetos onde é membro
+    result = await db.execute(
+        select(ProjectMember, Project)
+        .join(Project, ProjectMember.project_id == Project.id)
+        .where(ProjectMember.user_id == current_user_id)
+        .order_by(Project.created_at.desc())
+    )
+    rows = result.all()
 
     return {
         "projects": [
             {
-                "id": str(p.id),
-                "name": p.name,
-                "slug": p.slug,
-                "description": p.description or "",
-                "status": p.status or "draft",
+                "id": str(proj.id),
+                "name": proj.name,
+                "slug": proj.slug,
+                "description": proj.description or "",
+                "status": proj.status or "draft",
+                "role": pm.role,
                 "phase": 1,
-                "outputProfile": "web_app",
-                "stack": {"language": "", "framework": "", "database": ""},
                 "gatekeeperScore": 0,
-                "codeGenCount": 0,
-                "testsPassed": 0,
-                "testsTotal": 0,
-                "pendingIssues": 0,
-                "gpName": "",
             }
-            for p in projects
+            for pm, proj in rows
         ]
     }
 

@@ -15,7 +15,7 @@ import string
 from app.db.database import get_db
 from app.services.admin_service import AdminService
 from app.services.email_service import EmailService
-from app.middleware.auth import get_current_user_from_token
+from app.middleware.auth import get_current_user_from_token, require_admin
 from app.models.base import User
 from app.core.security import hash_password
 
@@ -68,7 +68,7 @@ class InviteAdminResponse(BaseModel):
 @router.post("/projects")
 async def create_project(
     req: CreateProjectRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -112,7 +112,7 @@ async def create_project(
 
 @router.get("/projects/pending")
 async def get_pending_projects(
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -147,7 +147,7 @@ async def get_pending_projects(
 @router.post("/projects/{project_id}/approve")
 async def approve_project(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -190,7 +190,7 @@ async def approve_project(
 async def reject_project(
     project_id: UUID,
     req: RejectProjectRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -232,7 +232,7 @@ async def reject_project(
 
 @router.get("/users")
 async def list_users(
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -269,7 +269,7 @@ async def list_users(
 @router.post("/users/{user_id}/reset-password")
 async def reset_user_password(
     user_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -316,7 +316,7 @@ async def reset_user_password(
 @router.post("/users/{user_id}/lock")
 async def lock_user(
     user_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -353,7 +353,7 @@ async def lock_user(
 @router.post("/users/{user_id}/unlock")
 async def unlock_user(
     user_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -391,7 +391,7 @@ async def unlock_user(
 
 @router.get("/suspicious-access")
 async def get_suspicious_access(
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -433,7 +433,7 @@ async def get_suspicious_access(
 @router.post("/suspicious-access/{access_attempt_id}/unblock")
 async def unblock_suspicious_access(
     access_attempt_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -474,7 +474,7 @@ async def unblock_suspicious_access(
 async def list_tickets(
     status: str = Query(None, description="Filter by status: ABERTO, EM_ANÁLISE, AGUARDANDO_FEEDBACK, RESOLVIDO"),
     severity: str = Query(None, description="Filter by severity: BAIXO, MÉDIO, ALTO, CRÍTICO"),
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -523,7 +523,7 @@ async def list_tickets(
 @router.get("/tickets/{ticket_id}")
 async def get_ticket_details(
     ticket_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -583,7 +583,7 @@ async def get_ticket_details(
 async def respond_to_ticket(
     ticket_id: UUID,
     req: TicketResponseRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -628,7 +628,7 @@ async def respond_to_ticket(
 
 @router.get("/dashboard/metrics")
 async def get_dashboard_metrics(
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -658,7 +658,7 @@ async def get_dashboard_metrics(
 @router.post("/integrations/webhook-test")
 async def test_webhook(
     req: WebhookTestRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -692,7 +692,7 @@ async def get_alerts_history(
     severity: str = Query(None, description="Filter by severity: info, warning, critical"),
     status: str = Query(None, description="Filter by status: pending, sent, failed, acknowledged"),
     limit: int = Query(50, description="Number of alerts to retrieve (max 100)"),
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -749,7 +749,7 @@ async def get_alerts_history(
 @router.post("/alerts/{alert_id}/acknowledge")
 async def acknowledge_alert(
     alert_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -813,7 +813,7 @@ def generate_temporary_password() -> str:
 @router.post("/invite-admin", response_model=InviteAdminResponse)
 async def invite_admin_user(
     request: InviteAdminRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db)
 ) -> InviteAdminResponse:
     """
@@ -825,13 +825,12 @@ async def invite_admin_user(
     from datetime import timedelta
 
     try:
-        # Verify current user is admin
+        # require_admin already verified admin status
+
+        # Get current user for name
         stmt = select(User).where(User.id == current_user_id)
         result = await db.execute(stmt)
         current_user = result.scalar_one_or_none()
-
-        if not current_user or not current_user.is_admin:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can invite")
 
         # Check if user already exists
         stmt = select(User).where(User.email == request.email)
@@ -907,6 +906,7 @@ async def invite_admin_user(
 
 @router.get("/audit")
 async def get_audit_log(
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
     limit: int = 50,
@@ -948,6 +948,7 @@ async def get_audit_log(
 @router.get("/projects/{project_id}/activity-log")
 async def get_project_activity_log(
     project_id: UUID,
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
     skip: int = 0,
     limit: int = 50,
@@ -990,7 +991,7 @@ async def get_project_activity_log(
 @router.post("/users/{user_id}/block")
 async def block_user(
     user_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Desativar usuário (apenas admin). Não pode desativar a si mesmo."""

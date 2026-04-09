@@ -13,6 +13,20 @@ interface SidebarProject {
   id: string
   name: string
   status: string
+  role: string
+}
+
+const ROLE_LABELS: Record<string, { label: string; bg: string; text: string }> = {
+  admin: { label: 'Admin', bg: 'bg-violet-600/20', text: 'text-violet-300' },
+  gp: { label: 'GP', bg: 'bg-emerald-500/20', text: 'text-emerald-300' },
+  tech_lead: { label: 'Tech Lead', bg: 'bg-blue-500/20', text: 'text-blue-300' },
+  dev: { label: 'Dev', bg: 'bg-cyan-500/20', text: 'text-cyan-300' },
+  dev_senior: { label: 'Dev Sr', bg: 'bg-cyan-500/20', text: 'text-cyan-300' },
+  dev_pleno: { label: 'Dev Pl', bg: 'bg-cyan-500/20', text: 'text-cyan-300' },
+  qa: { label: 'QA', bg: 'bg-amber-500/20', text: 'text-amber-300' },
+  tester: { label: 'Tester', bg: 'bg-orange-500/20', text: 'text-orange-300' },
+  compliance: { label: 'Compliance', bg: 'bg-rose-500/20', text: 'text-rose-300' },
+  viewer: { label: 'Viewer', bg: 'bg-slate-500/20', text: 'text-slate-300' },
 }
 
 const statusDot = (status: string) => {
@@ -43,7 +57,7 @@ export function Sidebar() {
       try {
         const res = await apiClient.get('/projects')
         const data = res.data.projects || res.data || []
-        setProjects(data.map((p: any) => ({ id: p.id, name: p.name, status: p.status })))
+        setProjects(data.map((p: any) => ({ id: p.id, name: p.name, status: p.status, role: p.role || '' })))
       } catch {
         // No projects available
       }
@@ -92,7 +106,7 @@ export function Sidebar() {
           <div className="min-w-0 flex-1">
             <p className="text-slate-200 text-xs font-medium truncate">{userName}</p>
             <span className={`text-[10px] px-1.5 py-0.5 rounded ${isAdmin ? 'bg-violet-600/20 text-violet-300' : 'bg-emerald-500/20 text-emerald-300'}`}>
-              {isAdmin ? 'Admin' : 'GP'}
+              {isAdmin ? 'Admin' : (user?.project_roles?.[0]?.role ? (ROLE_LABELS[user.project_roles[0].role]?.label || user.project_roles[0].role) : 'Membro')}
             </span>
           </div>
         </div>
@@ -142,7 +156,11 @@ export function Sidebar() {
                       end
                     >
                       {statusDot(proj.status)}
-                      <span className="truncate text-xs">{proj.name}</span>
+                      <span className="truncate text-xs flex-1">{proj.name}</span>
+                      {proj.role && (() => {
+                        const rc = ROLE_LABELS[proj.role] || { label: proj.role, bg: 'bg-slate-500/20', text: 'text-slate-400' }
+                        return <span className={`text-[9px] px-1 py-0.5 rounded ${rc.bg} ${rc.text} flex-shrink-0`}>{rc.label}</span>
+                      })()}
                     </NavLink>
                     {isInProject && (
                       <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-700 pl-2">
