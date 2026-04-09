@@ -182,6 +182,26 @@ export function CodeGeneratorPage() {
   const isTestFile = selectedFile.includes('test') || selectedFile.includes('spec')
   const canEdit = isTestFile ? isDevOrQA : isDevOrQA
 
+  // OCG context para referência
+  const [ocgContext, setOcgContext] = useState<any>(null)
+
+  useEffect(() => {
+    if (!projectId) return
+    apiClient.get(`/projects/${projectId}/ocg`).then(res => {
+      const ocg = res.data?.ocg
+      if (ocg?.ocg_data) {
+        const data = typeof ocg.ocg_data === 'string' ? JSON.parse(ocg.ocg_data) : ocg.ocg_data
+        setOcgContext({
+          stack: data.STACK_RECOMMENDATION || {},
+          architecture: data.ARCHITECTURE_OVERVIEW || {},
+          testing: data.TESTING_REQUIREMENTS || {},
+          overall_score: ocg.overall_score,
+          status: ocg.status,
+        })
+      }
+    }).catch(() => {})
+  }, [projectId])
+
   // ================================================================
   // Load file tree
   // ================================================================
@@ -350,7 +370,28 @@ export function CodeGeneratorPage() {
   // ================================================================
 
   return (
-    <div className="flex h-[calc(100vh-64px)] overflow-hidden">
+    <div className="flex flex-col h-[calc(100vh-64px)] overflow-hidden">
+      {/* Contexto OCG */}
+      {ocgContext && (
+        <div className="flex items-center gap-4 px-4 py-1.5 bg-slate-900/80 border-b border-slate-800 text-xs">
+          <span className="text-slate-500">OCG:</span>
+          {ocgContext.stack?.backend && (
+            <span className="text-slate-400">Backend: <span className="text-blue-400">{ocgContext.stack.backend.language || ''} {ocgContext.stack.backend.framework || ''}</span></span>
+          )}
+          {ocgContext.stack?.frontend && (
+            <span className="text-slate-400">Frontend: <span className="text-emerald-400">{ocgContext.stack.frontend.framework || ''} {ocgContext.stack.frontend.language || ''}</span></span>
+          )}
+          {ocgContext.stack?.database && (
+            <span className="text-slate-400">DB: <span className="text-amber-400">{ocgContext.stack.database.primary || ''}</span></span>
+          )}
+          <span className={`ml-auto px-1.5 py-0.5 rounded text-xs ${
+            ocgContext.status === 'READY' ? 'bg-emerald-500/20 text-emerald-300' :
+            ocgContext.status === 'NEEDS_REVIEW' ? 'bg-amber-500/20 text-amber-300' :
+            'bg-red-500/20 text-red-300'
+          }`}>{ocgContext.overall_score?.toFixed(1) || '—'}</span>
+        </div>
+      )}
+      <div className="flex flex-1 overflow-hidden">
       {/* === EDITOR AREA (expande quando sidebar fecha) === */}
       <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${sidebarOpen ? 'mr-0' : ''}`}>
         {/* Toolbar */}
@@ -591,6 +632,7 @@ export function CodeGeneratorPage() {
             </p>
           </div>
         </div>
+      </div>
       </div>
     </div>
   )
