@@ -245,6 +245,32 @@ class ProjectExternalRepo(Base):
         return f"<ProjectExternalRepo {self.repo_url} ({self.status})>"
 
 
+class AIUsageLog(Base):
+    """Log de uso de IA por projeto — billing compartimentalizado"""
+    __tablename__ = "ai_usage_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    provider = Column(String(30), nullable=False)
+    model = Column(String(50), nullable=False)
+    operation = Column(String(50), nullable=False)
+    tokens_input = Column(Integer, nullable=False, default=0)
+    tokens_output = Column(Integer, nullable=False, default=0)
+    cost_usd = Column(Float, nullable=False, default=0)
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    metadata_json = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_ai_usage_project", project_id),
+        Index("idx_ai_usage_operation", project_id, operation),
+        Index("idx_ai_usage_created", created_at),
+    )
+
+    def __repr__(self):
+        return f"<AIUsageLog {self.provider}/{self.operation} ${self.cost_usd}>"
+
+
 class BacklogItem(Base):
     """Item do backlog vivo do projeto (spec seção 7.2)"""
     __tablename__ = "backlog_items"
@@ -609,6 +635,8 @@ class OCG(Base):
     # Versionamento (spec seção 8.1)
     version = Column(Integer, default=1, nullable=False)  # Versão incremental do OCG
     schema_version = Column(String(20), default="1.0.0", nullable=False)  # Versão do schema JSON
+    context_health = Column(Text, nullable=True, default="{}")  # JSON: {depth, confidence, quality}
+    change_type = Column(String(20), nullable=True, default="INITIAL")  # INITIAL, EXPAND, CONTRACT
 
     # Full OCG as JSON
     ocg_data = Column(String, nullable=False)  # JSON string - complete OCG object
