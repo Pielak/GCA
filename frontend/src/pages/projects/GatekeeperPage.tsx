@@ -47,7 +47,31 @@ export function GatekeeperPage() {
     const load = async () => {
       try {
         const res = await apiClient.get(`/projects/${id}/gatekeeper`)
-        setData(res.data)
+        const raw = res.data
+
+        // Mapear OCG pillar scores para o formato esperado pela página
+        const ocgScores = raw.ocg?.pillar_scores || {}
+        const ocgStatus = raw.ocg?.status || {}
+
+        const pillars: PillarResult[] = Object.entries(ocgScores).map(([name, score]: [string, any]) => ({
+          pillar: name,
+          score: typeof score === 'number' ? score : 0,
+          status: (typeof score === 'number' ? score : 0) >= 80 ? 'ok' : (typeof score === 'number' ? score : 0) >= 60 ? 'warning' : 'blocker',
+        }))
+
+        setData({
+          score: ocgStatus.overall_score || 0,
+          status: ocgStatus.status || 'needs_review',
+          pillars: pillars.length > 0 ? pillars : [],
+          // Dados do gatekeeper (items)
+          summary: raw.summary,
+          gaps: raw.gaps,
+          show_stoppers: raw.show_stoppers,
+          poor_definitions: raw.poor_definitions,
+          improvement_suggestions: raw.improvement_suggestions,
+          module_candidates: raw.module_candidates,
+          ocg_health: raw.ocg?.health || {},
+        } as any)
       } catch {
         setData(null)
       } finally {
@@ -65,8 +89,8 @@ export function GatekeeperPage() {
         <div className="flex items-center justify-center h-32 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="text-center">
             <Shield className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-            <p className="text-slate-500 text-sm">Gatekeeper não iniciado</p>
-            <p className="text-slate-600 text-xs mt-1">Inicie após a consolidação dos artefatos</p>
+            <p className="text-slate-500 text-sm">Gatekeeper — Aguardando Documentação</p>
+            <p className="text-slate-600 text-xs mt-1">O Gatekeeper será ativado quando documentos forem ingeridos e analisados pelo Arguidor</p>
           </div>
         </div>
       </div>

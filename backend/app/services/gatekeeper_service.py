@@ -76,6 +76,60 @@ class GatekeeperService:
             for s in show_stoppers if s.status == "pending" and s.item_data
         )
 
+        # Buscar dados do OCG para scores reais dos pilares
+        from app.models.base import OCG
+        ocg_result = await self.db.execute(
+            select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+        )
+        ocg = ocg_result.scalar_one_or_none()
+
+        ocg_scores = {}
+        ocg_status = None
+        ocg_health = {}
+        if ocg:
+            # Ler scores do ocg_data JSON (mais completo) com fallback para colunas individuais
+            ocg_data_scores = {}
+            if ocg.ocg_data:
+                try:
+                    od = json.loads(ocg.ocg_data)
+                    ps = od.get("PILLAR_SCORES", {})
+                    for key, val in ps.items():
+                        score = val.get("score", val) if isinstance(val, dict) else val
+                        ocg_data_scores[key] = score if isinstance(score, (int, float)) else 0
+                except (json.JSONDecodeError, AttributeError):
+                    pass
+
+            pillar_names = {
+                1: "P1_Negócio", 2: "P2_Compliance", 3: "P3_Escopo",
+                4: "P4_Performance", 5: "P5_Arquitetura", 6: "P6_Dados", 7: "P7_Segurança",
+            }
+            db_scores = [
+                ocg.p1_business_score, ocg.p2_rules_score, ocg.p3_features_score,
+                ocg.p4_nfr_score, ocg.p5_architecture_score, ocg.p6_data_score, ocg.p7_security_score,
+            ]
+
+            for i, (num, name) in enumerate(pillar_names.items()):
+                # Preferência: coluna DB (se > 0) → ocg_data JSON → 0
+                db_val = db_scores[i] or 0
+                json_val = 0
+                for k, v in ocg_data_scores.items():
+                    if f"P{num}" in k:
+                        json_val = v
+                        break
+                ocg_scores[name] = db_val if db_val > 0 else json_val
+            ocg_status = {
+                "overall_score": ocg.overall_score or 0,
+                "status": ocg.status,
+                "is_blocking": ocg.is_blocking,
+                "version": getattr(ocg, 'version', 1),
+                "change_type": getattr(ocg, 'change_type', 'INITIAL'),
+            }
+            if hasattr(ocg, 'context_health') and ocg.context_health:
+                try:
+                    ocg_health = json.loads(ocg.context_health)
+                except json.JSONDecodeError:
+                    pass
+
         return {
             "summary": {
                 "total_gaps": len(gaps),
@@ -89,6 +143,11 @@ class GatekeeperService:
                 "modules_approved": sum(1 for m in modules if m.status == "approved"),
                 "modules_rejected": sum(1 for m in modules if m.status == "rejected"),
                 "has_blockers": has_blockers,
+            },
+            "ocg": {
+                "pillar_scores": ocg_scores,
+                "status": ocg_status,
+                "health": ocg_health,
             },
             "gaps": [item_to_dict(g) for g in gaps],
             "show_stoppers": [item_to_dict(s) for s in show_stoppers],
