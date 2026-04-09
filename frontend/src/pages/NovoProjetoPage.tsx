@@ -16,7 +16,7 @@ export function NovoProjetoPage() {
   const [step, setStep] = useState<Step>('identify')
   const [gpEmail, setGpEmail] = useState('')
   const [gpName, setGpName] = useState('')
-  const [gpRole, setGpRole] = useState('gp')
+  const gpRole = 'gp'
   const [identifyLoading, setIdentifyLoading] = useState(false)
   const [identifyError, setIdentifyError] = useState<string | null>(null)
 
@@ -259,15 +259,9 @@ export function NovoProjetoPage() {
 
               <div>
                 <label className="block text-sm text-slate-300 font-medium mb-1.5">Seu papel</label>
-                <select
-                  value={gpRole} onChange={e => setGpRole(e.target.value)}
-                  className="w-full bg-dark-200 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
-                >
-                  <option value="gp">Gestor de Projeto (GP)</option>
-                  <option value="admin_gp">Admin + GP</option>
-                  <option value="tech_lead">Tech Lead</option>
-                  <option value="stakeholder">Stakeholder</option>
-                </select>
+                <div className="w-full bg-dark-200 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-400">
+                  Gerente de Projeto (GP)
+                </div>
               </div>
 
               <button
