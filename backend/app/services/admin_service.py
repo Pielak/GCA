@@ -114,6 +114,34 @@ class AdminService:
             self.db.add(onboarding)
             await self.db.commit()
 
+            # Notificar GP por email
+            try:
+                gp = await self.db.get(User, request.gp_id)
+                if gp:
+                    from app.services.email_service import EmailService
+                    EmailService.send_email(
+                        to_email=gp.email,
+                        subject=f"GCA — Projeto '{request.project_name}' aprovado!",
+                        html_content=f"""
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                            <div style="background: #1e1b4b; padding: 20px; border-radius: 12px 12px 0 0;">
+                                <h2 style="color: #c4b5fd; margin: 0;">Projeto Aprovado!</h2>
+                            </div>
+                            <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
+                                <p>Olá <strong>{gp.full_name}</strong>,</p>
+                                <p>Seu projeto <strong style="color: #a78bfa;">{request.project_name}</strong> foi aprovado pelo administrador do GCA.</p>
+                                <p>O ambiente do projeto já foi provisionado. Acesse o GCA para iniciar o onboarding:</p>
+                                <p><a href="https://gca.code-auditor.com.br/login" style="color: #a78bfa;">Acessar GCA</a></p>
+                                <hr style="border-color: #334155; margin: 20px 0;" />
+                                <p style="color: #64748b; font-size: 12px;">GCA — Gestão de Codificação Assistida</p>
+                            </div>
+                        </div>
+                        """,
+                    )
+                    logger.info("project.gp_notified", gp_email=gp.email, project=request.project_name)
+            except Exception as e:
+                logger.warning("project.gp_notification_failed", error=str(e))
+
             return request
 
         except Exception as e:
