@@ -13,4 +13,7 @@ __all__ = [
     "Questionnaire",
     "OCG",
     "OCGAnalysisLog",
+    "ProjectInvite",
+    "UserProjectContext",
+    "AuditLogGlobal",
 ]

@@ -161,6 +161,89 @@ class ProjectMember(Base):
         return f"<ProjectMember {self.user_id} -> {self.project_id}>"
 
 
+class ProjectInvite(Base):
+    """Convites de membros por projeto (spec seção 6 e 11)"""
+    __tablename__ = "project_invites"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    email = Column(String(255), nullable=False)
+    full_name = Column(String(255), nullable=True)
+    role = Column(String(50), nullable=False)  # project_role enum values
+    invited_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    invite_token = Column(String(255), unique=True, nullable=False)
+    status = Column(String(20), nullable=False, default="PENDING")  # PENDING, ACCEPTED, EXPIRED, REVOKED, CANCELLED
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    accepted_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", foreign_keys=[project_id])
+    inviter = relationship("User", foreign_keys=[invited_by_user_id])
+
+    __table_args__ = (
+        Index("idx_project_invites_project", project_id),
+        Index("idx_project_invites_email", email),
+        Index("idx_project_invites_token", invite_token),
+        Index("idx_project_invites_status", status),
+    )
+
+    def __repr__(self):
+        return f"<ProjectInvite {self.email} -> {self.project_id} ({self.status})>"
+
+
+class UserProjectContext(Base):
+    """Contexto ativo do usuário — qual projeto está selecionado (spec seção 4.2 e 11)"""
+    __tablename__ = "user_project_context"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
+    active_project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    last_selected_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    user = relationship("User", foreign_keys=[user_id])
+    project = relationship("Project", foreign_keys=[active_project_id])
+
+    __table_args__ = (
+        Index("idx_user_project_context_user", user_id),
+    )
+
+    def __repr__(self):
+        return f"<UserProjectContext user={self.user_id} project={self.active_project_id}>"
+
+
+class BacklogItem(Base):
+    """Item do backlog vivo do projeto (spec seção 7.2)"""
+    __tablename__ = "backlog_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    category = Column(String(50), nullable=False)  # modules, tests, compliance, security, agile, other
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    priority = Column(String(20), nullable=False, default="medium")  # critical, high, medium, low
+    status = Column(String(20), nullable=False, default="pending")  # pending, in_progress, done, blocked
+    source = Column(String(50), nullable=False, default="ocg")  # ocg, ingestion, gatekeeper, arguider, manual
+    source_version = Column(Integer, nullable=True)  # OCG version que gerou este item
+    dependencies = Column(Text, nullable=True)  # JSON array de backlog_item IDs
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    project = relationship("Project", foreign_keys=[project_id])
+
+    __table_args__ = (
+        Index("idx_backlog_project", project_id),
+        Index("idx_backlog_category", project_id, category),
+        Index("idx_backlog_status", project_id, status),
+        Index("idx_backlog_priority", project_id, priority),
+    )
+
+    def __repr__(self):
+        return f"<BacklogItem {self.title[:30]} ({self.category}/{self.priority})>"
+
+
 class AccessAttempt(Base):
     """Track unauthorized access attempts to projects"""
     __tablename__ = "access_attempts"

@@ -1045,6 +1045,19 @@ async def get_audit_log(
         return {"events": []}
 
 
+@router.get("/audit/verify-chain")
+async def verify_audit_chain(
+    current_user_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 500,
+):
+    """Verifica integridade da cadeia de auditoria (hash chain)."""
+    from app.services.audit_service import AuditService
+    audit = AuditService(db)
+    result = await audit.verify_chain(limit=limit)
+    return result
+
+
 # ============================================================================
 # Activity Log por Projeto (Admin sem papel)
 # ============================================================================

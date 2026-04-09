@@ -225,3 +225,56 @@ async def revoke_invite(
         )
 
     return {"message": "Convite revogado com sucesso", "invite_id": str(invite_id)}
+
+
+@router.post("/{project_id}/activate")
+async def activate_project_context(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Define o projeto como contexto ativo do usuário (spec seção 4.2).
+    O GP vê apenas seus projetos; ao clicar, define o contexto ativo.
+    """
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.models.base import ProjectMember, UserProjectContext
+
+    # Verificar membership
+    result = await db.execute(
+        select(ProjectMember).where(
+            (ProjectMember.project_id == project_id) &
+            (ProjectMember.user_id == current_user_id) &
+            (ProjectMember.is_active == True)
+        )
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não é membro deste projeto",
+        )
+
+    # Upsert contexto
+    ctx_result = await db.execute(
+        select(UserProjectContext).where(UserProjectContext.user_id == current_user_id)
+    )
+    ctx = ctx_result.scalar_one_or_none()
+
+    if ctx:
+        ctx.active_project_id = project_id
+        ctx.last_selected_at = datetime.now(timezone.utc)
+    else:
+        ctx = UserProjectContext(
+            user_id=current_user_id,
+            active_project_id=project_id,
+        )
+        db.add(ctx)
+
+    await db.commit()
+
+    logger.info("project.context_activated",
+                user_id=str(current_user_id),
+                project_id=str(project_id))
+
+    return {"active_project_id": str(project_id), "message": "Contexto ativo definido"}
