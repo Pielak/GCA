@@ -88,7 +88,8 @@ export function TesterReviewPage() {
     loadRole()
   }, [id, user])
 
-  const canEdit = user?.is_admin || ['tester', 'tech_lead'].includes(userRole)
+  // RBAC: Apenas Tester edita testes. Admin NÃO atua em projeto. QA NÃO edita.
+  const canEdit = userRole === 'tester'
 
   const loadTests = useCallback(async () => {
     if (!id) return

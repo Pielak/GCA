@@ -18,8 +18,15 @@ from app.models.base import TestArtifact, TestExecutionLog, User, ProjectMember
 
 logger = structlog.get_logger(__name__)
 
-EDIT_ROLES = {"tester", "admin", "tech_lead"}
-APPROVE_ROLES = {"tester", "admin", "gp", "qa"}
+# RBAC — regras definitivas (08/04/2026)
+# Admin NÃO atua em projeto, apenas administra plataforma
+# GP NÃO edita testes
+# Dev NÃO edita testes, NÃO aprova
+# Tester: edita, aprova, rejeita, executa, exporta
+# QA: executa, aprova resultados, exporta — NÃO edita conteúdo
+EDIT_ROLES = {"tester"}
+APPROVE_ROLES = {"tester", "qa"}
+EXECUTE_ROLES = {"tester", "qa", "dev"}
 
 
 class TesterReviewService:

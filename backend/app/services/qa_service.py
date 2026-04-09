@@ -20,7 +20,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from app.models.base import TestArtifact, TestExecutionLog, User
+from app.models.base import TestArtifact, TestExecutionLog, User, Project
 
 logger = structlog.get_logger(__name__)
 
@@ -77,7 +77,13 @@ class QAService:
         end = datetime.now(timezone.utc)
         duration_ms = int((end - start).total_seconds() * 1000)
 
-        # Gravar log no banco
+        # Buscar contexto do projeto para desnormalizar no log
+        project = await self.db.get(Project, artifact.project_id)
+
+        # Calcular aderência (passed = 100%, failed = 0%)
+        adherence = 100.0 if exec_result["status"] == "passed" else 0.0
+
+        # Gravar log no banco — REGRA: sempre, independente da vontade do usuário
         log_entry = TestExecutionLog(
             test_artifact_id=artifact.id,
             project_id=artifact.project_id,
@@ -91,6 +97,12 @@ class QAService:
             test_created_by=artifact.created_by,
             test_edited_by=artifact.last_edited_by,
             test_version_at_run=artifact.version,
+            # Contexto do projeto (desnormalizado)
+            project_code=str(project.id)[:8] if project else None,
+            project_name=project.name if project else None,
+            project_slug=project.slug if project else None,
+            test_type=artifact.test_type,
+            adherence_percent=adherence,
         )
         self.db.add(log_entry)
         await self.db.commit()
@@ -134,6 +146,11 @@ class QAService:
                 "module_name": log.module_name,
                 "function_name": log.function_name,
                 "test_version_at_run": log.test_version_at_run,
+                "project_code": log.project_code,
+                "project_name": log.project_name,
+                "project_slug": log.project_slug,
+                "test_type": log.test_type,
+                "adherence_percent": log.adherence_percent,
             }
             for log in logs
         ]
@@ -203,6 +220,11 @@ class QAService:
                 "module_name": log.module_name,
                 "function_name": log.function_name,
                 "test_version_at_run": log.test_version_at_run,
+                "project_code": log.project_code,
+                "project_name": log.project_name,
+                "project_slug": log.project_slug,
+                "test_type": log.test_type,
+                "adherence_percent": log.adherence_percent,
             }
             for log in logs
         ]
@@ -279,6 +301,10 @@ class QAService:
             } if artifact.last_edited_by else None,
             "test_version": artifact.version,
             "project_id": str(artifact.project_id),
+            "project_code": log.project_code,
+            "project_name": log.project_name,
+            "project_slug": log.project_slug,
+            "adherence_percent": log.adherence_percent,
             "output_summary": (log.output or "")[:200],
         }
 

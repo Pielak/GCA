@@ -858,6 +858,12 @@ class TestExecutionLog(Base):
     test_created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     test_edited_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     test_version_at_run = Column(Integer, nullable=False, default=1)
+    # Contexto do projeto (desnormalizado para rastreabilidade)
+    project_code = Column(String(50), nullable=True)
+    project_name = Column(String(255), nullable=True)
+    project_slug = Column(String(100), nullable=True)
+    test_type = Column(String(20), nullable=True)
+    adherence_percent = Column(Float, nullable=True)
 
     test_artifact = relationship("TestArtifact", foreign_keys=[test_artifact_id])
     project = relationship("Project", foreign_keys=[project_id])
