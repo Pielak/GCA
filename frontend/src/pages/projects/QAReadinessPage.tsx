@@ -48,16 +48,24 @@ export function QAReadinessPage() {
   const [results, setResults] = useState<TestExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [ocgTesting, setOcgTesting] = useState<any>(null);
 
   useEffect(() => {
     const load = async () => {
       try {
-        const [covRes, resRes] = await Promise.all([
+        const [covRes, resRes, ocgRes] = await Promise.all([
           apiClient.get(`/projects/${id}/qa/coverage`),
           apiClient.get(`/projects/${id}/qa/results`),
+          apiClient.get(`/projects/${id}/ocg`).catch(() => ({ data: {} })),
         ]);
         setCoverage(covRes.data);
         setResults(resRes.data);
+
+        const ocg = ocgRes.data?.ocg;
+        if (ocg?.ocg_data) {
+          const data = typeof ocg.ocg_data === 'string' ? JSON.parse(ocg.ocg_data) : ocg.ocg_data;
+          setOcgTesting(data.TESTING_REQUIREMENTS || null);
+        }
       } catch {
         setCoverage(null);
         setResults([]);
@@ -113,6 +121,27 @@ export function QAReadinessPage() {
           </h2>
           <p className="text-slate-500 text-sm mt-0.5">Planejamento e execução de testes em containers isolados por projeto</p>
         </div>
+      </div>
+
+      {/* Requisitos de testes do OCG */}
+      {ocgTesting && Object.keys(ocgTesting).length > 0 && (
+        <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl p-4">
+          <p className="text-slate-400 text-xs font-semibold mb-2">Requisitos de Testes (OCG)</p>
+          <div className="flex flex-wrap gap-2">
+            {Object.entries(ocgTesting).map(([key, val]: [string, any]) => (
+              <div key={key} className="px-2.5 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
+                <span className="text-violet-400 text-xs font-medium">{key.replace(/_/g, ' ')}</span>
+                {typeof val === 'object' && val?.coverage_target && (
+                  <span className="text-slate-500 text-xs ml-1.5">({val.coverage_target})</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-start justify-between">
+        <div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(`/projects/${id}/tester-review`)}
