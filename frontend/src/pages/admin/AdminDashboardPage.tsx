@@ -460,10 +460,67 @@ export function AdminDashboardPage() {
     try {
       const [metricsRes, pendingRes] = await Promise.all([
         apiClient.get('/admin/dashboard/metrics'),
-        apiClient.get('/admin/projects/pending').catch(() => ({ data: { count: 0 } })),
+        apiClient.get('/admin/projects/pending').catch(() => ({ data: { pending_count: 0 } })),
       ])
-      setMetrics({ ...emptyMetrics, ...(metricsRes.data || {}) })
-      setPendingCount(pendingRes.data?.count || 0)
+
+      // Mapear backend (data.summary.*) para frontend (totalProjects, activeProjects, etc.)
+      const raw = metricsRes.data?.data || metricsRes.data || {}
+      const summary = raw.summary || {}
+      const projects = raw.projects || []
+
+      // Status distribution
+      const statusCounts: Record<string, number> = {}
+      projects.forEach((p: any) => {
+        const s = p.status || 'draft'
+        statusCounts[s] = (statusCounts[s] || 0) + 1
+      })
+      const statusColors: Record<string, string> = { active: '#34d399', completed: '#60a5fa', archived: '#94a3b8', draft: '#64748b', degraded: '#fbbf24' }
+      const statusDistribution = Object.entries(statusCounts).map(([name, value]) => ({
+        name: name === 'active' ? 'Ativo' : name === 'completed' ? 'Concluído' : name === 'archived' ? 'Arquivado' : name === 'draft' ? 'Rascunho' : name,
+        value,
+        color: statusColors[name] || '#64748b',
+      }))
+
+      // Gatekeeper scores por projeto
+      const gatekeeperScores = projects
+        .filter((p: any) => (p.gatekeeper_score || 0) > 0)
+        .map((p: any) => ({
+          name: p.name || p.slug,
+          score: p.gatekeeper_score || 0,
+          fill: (p.gatekeeper_score || 0) >= 80 ? '#34d399' : (p.gatekeeper_score || 0) >= 60 ? '#fbbf24' : '#f87171',
+        }))
+
+      // Recent projects
+      const recentProjects = projects.slice(0, 5).map((p: any) => ({
+        id: p.id,
+        name: p.name || p.slug,
+        status: p.status || 'draft',
+        phase: p.phase || 1,
+        outputProfile: p.provisioning_status || '',
+      }))
+
+      // Recent audit
+      let recentAudit: any[] = []
+      try {
+        const auditRes = await apiClient.get('/admin/audit?limit=5')
+        recentAudit = (auditRes.data?.events || []).map((e: any) => ({
+          id: e.id, detail: e.action || e.detail, level: e.level || 'info', timestamp: e.timestamp,
+        }))
+      } catch { /* ignore */ }
+
+      setMetrics({
+        totalProjects: summary.total_projects || projects.length || 0,
+        activeProjects: summary.projects_active || 0,
+        degradedProjects: summary.projects_archived || 0,
+        totalUsers: summary.total_users || 0,
+        inactiveUsers: 0,
+        statusDistribution: statusDistribution.length > 0 ? statusDistribution : [],
+        gatekeeperScores,
+        recentProjects,
+        criticalCredentials: [],
+        recentAudit,
+      })
+      setPendingCount(pendingRes.data?.pending_count || 0)
     } catch {
       setMetrics(emptyMetrics)
     } finally {
