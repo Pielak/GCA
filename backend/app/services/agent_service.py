@@ -48,12 +48,74 @@ class AgentService:
     """Service para gerenciar os 8 agentes OCG.
     CAMADA GCA ADMIN — usa chave global configurada pelo admin.
     Não deve usar chave de projeto. Avalia questionários externos apenas.
+    Suporta múltiplos providers: Anthropic, DeepSeek, OpenAI (compatíveis).
     """
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        # Chave GCA Admin (global) — APENAS para pipeline OCG do questionário externo
-        self.client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        # Detectar provider configurado pelo admin
+        self.provider = settings.DEFAULT_AI_PROVIDER or "anthropic"
+        self.api_key = getattr(settings, f"{self.provider.upper()}_API_KEY", None) or settings.ANTHROPIC_API_KEY
+        self.model = getattr(settings, f"{self.provider.upper()}_MODEL", None) or settings.ANTHROPIC_MODEL
+
+        if self.provider == "anthropic" and self.api_key:
+            self.client = AsyncAnthropic(api_key=self.api_key)
+        else:
+            self.client = None  # Usará _call_llm via httpx
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> tuple[str, int]:
+        """Chamada unificada ao LLM — suporta Anthropic e OpenAI-compatible (DeepSeek, Grok, etc.)
+        Returns: (response_text, tokens_used)
+        """
+        import httpx
+
+        if self.provider == "anthropic" and self.client:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=getattr(settings, 'ANTHROPIC_TEMPERATURE', 0.3),
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            text = response.content[0].text
+            tokens = response.usage.input_tokens + response.usage.output_tokens
+            return text, tokens
+
+        # OpenAI-compatible (DeepSeek, Grok, OpenAI)
+        provider_urls = {
+            "deepseek": "https://api.deepseek.com/chat/completions",
+            "openai": "https://api.openai.com/v1/chat/completions",
+            "grok": "https://api.x.ai/v1/chat/completions",
+        }
+        url = provider_urls.get(self.provider)
+        if not url:
+            raise ValueError(f"Provider '{self.provider}' não suportado para OCG pipeline")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.3,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+
+        if resp.status_code not in (200, 201):
+            raise ValueError(f"LLM API error ({resp.status_code}): {resp.text[:300]}")
+
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        tokens = data.get("usage", {}).get("total_tokens", 0)
+        return text, tokens
 
     # ========== AGENT 0: ANALYZER ==========
 
@@ -92,24 +154,14 @@ class AgentService:
                 submitted_at=datetime.now(timezone.utc).isoformat(),
             )
 
-            # Chamar Claude
+            # Chamar LLM (Anthropic, DeepSeek, etc.)
             start_time = datetime.now(timezone.utc)
-            response = await self.client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+            response_text, tokens_used = await self._call_llm(
+                system_prompt=ANALYZER_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-                temperature=settings.ANTHROPIC_TEMPERATURE,
-                system=ANALYZER_SYSTEM_PROMPT,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    }
-                ],
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-
-            # Extrair JSON da resposta
-            response_text = response.content[0].text
             ocg_json = self._extract_json(response_text)
 
             # Normalizar classification: extrair apenas question IDs
@@ -134,7 +186,7 @@ class AgentService:
                 "agent.analyzer_success",
                 questionnaire_id=str(req.questionnaire_id),
                 pillars_found=len(result.classification),
-                tokens_used=response.usage.input_tokens + response.usage.output_tokens,
+                tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
 
@@ -203,24 +255,16 @@ Project Context:
 
 Return complete JSON analysis with score, classification, findings, and recommendations."""
 
-            # Chamar Claude
+            # Chamar LLM
             start_time = datetime.now(timezone.utc)
-            response = await self.client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+            response_text, tokens_used = await self._call_llm(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-                temperature=settings.ANTHROPIC_TEMPERATURE,
-                system=system_prompt,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    }
-                ],
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
             # Extrair JSON
-            response_text = response.content[0].text
             ocg_json = self._extract_json(response_text)
 
             result = PillarAgentResponse(
@@ -239,7 +283,7 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 pillar_id=pillar_id,
                 questionnaire_id=str(req.questionnaire_id),
                 score=result.score,
-                tokens_used=response.usage.input_tokens + response.usage.output_tokens,
+                tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
 
@@ -369,24 +413,16 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 pillar_results_json=json.dumps(pillar_json, ensure_ascii=False, indent=2, cls=UUIDEncoder),
             )
 
-            # Chamar Claude
+            # Chamar LLM
             start_time = datetime.now(timezone.utc)
-            response = await self.client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+            response_text, tokens_used = await self._call_llm(
+                system_prompt=CONSOLIDATOR_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-                temperature=settings.ANTHROPIC_TEMPERATURE,
-                system=CONSOLIDATOR_SYSTEM_PROMPT,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    }
-                ],
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
             # Extrair JSON
-            response_text = response.content[0].text
             ocg_json = self._extract_json(response_text)
 
             # Construir OCGResponse
@@ -415,7 +451,7 @@ Return complete JSON analysis with score, classification, findings, and recommen
             await self.log_analysis(
                 ocg_id=ocg_response.ocg_id,
                 agent_name="consolidator",
-                tokens_used=response.usage.input_tokens + response.usage.output_tokens,
+                tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
 
@@ -425,7 +461,7 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 ocg_id=str(ocg_response.ocg_id),
                 overall_score=ocg_response.COMPOSITE_SCORE.get("overall", 0),
                 is_blocking=ocg_response.COMPOSITE_SCORE.get("is_blocking", False),
-                tokens_used=response.usage.input_tokens + response.usage.output_tokens,
+                tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
 

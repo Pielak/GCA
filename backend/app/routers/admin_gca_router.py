@@ -191,13 +191,18 @@ async def _load_ai_providers_from_db(db):
         for pid, config in _ai_providers.items():
             api_key = config.get("api_key")
             if api_key:
+                # Setar API key (criar atributo se não existir)
                 key_attr = f"{pid.upper()}_API_KEY"
-                if hasattr(settings, key_attr):
-                    object.__setattr__(settings, key_attr, api_key)
+                object.__setattr__(settings, key_attr, api_key)
+            model = config.get("model")
+            if model:
+                # Setar modelo do provider
+                model_attr = f"{pid.upper()}_MODEL"
+                object.__setattr__(settings, model_attr, model)
             if config.get("is_default"):
                 object.__setattr__(settings, "DEFAULT_AI_PROVIDER", pid)
-                if config.get("model"):
-                    object.__setattr__(settings, "DEFAULT_AI_MODEL", config["model"])
+                if model:
+                    object.__setattr__(settings, "DEFAULT_AI_MODEL", model)
 
         logger.info("admin_gca.ai_providers_loaded_from_db", count=len(rows))
 

@@ -186,6 +186,54 @@ async def consolidate_ocg(
         )
 
 
+# ========== OCG GENERATION ENDPOINT (Pipeline completo) ==========
+
+from pydantic import BaseModel
+
+class OCGGenerateRequest(BaseModel):
+    questionnaire_id: UUID
+    project_id: UUID = None
+
+@router.post("/agents/ocg/generate")
+async def generate_ocg(
+    req: OCGGenerateRequest,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Executa pipeline completo de 8 agentes para gerar OCG a partir do questionário.
+    Usa o provider padrão configurado pelo admin (DeepSeek, Anthropic, etc.)."""
+    try:
+        # Carregar chaves do admin do banco (system_settings) para runtime
+        from app.routers.admin_gca_router import _load_ai_providers_from_db
+        await _load_ai_providers_from_db(db)
+
+        from app.services.ocg_service import OCGService
+        service = OCGService(db)
+        ocg_response = await service.generate_ocg_from_questionnaire(
+            questionnaire_id=req.questionnaire_id,
+            project_id=req.project_id,
+        )
+
+        logger.info("agents.ocg_generated",
+                    questionnaire_id=str(req.questionnaire_id),
+                    project_id=str(req.project_id),
+                    ocg_id=str(ocg_response.ocg_id))
+
+        return {
+            "success": True,
+            "ocg_id": str(ocg_response.ocg_id),
+            "overall_score": ocg_response.COMPOSITE_SCORE.get("overall", 0),
+            "is_blocking": ocg_response.COMPOSITE_SCORE.get("is_blocking", False),
+            "message": "OCG gerado com sucesso",
+        }
+    except Exception as e:
+        logger.error("agents.ocg_generate_error", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao gerar OCG: {str(e)}",
+        )
+
+
 # ========== OCG RETRIEVAL ENDPOINT ==========
 
 @router.get("/ocg/{ocg_id}", response_model=OCGResponse)
