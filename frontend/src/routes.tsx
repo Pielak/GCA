@@ -15,6 +15,7 @@ import { ProjectTeamPage } from './app/pages/projects/ProjectTeamPage';
 import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
+import { RepositoryPage } from './pages/projects/RepositoryPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
 import { ArguiderPage } from './pages/projects/ArguiderPage';
 import { CodeGeneratorPage } from './pages/projects/CodeGeneratorPage';
@@ -80,6 +81,7 @@ export const router = createBrowserRouter([
           { path: 'team', Component: ProjectTeamPage },
           { path: 'ocg', Component: OCGPage },
           { path: 'questionnaire', Component: QuestionnairePage },
+          { path: 'repository', Component: RepositoryPage },
           { path: 'external-repos', Component: ExternalReposPage },
           { path: 'ingestion', Component: IngestionPage },
           { path: 'gatekeeper', Component: GatekeeperPage },

@@ -22,6 +22,7 @@ const MODULES = [
   { path: '', label: 'Dashboard', icon: Activity, end: true },
   { path: 'ocg', label: 'OCG', icon: Settings },
   { path: 'questionnaire', label: 'Questionário', icon: ClipboardList },
+  { path: 'repository', label: 'Repositório', icon: Shield },
   { path: 'external-repos', label: 'Repos Externos', icon: GitBranch },
   { path: 'ingestion', label: 'Ingestão', icon: FileText },
   { path: 'gatekeeper', label: 'Gatekeeper', icon: Shield },
