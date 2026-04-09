@@ -18,7 +18,7 @@ router = APIRouter()
 # Request/Response Models
 class SubmitQuestionnaireRequest(BaseModel):
     """Request: Submit technical questionnaire"""
-    project_id: UUID
+    project_id: Optional[UUID] = None
     gp_email: str
     responses: Dict[str, Any]
 
@@ -26,7 +26,7 @@ class SubmitQuestionnaireRequest(BaseModel):
 class SubmitQuestionnaireResponse(BaseModel):
     """Response: Questionnaire submitted"""
     questionnaire_id: str
-    project_id: str
+    project_id: Optional[str] = None
     status: str = "pending"
     submission_date: str
     message: str = "Questionário submetido para análise. Você receberá um email com o resultado"

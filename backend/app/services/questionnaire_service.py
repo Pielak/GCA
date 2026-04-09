@@ -21,33 +21,34 @@ class QuestionnaireService:
     @staticmethod
     async def submit_questionnaire(
         db: AsyncSession,
-        project_id: UUID,
+        project_id: Optional[UUID],
         gp_email: str,
         responses: Dict[str, Any],
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Submit technical questionnaire for n8n analysis.
         Returns (success, questionnaire_id, error_message)
-        
-        Note: Requires Questionnaire model in database (future implementation)
-        For now, we return success and simulate questionnaire_id
+
+        project_id pode ser None quando o questionário é submetido
+        pelo fluxo externo (NovoProjetoPage) antes do projeto existir.
         """
         try:
-            # Verify project exists
-            result = await db.execute(
-                select(Project).where(Project.id == project_id)
-            )
-            project = result.scalar_one_or_none()
-            if not project:
-                logger.warning("questionnaire.project_not_found", project_id=str(project_id))
-                return False, None, "Projeto não encontrado"
+            # Verify project exists (only if project_id provided)
+            if project_id:
+                result = await db.execute(
+                    select(Project).where(Project.id == project_id)
+                )
+                project = result.scalar_one_or_none()
+                if not project:
+                    logger.warning("questionnaire.project_not_found", project_id=str(project_id))
+                    return False, None, "Projeto não encontrado"
 
-            # Verify GP exists
+            # Verify GP exists (optional — external flow may not have user yet)
             result = await db.execute(
                 select(User).where(User.email == gp_email)
             )
             gp_user = result.scalar_one_or_none()
-            if not gp_user:
+            if not gp_user and project_id:
                 logger.warning("questionnaire.gp_not_found", email=gp_email)
                 return False, None, "Gestor de Projeto não encontrado"
 
