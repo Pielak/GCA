@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import structlog
 
-from app.models.base import Questionnaire
+from app.models.base import Questionnaire, OCG, OCGDeltaLog
 from app.schemas.ocg import (
     AnalyzerRequest,
     PillarAgentRequest,
@@ -155,6 +155,42 @@ class OCGService:
                 error=str(e),
             )
             raise
+
+    async def get_next_version(self, project_id: UUID) -> int:
+        """Retorna a próxima versão do OCG para o projeto"""
+        result = await self.db.execute(
+            select(OCG.version)
+            .where(OCG.project_id == project_id)
+            .order_by(OCG.version.desc())
+            .limit(1)
+        )
+        current = result.scalar_one_or_none()
+        return (current or 0) + 1
+
+    async def log_delta(
+        self,
+        project_id: UUID,
+        document_id: UUID,
+        version_from: int,
+        version_to: int,
+        fields_changed: dict,
+    ):
+        """Registra mudança no OCG causada por ingestão"""
+        delta = OCGDeltaLog(
+            project_id=project_id,
+            document_id=document_id,
+            ocg_version_from=version_from,
+            ocg_version_to=version_to,
+            fields_changed=json.dumps(fields_changed, default=str),
+            change_summary=f"OCG v{version_from} → v{version_to}",
+        )
+        self.db.add(delta)
+        await self.db.commit()
+
+        logger.info("ocg.delta_logged",
+                    project_id=str(project_id),
+                    version_from=version_from,
+                    version_to=version_to)
 
     async def send_ocg_notification(
         self,

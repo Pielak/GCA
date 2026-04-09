@@ -198,3 +198,30 @@ async def accept_invite(
         )
 
     return AcceptInviteResponse(**project_info)
+
+
+@router.post("/{project_id}/invites/{invite_id}/revoke")
+async def revoke_invite(
+    project_id: UUID,
+    invite_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Revoga convite pendente (somente GP do projeto).
+    Spec seção 6.1: revogar convite antes de ser aceito.
+    """
+    success, error = await ProjectTeamService.revoke_invite(
+        db=db,
+        project_id=project_id,
+        invite_id=invite_id,
+        gp_user_id=current_user_id,
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error,
+        )
+
+    return {"message": "Convite revogado com sucesso", "invite_id": str(invite_id)}

@@ -100,14 +100,15 @@ async def setup_complete(payload: SetupPayload, db: AsyncSession = Depends(get_d
                 "user": payload.smtp_user,
             }
 
-        audit = GlobalAuditLog(
+        from app.services.audit_service import AuditService
+        audit_svc = AuditService(db)
+        await audit_svc.log_event(
             event_type="system.setup_completed",
             actor_id=user.id,
             actor_email=payload.admin_email,
             resource_type="system",
-            details=json.dumps(config_details),
+            details=config_details,
         )
-        db.add(audit)
 
         await db.commit()
 

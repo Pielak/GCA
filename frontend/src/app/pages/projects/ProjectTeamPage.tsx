@@ -20,14 +20,15 @@ interface TeamMember {
   joined_at: string
 }
 
-type InviteRole = 'tech_lead' | 'dev_senior' | 'dev_pleno' | 'qa' | 'compliance'
+type InviteRole = 'tech_lead' | 'dev_senior' | 'dev_pleno' | 'qa' | 'compliance' | 'stakeholder'
 
 const ROLE_OPTIONS: { value: InviteRole; label: string }[] = [
   { value: 'tech_lead', label: 'Tech Lead' },
   { value: 'dev_senior', label: 'Dev Senior' },
   { value: 'dev_pleno', label: 'Dev Pleno' },
   { value: 'qa', label: 'QA' },
-  { value: 'compliance', label: 'Compliance' },
+  { value: 'compliance', label: 'Compliance / Segurança' },
+  { value: 'stakeholder', label: 'Stakeholder / Gestão' },
 ]
 
 const ROLE_COLORS: Record<string, string> = {
@@ -37,6 +38,7 @@ const ROLE_COLORS: Record<string, string> = {
   dev_pleno: 'bg-slate-600/20 text-slate-300 border-slate-600/30',
   qa: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
   compliance: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
+  stakeholder: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
 }
 
 function getRoleLabel(role: string): string {

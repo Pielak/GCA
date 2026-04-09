@@ -136,13 +136,16 @@ class ProjectMember(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    role = Column(String(50), nullable=False)  # gp, tech_lead, dev, qa, compliance, viewer
+    role = Column(String(50), nullable=False)  # gp, tech_lead, dev_senior, dev_pleno, qa, compliance, stakeholder, viewer
     invited_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     invite_token = Column(String(255), unique=True, nullable=True)
     invite_expires_at = Column(DateTime(timezone=True), nullable=True)
+    full_name = Column(String(255), nullable=True)  # Nome do convidado (preenchido no convite)
+    is_active = Column(Boolean, default=True, nullable=False)  # False = revogado
     invited_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     accepted_at = Column(DateTime(timezone=True), nullable=True)
     joined_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     project = relationship("Project", back_populates="members")
@@ -390,16 +393,23 @@ class GlobalAuditLog(Base):
     resource_type = Column(String(100), nullable=False)
     resource_id = Column(UUID(as_uuid=True), nullable=True)
     details = Column(String, nullable=True)  # JSON field in real DB
-    previous_hash = Column(String(64), nullable=True)  # For chain integrity
+    previous_hash = Column(String(64), nullable=True)  # Hash do registro anterior
+    current_hash = Column(String(64), nullable=False)   # Hash deste registro (chain integrity)
+    correlation_id = Column(UUID(as_uuid=True), nullable=True, index=True)  # Vincula eventos relacionados
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
 
     __table_args__ = (
         Index("idx_audit_log_event_type", event_type),
         Index("idx_audit_log_created_at", created_at),
+        Index("idx_audit_log_correlation", correlation_id),
     )
 
     def __repr__(self):
         return f"<GlobalAuditLog {self.event_type} {self.resource_type}>"
+
+
+# Alias para compatibilidade
+AuditLogGlobal = GlobalAuditLog
 
 
 class Questionnaire(Base):
@@ -466,6 +476,10 @@ class OCG(Base):
     overall_score = Column(Float, nullable=True, index=True)
     status = Column(String(50), default="READY", nullable=False, index=True)  # READY, NEEDS_REVIEW, AT_RISK, BLOCKED
     is_blocking = Column(Boolean, default=False, nullable=False, index=True)
+
+    # Versionamento (spec seção 8.1)
+    version = Column(Integer, default=1, nullable=False)  # Versão incremental do OCG
+    schema_version = Column(String(20), default="1.0.0", nullable=False)  # Versão do schema JSON
 
     # Full OCG as JSON
     ocg_data = Column(String, nullable=False)  # JSON string - complete OCG object
@@ -620,6 +634,9 @@ class IngestedDocument(Base):
     file_hash = Column(String(64), nullable=False)  # SHA256
     file_size_bytes = Column(Integer, nullable=False)
     uploaded_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    quarantine_status = Column(String(20), nullable=False, default="none")  # none, quarantined, released, rejected
+    pii_detected = Column(Boolean, nullable=False, default=False)
+    pii_fields = Column(Text, nullable=True)  # JSON: lista de campos PII detectados
     arguider_status = Column(String(20), nullable=False, default="pending")  # pending, processing, completed, error
     arguider_started_at = Column(DateTime(timezone=True), nullable=True)
     arguider_completed_at = Column(DateTime(timezone=True), nullable=True)

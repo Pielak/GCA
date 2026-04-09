@@ -1016,9 +1016,9 @@ async def get_audit_log(
 ):
     """Get global audit log entries."""
     try:
-        from app.models.base import AuditLogGlobal
+        from app.models.base import GlobalAuditLog
         result = await db.execute(
-            select(AuditLogGlobal).order_by(AuditLogGlobal.created_at.desc()).offset(skip).limit(limit)
+            select(GlobalAuditLog).order_by(GlobalAuditLog.created_at.desc()).offset(skip).limit(limit)
         )
         events = result.scalars().all()
         return {
@@ -1033,8 +1033,9 @@ async def get_audit_log(
                     "target": e.resource_type or "",
                     "projectId": str(e.resource_id) if e.resource_id else None,
                     "projectName": None,
-                    "hash": e.previous_hash or "",
-                    "prevHash": "",
+                    "hash": e.current_hash or "",
+                    "prevHash": e.previous_hash or "",
+                    "correlationId": str(e.correlation_id) if e.correlation_id else None,
                     "timestamp": e.created_at.isoformat() if e.created_at else "",
                 }
                 for e in events

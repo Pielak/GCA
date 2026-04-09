@@ -26,6 +26,7 @@ const ROLE_LABELS: Record<string, { label: string; bg: string; text: string }> =
   qa: { label: 'QA', bg: 'bg-amber-500/20', text: 'text-amber-300' },
   tester: { label: 'Tester', bg: 'bg-orange-500/20', text: 'text-orange-300' },
   compliance: { label: 'Compliance', bg: 'bg-rose-500/20', text: 'text-rose-300' },
+  stakeholder: { label: 'Stakeholder', bg: 'bg-indigo-500/20', text: 'text-indigo-300' },
   viewer: { label: 'Viewer', bg: 'bg-slate-500/20', text: 'text-slate-300' },
 }
 

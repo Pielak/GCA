@@ -234,3 +234,51 @@ class ProjectTeamService:
             await db.rollback()
             logger.error("project_team.accept_invite_failed", error=str(e))
             return False, None, str(e)
+
+    @staticmethod
+    async def revoke_invite(
+        db: AsyncSession,
+        project_id: UUID,
+        invite_id: UUID,
+        gp_user_id: UUID,
+    ) -> Tuple[bool, Optional[str]]:
+        """Revoga convite pendente (somente GP pode revogar)"""
+        try:
+            # Verificar que quem revoga é GP do projeto
+            result = await db.execute(
+                select(ProjectMember).where(
+                    (ProjectMember.project_id == project_id) &
+                    (ProjectMember.user_id == gp_user_id) &
+                    (ProjectMember.role == "gp")
+                )
+            )
+            if not result.scalar_one_or_none():
+                return False, "Apenas GPs podem revogar convites"
+
+            # Buscar convite
+            invite = await db.get(ProjectMember, invite_id)
+            if not invite or invite.project_id != project_id:
+                return False, "Convite não encontrado"
+
+            if invite.accepted_at:
+                return False, "Convite já foi aceito — não pode ser revogado"
+
+            if not invite.is_active:
+                return False, "Convite já foi revogado"
+
+            # Revogar
+            invite.is_active = False
+            invite.revoked_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            logger.info("project_team.invite_revoked",
+                       invite_id=str(invite_id),
+                       project_id=str(project_id),
+                       revoked_by=str(gp_user_id))
+
+            return True, None
+
+        except Exception as e:
+            await db.rollback()
+            logger.error("project_team.revoke_failed", error=str(e))
+            return False, str(e)

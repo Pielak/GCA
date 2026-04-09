@@ -77,6 +77,10 @@ class IngestionService:
         # Gerar filename único
         filename = f"{uuid4()}.{ext}"
 
+        # PII detection — triagem básica no conteúdo textual
+        pii_detected, pii_fields = self._detect_pii(file_bytes, file_type)
+        quarantine_status = "quarantined" if pii_detected else "none"
+
         # Criar registro
         document = IngestedDocument(
             project_id=project_id,
@@ -86,7 +90,10 @@ class IngestionService:
             file_hash=file_hash,
             file_size_bytes=len(file_bytes),
             uploaded_by=uploaded_by,
-            arguider_status="pending",
+            quarantine_status=quarantine_status,
+            pii_detected=pii_detected,
+            pii_fields=json.dumps(pii_fields) if pii_fields else None,
+            arguider_status="pending" if not pii_detected else "quarantined",
             git_file_path=f"docs/ingested/uncategorized/{filename}",
         )
         self.db.add(document)
@@ -94,7 +101,21 @@ class IngestionService:
 
         doc_id = document.id
 
-        # Disparar análise assíncrona
+        if pii_detected:
+            logger.warning(
+                "ingestion.pii_detected_quarantined",
+                document_id=str(doc_id),
+                pii_fields=pii_fields,
+            )
+            return {
+                "document_id": str(doc_id),
+                "quarantined": True,
+                "pii_fields": pii_fields,
+                "message": "Documento em quarentena — PII detectado. Requer decisão explícita.",
+                "status_code": 200,
+            }
+
+        # Disparar análise assíncrona (somente se não quarentenado)
         asyncio.create_task(
             self._analyze_async(doc_id, project_id, file_bytes, file_type)
         )
@@ -113,6 +134,37 @@ class IngestionService:
             "status": "pending",
             "message": "Documento recebido. Análise iniciada.",
         }
+
+    @staticmethod
+    def _detect_pii(file_bytes: bytes, file_type: str) -> tuple[bool, list[str]]:
+        """Triagem básica de PII em conteúdo textual.
+        Detecta padrões comuns: CPF, CNPJ, email pessoal, telefone, cartão de crédito.
+        """
+        import re
+
+        # Só analisa tipos textuais
+        if file_type in ("image", "spreadsheet"):
+            return False, []
+
+        try:
+            text = file_bytes.decode("utf-8", errors="ignore")[:100_000]  # primeiros 100KB
+        except Exception:
+            return False, []
+
+        pii_patterns = {
+            "cpf": r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b",
+            "cnpj": r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b",
+            "email_pessoal": r"\b[a-zA-Z0-9._%+-]+@(gmail|hotmail|yahoo|outlook)\.[a-zA-Z]{2,}\b",
+            "telefone_br": r"\b\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b",
+            "cartao_credito": r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
+        }
+
+        detected = []
+        for field_name, pattern in pii_patterns.items():
+            if re.search(pattern, text):
+                detected.append(field_name)
+
+        return len(detected) > 0, detected
 
     async def _analyze_async(
         self,
@@ -161,6 +213,32 @@ class IngestionService:
                     current_ocg=current_ocg,
                     previous_analyses=prev_analyses,
                 )
+
+                # Marcar documento como analisado com OCG atualizado
+                doc = await db.get(IngestedDocument, document_id)
+                if doc and doc.arguider_status == "completed":
+                    doc.ocg_updated = True
+                    await db.commit()
+
+                    # Registrar evento DOCUMENT_INGESTED
+                    from app.services.audit_service import AuditService
+                    audit = AuditService(db)
+                    await audit.log_event(
+                        event_type="DOCUMENT_INGESTED",
+                        resource_type="ingested_document",
+                        resource_id=document_id,
+                        details={
+                            "project_id": str(project_id),
+                            "filename": doc.original_filename,
+                            "file_type": doc.file_type,
+                            "ocg_updated": True,
+                        },
+                    )
+                    await db.commit()
+
+                    logger.info("ingestion.analysis_complete_ocg_updated",
+                               document_id=str(document_id),
+                               project_id=str(project_id))
 
         except Exception as e:
             logger.error("ingestion.analysis_async_error", document_id=str(document_id), error=str(e))

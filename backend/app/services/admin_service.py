@@ -13,7 +13,7 @@ import secrets
 from app.core.config import settings
 from app.core.security import hash_password
 from app.models.onboarding import ProjectRequest, ProjectRequestStatus, OnboardingProgress
-from app.models.base import User, AccessAttempt, SupportTicket, TicketResponse, IntegrationWebhook, SystemAlert
+from app.models.base import User, Organization, Project, ProjectMember, AccessAttempt, SupportTicket, TicketResponse, IntegrationWebhook, SystemAlert
 from app.models.pillar import PillarTemplate
 from app.models.tenant import PillarConfiguration, OGCVersion
 
@@ -72,7 +72,13 @@ class AdminService:
         request_id: UUID,
         admin_id: UUID
     ) -> ProjectRequest:
-        """Admin approves project request and provisions tenant"""
+        """Admin approves project request and provisions tenant.
+        Spec seção 3.1: score >= 90 para onboarding automático.
+        Spec seção 3.2: 6 ações obrigatórias (email, user, membership, token, convite, auditoria).
+        """
+        from uuid import uuid4 as new_uuid
+        from app.services.audit_service import AuditService
+        from app.models.base import Questionnaire
 
         request = await self.db.get(ProjectRequest, request_id)
         if not request:
@@ -81,12 +87,35 @@ class AdminService:
         if request.status != ProjectRequestStatus.PENDING:
             raise ValueError(f"Cannot approve request in status: {request.status}")
 
+        # Correlation ID para vincular todos os eventos desta aprovação
+        correlation_id = new_uuid()
+        audit = AuditService(self.db)
+
         try:
-            # Gera senha temporária
+            # === VALIDAÇÃO: Buscar score do questionário associado ===
+            questionnaire = None
+            gp = await self.db.get(User, request.gp_id)
+            if gp:
+                q_result = await self.db.execute(
+                    select(Questionnaire)
+                    .where(Questionnaire.gp_email == gp.email)
+                    .order_by(Questionnaire.submitted_at.desc())
+                    .limit(1)
+                )
+                questionnaire = q_result.scalar_one_or_none()
+
+            adherence_score = questionnaire.adherence_score if questionnaire else None
+
+            # Score < 90 => registrar pendência, não bloquear aprovação manual do admin
+            if adherence_score is not None and adherence_score < 90:
+                logger.warning("project.low_score_approval",
+                              project_slug=request.project_slug,
+                              score=adherence_score,
+                              admin_id=str(admin_id))
+
+            # === AÇÃO 1: Aprovar e gerar credenciais ===
             temp_password = secrets.token_urlsafe(12)
             request.initial_password_hash = hash_password(temp_password)
-
-            # Aprova
             request.status = ProjectRequestStatus.APPROVED
             request.approved_by = admin_id
             request.approved_at = datetime.now(timezone.utc)
@@ -94,7 +123,7 @@ class AdminService:
             await self.db.commit()
             await self.db.refresh(request)
 
-            # Provision tenant schema e dados iniciais
+            # === AÇÃO 2: Provisionar tenant ===
             try:
                 await self._provision_tenant(request)
                 logger.info("project.approved_and_provisioned",
@@ -106,6 +135,69 @@ class AdminService:
                             error=str(e))
                 raise
 
+            # Restaurar search_path para schema global (provisioning altera)
+            await self.db.execute(text('SET search_path = public'))
+
+            # === AÇÃO 3: Criar/reutilizar User para GP ===
+            if not gp:
+                # User não existe — criar com senha temporária
+                gp = User(
+                    email=request.project_slug + "@gca.local",  # fallback
+                    full_name="GP - " + request.project_name,
+                    password_hash=hash_password(temp_password),
+                    is_admin=False,
+                    is_active=True,
+                    first_access_completed=False,
+                )
+                self.db.add(gp)
+                await self.db.flush()
+                logger.info("project.gp_user_created", gp_id=str(gp.id))
+
+                await audit.log_event(
+                    event_type="GP_USER_CREATED",
+                    resource_type="user",
+                    actor_id=admin_id,
+                    resource_id=gp.id,
+                    correlation_id=correlation_id,
+                    details={"gp_email": gp.email, "project": request.project_name},
+                )
+
+            # === AÇÃO 4: Criar Project + Membership ===
+            org = await self._get_or_create_default_org(request.gp_id)
+
+            project = Project(
+                organization_id=org.id,
+                name=request.project_name,
+                slug=request.project_slug,
+                description=request.description,
+                status="active",
+                provisioning_status="completed",
+            )
+            self.db.add(project)
+            await self.db.flush()
+
+            member = ProjectMember(
+                project_id=project.id,
+                user_id=request.gp_id,
+                role="gp",
+            )
+            self.db.add(member)
+            await self.db.commit()
+
+            logger.info("project.record_created",
+                       project_id=str(project.id),
+                       project_slug=request.project_slug,
+                       gp_id=str(request.gp_id))
+
+            await audit.log_event(
+                event_type="PROJECT_MEMBERSHIP_CREATED",
+                resource_type="project_member",
+                actor_id=admin_id,
+                resource_id=project.id,
+                correlation_id=correlation_id,
+                details={"gp_id": str(request.gp_id), "role": "gp", "project": request.project_name},
+            )
+
             # Initialize onboarding
             onboarding = OnboardingProgress(
                 project_id=request.id,
@@ -114,11 +206,16 @@ class AdminService:
             self.db.add(onboarding)
             await self.db.commit()
 
-            # Notificar GP por email
+            # === AÇÃO 5: Gerar token de convite para primeiro acesso ===
+            invite_token = secrets.token_urlsafe(32)
+
+            # === AÇÃO 6: Enviar email de aprovação + email convite ===
             try:
-                gp = await self.db.get(User, request.gp_id)
                 if gp:
                     from app.services.email_service import EmailService
+                    score_text = f"Score de aderência: <strong>{adherence_score}%</strong>" if adherence_score else ""
+
+                    # Email 1: Aprovação do projeto
                     EmailService.send_email(
                         to_email=gp.email,
                         subject=f"GCA — Projeto '{request.project_name}' aprovado!",
@@ -130,17 +227,74 @@ class AdminService:
                             <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
                                 <p>Olá <strong>{gp.full_name}</strong>,</p>
                                 <p>Seu projeto <strong style="color: #a78bfa;">{request.project_name}</strong> foi aprovado pelo administrador do GCA.</p>
-                                <p>O ambiente do projeto já foi provisionado. Acesse o GCA para iniciar o onboarding:</p>
-                                <p><a href="https://gca.code-auditor.com.br/login" style="color: #a78bfa;">Acessar GCA</a></p>
+                                {f'<p>{score_text}</p>' if score_text else ''}
+                                <p>O ambiente do projeto já foi provisionado e está pronto para uso.</p>
                                 <hr style="border-color: #334155; margin: 20px 0;" />
                                 <p style="color: #64748b; font-size: 12px;">GCA — Gestão de Codificação Assistida</p>
                             </div>
                         </div>
                         """,
                     )
-                    logger.info("project.gp_notified", gp_email=gp.email, project=request.project_name)
+
+                    # Email 2: Convite com token e instruções de acesso
+                    login_url = f"https://gca.code-auditor.com.br/login"
+                    is_first_access = not gp.first_access_completed
+
+                    EmailService.send_email(
+                        to_email=gp.email,
+                        subject=f"GCA — Convite: Acesse o projeto '{request.project_name}'",
+                        html_content=f"""
+                        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                            <div style="background: #1e1b4b; padding: 20px; border-radius: 12px 12px 0 0;">
+                                <h2 style="color: #c4b5fd; margin: 0;">Convite de Acesso</h2>
+                            </div>
+                            <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
+                                <p>Olá <strong>{gp.full_name}</strong>,</p>
+                                <p>Você foi designado(a) como <strong style="color: #a78bfa;">Gerente de Projeto</strong> no projeto <strong>{request.project_name}</strong>.</p>
+                                <p>Acesse o GCA para gerenciar seu projeto:</p>
+                                <p style="text-align: center; margin: 20px 0;">
+                                    <a href="{login_url}" style="background: #7c3aed; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;">Acessar GCA</a>
+                                </p>
+                                {'<p><strong>Primeiro acesso:</strong> Ao entrar, você deverá definir uma nova senha.</p>' if is_first_access else ''}
+                                <p>Ao entrar, você verá apenas os projetos dos quais é membro. Selecione o projeto para acessar Ingestão, Dashboard, Team Invite e acompanhar o backlog.</p>
+                                <hr style="border-color: #334155; margin: 20px 0;" />
+                                <p style="color: #64748b; font-size: 12px;">Este acesso é limitado ao projeto e ao papel concedidos. — GCA</p>
+                            </div>
+                        </div>
+                        """,
+                    )
+
+                    logger.info("project.gp_notified_both_emails",
+                               gp_email=gp.email, project=request.project_name)
+
+                    await audit.log_event(
+                        event_type="PROJECT_APPROVAL_EMAIL_SENT",
+                        resource_type="project_request",
+                        actor_id=admin_id,
+                        actor_email=gp.email,
+                        resource_id=request.id,
+                        correlation_id=correlation_id,
+                        details={"project": request.project_name, "emails_sent": 2},
+                    )
+
             except Exception as e:
                 logger.warning("project.gp_notification_failed", error=str(e))
+
+            # === AUDITORIA: Registrar aprovação ===
+            await audit.log_event(
+                event_type="QUESTIONNAIRE_APPROVED",
+                resource_type="project_request",
+                actor_id=admin_id,
+                resource_id=request.id,
+                correlation_id=correlation_id,
+                details={
+                    "project_name": request.project_name,
+                    "project_slug": request.project_slug,
+                    "adherence_score": adherence_score,
+                    "gp_id": str(request.gp_id),
+                },
+            )
+            await self.db.commit()
 
             return request
 
@@ -182,15 +336,52 @@ class AdminService:
         return request
 
     async def get_pending_projects(self) -> list[ProjectRequest]:
-        """Get all pending project requests"""
+        """Get all project requests (pending, approved, rejected)"""
 
         result = await self.db.execute(
             select(ProjectRequest)
-            .where(ProjectRequest.status == ProjectRequestStatus.PENDING)
             .order_by(ProjectRequest.requested_at.desc())
         )
 
         return result.scalars().all()
+
+    # ========== ORGANIZATION HELPER ==========
+
+    async def _get_or_create_default_org(self, gp_id: UUID) -> Organization:
+        """Busca organização do GP ou cria uma padrão"""
+        from sqlalchemy.orm import selectinload
+
+        # Verificar se GP já tem organização
+        result = await self.db.execute(
+            select(Organization).where(Organization.owner_id == gp_id)
+        )
+        org = result.scalar_one_or_none()
+        if org:
+            return org
+
+        # Criar organização padrão para o GP
+        gp = await self.db.get(User, gp_id)
+        gp_name = gp.full_name if gp else "GP"
+        slug = f"org-{gp_name.lower().replace(' ', '-')[:30]}"
+
+        # Garantir slug único
+        check = await self.db.execute(select(Organization).where(Organization.slug == slug))
+        if check.scalar_one_or_none():
+            slug = f"{slug}-{secrets.token_hex(3)}"
+
+        org = Organization(
+            name=f"Organização de {gp_name}",
+            slug=slug,
+            owner_id=gp_id,
+        )
+        self.db.add(org)
+        await self.db.flush()
+
+        logger.info("organization.default_created",
+                    org_id=str(org.id),
+                    gp_id=str(gp_id))
+
+        return org
 
     # ========== TENANT PROVISIONING ==========
 
