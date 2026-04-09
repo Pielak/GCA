@@ -48,15 +48,19 @@ export function ProjectDashPage() {
   const [ocg, setOcg] = useState<any>(null)
   const [members, setMembers] = useState<any[]>([])
   const [questionnaire, setQuestionnaire] = useState<any>(null)
+  const [health, setHealth] = useState<any>(null)
+  const [billing, setBilling] = useState<any>(null)
 
   useEffect(() => {
     const load = async () => {
       if (!id) return
       try {
-        const [ocgRes, membersRes, questRes] = await Promise.all([
+        const [ocgRes, membersRes, questRes, healthRes, billingRes] = await Promise.all([
           apiClient.get(`/projects/${id}/ocg`).catch(() => ({ data: {} })),
           apiClient.get(`/projects/${id}/members`).catch(() => ({ data: { members: [] } })),
           apiClient.get(`/projects/${id}/questionnaire`).catch(() => ({ data: {} })),
+          apiClient.get(`/projects/${id}/ocg/health`).catch(() => ({ data: {} })),
+          apiClient.get(`/projects/${id}/billing`).catch(() => ({ data: {} })),
         ])
 
         const ocgData = ocgRes.data?.ocg
@@ -67,6 +71,8 @@ export function ProjectDashPage() {
         }
         setMembers(membersRes.data?.members || [])
         setQuestionnaire(questRes.data?.questionnaire || null)
+        setHealth(healthRes.data || null)
+        setBilling(billingRes.data || null)
       } catch { /* ignore */ }
       setLoading(false)
     }
@@ -134,6 +140,118 @@ export function ProjectDashPage() {
           sub={radarData.length > 0 ? 'Avaliação completa' : 'Aguardando OCG'}
           icon={<Cpu className="w-4 h-4 text-amber-400" />}
         />
+      </div>
+
+      {/* Context Health + Billing */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Saúde do Contexto OCG */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 className="text-slate-200 text-sm font-semibold mb-4 flex items-center gap-2">
+            <Shield className="w-4 h-4 text-violet-400" />
+            Saúde do Contexto OCG
+          </h3>
+          {health?.health && Object.keys(health.health).length > 0 ? (
+            <div className="space-y-3">
+              {[
+                { label: 'Profundidade', key: 'depth', format: (v: number) => `${Math.round(v * 100)}%` },
+                { label: 'Confiança', key: 'confidence', format: (v: number) => `${Math.round(v * 100)}%` },
+                { label: 'Qualidade', key: 'quality', format: (v: number) => `${Math.round(v * 100)}%` },
+              ].map(item => {
+                const val = health.health[item.key] ?? 0
+                const numVal = typeof val === 'number' ? val : 0
+                const pct = Math.round(numVal * 100)
+                const color = pct >= 80 ? 'emerald' : pct >= 60 ? 'amber' : 'red'
+                return (
+                  <div key={item.key}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-slate-400 text-xs">{item.label}</span>
+                      <span className={`text-xs font-semibold text-${color}-400`}>{item.format(numVal)}</span>
+                    </div>
+                    <div className="h-1.5 bg-slate-700 rounded-full">
+                      <div className={`h-full rounded-full bg-${color}-500 transition-all`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )
+              })}
+              <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                <span className="text-slate-500 text-xs">Versão OCG</span>
+                <span className="text-slate-300 text-xs font-mono">v{health.version || 1}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 text-xs">Tipo de Mudança</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                  health.change_type === 'EXPAND' ? 'bg-emerald-500/20 text-emerald-300' :
+                  health.change_type === 'CONTRACT' ? 'bg-red-500/20 text-red-300' :
+                  'bg-slate-700 text-slate-400'
+                }`}>{health.change_type === 'EXPAND' ? 'Expandido' : health.change_type === 'CONTRACT' ? 'Contraído' : health.change_type || 'Inicial'}</span>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <p className="text-slate-500 text-sm italic">Aguardando ingestão de documentos</p>
+              <p className="text-slate-600 text-xs mt-1">A saúde do contexto é calculada após a primeira atualização do OCG</p>
+            </div>
+          )}
+        </div>
+
+        {/* Billing IA */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 className="text-slate-200 text-sm font-semibold mb-4 flex items-center gap-2">
+            <Cpu className="w-4 h-4 text-amber-400" />
+            Consumo de IA do Projeto
+          </h3>
+          {billing && billing.total_calls > 0 ? (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-3 rounded-lg bg-slate-800/50">
+                  <p className="text-lg font-bold text-emerald-400">${billing.total_cost_usd.toFixed(4)}</p>
+                  <p className="text-slate-500 text-xs">Custo Total (USD)</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-slate-800/50">
+                  <p className="text-lg font-bold text-blue-400">{(billing.total_tokens || 0).toLocaleString('pt-BR')}</p>
+                  <p className="text-slate-500 text-xs">Tokens Totais</p>
+                </div>
+                <div className="text-center p-3 rounded-lg bg-slate-800/50">
+                  <p className="text-lg font-bold text-violet-400">{billing.total_calls}</p>
+                  <p className="text-slate-500 text-xs">Chamadas IA</p>
+                </div>
+              </div>
+
+              {billing.by_operation?.length > 0 && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-2">Por Operação</p>
+                  <div className="space-y-1.5">
+                    {billing.by_operation.map((op: any) => (
+                      <div key={op.operation} className="flex items-center justify-between">
+                        <span className="text-slate-400 text-xs">{op.operation}</span>
+                        <span className="text-slate-300 text-xs">${op.cost_usd.toFixed(4)} ({op.calls} chamadas)</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {billing.by_provider?.length > 0 && (
+                <div>
+                  <p className="text-slate-500 text-xs mb-2">Por Provedor</p>
+                  <div className="space-y-1.5">
+                    {billing.by_provider.map((prov: any) => (
+                      <div key={prov.provider} className="flex items-center justify-between">
+                        <span className="text-slate-400 text-xs capitalize">{prov.provider}</span>
+                        <span className="text-slate-300 text-xs">${prov.cost_usd.toFixed(4)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="text-center py-6">
+              <p className="text-slate-500 text-sm italic">Nenhuma chamada de IA registrada</p>
+              <p className="text-slate-600 text-xs mt-1">O billing é registrado automaticamente a cada interação com a IA</p>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
