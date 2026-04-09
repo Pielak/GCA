@@ -375,6 +375,21 @@ class IntegrationWebhook(Base):
         return f"<IntegrationWebhook {self.integration_type}>"
 
 
+class SystemSettings(Base):
+    """Configurações globais do sistema (persistente, não por projeto)"""
+    __tablename__ = "system_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    setting_key = Column(String(100), unique=True, nullable=False, index=True)  # ex: ai_provider:deepseek
+    setting_value = Column(Text, nullable=False, default="{}")  # JSON
+    updated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    def __repr__(self):
+        return f"<SystemSettings {self.setting_key}>"
+
+
 class SystemAlert(Base):
     """System alerts and notifications sent to admins"""
     __tablename__ = "system_alerts"

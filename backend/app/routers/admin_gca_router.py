@@ -150,8 +150,9 @@ AVAILABLE_PROVIDERS = {
     },
 }
 
-# Estado em memória para configurações de IA
+# Cache em memória (populado do banco na primeira leitura)
 _ai_providers: Dict[str, dict] = {}
+_ai_providers_loaded: bool = False
 
 
 def _mask_key(key: str) -> str:
@@ -159,6 +160,70 @@ def _mask_key(key: str) -> str:
     if not key or len(key) <= 6:
         return "****"
     return f"{'*' * (len(key) - 6)}{key[-6:]}"
+
+
+async def _load_ai_providers_from_db(db):
+    """Carrega provedores de IA do banco para o cache em memória."""
+    global _ai_providers, _ai_providers_loaded
+    if _ai_providers_loaded:
+        return
+
+    from sqlalchemy import select
+    from app.models.base import SystemSettings
+    import json
+
+    result = await db.execute(
+        select(SystemSettings).where(SystemSettings.setting_key.like("ai_provider:%"))
+    )
+    rows = result.scalars().all()
+    for row in rows:
+        provider_id = row.setting_key.replace("ai_provider:", "")
+        try:
+            _ai_providers[provider_id] = json.loads(row.setting_value)
+        except Exception:
+            pass
+
+    _ai_providers_loaded = True
+
+    # Atualizar settings em runtime com keys do banco
+    if rows:
+        from app.core.config import settings
+        for pid, config in _ai_providers.items():
+            api_key = config.get("api_key")
+            if api_key:
+                key_attr = f"{pid.upper()}_API_KEY"
+                if hasattr(settings, key_attr):
+                    object.__setattr__(settings, key_attr, api_key)
+            if config.get("is_default"):
+                object.__setattr__(settings, "DEFAULT_AI_PROVIDER", pid)
+                if config.get("model"):
+                    object.__setattr__(settings, "DEFAULT_AI_MODEL", config["model"])
+
+        logger.info("admin_gca.ai_providers_loaded_from_db", count=len(rows))
+
+
+async def _save_ai_provider_to_db(db, provider_id: str, config: dict, user_id=None):
+    """Persiste configuração do provedor no banco."""
+    from sqlalchemy import select
+    from app.models.base import SystemSettings
+    import json
+
+    key = f"ai_provider:{provider_id}"
+    result = await db.execute(select(SystemSettings).where(SystemSettings.setting_key == key))
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        existing.setting_value = json.dumps(config, default=str)
+        existing.updated_by = user_id
+    else:
+        row = SystemSettings(
+            setting_key=key,
+            setting_value=json.dumps(config, default=str),
+            updated_by=user_id,
+        )
+        db.add(row)
+
+    await db.commit()
 
 
 class AIProviderConfigRequest(BaseModel):
@@ -180,6 +245,9 @@ async def list_ai_providers(
 ):
     """Lista provedores de IA disponíveis e configurados."""
     from app.core.config import settings
+
+    # Carregar do banco na primeira chamada
+    await _load_ai_providers_from_db(db)
 
     providers = []
     for pid, info in AVAILABLE_PROVIDERS.items():
@@ -233,7 +301,7 @@ async def configure_ai_provider(
     if model not in info["models"]:
         raise HTTPException(status_code=400, detail=f"Modelo '{model}' não disponível para {info['name']}")
 
-    _ai_providers[req.provider] = {
+    config = {
         "api_key": req.api_key,
         "model": model,
         "enabled": req.enabled,
@@ -241,7 +309,13 @@ async def configure_ai_provider(
         "configured_by": str(current_user_id),
     }
 
+    _ai_providers[req.provider] = config
+
+    # Persistir no banco
+    await _save_ai_provider_to_db(db, req.provider, config, current_user_id)
+
     # Atualizar settings em runtime para o AIService usar
+    from app.core.config import settings
     key_attr = f"{req.provider.upper()}_API_KEY"
     if hasattr(settings, key_attr):
         object.__setattr__(settings, key_attr, req.api_key)
@@ -318,10 +392,11 @@ async def test_ai_provider(
         success = resp.status_code in (200, 201)
         now = datetime.now(timezone.utc).isoformat()
 
-        # Salvar resultado do teste
+        # Salvar resultado do teste (memória + banco)
         if req.provider in _ai_providers:
             _ai_providers[req.provider]["tested_at"] = now
             _ai_providers[req.provider]["test_status"] = "ok" if success else "error"
+            await _save_ai_provider_to_db(db, req.provider, _ai_providers[req.provider], current_user_id)
 
         logger.info(
             "admin_gca.ai_provider_tested",
@@ -359,15 +434,20 @@ async def set_default_provider(
     if not mem_config and not env_key:
         raise HTTPException(status_code=400, detail=f"Provedor '{req.provider}' não tem API key configurada")
 
-    # Remover flag de outros
+    # Carregar do banco caso necessário
+    await _load_ai_providers_from_db(db)
+
+    # Remover flag de outros e persistir
     for pid in _ai_providers:
         _ai_providers[pid]["is_default"] = False
+        await _save_ai_provider_to_db(db, pid, _ai_providers[pid], current_user_id)
 
     # Setar como padrão
     if mem_config:
         _ai_providers[req.provider]["is_default"] = True
         if req.model:
             _ai_providers[req.provider]["model"] = req.model
+        await _save_ai_provider_to_db(db, req.provider, _ai_providers[req.provider], current_user_id)
 
     # Atualizar settings em runtime
     from app.core.config import settings as s
