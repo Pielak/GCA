@@ -167,12 +167,20 @@ async def handle_questionnaire_n8n_result(payload: N8nAnalysisPayload) -> dict:
             gp_email=payload.gp_email,
         )
 
-        # TODO: In future, update questionnaire in DB with n8n results
-        # For now, just log and acknowledge
+        # Atualizar questionário no BD com resultados do n8n
+        from app.db.database import AsyncSessionLocal
+        from app.services.n8n_service import N8nService
+
+        async with AsyncSessionLocal() as db:
+            updated = await N8nService.update_questionnaire_with_n8n_results(
+                db=db,
+                questionnaire_id=payload.responses.get("questionnaire_id", payload.projectId),
+                n8n_results=payload.responses,
+            )
 
         return {
-            "status": "received",
-            "message": "Questionnaire result received from n8n",
+            "status": "updated" if updated else "received",
+            "message": "Questionnaire result processed",
             "projectId": payload.projectId,
         }
 
@@ -227,16 +235,55 @@ async def ocg_result_callback(payload: Dict[str, Any]) -> dict:
             questionnaire_id=questionnaire_id,
         )
 
-        # OCG already persisted by consolidator agent
-        # This callback is mainly for notifications/logging
+        # OCG já persistido pelo agente consolidador
+        # Callback notifica GP e atualiza status do questionário
+        from app.db.database import AsyncSessionLocal
+        from sqlalchemy import select, update
+        from app.models.base import Questionnaire, User
+        from app.services.email_service import EmailService
 
-        # TODO: Send email notification with OCG summary
-        # TODO: Update questionnaire status to 'analyzed'
-        # TODO: Trigger code generator if approved
+        async with AsyncSessionLocal() as db:
+            # Atualizar status do questionário
+            q_id = payload.get("questionnaire_id")
+            if q_id:
+                from uuid import UUID
+                stmt = update(Questionnaire).where(
+                    Questionnaire.id == UUID(q_id)
+                ).values(status="ocg_generated")
+                await db.execute(stmt)
+                await db.commit()
+
+                # Buscar GP para notificação
+                q_result = await db.execute(
+                    select(Questionnaire).where(Questionnaire.id == UUID(q_id))
+                )
+                questionnaire = q_result.scalar_one_or_none()
+                if questionnaire and questionnaire.gp_email:
+                    try:
+                        project_name = payload.get("PROJECT_PROFILE", {}).get("project_name", "Projeto")
+                        overall_score = payload.get("COMPOSITE_SCORE", {}).get("overall", 0)
+                        EmailService.send_email(
+                            to_email=questionnaire.gp_email,
+                            subject=f"GCA — OCG gerado para {project_name} (Score: {overall_score})",
+                            html_content=f"""
+                            <div style="font-family: Arial; max-width: 600px; margin: 0 auto;">
+                                <div style="background: #1e1b4b; padding: 20px; border-radius: 12px 12px 0 0;">
+                                    <h2 style="color: #c4b5fd; margin: 0;">OCG Gerado com Sucesso</h2>
+                                </div>
+                                <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
+                                    <p>O OCG do projeto <strong>{project_name}</strong> foi gerado pelos 8 agentes de IA.</p>
+                                    <p>Score composto: <strong>{overall_score}/100</strong></p>
+                                    <p><a href="https://gca.code-auditor.com.br/login" style="color: #a78bfa;">Acessar GCA</a></p>
+                                </div>
+                            </div>
+                            """,
+                        )
+                    except Exception as email_err:
+                        logger.warning("webhook.ocg_email_failed", error=str(email_err))
 
         return {
             "status": "processed",
-            "message": "OCG result received and processed",
+            "message": "OCG result received, questionnaire updated, GP notified",
             "ocg_id": ocg_id,
         }
 

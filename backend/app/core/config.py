@@ -161,9 +161,9 @@ class Settings(BaseSettings):
     GCA_MASTER_KEY: str = "gca-default-master-key-change-in-production-32chars!"
     GCA_MASTER_KEY_SALT: str = "gca-salt-default"
 
-    # N8N Integration
-    N8N_WEBHOOK_URL: str = "http://localhost:5678/webhook"
-    N8N_API_URL: str = "http://localhost:5678/api"
+    # N8N Integration (usar 'n8n' como hostname dentro do Docker, 'localhost' fora)
+    N8N_WEBHOOK_URL: str = "http://n8n:5678/webhook"
+    N8N_API_URL: str = "http://n8n:5678/api"
     N8N_API_KEY: Optional[str] = None
 
     # Anthropic API (Claude)
