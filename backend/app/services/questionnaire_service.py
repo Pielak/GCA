@@ -306,6 +306,9 @@ class QuestionnaireService:
         try:
             email_service = EmailService()
 
+            project_name = analysis_result.get("projectName", "Projeto")
+            gp_name = gp_email.split("@")[0]
+
             if notification_type == "approved":
                 logger.info(
                     "questionnaire.sending_approval_email",
@@ -313,10 +316,13 @@ class QuestionnaireService:
                     project_id=project_id,
                 )
                 email_service.send_questionnaire_approved_email(
-                    gp_email=gp_email,
-                    project_id=project_id,
-                    adherence_score=analysis_result["adherenceScore"],
-                    observations=analysis_result["observations"],
+                    to_email=gp_email,
+                    gp_name=gp_name,
+                    project_name=project_name,
+                    suggested_stack=analysis_result.get("suggestedStack", "A definir"),
+                    observations=analysis_result.get("observations", ""),
+                    restrictions=analysis_result.get("restrictions", ""),
+                    project_link=f"https://gca.code-auditor.com.br/projects/{project_id}" if project_id else "",
                 )
 
             elif notification_type == "revision_needed":
@@ -325,13 +331,14 @@ class QuestionnaireService:
                     email=gp_email,
                     project_id=project_id,
                 )
+                conflicts = analysis_result.get("validations", {}).get("logicConflicts", [])
                 email_service.send_questionnaire_revision_needed_email(
-                    gp_email=gp_email,
-                    project_id=project_id,
-                    adherence_score=analysis_result["adherenceScore"],
-                    conflicts=analysis_result["validations"].get("logicConflicts", []),
-                    gaps=analysis_result["validations"].get("gaps", []),
-                    observations=analysis_result["observations"],
+                    to_email=gp_email,
+                    gp_name=gp_name,
+                    project_name=project_name,
+                    conflicts=conflicts,
+                    adherence_score=analysis_result.get("adherenceScore", 0),
+                    revision_link=f"https://gca.code-auditor.com.br/novo-projeto?email={gp_email}",
                 )
 
             logger.info(
