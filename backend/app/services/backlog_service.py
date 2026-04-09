@@ -67,7 +67,7 @@ class BacklogService:
         items_created = []
 
         # === MÓDULOS: extrair do OCG ===
-        stack = ocg_data.get("stack", {}) or ocg_data.get("STACK_RECOMMENDATIONS", {})
+        stack = ocg_data.get("STACK_RECOMMENDATION", {}) or ocg_data.get("STACK_RECOMMENDATIONS", {}) or ocg_data.get("stack", {})
         if stack:
             items_created.append(self._create_item(
                 project_id, "modules", "Configurar stack do projeto",
@@ -91,58 +91,80 @@ class BacklogService:
                             ))
 
         # === TESTES: tipos necessários ===
-        qa_profile = ocg_data.get("qa_profile", {})
-        test_types = qa_profile.get("required_test_types", [])
-        if test_types:
-            for tt in test_types:
+        testing = ocg_data.get("TESTING_REQUIREMENTS", {}) or ocg_data.get("qa_profile", {})
+        if isinstance(testing, dict):
+            for test_type, config in testing.items():
+                desc = ""
+                if isinstance(config, dict):
+                    desc = config.get("scope", config.get("rationale", ""))
+                    coverage = config.get("coverage_target", "")
+                    if coverage:
+                        desc = f"{desc} (cobertura: {coverage})"
                 items_created.append(self._create_item(
-                    project_id, "tests", f"Implementar testes: {tt}",
-                    f"Tipo de teste requerido pelo OCG: {tt}",
+                    project_id, "tests", f"Implementar: {test_type.replace('_', ' ').title()}",
+                    desc[:200] if desc else f"Tipo de teste requerido pelo OCG",
                     "high", "ocg", version,
                 ))
 
         # === COMPLIANCE ===
-        compliance = ocg_data.get("compliance", {})
-        if compliance.get("lgpd"):
-            items_created.append(self._create_item(
-                project_id, "compliance", "Adequação LGPD",
-                "Projeto requer conformidade com LGPD",
-                "critical", "ocg", version,
-            ))
-        if compliance.get("gdpr"):
-            items_created.append(self._create_item(
-                project_id, "compliance", "Adequação GDPR",
-                "Projeto requer conformidade com GDPR",
-                "critical", "ocg", version,
-            ))
-        if compliance.get("audit_required"):
-            items_created.append(self._create_item(
-                project_id, "compliance", "Trilha de auditoria obrigatória",
-                "Todas as ações devem ser registradas",
-                "high", "ocg", version,
-            ))
-
-        # === SEGURANÇA ===
-        security_controls = ocg_data.get("security", {})
-        if isinstance(security_controls, dict):
-            for control, enabled in security_controls.items():
-                if enabled and isinstance(enabled, bool):
+        compliance = ocg_data.get("COMPLIANCE_CHECKLIST", []) or ocg_data.get("compliance", [])
+        if isinstance(compliance, list):
+            for item in compliance[:10]:
+                if isinstance(item, dict):
                     items_created.append(self._create_item(
-                        project_id, "security", f"Implementar: {control}",
-                        f"Controle de segurança requerido",
-                        "high", "ocg", version,
+                        project_id, "compliance",
+                        item.get("item", item.get("requirement", "Item de compliance"))[:200],
+                        f"Status: {item.get('status', 'PENDENTE')} — {item.get('owner', '')}",
+                        "critical", "ocg", version,
+                    ))
+                elif isinstance(item, str):
+                    items_created.append(self._create_item(
+                        project_id, "compliance", item[:200], "", "critical", "ocg", version,
                     ))
 
-        # === DELIVERY STATE ===
-        delivery = ocg_data.get("delivery_state", {})
-        if delivery:
-            for key, val in delivery.items():
-                if val and isinstance(val, str) and val not in ("not_started",):
+        # === CRITICAL FINDINGS → segurança e módulos ===
+        findings = ocg_data.get("CRITICAL_FINDINGS", [])
+        if isinstance(findings, list):
+            for f in findings[:5]:
+                if isinstance(f, dict):
+                    category = "security" if "segurança" in str(f).lower() or "security" in str(f).lower() else "modules"
                     items_created.append(self._create_item(
-                        project_id, "agile", f"Acompanhar: {key} ({val})",
-                        f"Estado de entrega do OCG",
-                        "medium", "ocg", version,
+                        project_id, category,
+                        f.get("finding", f.get("risk", "Achado crítico"))[:200],
+                        f"Pilar: {f.get('pillar', '—')} · Severidade: {f.get('severity', '—')}",
+                        "critical", "ocg", version,
                     ))
+
+        # === RISK ANALYSIS ===
+        risks = ocg_data.get("RISK_ANALYSIS", {})
+        if isinstance(risks, dict):
+            for level, risk_list in risks.items():
+                if isinstance(risk_list, list):
+                    priority = "critical" if "high" in level.lower() else "high" if "medium" in level.lower() else "medium"
+                    for r in risk_list[:3]:
+                        if isinstance(r, dict):
+                            items_created.append(self._create_item(
+                                project_id, "agile",
+                                r.get("risk", "Risco identificado")[:200],
+                                f"Mitigação: {r.get('mitigation', '—')[:150]}",
+                                priority, "ocg", version,
+                            ))
+
+        # === DELIVERABLES ===
+        deliverables = ocg_data.get("DELIVERABLES", [])
+        if isinstance(deliverables, list):
+            for d in deliverables[:8]:
+                title = d if isinstance(d, str) else d.get("title", d.get("name", "Entregável"))
+                items_created.append(self._create_item(
+                    project_id, "modules", str(title)[:200],
+                    "Entregável definido no OCG", "medium", "ocg", version,
+                ))
+        elif isinstance(deliverables, dict):
+            for key, val in deliverables.items():
+                items_created.append(self._create_item(
+                    project_id, "modules", f"{key}: {str(val)[:150]}",
+                    "Entregável definido no OCG", "medium", "ocg", version,
+                ))
 
         # Persistir
         for item in items_created:
