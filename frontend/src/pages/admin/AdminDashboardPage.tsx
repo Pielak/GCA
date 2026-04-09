@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  FolderOpen, Users, CheckCircle2, AlertTriangle, Key, Loader2, Settings, Save
+  FolderOpen, Users, CheckCircle2, AlertTriangle, Key, Loader2, Settings, Save,
+  Cpu, Eye, EyeOff, Zap, Star, TestTube2, CircleCheck, CircleX,
 } from 'lucide-react'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
 import { apiClient } from '@/lib/api'
@@ -188,11 +189,260 @@ function GCASettingsTab() {
   )
 }
 
+// ============================================================================
+// Provedores de IA
+// ============================================================================
+
+interface AIProviderInfo {
+  id: string
+  name: string
+  models: string[]
+  default_model: string
+  configured: boolean
+  enabled: boolean
+  key_source: string | null
+  masked_key: string | null
+  selected_model: string
+  is_default: boolean
+  tested_at: string | null
+  test_status: string | null
+}
+
+function AIProvidersTab() {
+  const [providers, setProviders] = useState<AIProviderInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [editingProvider, setEditingProvider] = useState<string | null>(null)
+  const [apiKeyInput, setApiKeyInput] = useState('')
+  const [showKey, setShowKey] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  const loadProviders = useCallback(async () => {
+    try {
+      const res = await apiClient.get('/admin/gca/ai-providers')
+      setProviders(res.data.providers || [])
+    } catch {
+      setProviders([])
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { loadProviders() }, [loadProviders])
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
+
+  const handleEdit = (p: AIProviderInfo) => {
+    setEditingProvider(p.id)
+    setApiKeyInput('')
+    setSelectedModel(p.selected_model)
+    setShowKey(false)
+  }
+
+  const handleSave = async (providerId: string) => {
+    if (!apiKeyInput.trim()) return
+    setSaving(true)
+    try {
+      await apiClient.put('/admin/gca/ai-providers', {
+        provider: providerId,
+        api_key: apiKeyInput,
+        model: selectedModel || undefined,
+        enabled: true,
+      })
+      showToast('Provedor configurado com sucesso', 'success')
+      setEditingProvider(null)
+      setApiKeyInput('')
+      await loadProviders()
+    } catch (err: any) {
+      showToast(err.message || 'Erro ao salvar', 'error')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleTest = async (p: AIProviderInfo) => {
+    const key = editingProvider === p.id && apiKeyInput ? apiKeyInput : null
+    if (!key && !p.configured) {
+      showToast('Configure a API key antes de testar', 'error')
+      return
+    }
+    setTesting(p.id)
+    try {
+      const res = await apiClient.post('/admin/gca/ai-providers/test', {
+        provider: p.id,
+        api_key: key || 'use_existing',
+        model: editingProvider === p.id ? selectedModel : p.selected_model,
+      })
+      if (res.data.success) {
+        showToast(res.data.message, 'success')
+      } else {
+        showToast(res.data.message, 'error')
+      }
+      await loadProviders()
+    } catch (err: any) {
+      showToast(err.message || 'Erro no teste', 'error')
+    } finally {
+      setTesting(null)
+    }
+  }
+
+  const handleSetDefault = async (providerId: string) => {
+    try {
+      await apiClient.put('/admin/gca/ai-providers/default', { provider: providerId })
+      showToast('Provedor padrao definido', 'success')
+      await loadProviders()
+    } catch (err: any) {
+      showToast(err.message || 'Erro', 'error')
+    }
+  }
+
+  if (loading) {
+    return <div className="flex justify-center py-12"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
+  }
+
+  return (
+    <div className="space-y-4">
+      {toast && (
+        <div className={`p-3 rounded-lg text-sm ${toast.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-red-900/30 border border-red-700 text-red-300'}`}>
+          {toast.message}
+        </div>
+      )}
+
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+        <h3 className="text-slate-200 text-sm font-semibold mb-1 flex items-center gap-2">
+          <Cpu className="w-4 h-4 text-violet-400" />
+          Provedores de IA
+        </h3>
+        <p className="text-slate-500 text-xs mb-5">
+          Configure as API keys dos provedores de IA para que o pipeline OCG e o Arguidor possam funcionar.
+          Pelo menos um provedor deve estar configurado e testado.
+        </p>
+
+        <div className="space-y-3">
+          {providers.map(p => {
+            const isEditing = editingProvider === p.id
+            return (
+              <div key={p.id} className={`border rounded-xl p-4 transition-colors ${p.is_default ? 'border-violet-600/40 bg-violet-950/10' : 'border-slate-800 bg-slate-900/50'}`}>
+                {/* Header */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center text-xs font-bold flex-shrink-0 ${p.configured ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800/30' : 'bg-slate-800 text-slate-500 border border-slate-700'}`}>
+                      {p.name.charAt(0)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-200 text-sm font-medium">{p.name}</span>
+                        {p.is_default && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-600/20 text-violet-300 flex items-center gap-0.5">
+                            <Star className="w-2.5 h-2.5" /> Padrao
+                          </span>
+                        )}
+                        {p.configured && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-600/20 text-emerald-300">
+                            Configurado ({p.key_source})
+                          </span>
+                        )}
+                        {p.test_status === 'ok' && (
+                          <CircleCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        )}
+                        {p.test_status === 'error' && (
+                          <CircleX className="w-3.5 h-3.5 text-red-400" />
+                        )}
+                      </div>
+                      <p className="text-slate-500 text-xs">
+                        Modelo: {p.selected_model}
+                        {p.masked_key && <> &middot; Key: {p.masked_key}</>}
+                        {p.tested_at && <> &middot; Testado: {new Date(p.tested_at).toLocaleString('pt-BR')}</>}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {p.configured && !p.is_default && (
+                      <button onClick={() => handleSetDefault(p.id)}
+                        className="px-2.5 py-1 text-xs text-slate-400 hover:text-violet-300 bg-slate-800 border border-slate-700 rounded-lg hover:border-violet-600/30 transition-colors">
+                        Definir padrao
+                      </button>
+                    )}
+                    <button onClick={() => handleTest(p)}
+                      disabled={testing === p.id || (!p.configured && !isEditing)}
+                      className="flex items-center gap-1 px-2.5 py-1 text-xs text-slate-400 hover:text-emerald-300 bg-slate-800 border border-slate-700 rounded-lg hover:border-emerald-600/30 disabled:opacity-30 transition-colors">
+                      {testing === p.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <TestTube2 className="w-3 h-3" />} Testar
+                    </button>
+                    <button onClick={() => isEditing ? setEditingProvider(null) : handleEdit(p)}
+                      className={`px-2.5 py-1 text-xs rounded-lg border transition-colors ${isEditing ? 'bg-violet-600/20 border-violet-600/30 text-violet-300' : 'text-slate-400 bg-slate-800 border-slate-700 hover:text-slate-200'}`}>
+                      {isEditing ? 'Cancelar' : (p.configured ? 'Alterar key' : 'Configurar')}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Edit form */}
+                {isEditing && (
+                  <div className="mt-3 pt-3 border-t border-slate-800 space-y-3">
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1 block">API Key</label>
+                      <div className="relative">
+                        <input
+                          type={showKey ? 'text' : 'password'}
+                          value={apiKeyInput}
+                          onChange={e => setApiKeyInput(e.target.value)}
+                          placeholder={p.configured ? 'Nova API key (deixe vazio para manter)' : 'Cole a API key aqui'}
+                          className="w-full px-3 py-2 pr-10 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500 placeholder-slate-600"
+                        />
+                        <button onClick={() => setShowKey(!showKey)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                          {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-slate-400 text-xs mb-1 block">Modelo</label>
+                      <select
+                        value={selectedModel}
+                        onChange={e => setSelectedModel(e.target.value)}
+                        className="w-full px-3 py-2 bg-slate-800 border border-slate-700 rounded-lg text-slate-100 text-sm focus:outline-none focus:ring-2 focus:ring-violet-500"
+                      >
+                        {p.models.map(m => (
+                          <option key={m} value={m}>{m}{m === p.default_model ? ' (recomendado)' : ''}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex justify-end">
+                      <button onClick={() => handleSave(p.id)} disabled={!apiKeyInput.trim() || saving}
+                        className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
+                        {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />} Salvar
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+
+      {/* Info box */}
+      <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex items-start gap-3">
+        <Zap className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+        <div className="text-xs text-slate-400 space-y-1">
+          <p><strong className="text-slate-300">Por que configurar?</strong> O questionario preenchido pelo GP precisa de um agente de IA para ser avaliado. Sem provedor configurado, o pipeline OCG nao funciona.</p>
+          <p><strong className="text-slate-300">Recomendacao:</strong> Configure pelo menos Anthropic (Claude) ou OpenAI (GPT-4). O provedor padrao sera usado para todas as analises automaticas.</p>
+          <p><strong className="text-slate-300">Seguranca:</strong> API keys sao armazenadas com mascaramento. Apenas os ultimos 6 caracteres sao exibidos.</p>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function AdminDashboardPage() {
   const navigate = useNavigate()
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'settings'>('dashboard')
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'settings' | 'ai'>('dashboard')
 
   useEffect(() => {
     loadMetrics()
@@ -253,10 +503,15 @@ export function AdminDashboardPage() {
         </button>
         <button onClick={() => setActiveTab('settings')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'settings' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
-          <Settings className="w-3.5 h-3.5" /> Configurações
+          <Settings className="w-3.5 h-3.5" /> Configuracoes
+        </button>
+        <button onClick={() => setActiveTab('ai')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'ai' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <Cpu className="w-3.5 h-3.5" /> Provedores de IA
         </button>
       </div>
 
+      {activeTab === 'ai' && <AIProvidersTab />}
       {activeTab === 'settings' && <GCASettingsTab />}
 
       {activeTab === 'dashboard' && (<>
