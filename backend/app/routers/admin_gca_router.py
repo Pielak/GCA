@@ -347,9 +347,26 @@ async def test_ai_provider(
 
     import httpx
 
+    # Carregar providers do banco caso necessário
+    await _load_ai_providers_from_db(db)
+
     info = AVAILABLE_PROVIDERS[req.provider]
     model = req.model or info["default_model"]
     test_prompt = "Respond with exactly: OK"
+
+    # Resolver API key: se 'use_existing' ou mascarada, buscar a real do cache/banco
+    api_key = req.api_key
+    if not api_key or api_key == "use_existing" or api_key.startswith("*"):
+        mem_config = _ai_providers.get(req.provider)
+        if mem_config and mem_config.get("api_key"):
+            api_key = mem_config["api_key"]
+        else:
+            from app.core.config import settings as s
+            env_key = getattr(s, f"{req.provider.upper()}_API_KEY", None)
+            if env_key:
+                api_key = env_key
+            else:
+                raise HTTPException(status_code=400, detail="API key não encontrada. Configure primeiro.")
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -357,7 +374,7 @@ async def test_ai_provider(
                 resp = await client.post(
                     "https://api.anthropic.com/v1/messages",
                     headers={
-                        "x-api-key": req.api_key,
+                        "x-api-key": api_key,
                         "anthropic-version": "2023-06-01",
                         "content-type": "application/json",
                     },
@@ -366,24 +383,24 @@ async def test_ai_provider(
             elif req.provider == "openai":
                 resp = await client.post(
                     "https://api.openai.com/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {req.api_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={"model": model, "max_tokens": 10, "messages": [{"role": "user", "content": test_prompt}]},
                 )
             elif req.provider == "deepseek":
                 resp = await client.post(
                     "https://api.deepseek.com/chat/completions",
-                    headers={"Authorization": f"Bearer {req.api_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={"model": model, "max_tokens": 10, "messages": [{"role": "user", "content": test_prompt}]},
                 )
             elif req.provider == "grok":
                 resp = await client.post(
                     "https://api.x.ai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {req.api_key}", "Content-Type": "application/json"},
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
                     json={"model": model, "max_tokens": 10, "messages": [{"role": "user", "content": test_prompt}]},
                 )
             elif req.provider == "gemini":
                 resp = await client.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={req.api_key}",
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
                     json={"contents": [{"parts": [{"text": test_prompt}]}]},
                 )
             else:
