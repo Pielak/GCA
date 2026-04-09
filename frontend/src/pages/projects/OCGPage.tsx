@@ -43,6 +43,7 @@ const DIMENSIONS = [
   { key: 'deliverables', label: 'Entregáveis', icon: FileText, color: 'orange' },
   { key: 'risks', label: 'Análise de Riscos', icon: AlertTriangle, color: 'red' },
   { key: 'approval', label: 'Status de Aprovação', icon: Check, color: 'indigo' },
+  { key: 'history', label: 'Histórico de Versões', icon: History, color: 'violet' },
 ]
 
 const colorClass: Record<string, string> = {
@@ -163,6 +164,7 @@ export function OCGPage() {
   const { id } = useParams<{ id: string }>()
   const [ocg, setOcg] = useState<OCGData | null>(null)
   const [project, setProject] = useState<ProjectData | null>(null)
+  const [history, setHistory] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>('composite')
@@ -199,6 +201,12 @@ export function OCGPage() {
       } else {
         setError('Erro ao carregar OCG')
       }
+    // Buscar histórico de versões
+    try {
+      const histRes = await apiClient.get(`/projects/${id}/ocg/history`)
+      setHistory(histRes.data?.history || [])
+    } catch { setHistory([]) }
+
     } finally {
       setLoading(false)
     }
@@ -294,6 +302,33 @@ export function OCGPage() {
         return (ocg.RISK_ANALYSIS || ocg.RISKS) ? renderObject(ocg.RISK_ANALYSIS || ocg.RISKS) : <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
       case 'approval':
         return (ocg.APPROVAL_STATUS) ? renderObject(ocg.APPROVAL_STATUS) : <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
+      case 'history':
+        return history.length > 0 ? (
+          <div className="space-y-3">
+            {history.map((h, i) => (
+              <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/40">
+                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-violet-900/40 border border-violet-800/40 flex items-center justify-center">
+                  <span className="text-violet-400 text-xs font-bold">v{h.version_to}</span>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-200 text-sm font-medium">Versão {h.version_from} → {h.version_to}</span>
+                    <span className="text-slate-500 text-xs">{h.created_at ? new Date(h.created_at).toLocaleString('pt-BR') : ''}</span>
+                  </div>
+                  {h.change_summary && <p className="text-slate-400 text-xs mt-1">{h.change_summary}</p>}
+                  {h.fields_changed && (
+                    <details className="mt-1">
+                      <summary className="text-slate-500 text-xs cursor-pointer hover:text-slate-300">Ver campos alterados</summary>
+                      <pre className="text-slate-500 text-xs mt-1 bg-slate-900/50 rounded p-2 overflow-x-auto max-h-24">
+                        {typeof h.fields_changed === 'string' ? h.fields_changed : JSON.stringify(h.fields_changed, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : <p className="text-slate-500 text-sm italic">Nenhuma alteração registrada. O histórico será preenchido quando documentos forem ingeridos e o OCG atualizado.</p>
       default:
         return <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
     }
