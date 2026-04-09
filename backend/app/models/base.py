@@ -800,3 +800,71 @@ class TestFile(Base):
 
     def __repr__(self):
         return f"<TestFile type={self.test_type} module={self.generated_module_id}>"
+
+
+# ============================================================================
+# SESSION 14 — QA Readiness + Tester Review
+# ============================================================================
+
+class TestArtifact(Base):
+    """Artefato de teste com revisão RBAC e versionamento."""
+    __tablename__ = "test_artifacts"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    module_id = Column(UUID(as_uuid=True), ForeignKey("module_candidates.id"), nullable=True)
+    test_type = Column(String(20), nullable=False)  # unit, integration, e2e, regression, load, security
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    file_path = Column(String(500), nullable=True)
+    content = Column(Text, nullable=False)
+    status = Column(String(20), nullable=False, default="pending_review")  # pending_review, approved, rejected, edited
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    last_edited_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    last_edited_at = Column(DateTime(timezone=True), nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+
+    project = relationship("Project", foreign_keys=[project_id])
+    module = relationship("ModuleCandidate", foreign_keys=[module_id])
+
+    __table_args__ = (
+        CheckConstraint("test_type IN ('unit','integration','e2e','regression','load','security')", name="ck_test_artifact_type"),
+        CheckConstraint("status IN ('pending_review','approved','rejected','edited')", name="ck_test_artifact_status"),
+        Index("idx_test_artifacts_project", project_id),
+        Index("idx_test_artifacts_module", module_id),
+        Index("idx_test_artifacts_type", test_type),
+        Index("idx_test_artifacts_status", status),
+    )
+
+    def __repr__(self):
+        return f"<TestArtifact title={self.title} type={self.test_type} status={self.status}>"
+
+
+class TestExecutionLog(Base):
+    """Log de execução de teste com rastreabilidade de autoria."""
+    __tablename__ = "test_execution_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    test_artifact_id = Column(UUID(as_uuid=True), ForeignKey("test_artifacts.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id"), nullable=False)
+    executed_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    executed_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    status = Column(String(20), nullable=False)  # passed, failed, error, skipped
+    duration_ms = Column(Integer, nullable=True)
+    output = Column(Text, nullable=True)
+    module_name = Column(String(255), nullable=True)
+    function_name = Column(String(255), nullable=True)
+    test_created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    test_edited_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    test_version_at_run = Column(Integer, nullable=False, default=1)
+
+    test_artifact = relationship("TestArtifact", foreign_keys=[test_artifact_id])
+    project = relationship("Project", foreign_keys=[project_id])
+
+    __table_args__ = (
+        CheckConstraint("status IN ('passed','failed','error','skipped')", name="ck_test_exec_status"),
+        Index("idx_test_exec_logs_artifact", test_artifact_id),
+        Index("idx_test_exec_logs_project", project_id),
+        Index("idx_test_exec_logs_status", status),
+    )

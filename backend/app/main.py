@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import structlog
 from app.core.config import settings
 from app.db.database import init_db
-from app.routers import auth, users, organizations, projects, ocg, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, legacy_router, merge_router, admin_gca_router, setup
+from app.routers import auth, users, organizations, projects, ocg, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, legacy_router, merge_router, admin_gca_router, setup, qa_router
 
 logger = structlog.get_logger(__name__)
 
@@ -82,6 +82,7 @@ app.include_router(legacy_router.router, prefix=f"{settings.API_PREFIX}", tags=[
 app.include_router(merge_router.router, prefix=f"{settings.API_PREFIX}", tags=["merge"])
 app.include_router(admin_gca_router.router, prefix=f"{settings.API_PREFIX}", tags=["admin-gca"])
 app.include_router(setup.router, prefix=f"{settings.API_PREFIX}", tags=["setup"])
+app.include_router(qa_router.router, prefix=f"{settings.API_PREFIX}", tags=["qa"])
 
 
 @app.get("/health")
