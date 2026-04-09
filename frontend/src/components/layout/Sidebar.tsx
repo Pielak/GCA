@@ -179,6 +179,7 @@ export function Sidebar() {
                     {isInProject && (
                       <div className="ml-4 mt-0.5 space-y-0.5 border-l border-slate-700 pl-2">
                         <SubNavItem to={`/projects/${proj.id}`} label="Dashboard" icon={<Activity className="w-3 h-3" />} end />
+                        <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionario" icon={<ClipboardList className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ingestion`} label="M4 - Ingestao" icon={<FileText className="w-3 h-3" />} />

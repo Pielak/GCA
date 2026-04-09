@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
 interface PendingProject {
@@ -24,9 +25,11 @@ const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }>
 }
 
 export function AdminProjectsPage() {
+  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
   const [projects, setProjects] = useState<PendingProject[]>([])
+  const [realProjects, setRealProjects] = useState<{id: string, slug: string}[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
@@ -45,8 +48,12 @@ export function AdminProjectsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const res = await apiClient.get('/admin/projects/pending')
-      setProjects(res.data.pending_projects || [])
+      const [pendingRes, projectsRes] = await Promise.all([
+        apiClient.get('/admin/projects/pending'),
+        apiClient.get('/projects'),
+      ])
+      setProjects(pendingRes.data.pending_projects || [])
+      setRealProjects((projectsRes.data.projects || []).map((p: any) => ({ id: p.id, slug: p.slug })))
     } catch {
       setProjects([])
     } finally {
@@ -190,6 +197,11 @@ export function AdminProjectsPage() {
                           <Clock className="w-3.5 h-3.5" />
                           Aguardando aprovação
                         </span>
+                      ) : proj.status === 'approved' ? (
+                        <span className="flex items-center gap-1.5 text-emerald-400 text-xs">
+                          <CheckCircle className="w-3.5 h-3.5" />
+                          Provisionado — GP pode operar
+                        </span>
                       ) : proj.rejection_reason ? (
                         <span className="text-red-400 text-xs" title={proj.rejection_reason}>
                           {proj.rejection_reason.length > 40 ? proj.rejection_reason.slice(0, 40) + '...' : proj.rejection_reason}
@@ -200,14 +212,27 @@ export function AdminProjectsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => handleDelete(proj)}
-                          disabled={actionLoading === proj.id}
-                          className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 disabled:opacity-30 transition-colors"
-                          title="Excluir solicitação"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {proj.status === 'approved' && (() => {
+                          const realProj = realProjects.find(rp => rp.slug === proj.project_slug)
+                          return realProj ? (
+                            <>
+                              <button
+                                onClick={() => navigate(`/projects/${realProj.id}`)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-900/20 transition-colors"
+                                title="Ver projeto"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => navigate(`/projects/${realProj.id}/team`)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-900/20 transition-colors"
+                                title="Equipe do projeto"
+                              >
+                                <Users className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : null
+                        })()}
                         <button
                           onClick={() => { setMessageModal(proj); setMessageText('') }}
                           className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors"
@@ -216,14 +241,24 @@ export function AdminProjectsPage() {
                           <Pencil className="w-4 h-4" />
                         </button>
                         {isPending && (
-                          <button
-                            onClick={() => handleApprove(proj)}
-                            disabled={actionLoading === proj.id}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-30 transition-colors"
-                            title="Aprovar projeto"
-                          >
-                            {actionLoading === proj.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
-                          </button>
+                          <>
+                            <button
+                              onClick={() => handleApprove(proj)}
+                              disabled={actionLoading === proj.id}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-30 transition-colors"
+                              title="Aprovar projeto"
+                            >
+                              {actionLoading === proj.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                            </button>
+                            <button
+                              onClick={() => handleDelete(proj)}
+                              disabled={actionLoading === proj.id}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 disabled:opacity-30 transition-colors"
+                              title="Excluir solicitação"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
