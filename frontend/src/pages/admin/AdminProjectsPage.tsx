@@ -1,81 +1,109 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Search, CheckCircle, XCircle, AlertCircle, Clock, ChevronRight, Loader2 } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
-interface PendingRequest {
+interface PendingProject {
   id: string
-  name: string
+  project_name: string
+  project_slug: string
   description: string
-  requestedBy: string
-  outputProfile: string
-  requestedAt: string
-}
-
-interface Project {
-  id: string
-  name: string
-  slug: string
   status: string
-  outputProfile: string
-  phase: number
-  gpName: string
-  gatekeeperScore: number
-  pendingIssues: number
+  gp_name: string
+  gp_email: string
+  requested_at: string
+  rejection_reason: string
 }
 
-const OUTPUT_LABELS: Record<string, string> = {
-  web_app: 'Web App', api: 'API', desktop: 'Desktop', mobile: 'Mobile', improvement: 'Melhoria', new_feature: 'Nova Feature',
+const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }> = {
+  pending:       { label: 'Pendente',       bg: 'bg-amber-500/20',   text: 'text-amber-300' },
+  approved:      { label: 'Aprovado',       bg: 'bg-emerald-500/20', text: 'text-emerald-300' },
+  rejected:      { label: 'Rejeitado',      bg: 'bg-red-500/20',     text: 'text-red-300' },
+  active:        { label: 'Ativo',          bg: 'bg-emerald-500/20', text: 'text-emerald-300' },
+  provisioning:  { label: 'Provisionando',  bg: 'bg-blue-500/20',    text: 'text-blue-300' },
+  draft:         { label: 'Rascunho',       bg: 'bg-slate-600/30',   text: 'text-slate-400' },
 }
 
 export function AdminProjectsPage() {
-  const navigate = useNavigate()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
-  const [pending, setPending] = useState<PendingRequest[]>([])
-  const [projects, setProjects] = useState<Project[]>([])
+  const [projects, setProjects] = useState<PendingProject[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
 
+  // Modal de mensagem ao GP
+  const [messageModal, setMessageModal] = useState<PendingProject | null>(null)
+  const [messageText, setMessageText] = useState('')
+  const [sendingMessage, setSendingMessage] = useState(false)
+
+  // Toast
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
+
   const loadData = useCallback(async () => {
     try {
-      const [pendingRes, projectsRes] = await Promise.allSettled([
-        apiClient.get('/admin/projects/pending'),
-        apiClient.get('/projects'),
-      ])
-      if (pendingRes.status === 'fulfilled') setPending(pendingRes.value.data.requests || pendingRes.value.data || [])
-      if (projectsRes.status === 'fulfilled') setProjects(projectsRes.value.data.projects || projectsRes.value.data || [])
-    } catch { /* empty */ } finally {
+      const res = await apiClient.get('/admin/projects/pending')
+      setProjects(res.data.pending_projects || [])
+    } catch {
+      setProjects([])
+    } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => { loadData() }, [loadData])
 
-  const handleApprove = async (id: string) => {
-    setActionLoading(id)
+  const handleApprove = async (p: PendingProject) => {
+    setActionLoading(p.id)
     try {
-      await apiClient.post(`/admin/projects/${id}/approve`)
-      setPending(prev => prev.filter(r => r.id !== id))
+      await apiClient.post(`/admin/projects/${p.id}/approve`)
+      showToast(`Projeto "${p.project_name}" aprovado com sucesso`, 'success')
       await loadData()
-    } catch { /* toast error */ } finally {
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao aprovar projeto', 'error')
+    } finally {
       setActionLoading(null)
     }
   }
 
-  const handleReject = async (id: string) => {
-    if (!confirm('Tem certeza que deseja rejeitar este projeto?')) return
-    setActionLoading(id)
+  const handleDelete = async (p: PendingProject) => {
+    if (!confirm(`Tem certeza que deseja excluir a solicitação "${p.project_name}"?`)) return
+    setActionLoading(p.id)
     try {
-      await apiClient.post(`/admin/projects/${id}/reject`)
-      setPending(prev => prev.filter(r => r.id !== id))
-    } catch { /* toast error */ } finally {
+      await apiClient.delete(`/admin/projects/${p.id}`)
+      showToast(`Solicitação "${p.project_name}" excluída`, 'success')
+      await loadData()
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao excluir', 'error')
+    } finally {
       setActionLoading(null)
+    }
+  }
+
+  const handleSendMessage = async () => {
+    if (!messageModal || !messageText.trim()) return
+    setSendingMessage(true)
+    try {
+      const res = await apiClient.post(`/admin/projects/${messageModal.id}/message`, {
+        message: messageText.trim(),
+        project_name: messageModal.project_name,
+      })
+      showToast(res.data.message || 'Mensagem enviada', 'success')
+      setMessageModal(null)
+      setMessageText('')
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao enviar mensagem', 'error')
+    } finally {
+      setSendingMessage(false)
     }
   }
 
   const filtered = projects.filter(p => {
-    const matchSearch = p.name.toLowerCase().includes(search.toLowerCase()) || p.slug.toLowerCase().includes(search.toLowerCase())
+    const matchSearch = p.project_name.toLowerCase().includes(search.toLowerCase()) ||
+                        p.gp_name.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'all' || p.status === statusFilter
     return matchSearch && matchStatus
   })
@@ -86,68 +114,25 @@ export function AdminProjectsPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold text-slate-100">Gestao de Projetos</h1>
-        <p className="text-slate-500 text-sm mt-0.5">Consolide solicitacoes, avalie pre-requisitos e libere tenants.</p>
-      </div>
-
-      {/* Pending Requests */}
-      {pending.length > 0 && (
-        <div className="bg-amber-950/20 border border-amber-800/30 rounded-xl p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertCircle className="w-4 h-4 text-amber-400" />
-            <h3 className="text-amber-300 text-sm font-semibold">Solicitacoes Pendentes ({pending.length})</h3>
-          </div>
-          <div className="space-y-3">
-            {pending.map(req => (
-              <div key={req.id} className="flex items-center justify-between p-4 bg-slate-900/60 rounded-lg border border-slate-800">
-                <div className="flex items-start gap-4">
-                  <div className="w-9 h-9 rounded-lg bg-amber-900/30 border border-amber-700/30 flex items-center justify-center flex-shrink-0">
-                    <Clock className="w-4 h-4 text-amber-400" />
-                  </div>
-                  <div>
-                    <p className="text-slate-200 text-sm font-medium">{req.name}</p>
-                    <p className="text-slate-400 text-xs mt-0.5">{req.description}</p>
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <span className="text-slate-500 text-xs">Solicitado por: <span className="text-slate-400">{req.requestedBy}</span></span>
-                      <span className="text-slate-600">-</span>
-                      <span className="text-slate-500 text-xs">{OUTPUT_LABELS[req.outputProfile] || req.outputProfile}</span>
-                      <span className="text-slate-600">-</span>
-                      <span className="text-slate-500 text-xs">{new Date(req.requestedAt).toLocaleDateString('pt-BR')}</span>
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 flex-shrink-0">
-                  <button
-                    onClick={() => handleReject(req.id)}
-                    disabled={actionLoading === req.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-900/30 border border-red-800/40 text-red-400 hover:bg-red-900/50 disabled:opacity-50 transition-colors text-xs"
-                  >
-                    <XCircle className="w-3.5 h-3.5" /> Rejeitar
-                  </button>
-                  <button
-                    onClick={() => handleApprove(req.id)}
-                    disabled={actionLoading === req.id}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-900/30 border border-emerald-800/40 text-emerald-400 hover:bg-emerald-900/50 disabled:opacity-50 transition-colors text-xs"
-                  >
-                    {actionLoading === req.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle className="w-3.5 h-3.5" />}
-                    Aprovar e Liberar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
+      {toast && (
+        <div className={`p-3 rounded-lg text-sm ${toast.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-red-900/30 border border-red-700 text-red-300'}`}>
+          {toast.message}
         </div>
       )}
 
-      {/* Filters */}
+      <div>
+        <h1 className="text-xl font-semibold text-slate-100">Gestão de Projetos</h1>
+        <p className="text-slate-500 text-sm mt-0.5">Gerencie solicitações, aprove projetos e comunique-se com os Gerentes de Projeto.</p>
+      </div>
+
+      {/* Filtros */}
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             value={search}
             onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar projeto..."
+            placeholder="Buscar por projeto ou GP..."
             className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
           />
         </div>
@@ -157,80 +142,161 @@ export function AdminProjectsPage() {
           className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-violet-600"
         >
           <option value="all">Todos os status</option>
-          <option value="active">Ativo</option>
-          <option value="degraded">Degradado</option>
-          <option value="provisioning">Provisionando</option>
-          <option value="draft">Rascunho</option>
-          <option value="suspended">Suspenso</option>
-          <option value="archived">Arquivado</option>
+          <option value="pending">Pendente</option>
+          <option value="approved">Aprovado</option>
+          <option value="rejected">Rejeitado</option>
         </select>
       </div>
 
-      {/* Projects Table */}
+      {/* Tabela de Projetos */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-slate-800">
-                {['PROJETO', 'STATUS', 'OUTPUT', 'FASE', 'GP', 'GATEKEEPER', 'PENDENCIAS', ''].map(h => (
-                  <th key={h} className="text-left px-4 py-3 text-xs text-slate-500 font-medium">{h}</th>
-                ))}
+                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PROJETO</th>
+                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">STATUS</th>
+                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">GERENTE DE PROJETO</th>
+                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PENDÊNCIAS</th>
+                <th className="text-right px-4 py-3 text-xs text-slate-500 font-medium">AÇÕES</th>
               </tr>
             </thead>
             <tbody>
-              {filtered.length > 0 ? filtered.map((proj, i) => (
-                <tr
-                  key={proj.id}
-                  className={`border-b border-slate-800/50 hover:bg-slate-800/40 transition-colors cursor-pointer ${i === filtered.length - 1 ? 'border-b-0' : ''}`}
-                  onClick={() => navigate(`/projects/${proj.id}`)}
-                >
-                  <td className="px-4 py-3">
-                    <p className="text-slate-200 text-sm font-medium">{proj.name}</p>
-                    <p className="text-slate-500 text-xs">{proj.slug}</p>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${
-                      proj.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
-                      proj.status === 'degraded' ? 'bg-amber-500/20 text-amber-300' :
-                      proj.status === 'provisioning' ? 'bg-blue-500/20 text-blue-300' :
-                      'bg-slate-700 text-slate-400'
-                    }`}>{proj.status}</span>
-                  </td>
-                  <td className="px-4 py-3"><span className="text-slate-400 text-xs">{OUTPUT_LABELS[proj.outputProfile] || proj.outputProfile}</span></td>
-                  <td className="px-4 py-3"><span className="text-slate-300 text-sm">{proj.phase}</span></td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-5 h-5 rounded-full bg-violet-700/60 flex items-center justify-center text-white text-xs">{(proj.gpName || '?').charAt(0)}</div>
-                      <span className="text-slate-400 text-xs">{(proj.gpName || '').split(' ')[0]}</span>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-16 bg-slate-700 rounded-full h-1.5">
-                        <div className="h-1.5 rounded-full transition-all" style={{
-                          width: `${proj.gatekeeperScore || 0}%`,
-                          backgroundColor: (proj.gatekeeperScore || 0) >= 90 ? '#34d399' : (proj.gatekeeperScore || 0) >= 70 ? '#fbbf24' : '#f87171'
-                        }} />
+              {filtered.length > 0 ? filtered.map((proj, i) => {
+                const st = STATUS_LABELS[proj.status] || STATUS_LABELS.pending
+                const isPending = proj.status === 'pending'
+                return (
+                  <tr key={proj.id} className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors ${i === filtered.length - 1 ? 'border-b-0' : ''}`}>
+                    <td className="px-4 py-3">
+                      <p className="text-slate-200 text-sm font-medium">{proj.project_name}</p>
+                      <p className="text-slate-500 text-xs">{proj.project_slug}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <a
+                        href={`mailto:${proj.gp_email}`}
+                        className="text-violet-400 hover:text-violet-300 text-sm transition-colors flex items-center gap-1.5"
+                        title={proj.gp_email}
+                      >
+                        <Mail className="w-3.5 h-3.5" />
+                        {proj.gp_name || proj.gp_email}
+                      </a>
+                    </td>
+                    <td className="px-4 py-3">
+                      {isPending ? (
+                        <span className="flex items-center gap-1.5 text-amber-400 text-xs">
+                          <Clock className="w-3.5 h-3.5" />
+                          Aguardando aprovação
+                        </span>
+                      ) : proj.rejection_reason ? (
+                        <span className="text-red-400 text-xs" title={proj.rejection_reason}>
+                          {proj.rejection_reason.length > 40 ? proj.rejection_reason.slice(0, 40) + '...' : proj.rejection_reason}
+                        </span>
+                      ) : (
+                        <span className="text-slate-600 text-xs">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => handleDelete(proj)}
+                          disabled={actionLoading === proj.id}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 disabled:opacity-30 transition-colors"
+                          title="Excluir solicitação"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => { setMessageModal(proj); setMessageText('') }}
+                          className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors"
+                          title="Enviar mensagem ao GP"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        {isPending && (
+                          <button
+                            onClick={() => handleApprove(proj)}
+                            disabled={actionLoading === proj.id}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-30 transition-colors"
+                            title="Aprovar projeto"
+                          >
+                            {actionLoading === proj.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle className="w-4 h-4" />}
+                          </button>
+                        )}
                       </div>
-                      <span className="text-xs text-slate-400">{proj.gatekeeperScore || 0}</span>
-                    </div>
+                    </td>
+                  </tr>
+                )
+              }) : (
+                <tr>
+                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">
+                    Nenhum projeto encontrado
                   </td>
-                  <td className="px-4 py-3">
-                    {(proj.pendingIssues || 0) > 0 ? (
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 text-xs">{proj.pendingIssues}</span>
-                    ) : (
-                      <span className="text-slate-600 text-xs">--</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3"><ChevronRight className="w-4 h-4 text-slate-600" /></td>
                 </tr>
-              )) : (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-slate-500 text-sm">Nenhum projeto encontrado</td></tr>
               )}
             </tbody>
           </table>
         </div>
       </div>
+
+      {/* Modal de mensagem ao GP */}
+      {messageModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold text-sm">Mensagem para o Gerente de Projeto</h3>
+              <button onClick={() => setMessageModal(null)} className="text-slate-500 hover:text-slate-300">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-3 mb-4">
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-400">Projeto:</span>
+                <span className="text-slate-200 font-medium">{messageModal.project_name}</span>
+              </div>
+              <div className="flex items-center gap-2 text-sm">
+                <span className="text-slate-400">Destinatário:</span>
+                <a href={`mailto:${messageModal.gp_email}`} className="text-violet-400 hover:text-violet-300">
+                  {messageModal.gp_name} ({messageModal.gp_email})
+                </a>
+              </div>
+              <div className="text-xs text-slate-500">
+                Assunto: <span className="text-slate-400">Edição de Projeto - {messageModal.project_name}</span>
+              </div>
+            </div>
+
+            <textarea
+              value={messageText}
+              onChange={e => setMessageText(e.target.value.slice(0, 1000))}
+              rows={6}
+              placeholder="Descreva as informações ou ajustes necessários para o projeto..."
+              className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-3 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors resize-none"
+            />
+            <div className="flex items-center justify-between mt-2">
+              <span className="text-xs text-slate-500">{messageText.length}/1000 caracteres</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setMessageModal(null)}
+                  className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSendMessage}
+                  disabled={!messageText.trim() || sendingMessage}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                >
+                  {sendingMessage ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                  Enviar Mensagem
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

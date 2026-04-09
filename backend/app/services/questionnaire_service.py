@@ -60,8 +60,18 @@ class QuestionnaireService:
             logger.info(
                 "questionnaire.submitted",
                 questionnaire_id=questionnaire_id,
-                project_id=str(project_id),
+                project_id=str(project_id) if project_id else "externo",
                 gp_email=gp_email,
+            )
+
+            # Notificar admins por email
+            asyncio.create_task(
+                QuestionnaireService._notify_admins_questionnaire_submitted(
+                    db_session_factory=None,
+                    gp_email=gp_email,
+                    project_name=responses.get('1', 'Projeto sem nome'),
+                    questionnaire_id=questionnaire_id,
+                )
             )
 
             # Opção A: Análise built-in (imediato)
@@ -164,6 +174,59 @@ class QuestionnaireService:
             return False, None, str(e)
 
     @staticmethod
+    @staticmethod
+    async def _notify_admins_questionnaire_submitted(
+        db_session_factory,
+        gp_email: str,
+        project_name: str,
+        questionnaire_id: str,
+    ):
+        """Notifica todos os admins por email quando um questionário é submetido."""
+        try:
+            from app.db.database import AsyncSessionLocal
+            from app.models.base import User
+            from app.services.email_service import EmailService
+
+            async with AsyncSessionLocal() as db:
+                result = await db.execute(
+                    select(User).where(User.is_admin == True, User.is_active == True)
+                )
+                admins = result.scalars().all()
+
+            subject = f"GCA — Novo questionário submetido: {project_name}"
+            body = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: #1e1b4b; padding: 20px; border-radius: 12px 12px 0 0;">
+                    <h2 style="color: #c4b5fd; margin: 0;">GCA — Questionário Pendente de Aprovação</h2>
+                </div>
+                <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
+                    <p>Um novo questionário técnico foi submetido e aguarda aprovação:</p>
+                    <ul style="list-style: none; padding: 0;">
+                        <li><strong>Projeto:</strong> {project_name}</li>
+                        <li><strong>GP:</strong> {gp_email}</li>
+                        <li><strong>ID:</strong> {questionnaire_id}</li>
+                    </ul>
+                    <p>Acesse a área de <strong>Administração → Projetos</strong> no GCA para revisar e aprovar.</p>
+                    <hr style="border-color: #334155; margin: 20px 0;" />
+                    <p style="color: #64748b; font-size: 12px;">GCA — Gestão de Codificação Assistida</p>
+                </div>
+            </div>
+            """
+
+            for admin in admins:
+                try:
+                    EmailService.send_email(
+                        to_email=admin.email,
+                        subject=subject,
+                        html_content=body,
+                    )
+                    logger.info("questionnaire.admin_notified", admin_email=admin.email, project=project_name)
+                except Exception as e:
+                    logger.warning("questionnaire.admin_notify_failed", admin_email=admin.email, error=str(e))
+
+        except Exception as e:
+            logger.error("questionnaire.admin_notification_error", error=str(e))
+
     async def _send_analysis_email(
         gp_email: str,
         project_id: str,

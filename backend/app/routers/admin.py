@@ -116,31 +116,39 @@ async def get_pending_projects(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Admin views all pending project requests
+    Admin visualiza todas as solicitações pendentes de projeto.
+    Inclui dados do GP para exibição na tabela.
     """
     try:
         service = AdminService(db)
         projects = await service.get_pending_projects()
 
-        return {
-            "pending_projects": [
-                {
-                    "id": str(p.id),
-                    "gp_id": str(p.gp_id),
-                    "project_name": p.project_name,
-                    "project_slug": p.project_slug,
-                    "requested_at": p.requested_at.isoformat()
-                }
-                for p in projects
-            ],
-            "count": len(projects)
-        }
+        result = []
+        for p in projects:
+            # Buscar dados do GP
+            gp_result = await db.execute(select(User).where(User.id == p.gp_id))
+            gp = gp_result.scalar_one_or_none()
+
+            result.append({
+                "id": str(p.id),
+                "gp_id": str(p.gp_id),
+                "project_name": p.project_name,
+                "project_slug": p.project_slug,
+                "description": p.description or "",
+                "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
+                "gp_name": gp.full_name if gp else "",
+                "gp_email": gp.email if gp else "",
+                "requested_at": p.requested_at.isoformat() if p.requested_at else "",
+                "rejection_reason": p.rejection_reason or "",
+            })
+
+        return {"pending_projects": result, "count": len(result)}
 
     except Exception as e:
         logger.error("admin.get_pending_projects_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching pending projects"
+            detail="Erro ao buscar projetos pendentes"
         )
 
 
@@ -226,6 +234,101 @@ async def reject_project(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error rejecting project"
         )
+
+
+class ProjectMessageRequest(BaseModel):
+    """Mensagem do admin para o GP do projeto"""
+    message: str
+    project_name: str
+
+
+@router.post("/projects/{project_id}/message")
+async def send_message_to_gp(
+    project_id: UUID,
+    req: ProjectMessageRequest,
+    current_user_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Admin envia mensagem ao GP de um projeto pendente.
+    Subject: "Edição de Projeto - [Nome do Projeto]"
+    """
+    if not req.message or not req.message.strip():
+        raise HTTPException(status_code=400, detail="Mensagem é obrigatória")
+    if len(req.message) > 1000:
+        raise HTTPException(status_code=400, detail="Mensagem deve ter no máximo 1000 caracteres")
+
+    from app.models.onboarding import ProjectRequest
+    result = await db.execute(select(ProjectRequest).where(ProjectRequest.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    # Buscar GP
+    gp_result = await db.execute(select(User).where(User.id == project.gp_id))
+    gp = gp_result.scalar_one_or_none()
+    if not gp:
+        raise HTTPException(status_code=404, detail="Gerente de Projeto não encontrado")
+
+    # Buscar admin que está enviando
+    admin_result = await db.execute(select(User).where(User.id == current_user_id))
+    admin_user = admin_result.scalar_one_or_none()
+    admin_name = admin_user.full_name if admin_user else "Administrador GCA"
+
+    # Enviar email
+    subject = f"Edição de Projeto - {req.project_name}"
+    body = f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <div style="background: #1e1b4b; padding: 20px; border-radius: 12px 12px 0 0;">
+            <h2 style="color: #c4b5fd; margin: 0;">GCA — Edição de Projeto</h2>
+        </div>
+        <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
+            <p>Olá <strong>{gp.full_name}</strong>,</p>
+            <p>O administrador <strong>{admin_name}</strong> enviou uma mensagem sobre o projeto <strong>{req.project_name}</strong>:</p>
+            <div style="background: #0f172a; padding: 16px; border-radius: 8px; border-left: 4px solid #7c3aed; margin: 16px 0;">
+                <p style="margin: 0; white-space: pre-wrap;">{req.message}</p>
+            </div>
+            <p>Por favor, acesse o GCA para revisar e atualizar as informações solicitadas.</p>
+            <hr style="border-color: #334155; margin: 20px 0;" />
+            <p style="color: #64748b; font-size: 12px;">Este e-mail foi enviado automaticamente pelo GCA — Gestão de Codificação Assistida.</p>
+        </div>
+    </div>
+    """
+
+    try:
+        success, error = EmailService.send_email(
+            to_email=gp.email,
+            subject=subject,
+            html_content=body,
+        )
+        if not success:
+            logger.warning("admin.message_email_failed", email=gp.email, error=error)
+            return {"success": True, "message": f"Mensagem registrada, mas o envio de e-mail falhou: {error}", "email_sent": False}
+    except Exception as e:
+        logger.warning("admin.message_email_error", error=str(e))
+        return {"success": True, "message": "Mensagem registrada, mas o envio de e-mail falhou", "email_sent": False}
+
+    logger.info("admin.message_sent_to_gp", project_id=str(project_id), gp_email=gp.email)
+    return {"success": True, "message": f"Mensagem enviada para {gp.email}", "email_sent": True}
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project_request(
+    project_id: UUID,
+    current_user_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Admin exclui uma solicitação de projeto pendente."""
+    from app.models.onboarding import ProjectRequest
+    result = await db.execute(select(ProjectRequest).where(ProjectRequest.id == project_id))
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    await db.delete(project)
+    await db.commit()
+    logger.info("admin.project_request_deleted", project_id=str(project_id))
+    return {"success": True, "message": "Solicitação de projeto excluída"}
 
 
 # ========== USER MANAGEMENT ==========
