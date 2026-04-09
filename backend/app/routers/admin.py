@@ -142,7 +142,8 @@ async def get_pending_projects(
                 "rejection_reason": p.rejection_reason or "",
             })
 
-        return {"pending_projects": result, "count": len(result)}
+        pending_count = sum(1 for p in result if p["status"] == "pending")
+        return {"pending_projects": result, "count": len(result), "pending_count": pending_count}
 
     except Exception as e:
         logger.error("admin.get_pending_projects_error", error=str(e))

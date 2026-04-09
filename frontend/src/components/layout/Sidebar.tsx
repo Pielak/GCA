@@ -67,7 +67,7 @@ export function Sidebar() {
       if (isAdmin) {
         try {
           const res = await apiClient.get('/admin/projects/pending')
-          setPendingCount(res.data.count || 0)
+          setPendingCount(res.data.pending_count || 0)
         } catch { /* ignore */ }
       }
     }

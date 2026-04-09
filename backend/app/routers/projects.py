@@ -121,6 +121,100 @@ async def list_projects(
     }
 
 
+@router.get("/{project_id}")
+async def get_project_detail(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Detalhe de um projeto (usado pelo ProjectDetailLayout)."""
+    from app.models.base import Project, ProjectMember, User
+    from sqlalchemy import select
+
+    result = await db.execute(select(Project).where(Project.id == project_id))
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    # Buscar papel do usuário no projeto
+    user_result = await db.execute(select(User).where(User.id == current_user_id))
+    user = user_result.scalar_one_or_none()
+
+    role = "admin" if user and user.is_admin else None
+    if not role:
+        member_result = await db.execute(
+            select(ProjectMember).where(
+                (ProjectMember.project_id == project_id) &
+                (ProjectMember.user_id == current_user_id)
+            )
+        )
+        member = member_result.scalar_one_or_none()
+        role = member.role if member else "viewer"
+
+    return {
+        "id": str(project.id),
+        "name": project.name,
+        "slug": project.slug,
+        "description": project.description or "",
+        "status": project.status or "active",
+        "phase": 1,
+        "language": "",
+        "database": "",
+        "gatekeeperScore": 0,
+        "pendingIssues": 0,
+        "role": role,
+    }
+
+
+@router.get("/{project_id}/members")
+async def list_project_members(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista membros ativos do projeto."""
+    from app.models.base import Project, ProjectMember, User
+    from sqlalchemy import select
+
+    result = await db.execute(
+        select(ProjectMember, User)
+        .join(User, ProjectMember.user_id == User.id)
+        .where(
+            (ProjectMember.project_id == project_id) &
+            (ProjectMember.is_active == True)
+        )
+        .order_by(ProjectMember.invited_at.asc())
+    )
+    rows = result.all()
+
+    return {
+        "members": [
+            {
+                "id": str(pm.id),
+                "user_id": str(pm.user_id),
+                "email": u.email,
+                "full_name": u.full_name or u.email.split("@")[0],
+                "role": pm.role,
+                "joined_at": pm.joined_at.isoformat() if pm.joined_at else pm.invited_at.isoformat() if pm.invited_at else None,
+                "accepted": pm.accepted_at is not None,
+            }
+            for pm, u in rows
+        ]
+    }
+
+
+@router.get("/{project_id}/pending-invites")
+async def list_pending_invites_alias(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Alias: lista convites pendentes (usado pelo ProjectTeamPage)."""
+    invites = await ProjectTeamService.get_pending_invites(db=db, project_id=project_id)
+    return {"invites": invites}
+
+
 @router.post("/{project_id}/invite", response_model=InviteTeamMemberResponse)
 async def invite_team_member(
     project_id: UUID,
