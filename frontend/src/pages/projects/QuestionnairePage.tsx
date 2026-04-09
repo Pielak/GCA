@@ -7,7 +7,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import {
-  BLOCKS, NA_VALUE, VALIDATION_RULES,
+  BLOCKS, NA_VALUE, VALIDATION_RULES, ANALYSIS_RESULT_FIELDS,
   type QuestionDef, type ValidationRule, type ValidationSeverity,
 } from '@/data/questionnaireBlocks'
 import { AnalysisOverlay } from '@/components/questionnaire/AnalysisOverlay'
@@ -80,13 +80,12 @@ export function QuestionnairePage() {
   const [showResult, setShowResult] = useState(false)
 
   const block = BLOCKS[currentBlock]
-  const totalQuestions = 54 // Q1-Q49 + Q50-Q54 (excluindo Q52 e Q53)
 
   // ─── Visibility helpers ────────────────────────────────────────────
 
-  const isQuestionVisible = (q: QuestionDef): boolean => {
-    if (!q.conditionalOn) return true
-    return responses[q.conditionalOn.question] === q.conditionalOn.value
+  const isQuestionDisabled = (q: QuestionDef): boolean => {
+    if (q.conditionalOn) return responses[q.conditionalOn.question] !== q.conditionalOn.value
+    return false
   }
 
   const isQuestionLinked = (q: QuestionDef): boolean => {
@@ -94,22 +93,21 @@ export function QuestionnairePage() {
     return responses[q.linkedTo.question] === q.linkedTo.value
   }
 
-  const visibleQuestions = block.questions.filter(isQuestionVisible)
-
   // ─── All visible questions across blocks (for percentage) ──────────
 
-  const allVisibleQuestions = useMemo(() => {
+  const allApplicableQuestions = useMemo(() => {
     return BLOCKS.flatMap(b =>
       b.questions.filter(q => {
         if (q.type === 'computed' || q.id === '52' || q.id === '53') return false
-        if (!q.conditionalOn) return true
-        return responses[q.conditionalOn.question] === q.conditionalOn.value
+        // Perguntas condicionais desabilitadas não contam para o percentual
+        if (q.conditionalOn && responses[q.conditionalOn.question] !== q.conditionalOn.value) return false
+        return true
       })
     )
   }, [responses])
 
   const answeredCount = useMemo(() => {
-    return allVisibleQuestions.filter(q => {
+    return allApplicableQuestions.filter(q => {
       if (q.linkedTo && responses[q.linkedTo.question] === q.linkedTo.value) return false
       const val = responses[q.id]
       if (!val) return false
@@ -117,12 +115,12 @@ export function QuestionnairePage() {
       if (Array.isArray(val)) return val.length > 0
       return false
     }).length
-  }, [allVisibleQuestions, responses])
+  }, [allApplicableQuestions, responses])
 
   const percentage = useMemo(() => {
-    if (allVisibleQuestions.length === 0) return 0
-    return Math.round((answeredCount / allVisibleQuestions.length) * 100)
-  }, [answeredCount, allVisibleQuestions])
+    if (allApplicableQuestions.length === 0) return 0
+    return Math.round((answeredCount / allApplicableQuestions.length) * 100)
+  }, [answeredCount, allApplicableQuestions])
 
   // ─── Handlers ──────────────────────────────────────────────────────
 
@@ -243,7 +241,11 @@ export function QuestionnairePage() {
       setResult(res.data)
       setSubmitted(true)
     } catch (err: any) {
-      setError(err?.message || 'Erro ao submeter questionario')
+      const msg = typeof err === 'string' ? err
+        : typeof err?.message === 'string' ? err.message
+        : typeof err?.detail === 'string' ? err.detail
+        : JSON.stringify(err) || 'Erro ao submeter questionario'
+      setError(msg)
     } finally {
       setSubmitting(false)
     }
@@ -291,7 +293,7 @@ export function QuestionnairePage() {
           <ClipboardList className="w-6 h-6 text-violet-400" />
           <div>
             <h1 className="text-2xl font-bold text-white">Questionario Tecnico</h1>
-            <p className="text-slate-400 text-sm">54 perguntas em 9 blocos</p>
+            <p className="text-slate-400 text-sm">49 perguntas em 8 blocos</p>
           </div>
         </div>
         <div className="text-right">
@@ -307,15 +309,12 @@ export function QuestionnairePage() {
 
       {/* Tabs */}
       <div className="flex gap-1.5 overflow-x-auto pb-1">
-        {BLOCKS.map((b, i) => {
-          const isA2Disabled = b.id === 'A.2' && responses['3'] !== 'Sim'
-          return (
-            <button key={b.id} onClick={() => { !isA2Disabled && setCurrentBlock(i); setShowResult(false) }} disabled={isA2Disabled}
-              className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-lg transition-colors ${isA2Disabled ? 'bg-slate-800/50 text-slate-600 cursor-not-allowed' : i === currentBlock && !showResult ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300'}`}
-              title={isA2Disabled ? 'Habilitado quando Q3 = "Sim"' : b.title}
-            >{b.id}</button>
-          )
-        })}
+        {BLOCKS.map((b, i) => (
+          <button key={b.id} onClick={() => { setCurrentBlock(i); setShowResult(false) }}
+            className={`flex-shrink-0 px-3 py-1.5 text-xs rounded-lg transition-colors ${i === currentBlock && !showResult ? 'bg-violet-600 text-white' : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:text-slate-300'}`}
+            title={b.title}
+          >{b.id}</button>
+        ))}
         {analysisResult && (
           <button
             onClick={() => setShowResult(true)}
@@ -424,6 +423,47 @@ export function QuestionnairePage() {
             </div>
           )}
 
+          {/* Campos A.12 — Resultado da Análise */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+            <h4 className="text-slate-200 text-sm font-semibold">Dados da Analise (A.12)</h4>
+
+            <div>
+              <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.percentage.label}</p>
+              <div className="flex items-center gap-3">
+                <div className="flex-1 h-2.5 bg-slate-800 rounded-full">
+                  <div className={`h-full rounded-full transition-all ${percentage >= 80 ? 'bg-emerald-500' : percentage >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                    style={{ width: `${percentage}%` }} />
+                </div>
+                <span className={`text-sm font-bold ${percentage >= 80 ? 'text-emerald-400' : 'text-amber-400'}`}>{percentage}%</span>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.restrictions.label}</p>
+              <p className="text-slate-300 text-sm bg-slate-800/50 rounded-lg px-3 py-2 min-h-[2rem]">
+                {analysisResult.failedRules.length > 0
+                  ? analysisResult.failedRules.map(r => r.message).join('. ')
+                  : 'Nenhuma restricao identificada.'}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.observations.label}</p>
+              <p className="text-slate-300 text-sm bg-slate-800/50 rounded-lg px-3 py-2 min-h-[2rem]">
+                {analysisResult.status === 'pronto_para_ingestao'
+                  ? 'Questionario completo e consistente. Pronto para ingestao no pipeline OCG.'
+                  : analysisResult.status === 'recusado'
+                    ? `Questionario recusado. ${percentage < 80 ? `Percentual respondido (${percentage}%) abaixo do minimo (80%).` : `${analysisResult.blockers.length} bloqueante(s) ativo(s).`}`
+                    : `${analysisResult.gaps.length} gap(s) e ${analysisResult.caveats.length} ressalva(s) identificados. Revisao necessaria antes do envio.`}
+              </p>
+            </div>
+
+            <div>
+              <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.validators.label}</p>
+              <p className="text-slate-500 text-xs italic">Sera preenchido apos validacao pelos responsaveis do projeto.</p>
+            </div>
+          </div>
+
           {/* Action buttons */}
           <div className="flex items-center gap-3">
             <button onClick={handleExportJSON}
@@ -451,13 +491,6 @@ export function QuestionnairePage() {
             <h2 className="text-lg font-semibold text-white mb-1">{block.title}</h2>
             <p className="text-slate-400 text-sm mb-6">{block.description}</p>
 
-            {block.id === 'A.2' && responses['3'] !== 'Sim' && (
-              <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-center gap-2 mb-6">
-                <Info className="w-4 h-4 text-amber-400 flex-shrink-0" />
-                <p className="text-amber-300 text-sm">Este bloco so e habilitado quando Q3 = "Sim" (projeto existente).</p>
-              </div>
-            )}
-
             {error && (
               <div className="mb-4 bg-red-900/40 border border-red-800/50 rounded-lg p-3">
                 <p className="text-red-300 text-sm">{error}</p>
@@ -465,51 +498,47 @@ export function QuestionnairePage() {
             )}
 
             <div className="space-y-7">
-              {visibleQuestions.map(q => {
+              {block.questions.map(q => {
+                const disabled = isQuestionDisabled(q)
                 const linked = isQuestionLinked(q)
-                const isComputed = q.type === 'computed'
+                const inactive = disabled || linked
 
                 return (
-                  <div key={q.id} className={linked ? 'opacity-50' : ''}>
+                  <div key={q.id} className={`transition-opacity ${inactive ? 'opacity-40' : ''}`}>
                     <label className="block text-sm text-slate-200 font-medium mb-2">
                       <span className="text-violet-400 mr-1 font-bold">Q{q.id}.</span>
                       {q.label}
                       <HelpTooltip text={q.help} />
                     </label>
 
-                    {linked && (
-                      <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/60 border border-slate-700/50 rounded-lg">
-                        <Info className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
-                        <p className="text-xs text-slate-500 italic">{q.linkedTo?.message || 'Resposta ja providenciada em perguntas anteriores.'}</p>
+                    {disabled && (
+                      <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/40 border border-slate-700/30 rounded-lg">
+                        <Info className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                        <p className="text-xs text-slate-600 italic">Nao se aplica — {q.conditionalOn ? `requer Q${q.conditionalOn.question} = "${q.conditionalOn.value}"` : ''}</p>
                       </div>
                     )}
 
-                    {isComputed && (
-                      <div className="flex items-center gap-3 px-4 py-3 bg-slate-800/60 border border-slate-700/50 rounded-lg">
-                        <div className="flex-1">
-                          <div className="w-full h-2 bg-slate-700 rounded-full">
-                            <div className={`h-full rounded-full transition-all ${percentage >= 80 ? 'bg-emerald-500' : percentage >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
-                              style={{ width: `${percentage}%` }} />
-                          </div>
-                        </div>
-                        <span className={`text-sm font-semibold ${percentage >= 80 ? 'text-emerald-400' : 'text-amber-400'}`}>{percentage}%</span>
+                    {linked && !disabled && (
+                      <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/40 border border-slate-700/30 rounded-lg">
+                        <Info className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+                        <p className="text-xs text-slate-600 italic">{q.linkedTo?.message || 'Resposta ja providenciada em perguntas anteriores.'}</p>
                       </div>
                     )}
 
-                    {q.type === 'text' && !linked && (
+                    {q.type === 'text' && !inactive && (
                       <input type="text" value={(responses[q.id] as string) || ''} onChange={e => handleTextChange(q.id, e.target.value)}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
                         placeholder={q.placeholder || ''} />
                     )}
 
-                    {q.type === 'textarea' && !linked && (
+                    {q.type === 'textarea' && !inactive && (
                       <textarea value={(responses[q.id] as string) || ''} onChange={e => handleTextChange(q.id, e.target.value)}
                         rows={4}
                         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors resize-none"
                         placeholder={q.placeholder || ''} />
                     )}
 
-                    {q.type === 'single' && !linked && q.options && (
+                    {q.type === 'single' && !inactive && q.options && (
                       <div className="flex flex-wrap gap-2">
                         {q.options.map(opt => {
                           const isNA = opt === NA_VALUE
@@ -522,7 +551,7 @@ export function QuestionnairePage() {
                       </div>
                     )}
 
-                    {q.type === 'multi' && !linked && q.options && (
+                    {q.type === 'multi' && !inactive && q.options && (
                       <div className="flex flex-wrap gap-2">
                         {q.options.map(opt => {
                           const currentVals = (responses[q.id] as string[]) || []
@@ -539,6 +568,15 @@ export function QuestionnairePage() {
                             className={`px-3 py-1.5 text-sm rounded-lg border transition-colors italic ${((responses[q.id] as string[]) || []).includes(NA_VALUE) ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
                           >Nao se aplica</button>
                         )}
+                      </div>
+                    )}
+
+                    {/* Perguntas desabilitadas mostram botão NA pré-marcado */}
+                    {inactive && (q.type === 'single' || q.type === 'multi') && (
+                      <div className="flex flex-wrap gap-2">
+                        <span className="px-3 py-1.5 text-sm rounded-lg border bg-slate-600/20 border-slate-600/30 text-slate-500 italic">
+                          Nao se aplica
+                        </span>
                       </div>
                     )}
                   </div>
