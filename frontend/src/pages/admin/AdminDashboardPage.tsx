@@ -587,63 +587,17 @@ export function AdminDashboardPage() {
         <KPICard icon={<Users className="w-5 h-5 text-blue-400" />} label="Usuarios" value={metrics.totalUsers} sub={`${metrics.inactiveUsers} inativos`} color="blue" />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Status Distribution */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-slate-200 text-sm font-semibold mb-4">Distribuicao de Status</h3>
-          <div className="flex items-center gap-4">
-            <ResponsiveContainer width={120} height={120}>
-              <PieChart>
-                <Pie data={pieData} cx={55} cy={55} innerRadius={30} outerRadius={55} paddingAngle={3} dataKey="value">
-                  {pieData.map((entry, i) => <Cell key={i} fill={entry.color} />)}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="space-y-2">
-              {pieData.map(d => (
-                <div key={d.name} className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color }} />
-                  <span className="text-slate-400 text-xs">{d.name}</span>
-                  <span className="text-slate-200 text-xs font-medium ml-auto pl-4">{d.value}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        {/* Gatekeeper Scores */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 lg:col-span-2">
-          <h3 className="text-slate-200 text-sm font-semibold mb-4">Score Gatekeeper por Projeto</h3>
-          {gkScores.length > 0 ? (
-            <ResponsiveContainer width="100%" height={140}>
-              <BarChart data={gkScores} margin={{ top: 0, right: 0, bottom: 0, left: -20 }}>
-                <XAxis dataKey="name" tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} />
-                <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} axisLine={false} tickLine={false} domain={[0, 100]} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }}
-                  formatter={(v: number) => [`${v}/100`, 'Score']}
-                />
-                <Bar dataKey="score" radius={[4, 4, 0, 0]}>
-                  {gkScores.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <p className="text-slate-500 text-sm py-8 text-center">Nenhum score registrado</p>
-          )}
-        </div>
-      </div>
-
+      {/* Visão sistêmica — apenas informações globais, não de projeto */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Recent Projects */}
+        {/* Lista de Projetos do Sistema */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-slate-200 text-sm font-semibold">Projetos Recentes</h3>
-            <button onClick={() => navigate('/admin/projects')} className="text-xs text-violet-400 hover:text-violet-300 transition-colors">Ver todos</button>
+            <h3 className="text-slate-200 text-sm font-semibold">Projetos no Sistema</h3>
+            <button onClick={() => navigate('/admin/projects')} className="text-xs text-violet-400 hover:text-violet-300 transition-colors">Gerenciar</button>
           </div>
           {recentProj.length > 0 ? (
             <div className="space-y-2">
-              {recentProj.slice(0, 5).map(p => (
+              {recentProj.map(p => (
                 <div
                   key={p.id}
                   onClick={() => navigate(`/projects/${p.id}`)}
@@ -654,52 +608,37 @@ export function AdminDashboardPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-slate-200 text-xs font-medium truncate">{p.name}</p>
-                    <p className="text-slate-500 text-xs">Fase {p.phase} - {p.outputProfile}</p>
+                    <p className="text-slate-500 text-xs">{p.outputProfile || 'Em operação'}</p>
                   </div>
                   <span className={`text-xs px-2 py-0.5 rounded-full ${
                     p.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
                     p.status === 'degraded' ? 'bg-amber-500/20 text-amber-300' :
                     'bg-slate-700 text-slate-400'
-                  }`}>{p.status}</span>
+                  }`}>{p.status === 'active' ? 'Ativo' : p.status === 'completed' ? 'Concluído' : p.status}</span>
                 </div>
               ))}
             </div>
           ) : (
-            <p className="text-slate-500 text-sm py-4 text-center">Nenhum projeto encontrado</p>
+            <p className="text-slate-500 text-sm py-4 text-center">Nenhum projeto cadastrado</p>
           )}
         </div>
 
-        {/* Alerts + Recent Audit */}
+        {/* Credenciais e Auditoria Global */}
         <div className="space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-slate-200 text-sm font-semibold flex items-center gap-2">
                 <Key className="w-4 h-4 text-amber-400" />
-                Credenciais com Alerta
+                Credenciais do Sistema
               </h3>
-              <span className="text-xs text-red-400 font-medium">{critCreds.length} criticas</span>
             </div>
-            {critCreds.length === 0 ? (
-              <p className="text-slate-500 text-xs">Todas as credenciais estao validas.</p>
-            ) : (
-              <div className="space-y-2">
-                {critCreds.map((c, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 rounded-md bg-red-950/30 border border-red-900/30">
-                    <div>
-                      <p className="text-slate-300 text-xs font-medium">{c.name}</p>
-                      <p className="text-slate-500 text-xs">{c.project}</p>
-                    </div>
-                    <span className="text-xs px-2 py-0.5 rounded-full bg-red-500/20 text-red-300">{c.status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+            <p className="text-slate-500 text-xs">Provedores de IA e integrações configurados na aba Provedores de IA.</p>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-slate-200 text-sm font-semibold">Atividade Recente</h3>
-              <button onClick={() => navigate('/admin/audit')} className="text-xs text-violet-400 hover:text-violet-300 transition-colors">Ver trilha</button>
+              <h3 className="text-slate-200 text-sm font-semibold">Auditoria Global</h3>
+              <button onClick={() => navigate('/admin/audit')} className="text-xs text-violet-400 hover:text-violet-300 transition-colors">Ver trilha completa</button>
             </div>
             {recentAud.length > 0 ? (
               <div className="space-y-2.5">
@@ -710,13 +649,13 @@ export function AdminDashboardPage() {
                     }`} />
                     <div className="min-w-0">
                       <p className="text-slate-300 text-xs leading-snug">{ev.detail.slice(0, 80)}{ev.detail.length > 80 ? '...' : ''}</p>
-                      <p className="text-slate-600 text-xs mt-0.5">{new Date(ev.timestamp).toLocaleString('pt-BR')}</p>
+                      <p className="text-slate-600 text-xs mt-0.5">{ev.timestamp ? new Date(ev.timestamp).toLocaleString('pt-BR') : ''}</p>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-slate-500 text-xs">Nenhuma atividade recente.</p>
+              <p className="text-slate-500 text-xs">Nenhuma atividade global recente.</p>
             )}
           </div>
         </div>
