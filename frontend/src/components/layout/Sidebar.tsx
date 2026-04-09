@@ -48,6 +48,7 @@ export function Sidebar() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [projects, setProjects] = useState<SidebarProject[]>([])
+  const [pendingCount, setPendingCount] = useState(0)
 
   const isAdmin = user?.is_admin || false
   const userName = user?.full_name || user?.email || 'Usuario'
@@ -61,9 +62,16 @@ export function Sidebar() {
       } catch {
         // No projects available
       }
+      // Buscar contagem de pendentes (apenas admin)
+      if (isAdmin) {
+        try {
+          const res = await apiClient.get('/admin/projects/pending')
+          setPendingCount(res.data.count || 0)
+        } catch { /* ignore */ }
+      }
     }
     load()
-  }, [])
+  }, [isAdmin])
 
   const handleLogout = () => {
     logout()
@@ -125,7 +133,12 @@ export function Sidebar() {
           <div className="mb-4">
             <p className="text-slate-500 text-[10px] uppercase tracking-wider px-2 mb-2 font-semibold">Administracao</p>
             <NavItem to="/admin" icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard Global" end />
-            <NavItem to="/admin/projects" icon={<FolderOpen className="w-4 h-4" />} label="Projetos" />
+            <div className="relative">
+              <NavItem to="/admin/projects" icon={<FolderOpen className="w-4 h-4" />} label="Projetos" />
+              {pendingCount > 0 && (
+                <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse" title={`${pendingCount} projeto(s) pendente(s)`} />
+              )}
+            </div>
             <NavItem to="/admin/users" icon={<Users className="w-4 h-4" />} label="Usuarios" />
             <NavItem to="/admin/audit" icon={<ScrollText className="w-4 h-4" />} label="Auditoria Global" />
           </div>

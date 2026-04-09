@@ -1,6 +1,6 @@
 """Questionnaire Service for n8n Integration"""
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 from typing import Optional, Tuple, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -56,6 +56,9 @@ class QuestionnaireService:
             import secrets
             questionnaire_id = secrets.token_hex(8)
 
+            project_name = responses.get('1', 'Projeto sem nome')
+            project_slug = responses.get('2', f'projeto-{secrets.token_hex(4)}')
+
             # Log questionnaire submission
             logger.info(
                 "questionnaire.submitted",
@@ -64,12 +67,58 @@ class QuestionnaireService:
                 gp_email=gp_email,
             )
 
+            # Se fluxo externo (sem project_id), criar ProjectRequest para aprovação
+            if not project_id:
+                from app.models.onboarding import ProjectRequest, ProjectRequestStatus
+
+                # Criar user GP se não existir
+                if not gp_user:
+                    from app.core.security import hash_password
+                    temp_pass = secrets.token_urlsafe(16)
+                    gp_user = User(
+                        id=uuid4(),
+                        email=gp_email,
+                        full_name=responses.get('gp_name', gp_email.split('@')[0]),
+                        password_hash=hash_password(temp_pass),
+                        is_admin=False,
+                        is_active=True,
+                        first_access_completed=False,
+                    )
+                    db.add(gp_user)
+                    await db.flush()
+
+                # Verificar se slug já existe
+                existing_slug = await db.execute(
+                    select(ProjectRequest).where(ProjectRequest.project_slug == project_slug)
+                )
+                if existing_slug.scalar_one_or_none():
+                    project_slug = f"{project_slug}-{secrets.token_hex(3)}"
+
+                # Criar solicitação de projeto
+                proj_request = ProjectRequest(
+                    gp_id=gp_user.id,
+                    project_name=project_name,
+                    project_slug=project_slug,
+                    description=responses.get('description', ''),
+                    schema_name=f"proj_{project_slug.replace('-', '_')}",
+                    status=ProjectRequestStatus.PENDING,
+                )
+                db.add(proj_request)
+                await db.commit()
+
+                logger.info(
+                    "questionnaire.project_request_created",
+                    project_request_id=str(proj_request.id),
+                    project_name=project_name,
+                    gp_email=gp_email,
+                )
+
             # Notificar admins por email
             asyncio.create_task(
                 QuestionnaireService._notify_admins_questionnaire_submitted(
                     db_session_factory=None,
                     gp_email=gp_email,
-                    project_name=responses.get('1', 'Projeto sem nome'),
+                    project_name=project_name,
                     questionnaire_id=questionnaire_id,
                 )
             )

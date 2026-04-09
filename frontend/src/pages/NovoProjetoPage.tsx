@@ -214,21 +214,42 @@ export function NovoProjetoPage() {
       await apiClient.post('/questionnaires/', {
         project_id: null,
         gp_email: gpEmail,
-        responses,
+        responses: { ...responses, gp_name: gpName },
       })
       setStep('submitted')
     } catch (err: any) {
-      setSubmitError(err?.message || 'Erro ao enviar questionário')
+      const msg = typeof err === 'string' ? err
+        : typeof err?.message === 'string' ? err.message
+        : typeof err?.detail === 'string' ? err.detail
+        : JSON.stringify(err) || 'Erro ao enviar questionário'
+      setSubmitError(msg)
     } finally {
       setSubmitting(false)
     }
   }
 
   const block = BLOCKS[currentBlock]
-  const totalAnswered = Object.keys(responses).filter(k => {
-    const val = responses[k]
-    return val && (typeof val === 'string' ? val.length > 0 : Array.isArray(val) && val.length > 0)
+
+  // Cálculo de aderência: perguntas aplicáveis respondidas
+  const applicableQuestions = BLOCKS.flatMap(b =>
+    b.questions.filter(q => {
+      if (q.type === 'computed') return false
+      if (q.conditionalOn && responses[q.conditionalOn.question] !== q.conditionalOn.value) return false
+      if (q.linkedTo && responses[q.linkedTo.question] === q.linkedTo.value) return false
+      return true
+    })
+  )
+  const totalAnswered = applicableQuestions.filter(q => {
+    const val = responses[q.id]
+    if (!val) return false
+    if (typeof val === 'string') return val.trim().length > 0
+    if (Array.isArray(val)) return val.length > 0
+    return false
   }).length
+  const adherencePercent = applicableQuestions.length > 0
+    ? Math.round((totalAnswered / applicableQuestions.length) * 100)
+    : 0
+  const canSubmit = adherencePercent >= 85
 
   // === STEP: IDENTIFY ===
   if (step === 'identify') {
@@ -390,12 +411,16 @@ export function NovoProjetoPage() {
               {draftSaved ? 'Rascunho Salvo' : 'Salvar Rascunho'}
             </button>
 
-            {/* Progress */}
+            {/* Aderência */}
             <div className="text-right">
-              <p className="text-xs text-slate-500">{totalAnswered} respondidas</p>
-              <div className="w-28 h-1 bg-slate-700 rounded-full mt-0.5">
-                <div className="h-full bg-violet-600 rounded-full transition-all" style={{ width: `${Math.min(100, (totalAnswered / 49) * 100)}%` }} />
+              <p className="text-xs text-slate-500">
+                Aderência: <span className={`font-semibold ${adherencePercent >= 85 ? 'text-emerald-400' : adherencePercent >= 50 ? 'text-amber-400' : 'text-red-400'}`}>{adherencePercent}%</span>
+              </p>
+              <div className="w-28 h-1.5 bg-slate-700 rounded-full mt-0.5">
+                <div className={`h-full rounded-full transition-all ${adherencePercent >= 85 ? 'bg-emerald-500' : adherencePercent >= 50 ? 'bg-amber-500' : 'bg-red-500'}`}
+                  style={{ width: `${Math.min(100, adherencePercent)}%` }} />
               </div>
+              <p className="text-[10px] text-slate-600 mt-0.5">{totalAnswered} de {applicableQuestions.length} respondidas</p>
             </div>
           </div>
         </div>
@@ -518,11 +543,19 @@ export function NovoProjetoPage() {
               Próximo <ChevronRight className="w-4 h-4" />
             </button>
           ) : (
-            <button onClick={handleSubmit} disabled={submitting}
-              className="flex items-center gap-2 px-5 py-2 text-sm bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white rounded-lg transition-colors"
-            >
-              {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Enviando...</> : <><Send className="w-4 h-4" />Enviar para Análise</>}
-            </button>
+            <div className="flex items-center gap-2">
+              <button onClick={() => setCurrentBlock(0)}
+                className="flex items-center gap-1 px-4 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-300 hover:bg-slate-700 rounded-lg transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" /> Editar Respostas
+              </button>
+              <button onClick={handleSubmit} disabled={submitting || !canSubmit}
+                className="flex items-center gap-2 px-5 py-2 text-sm bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                title={!canSubmit ? `Aderência mínima de 85% necessária (atual: ${adherencePercent}%)` : ''}
+              >
+                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Enviando...</> : <><Send className="w-4 h-4" />Enviar Questionário</>}
+              </button>
+            </div>
           )}
         </div>
 

@@ -68,7 +68,7 @@ async def submit_questionnaire(
     from datetime import datetime, timezone
     return SubmitQuestionnaireResponse(
         questionnaire_id=questionnaire_id,
-        project_id=str(req.project_id),
+        project_id=str(req.project_id) if req.project_id else None,
         status="pending",
         submission_date=datetime.now(timezone.utc).isoformat(),
     )
