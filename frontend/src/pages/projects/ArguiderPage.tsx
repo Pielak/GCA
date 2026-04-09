@@ -122,7 +122,7 @@ export function ArguiderPage() {
           <div className="text-center">
             <CheckCircle className="w-10 h-10 text-emerald-500/30 mx-auto mb-3" />
             <p className="text-slate-400 text-sm">Nenhum item pendente do Gatekeeper.</p>
-            <p className="text-slate-600 text-xs mt-1">Faça upload e analise documentos na página de Ingestão primeiro.</p>
+            <p className="text-slate-600 text-xs mt-1">Faça upload e análise documentos na página de Ingestão primeiro.</p>
           </div>
         </div>
       </div>

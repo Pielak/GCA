@@ -72,7 +72,7 @@ export function QAReadinessPage() {
     setRunning(true);
     try {
       await apiClient.post(`/projects/${id}/qa/execute`, { test_types: null });
-      // Recarregar dados apos execucao
+      // Recarregar dados após execucao
       const [covRes, resRes] = await Promise.all([
         apiClient.get(`/projects/${id}/qa/coverage`),
         apiClient.get(`/projects/${id}/qa/results`),

@@ -16,7 +16,7 @@ import { AnalysisOverlay } from '@/components/questionnaire/AnalysisOverlay'
 // Types
 // ============================================================================
 
-type AnalysisStatus = 'pronto_para_ingestao' | 'pendente_ajustes' | 'recusado'
+type AnalysisStatus = 'pronto_para_ingestão' | 'pendente_ajustes' | 'recusado'
 
 interface AnalysisResult {
   status: AnalysisStatus
@@ -196,13 +196,13 @@ export function QuestionnairePage() {
     } else if (gaps.length > 0) {
       status = 'pendente_ajustes'
     } else {
-      status = 'pronto_para_ingestao'
+      status = 'pronto_para_ingestão'
     }
 
     // Auto-gravar motivo de recusa em Q51
     if (status === 'recusado') {
       const motivo = percentage < 80
-        ? `[Auto] Recusado: percentual respondido ${percentage}% (minimo 80%).`
+        ? `[Auto] Recusado: percentual respondido ${percentage}% (mínimo 80%).`
         : `[Auto] Recusado: ${blockers.length} bloqueante(s) ativo(s).`
       setResponses(prev => ({
         ...prev,
@@ -230,7 +230,7 @@ export function QuestionnairePage() {
 
   const handleExportJSON = useCallback(() => {
     const payload = {
-      questionario_versao: '1.0',
+      questionário_versao: '1.0',
       project_name: responses['1'] || '',
       project_slug: responses['2'] || '',
       data_preenchimento: new Date().toISOString(),
@@ -247,7 +247,7 @@ export function QuestionnairePage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `questionario-gca-${responses['2'] || 'projeto'}.json`
+    a.download = `questionário-gca-${responses['2'] || 'projeto'}.json`
     a.click()
     URL.revokeObjectURL(url)
   }, [responses, percentage, analysisResult])
@@ -270,7 +270,7 @@ export function QuestionnairePage() {
       const msg = typeof err === 'string' ? err
         : typeof err?.message === 'string' ? err.message
         : typeof err?.detail === 'string' ? err.detail
-        : JSON.stringify(err) || 'Erro ao submeter questionario'
+        : JSON.stringify(err) || 'Erro ao submeter questionário'
       setError(msg)
     } finally {
       setSubmitting(false)
@@ -297,10 +297,10 @@ export function QuestionnairePage() {
       <div className="max-w-3xl mx-auto p-6 space-y-6">
         <div className="bg-slate-900 border border-slate-700 rounded-xl p-8 text-center">
           <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Questionario Enviado!</h2>
-          <p className="text-slate-400 mb-4">Seu questionario foi submetido para analise.</p>
+          <h2 className="text-2xl font-bold text-white mb-2">Questionário Enviado!</h2>
+          <p className="text-slate-400 mb-4">Seu questionário foi submetido para análise.</p>
           <p className="text-slate-300 text-sm">
-            Em ate 48 horas voce recebera as informacoes referentes ao seu projeto, incluindo convite de acesso ao GCA e lista de instrucoes para parametrizar seu projeto.
+            Em até 48 horas você receberá as informações referentes ao seu projeto, incluindo convite de acesso ao GCA e lista de instruções para parametrizar seu projeto.
           </p>
         </div>
       </div>
@@ -318,7 +318,7 @@ export function QuestionnairePage() {
         <div className="flex items-center gap-3">
           <ClipboardList className="w-6 h-6 text-violet-400" />
           <div>
-            <h1 className="text-2xl font-bold text-white">Questionario Tecnico</h1>
+            <h1 className="text-2xl font-bold text-white">Questionário Técnico</h1>
             <p className="text-slate-400 text-sm">49 perguntas em 8 blocos</p>
           </div>
         </div>
@@ -354,14 +354,14 @@ export function QuestionnairePage() {
         <div className="space-y-4">
           {/* Status card */}
           <div className={`border rounded-xl p-6 ${
-            analysisResult.status === 'pronto_para_ingestao'
+            analysisResult.status === 'pronto_para_ingestão'
               ? 'bg-emerald-950/20 border-emerald-800/30'
               : analysisResult.status === 'pendente_ajustes'
                 ? 'bg-amber-950/20 border-amber-800/30'
                 : 'bg-red-950/20 border-red-800/30'
           }`}>
             <div className="flex items-center gap-3 mb-3">
-              {analysisResult.status === 'pronto_para_ingestao' ? (
+              {analysisResult.status === 'pronto_para_ingestão' ? (
                 <CheckCircle2 className="w-6 h-6 text-emerald-400" />
               ) : analysisResult.status === 'pendente_ajustes' ? (
                 <AlertTriangle className="w-6 h-6 text-amber-400" />
@@ -369,33 +369,33 @@ export function QuestionnairePage() {
                 <AlertCircle className="w-6 h-6 text-red-400" />
               )}
               <h3 className={`text-lg font-semibold ${
-                analysisResult.status === 'pronto_para_ingestao' ? 'text-emerald-300'
+                analysisResult.status === 'pronto_para_ingestão' ? 'text-emerald-300'
                 : analysisResult.status === 'pendente_ajustes' ? 'text-amber-300'
                 : 'text-red-300'
               }`}>
-                {analysisResult.status === 'pronto_para_ingestao' && 'Pronto para Ingestao'}
+                {analysisResult.status === 'pronto_para_ingestão' && 'Pronto para Ingestão'}
                 {analysisResult.status === 'pendente_ajustes' && 'Pendente de Ajustes'}
                 {analysisResult.status === 'recusado' && 'Recusado'}
               </h3>
             </div>
 
-            {analysisResult.status === 'pronto_para_ingestao' && (
+            {analysisResult.status === 'pronto_para_ingestão' && (
               <p className="text-slate-300 text-sm">
-                Seu questionario esta completo e consistente. Em ate 48 horas voce recebera as informacoes referentes ao seu projeto.
+                Seu questionário está completo e consistente. Em até 48 horas você receberá as informações referentes ao seu projeto.
               </p>
             )}
 
             {analysisResult.status === 'pendente_ajustes' && (
               <p className="text-slate-300 text-sm">
-                O questionario contem gaps ou ressalvas que devem ser revisados antes do envio.
+                O questionário contem gaps ou ressalvas que devem ser revisados antes do envio.
               </p>
             )}
 
             {analysisResult.status === 'recusado' && (
               <p className="text-slate-300 text-sm">
                 {percentage < 80
-                  ? `Percentual respondido inferior a 80% (atual: ${percentage}%). Complete o questionario antes de solicitar a ingestao.`
-                  : 'Existem bloqueantes que impedem a ingestao. Corrija os itens abaixo.'}
+                  ? `Percentual respondido inferior a 80% (atual: ${percentage}%). Complete o questionário antes de solicitar a ingestão.`
+                  : 'Existem bloqueantes que impedem a ingestão. Corrija os itens abaixo.'}
               </p>
             )}
           </div>
@@ -422,7 +422,7 @@ export function QuestionnairePage() {
               {/* Gaps */}
               {analysisResult.failedRules.filter(r => r.rule.severity === 'gap').length > 0 && (
                 <div>
-                  <p className="text-amber-400 text-xs font-semibold mb-1.5">Gaps (pendencias obrigatorias)</p>
+                  <p className="text-amber-400 text-xs font-semibold mb-1.5">Gaps (pendencias obrigatórias)</p>
                   {analysisResult.failedRules.filter(r => r.rule.severity === 'gap').map(({ rule }) => (
                     <button key={rule.id} onClick={() => navigateToQuestion(rule.affectedQuestions)}
                       className="w-full text-left flex items-start gap-2 py-1.5 px-2 rounded hover:bg-slate-800/50 transition-colors">
@@ -469,24 +469,24 @@ export function QuestionnairePage() {
               <p className="text-slate-300 text-sm bg-slate-800/50 rounded-lg px-3 py-2 min-h-[2rem]">
                 {analysisResult.failedRules.length > 0
                   ? analysisResult.failedRules.map(r => r.message).join('. ')
-                  : 'Nenhuma restricao identificada.'}
+                  : 'Nenhuma restrição identificada.'}
               </p>
             </div>
 
             <div>
               <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.observations.label}</p>
               <p className="text-slate-300 text-sm bg-slate-800/50 rounded-lg px-3 py-2 min-h-[2rem]">
-                {analysisResult.status === 'pronto_para_ingestao'
-                  ? 'Questionario completo e consistente. Pronto para ingestao no pipeline OCG.'
+                {analysisResult.status === 'pronto_para_ingestão'
+                  ? 'Questionário completo e consistente. Pronto para ingestão no pipeline OCG.'
                   : analysisResult.status === 'recusado'
-                    ? `Questionario recusado. ${percentage < 80 ? `Percentual respondido (${percentage}%) abaixo do minimo (80%).` : `${analysisResult.blockers.length} bloqueante(s) ativo(s).`}`
-                    : `${analysisResult.gaps.length} gap(s) e ${analysisResult.caveats.length} ressalva(s) identificados. Revisao necessaria antes do envio.`}
+                    ? `Questionário recusado. ${percentage < 80 ? `Percentual respondido (${percentage}%) abaixo do mínimo (80%).` : `${analysisResult.blockers.length} bloqueante(s) ativo(s).`}`
+                    : `${analysisResult.gaps.length} gap(s) e ${analysisResult.caveats.length} ressalva(s) identificados. Revisão necessária antes do envio.`}
               </p>
             </div>
 
             <div>
               <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.validators.label}</p>
-              <p className="text-slate-500 text-xs italic">Sera preenchido apos validacao pelos responsaveis do projeto.</p>
+              <p className="text-slate-500 text-xs italic">Sera preenchido após validação pelos responsáveis do projeto.</p>
             </div>
           </div>
 
@@ -500,10 +500,10 @@ export function QuestionnairePage() {
               className="flex items-center gap-2 px-4 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors">
               <RefreshCw className="w-4 h-4" /> Corrigir pendencias
             </button>
-            {analysisResult.status === 'pronto_para_ingestao' && (
+            {analysisResult.status === 'pronto_para_ingestão' && (
               <button onClick={handleSubmit} disabled={submitting}
                 className="flex items-center gap-2 px-5 py-2 text-sm bg-emerald-500 hover:bg-emerald-400 disabled:opacity-50 text-white rounded-lg transition-colors ml-auto">
-                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Enviando...</> : <><Send className="w-4 h-4" />Enviar para analise do GCA</>}
+                {submitting ? <><Loader2 className="w-4 h-4 animate-spin" />Enviando...</> : <><Send className="w-4 h-4" />Enviar para análise do GCA</>}
               </button>
             )}
           </div>
@@ -540,14 +540,14 @@ export function QuestionnairePage() {
                     {disabled && (
                       <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/40 border border-slate-700/30 rounded-lg">
                         <Info className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
-                        <p className="text-xs text-slate-600 italic">Nao se aplica — {q.conditionalOn ? `requer Q${q.conditionalOn.question} = "${q.conditionalOn.value}"` : ''}</p>
+                        <p className="text-xs text-slate-600 italic">Não se aplica — {q.conditionalOn ? `requer Q${q.conditionalOn.question} = "${q.conditionalOn.value}"` : ''}</p>
                       </div>
                     )}
 
                     {linked && !disabled && (
                       <div className="flex items-center gap-1.5 mb-2 px-3 py-1.5 bg-slate-800/40 border border-slate-700/30 rounded-lg">
                         <Info className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
-                        <p className="text-xs text-slate-600 italic">{q.linkedTo?.message || 'Resposta ja providenciada em perguntas anteriores.'}</p>
+                        <p className="text-xs text-slate-600 italic">{q.linkedTo?.message || 'Respostajá providenciada em perguntas anteriores.'}</p>
                       </div>
                     )}
 
@@ -592,7 +592,7 @@ export function QuestionnairePage() {
                         {q.allowNA && !q.options.includes(NA_VALUE) && (
                           <button type="button" onClick={() => handleMultiSelect(q.id, NA_VALUE)}
                             className={`px-3 py-1.5 text-sm rounded-lg border transition-colors italic ${((responses[q.id] as string[]) || []).includes(NA_VALUE) ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
-                          >Nao se aplica</button>
+                          >Não se aplica</button>
                         )}
                       </div>
                     )}
@@ -601,7 +601,7 @@ export function QuestionnairePage() {
                     {inactive && (q.type === 'single' || q.type === 'multi') && (
                       <div className="flex flex-wrap gap-2">
                         <span className="px-3 py-1.5 text-sm rounded-lg border bg-slate-600/20 border-slate-600/30 text-slate-500 italic">
-                          Nao se aplica
+                          Não se aplica
                         </span>
                       </div>
                     )}

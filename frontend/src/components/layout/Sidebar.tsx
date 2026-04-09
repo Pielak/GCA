@@ -98,7 +98,7 @@ export function Sidebar() {
           <img src="/images/gca-icon-40.png" alt="GCA" className="w-8 h-8" />
           <div>
             <span className="text-slate-100 text-sm font-semibold">GCA</span>
-            <p className="text-slate-500 text-[10px] leading-none">Gestao de Codigo</p>
+            <p className="text-slate-500 text-[10px] leading-none">Gestão de Código</p>
           </div>
         </div>
         <button onClick={() => setSidebarOpen(false)} className="p-1 rounded text-slate-500 hover:text-slate-300 transition-colors">
@@ -132,7 +132,7 @@ export function Sidebar() {
         {/* Admin section */}
         {isAdmin && (
           <div className="mb-4">
-            <p className="text-slate-500 text-[10px] uppercase tracking-wider px-2 mb-2 font-semibold">Administracao</p>
+            <p className="text-slate-500 text-[10px] uppercase tracking-wider px-2 mb-2 font-semibold">Administração</p>
             <NavItem to="/admin" icon={<LayoutDashboard className="w-4 h-4" />} label="Dashboard Global" end />
             <div className="relative">
               <NavItem to="/admin/projects" icon={<FolderOpen className="w-4 h-4" />} label="Projetos" />
@@ -140,7 +140,7 @@ export function Sidebar() {
                 <span className="absolute top-1.5 right-2 w-2 h-2 rounded-full bg-red-500 animate-pulse" title={`${pendingCount} projeto(s) pendente(s)`} />
               )}
             </div>
-            <NavItem to="/admin/users" icon={<Users className="w-4 h-4" />} label="Usuarios" />
+            <NavItem to="/admin/users" icon={<Users className="w-4 h-4" />} label="Usuários" />
             <NavItem to="/admin/audit" icon={<ScrollText className="w-4 h-4" />} label="Auditoria Global" />
           </div>
         )}
@@ -181,8 +181,8 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}`} label="Dashboard" icon={<Activity className="w-3 h-3" />} end />
                         <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionario" icon={<ClipboardList className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/ingestion`} label="M4 - Ingestao" icon={<FileText className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionário" icon={<ClipboardList className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/ingestion`} label="M4 - Ingestão" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="M5 - Gatekeeper" icon={<Shield className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/merge`} label="M6 - Merge" icon={<GitBranch className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/arguider`} label="M7 - Arguidor" icon={<Zap className="w-3 h-3" />} />

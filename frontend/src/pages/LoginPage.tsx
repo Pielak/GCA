@@ -62,7 +62,7 @@ export function LoginPage() {
           <img src="/images/gca-logo-120.png" alt="GCA" className="h-10" />
           <div>
             <span className="text-white text-lg font-semibold">GCA</span>
-            <p className="text-slate-400 text-xs">Gestao de Codificacao Assistida</p>
+            <p className="text-slate-400 text-xs">Gestao de Codificação Assistida</p>
           </div>
         </div>
 
@@ -80,7 +80,7 @@ export function LoginPage() {
           <div className="grid grid-cols-2 gap-4">
             {[
               { icon: Shield, label: '7 Pilares', desc: 'Gatekeeper documental' },
-              { icon: Code2, label: 'Code Gen', desc: 'Geracao assistida de codigo' },
+              { icon: Code2, label: 'Code Gen', desc: 'Geração assistida de codigo' },
               { icon: Zap, label: 'QA Readiness', desc: 'Testes em containers isolados' },
               { icon: Lock, label: 'Multi-tenant', desc: 'Isolamento por schema' },
             ].map(({ icon: Icon, label, desc }) => (

@@ -21,8 +21,8 @@ interface ProjectHeader {
 const MODULES = [
   { path: '', label: 'Dashboard', icon: Activity, end: true },
   { path: 'ocg', label: 'OCG', icon: Settings },
-  { path: 'questionnaire', label: 'Questionario', icon: ClipboardList },
-  { path: 'ingestion', label: 'M4 - Ingestao', icon: FileText },
+  { path: 'questionnaire', label: 'Questionário', icon: ClipboardList },
+  { path: 'ingestion', label: 'M4 - Ingestão', icon: FileText },
   { path: 'gatekeeper', label: 'M5 - Gatekeeper', icon: Shield },
   { path: 'merge', label: 'M6 - Merge', icon: GitBranch },
   { path: 'arguider', label: 'M7 - Arguidor', icon: Zap },
@@ -60,7 +60,7 @@ export function ProjectDetailLayout() {
   if (!project) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p className="text-slate-500">Projeto nao encontrado.</p>
+        <p className="text-slate-500">Projeto não encontrado.</p>
       </div>
     )
   }

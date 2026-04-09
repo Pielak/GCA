@@ -82,7 +82,7 @@ export function FirstAccessModal({ isOpen, temporaryPassword, onPasswordChanged 
           <div>
             <p className="text-amber-300 text-xs font-semibold">Importante</p>
             <p className="text-amber-200/80 text-xs mt-0.5">
-              Esta acao e obrigatoria. Sua senha temporaria sera invalidada apos esta alteracao.
+              Esta ação e obrigatória. Sua senha temporária será invalidada após esta alteração.
             </p>
           </div>
         </div>
@@ -180,7 +180,7 @@ export function FirstAccessModal({ isOpen, temporaryPassword, onPasswordChanged 
                 ) : (
                   <>
                     <AlertCircle className="w-3.5 h-3.5 text-red-400" />
-                    <span className="text-xs text-red-400">Senhas nao conferem</span>
+                    <span className="text-xs text-red-400">Senhas não conferem</span>
                   </>
                 )}
               </div>

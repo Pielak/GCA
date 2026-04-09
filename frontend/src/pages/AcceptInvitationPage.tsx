@@ -36,7 +36,7 @@ export function AcceptInvitationPage() {
 
   useEffect(() => {
     if (!token) {
-      setError('Token de convite nao encontrado. Verifique o link no seu email.')
+      setError('Token de convite não encontrado. Verifique o link no seu email.')
     }
   }, [token])
 
@@ -53,10 +53,10 @@ export function AcceptInvitationPage() {
         setUserEmail(res.data.email || '')
         setStep('setPassword')
       } else {
-        setError(res.data.message || 'Senha temporaria invalida')
+        setError(res.data.message || 'Senha temporária invalida')
       }
     } catch (err: any) {
-      setError(err?.message || 'Erro ao validar senha temporaria')
+      setError(err?.message || 'Erro ao validar senha temporária')
     } finally {
       setLoading(false)
     }
@@ -102,12 +102,12 @@ export function AcceptInvitationPage() {
               </div>
               <div>
                 <h1 className="text-xl font-bold text-white">Aceitar Convite</h1>
-                <p className="text-slate-400 text-sm">Passo 1: Validar senha temporaria</p>
+                <p className="text-slate-400 text-sm">Passo 1: Validar senha temporária</p>
               </div>
             </div>
 
             <p className="text-slate-300 text-sm mb-4">
-              Insira a senha temporaria que voce recebeu por email para confirmar sua identidade.
+              Insira a senha temporária que você recebeu por email para confirmar sua identidade.
             </p>
 
             {error && (
@@ -226,7 +226,7 @@ export function AcceptInvitationPage() {
                   <div className="mt-2 flex items-center gap-2">
                     {passwordsMatch
                       ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400">Senhas conferem</span></>
-                      : <><AlertCircle className="w-3.5 h-3.5 text-red-400" /><span className="text-xs text-red-400">Senhas nao conferem</span></>}
+                      : <><AlertCircle className="w-3.5 h-3.5 text-red-400" /><span className="text-xs text-red-400">Senhas não conferem</span></>}
                   </div>
                 )}
               </div>

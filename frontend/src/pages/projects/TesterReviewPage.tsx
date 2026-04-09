@@ -196,9 +196,9 @@ export function TesterReviewPage() {
       <div>
         <div className="flex items-center gap-1.5">
           <h2 className="text-lg font-semibold text-slate-100">Tester Review</h2>
-          <HelpTooltip text="O Tester Review permite que testadores revisem, editem e aprovem os testes gerados automaticamente pelo GCA antes da execucao. Cada teste passa por revisao obrigatoria: o codigo gerado pela IA pode ser ajustado pelo tester para cobrir cenarios especificos do projeto. Somente testes aprovados ou editados sao executados no QA Readiness." />
+          <HelpTooltip text="O Tester Review permite que testadores revisem, editem e aprovem os testes gerados automaticamente pelo GCA antes da execucao. Cada teste passa por revisao obrigatória: o codigo gerado pela IA pode ser ajustado pelo tester para cobrir cenarios especificos do projeto. Somente testes aprovados ou editados sao executados no QA Readiness." />
         </div>
-        <p className="text-slate-500 text-sm mt-0.5">Revisao e aprovacao de artefatos de teste por categoria</p>
+        <p className="text-slate-500 text-sm mt-0.5">Revisão e aprovação de artefatos de teste por categoria</p>
       </div>
 
       {/* Tabs */}
@@ -228,7 +228,7 @@ export function TesterReviewPage() {
           <div className="text-center">
             <FlaskConical className="w-8 h-8 text-slate-700 mx-auto mb-2" />
             <p className="text-slate-500 text-sm">Nenhum teste {activeTab} encontrado</p>
-            <p className="text-slate-600 text-xs mt-1">Os testes serao gerados automaticamente apos a fase de codificacao</p>
+            <p className="text-slate-600 text-xs mt-1">Os testes serao gerados automaticamente após a fase de codificacao</p>
           </div>
         </div>
       ) : (
@@ -354,7 +354,7 @@ export function TesterReviewPage() {
               </div>
               <div>
                 <h3 className="text-slate-100 font-semibold">Rejeitar Teste</h3>
-                <p className="text-red-400 text-xs">Justificativa obrigatoria (minimo 10 caracteres)</p>
+                <p className="text-red-400 text-xs">Justificativa obrigatória (mínimo 10 caracteres)</p>
               </div>
             </div>
             <textarea

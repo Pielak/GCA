@@ -20,7 +20,7 @@ import { HelpTooltip } from '@/components/ui/HelpTooltip';
 
 type SourceMode = 'url' | 'zip';
 
-interface DebitoTecnico {
+interface DebitoTécnico {
   id: string;
   severity: 'critico' | 'medio' | 'baixo';
   file: string;
@@ -44,7 +44,7 @@ interface ModuloImplementado {
 
 /* ── Mock data ───────────────────────────────────────────────────── */
 
-const MOCK_DEBITOS: DebitoTecnico[] = [
+const MOCK_DEBITOS: DebitoTécnico[] = [
   { id: 'd1', severity: 'critico', file: 'auth/views.py', line: 142, description: 'SQL query construída via concatenação — risco de SQLi' },
   { id: 'd2', severity: 'critico', file: 'payments/processor.py', line: 201, description: 'Sem tratamento de race condition em transações concorrentes' },
   { id: 'd3', severity: 'critico', file: 'models/user.py', line: 15, description: 'Uso de MD5 para hash de senha — migrar para bcrypt/argon2' },
@@ -117,7 +117,7 @@ export function LegacyPage() {
   const [analyzed, setAnalyzed] = useState(false);
   const [progress, setProgress] = useState(0);
 
-  const countBySeverity = (sev: DebitoTecnico['severity']) =>
+  const countBySeverity = (sev: DebitoTécnico['severity']) =>
     MOCK_DEBITOS.filter(d => d.severity === sev).length;
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -187,7 +187,7 @@ export function LegacyPage() {
               onChange={() => setSourceMode('url')}
               className="accent-violet-600"
             />
-            <span className="text-sm text-slate-300">URL de Repositorio Git</span>
+            <span className="text-sm text-slate-300">URL de Repositório Git</span>
             <HelpTooltip
               text="Cole a URL completa do repositório legado (ex: https://github.com/empresa/sistema-antigo). O GCA irá clonar o repositório usando o PAT configurado no projeto e analisar o código-fonte. Certifique-se de que o PAT tem permissão de leitura neste repositório."
             />
@@ -329,16 +329,16 @@ export function LegacyPage() {
         </div>
       </div>
 
-      {/* ── Resultados (aparecem apos analise concluida) ──────── */}
+      {/* ── Resultados (aparecem após análise concluida) ──────── */}
       {analyzed && (
         <>
-          {/* ── Debito Tecnico + Conflitos de Stack (side by side) ── */}
+          {/* ── Debito Técnico + Conflitos de Stack (side by side) ── */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Debito Tecnico */}
+            {/* Debito Técnico */}
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
               <div className="flex items-center gap-2">
                 <ShieldAlert className="w-4 h-4 text-red-400" />
-                <h3 className="text-sm font-semibold text-slate-200">Debito Tecnico</h3>
+                <h3 className="text-sm font-semibold text-slate-200">Debito Técnico</h3>
               </div>
 
               {/* Summary badges */}

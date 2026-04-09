@@ -65,7 +65,7 @@ export function ResetPasswordPage() {
     setError(null)
     try {
       await apiClient.post('/auth/reset-password', { email })
-      setSuccess('Se o email existir no sistema, voce recebera um link de recuperacao.')
+      setSuccess('Se o email existir no sistema, você receberá um link de recuperação.')
       setTimeout(() => setSuccess(null), 5000)
     } catch (err: any) {
       setError(err?.message || 'Erro ao solicitar reset')
@@ -110,7 +110,7 @@ export function ResetPasswordPage() {
             {step === 'confirm' && 'Definir Nova Senha'}
           </h1>
           <p className="mt-2 text-slate-400 text-sm">
-            {step === 'request' && 'Informe seu email para receber o link de recuperacao'}
+            {step === 'request' && 'Informe seu email para receber o link de recuperação'}
             {step === 'verify' && 'Aguarde enquanto validamos seu token'}
             {step === 'confirm' && 'Crie uma senha segura para sua conta'}
           </p>
@@ -236,7 +236,7 @@ export function ResetPasswordPage() {
                   <div className="mt-2 flex items-center gap-2">
                     {passwordsMatch
                       ? <><CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" /><span className="text-xs text-emerald-400">Senhas conferem</span></>
-                      : <><AlertCircle className="w-3.5 h-3.5 text-red-400" /><span className="text-xs text-red-400">Senhas nao conferem</span></>
+                      : <><AlertCircle className="w-3.5 h-3.5 text-red-400" /><span className="text-xs text-red-400">Senhas não conferem</span></>
                     }
                   </div>
                 )}

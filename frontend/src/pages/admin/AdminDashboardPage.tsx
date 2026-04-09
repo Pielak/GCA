@@ -294,7 +294,7 @@ function AIProvidersTab() {
   const handleSetDefault = async (providerId: string) => {
     try {
       await apiClient.put('/admin/gca/ai-providers/default', { provider: providerId })
-      showToast('Provedor padrao definido', 'success')
+      showToast('Provedor padrão definido', 'success')
       await loadProviders()
     } catch (err: any) {
       showToast(err.message || 'Erro', 'error')
@@ -429,8 +429,8 @@ function AIProvidersTab() {
       <div className="bg-slate-900/50 border border-slate-800 rounded-xl p-4 flex items-start gap-3">
         <Zap className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
         <div className="text-xs text-slate-400 space-y-1">
-          <p><strong className="text-slate-300">Por que configurar?</strong> O questionario preenchido pelo GP precisa de um agente de IA para ser avaliado. Sem provedor configurado, o pipeline OCG nao funciona.</p>
-          <p><strong className="text-slate-300">Recomendacao:</strong> Configure pelo menos Anthropic (Claude) ou OpenAI (GPT-4). O provedor padrao sera usado para todas as analises automaticas.</p>
+          <p><strong className="text-slate-300">Por que configurar?</strong> O questionário preenchido pelo GP precisa de um agente de IA para ser avaliado. Sem provedor configurado, o pipeline OCG não funciona.</p>
+          <p><strong className="text-slate-300">Recomendação:</strong> Configure pelo menos Anthropic (Claude) ou OpenAI (GPT-4). O provedor padrão será usado para todas as análises automáticas.</p>
           <p><strong className="text-slate-300">Seguranca:</strong> API keys sao armazenadas com mascaramento. Apenas os ultimos 6 caracteres sao exibidos.</p>
         </div>
       </div>
@@ -565,7 +565,7 @@ export function AdminDashboardPage() {
         </button>
         <button onClick={() => setActiveTab('settings')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'settings' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
-          <Settings className="w-3.5 h-3.5" /> Configuracoes
+          <Settings className="w-3.5 h-3.5" /> Configurações
         </button>
         <button onClick={() => setActiveTab('ai')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === 'ai' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
@@ -580,11 +580,11 @@ export function AdminDashboardPage() {
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard icon={<FolderOpen className="w-5 h-5 text-indigo-400" />} label="Total de Projetos" value={metrics.totalProjects} sub="todos os tenants" color="indigo" />
-        <KPICard icon={<CheckCircle2 className="w-5 h-5 text-emerald-400" />} label="Projetos Ativos" value={metrics.activeProjects} sub="em operacao" color="emerald" />
+        <KPICard icon={<CheckCircle2 className="w-5 h-5 text-emerald-400" />} label="Projetos Ativos" value={metrics.activeProjects} sub="em operação" color="emerald" />
         <div onClick={() => navigate('/admin/projects')} className="cursor-pointer">
           <KPICard icon={<AlertTriangle className="w-5 h-5 text-amber-400" />} label="Pendentes de Aprovação" value={pendingCount} sub={pendingCount > 0 ? 'clique para revisar' : 'nenhum pendente'} color="amber" />
         </div>
-        <KPICard icon={<Users className="w-5 h-5 text-blue-400" />} label="Usuarios" value={metrics.totalUsers} sub={`${metrics.inactiveUsers} inativos`} color="blue" />
+        <KPICard icon={<Users className="w-5 h-5 text-blue-400" />} label="Usuários" value={metrics.totalUsers} sub={`${metrics.inactiveUsers} inativos`} color="blue" />
       </div>
 
       {/* Visão sistêmica — apenas informações globais, não de projeto */}

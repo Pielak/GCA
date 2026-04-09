@@ -24,7 +24,7 @@ const OUTPUT_LABELS: Record<string, string> = {
   web_app: 'Web App', api: 'API', desktop: 'Desktop', mobile: 'Mobile', improvement: 'Melhoria', new_feature: 'Nova Feature',
 }
 
-const PHASES = ['--', 'Governanca', 'OCG + Prov.', 'Ingestao', 'Arguicao', 'Code Gen', 'QA', 'Docs Viva']
+const PHASES = ['--', 'Governanca', 'OCG + Prov.', 'Ingestão', 'Arguicao', 'Code Gen', 'QA', 'Docs Viva']
 
 export function ProjectListPage() {
   const navigate = useNavigate()
@@ -107,7 +107,7 @@ export function ProjectListPage() {
                   <Code2 className="w-3 h-3" />
                   <span className="text-xs">{proj.codeGenCount || 0}</span>
                 </div>
-                <p className="text-slate-600 text-[10px] mt-0.5">Geracoes</p>
+                <p className="text-slate-600 text-[10px] mt-0.5">Gerações</p>
               </div>
               <div className="text-center">
                 <div className="flex items-center justify-center gap-1 text-slate-400">

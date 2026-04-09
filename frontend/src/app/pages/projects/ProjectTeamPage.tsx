@@ -268,7 +268,7 @@ export function ProjectTeamPage() {
         <Lightbulb className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
         <p className="text-slate-400 text-xs">
           <span className="text-slate-300 font-medium">Dica:</span> Os convites expiram em 7 dias.
-          Os membros receberao um email com um link para aceitar o convite e configurar sua senha.
+          Os membros receberão um email com um link para aceitar o convite e configurar sua senha.
         </p>
       </div>
     </div>

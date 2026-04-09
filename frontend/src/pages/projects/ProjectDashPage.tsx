@@ -1,19 +1,35 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { GitBranch, Key, Cpu, Users, FileText, Code2, TestTube2, Shield, Loader2 } from 'lucide-react'
+import { FileText, Code2, TestTube2, Cpu, Shield, Users, GitBranch, Key, Loader2, AlertTriangle } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '@/lib/api'
 
-interface ProjectDash {
-  artifacts: { total: number; consolidated: number }
-  codeGen: { total: number; pushed: number }
-  tests: { total: number; passed: number }
-  ai: { tokensUsed: number; costEstimated: number; provider: string; model: string }
-  gatekeeper: { score: number; status: string; pillars: { pillar: string; score: number }[] }
-  stack: { language: string; framework: string; database: string }
-  repository?: { provider: string; branch: string; webhook: string }
-  team: { name: string; email: string; role: string; capabilities?: string[] }[]
-  credentials: { name: string; type: string; status: string; expiresAt?: string }[]
+const ROLE_LABELS: Record<string, string> = {
+  gp: 'Gerente de Projeto',
+  tech_lead: 'Tech Lead',
+  dev_senior: 'Dev Sênior',
+  dev_pleno: 'Dev Pleno',
+  qa: 'QA Engineer',
+  compliance: 'Compliance',
+  stakeholder: 'Stakeholder',
+  admin: 'Admin',
+  viewer: 'Visualizador',
+}
+
+const ROLE_COLORS: Record<string, string> = {
+  gp: 'bg-emerald-500/20 text-emerald-300',
+  tech_lead: 'bg-blue-500/20 text-blue-300',
+  dev_senior: 'bg-cyan-500/20 text-cyan-300',
+  dev_pleno: 'bg-cyan-600/20 text-cyan-300',
+  qa: 'bg-amber-500/20 text-amber-300',
+  compliance: 'bg-violet-500/20 text-violet-300',
+  stakeholder: 'bg-indigo-500/20 text-indigo-300',
+  admin: 'bg-violet-600/20 text-violet-300',
+}
+
+const PILLAR_NAMES: Record<string, string> = {
+  P1: 'Negócio', P2: 'Compliance', P3: 'Escopo', P4: 'Performance',
+  P5: 'Arquitetura', P6: 'Dados', P7: 'Segurança',
 }
 
 function MiniKPI({ label, value, sub, icon }: { label: string; value: string | number; sub: string; icon: React.ReactNode }) {
@@ -26,167 +42,226 @@ function MiniKPI({ label, value, sub, icon }: { label: string; value: string | n
   )
 }
 
-const ROLE_COLORS: Record<string, string> = {
-  gp: 'bg-emerald-500/20 text-emerald-300',
-  tech_lead: 'bg-blue-500/20 text-blue-300',
-  dev_senior: 'bg-slate-500/20 text-slate-200',
-  dev_pleno: 'bg-slate-600/20 text-slate-300',
-  qa: 'bg-amber-500/20 text-amber-300',
-  compliance: 'bg-violet-500/20 text-violet-300',
-  admin: 'bg-violet-600/20 text-violet-300',
-}
-
 export function ProjectDashPage() {
   const { id } = useParams<{ id: string }>()
-  const [data, setData] = useState<ProjectDash | null>(null)
   const [loading, setLoading] = useState(true)
+  const [ocg, setOcg] = useState<any>(null)
+  const [members, setMembers] = useState<any[]>([])
+  const [questionnaire, setQuestionnaire] = useState<any>(null)
 
   useEffect(() => {
     const load = async () => {
+      if (!id) return
       try {
-        const res = await apiClient.get(`/dashboard/metrics?project_id=${id}`)
-        setData(res.data)
-      } catch {
-        setData(null)
-      } finally {
-        setLoading(false)
-      }
+        const [ocgRes, membersRes, questRes] = await Promise.all([
+          apiClient.get(`/projects/${id}/ocg`).catch(() => ({ data: {} })),
+          apiClient.get(`/projects/${id}/members`).catch(() => ({ data: { members: [] } })),
+          apiClient.get(`/projects/${id}/questionnaire`).catch(() => ({ data: {} })),
+        ])
+
+        const ocgData = ocgRes.data?.ocg
+        if (ocgData && ocgData.ocg_data) {
+          setOcg({ ...ocgData, ...ocgData.ocg_data })
+        } else {
+          setOcg(ocgData || null)
+        }
+        setMembers(membersRes.data?.members || [])
+        setQuestionnaire(questRes.data?.questionnaire || null)
+      } catch { /* ignore */ }
+      setLoading(false)
     }
-    if (id) load()
+    load()
   }, [id])
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
-  if (!data) return <div className="flex items-center justify-center h-64"><p className="text-slate-500">Dados do projeto nao disponiveis.</p></div>
 
-  const radarData = (data.gatekeeper?.pillars || []).map(p => ({
-    subject: p.pillar.split(' ').pop() || p.pillar,
-    score: p.score,
-    fullMark: 100,
-  }))
+  // Extrair scores dos pilares do OCG
+  const pillarScores = ocg?.PILLAR_SCORES || {}
+  const radarData = Object.entries(pillarScores).map(([key, val]: [string, any]) => {
+    const shortKey = key.replace(/_.*/, '') // P1_Business -> P1
+    return {
+      subject: PILLAR_NAMES[shortKey] || shortKey,
+      score: typeof val === 'object' ? (val.score ?? 0) : (val ?? 0),
+      fullMark: 100,
+    }
+  })
+
+  const overallScore = ocg?.overall_score ?? 0
+  const ocgStatus = ocg?.status || ocg?.APPROVAL_STATUS?.status || 'Aguardando OCG'
+  const stack = ocg?.STACK_RECOMMENDATION || {}
+  const adherenceScore = questionnaire?.adherence_score ?? 0
+
+  const statusLabel: Record<string, string> = {
+    'READY': 'Aprovado',
+    'APPROVED': 'Aprovado',
+    'NEEDS_REVIEW': 'Em Revisão',
+    'AT_RISK': 'Em Risco',
+    'BLOCKED': 'Bloqueado',
+  }
+  const statusColor: Record<string, string> = {
+    'READY': 'bg-emerald-500/20 text-emerald-300',
+    'APPROVED': 'bg-emerald-500/20 text-emerald-300',
+    'NEEDS_REVIEW': 'bg-amber-500/20 text-amber-300',
+    'AT_RISK': 'bg-amber-500/20 text-amber-300',
+    'BLOCKED': 'bg-red-500/20 text-red-300',
+  }
 
   return (
     <div className="p-6 space-y-6">
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <MiniKPI label="Artefatos" value={data.artifacts?.total || 0} sub={`${data.artifacts?.consolidated || 0} consolidados`} icon={<FileText className="w-4 h-4 text-blue-400" />} />
-        <MiniKPI label="Geracoes" value={data.codeGen?.total || 0} sub={`${data.codeGen?.pushed || 0} enviadas`} icon={<Code2 className="w-4 h-4 text-violet-400" />} />
-        <MiniKPI label="Testes" value={data.tests?.total || 0} sub={`${data.tests?.passed || 0} passaram`} icon={<TestTube2 className="w-4 h-4 text-emerald-400" />} />
-        <MiniKPI label="Tokens IA" value={(data.ai?.tokensUsed || 0).toLocaleString('pt-BR')} sub={`R$ ${(data.ai?.costEstimated || 0).toFixed(2)} est.`} icon={<Cpu className="w-4 h-4 text-amber-400" />} />
+        <MiniKPI
+          label="Score OCG"
+          value={overallScore > 0 ? overallScore.toFixed(1) : '—'}
+          sub={overallScore > 0 ? (statusLabel[ocgStatus] || ocgStatus) : 'Aguardando geração'}
+          icon={<Shield className="w-4 h-4 text-violet-400" />}
+        />
+        <MiniKPI
+          label="Aderência Questionário"
+          value={adherenceScore > 0 ? `${adherenceScore}%` : '—'}
+          sub={questionnaire ? (questionnaire.approved ? 'Aprovado' : questionnaire.status) : 'Sem questionário'}
+          icon={<FileText className="w-4 h-4 text-blue-400" />}
+        />
+        <MiniKPI
+          label="Equipe"
+          value={members.length}
+          sub={members.length === 1 ? '1 membro' : `${members.length} membros`}
+          icon={<Users className="w-4 h-4 text-emerald-400" />}
+        />
+        <MiniKPI
+          label="Pilares Avaliados"
+          value={radarData.length > 0 ? `${radarData.length}/7` : '—'}
+          sub={radarData.length > 0 ? 'Avaliação completa' : 'Aguardando OCG'}
+          icon={<Cpu className="w-4 h-4 text-amber-400" />}
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Radar */}
+        {/* Radar Gatekeeper */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-slate-200 text-sm font-semibold flex items-center gap-2">
               <Shield className="w-4 h-4 text-violet-400" />
               Gatekeeper — 7 Pilares
             </h3>
-            <span className={`text-xs px-2 py-0.5 rounded-full ${
-              data.gatekeeper?.status === 'approved' ? 'bg-emerald-500/20 text-emerald-300' :
-              data.gatekeeper?.status === 'blocked' ? 'bg-red-500/20 text-red-300' :
-              'bg-slate-700 text-slate-400'
-            }`}>{data.gatekeeper?.status || 'N/A'}</span>
+            {overallScore > 0 && (
+              <span className={`text-xs px-2 py-0.5 rounded-full ${statusColor[ocgStatus] || 'bg-slate-700 text-slate-400'}`}>
+                {statusLabel[ocgStatus] || ocgStatus}
+              </span>
+            )}
           </div>
           {radarData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={200}>
-              <RadarChart data={radarData} margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
-                <PolarGrid stroke="#334155" />
-                <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
-                <Radar name="Score" dataKey="score" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.25} />
-                <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }} />
-              </RadarChart>
-            </ResponsiveContainer>
+            <>
+              <ResponsiveContainer width="100%" height={200}>
+                <RadarChart data={radarData} margin={{ top: 10, right: 20, bottom: 10, left: 20 }}>
+                  <PolarGrid stroke="#334155" />
+                  <PolarAngleAxis dataKey="subject" tick={{ fill: '#94a3b8', fontSize: 10 }} />
+                  <Radar name="Score" dataKey="score" stroke="#7c3aed" fill="#7c3aed" fillOpacity={0.25} />
+                  <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '8px', color: '#e2e8f0', fontSize: '12px' }} />
+                </RadarChart>
+              </ResponsiveContainer>
+              <div className="flex items-center justify-center gap-2 mt-2">
+                <span className="text-slate-500 text-xs">Score composto:</span>
+                <span className={`text-sm font-bold ${overallScore >= 80 ? 'text-emerald-400' : overallScore >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                  {overallScore.toFixed(1)}/100
+                </span>
+              </div>
+            </>
           ) : (
-            <div className="flex items-center justify-center h-32 text-slate-500 text-sm">Gatekeeper nao iniciado</div>
+            <div className="flex flex-col items-center justify-center h-40 text-slate-500">
+              <AlertTriangle className="w-8 h-8 mb-2 text-slate-600" />
+              <p className="text-sm">Aguardando geração do OCG</p>
+            </div>
           )}
         </div>
 
-        {/* Stack + Repo */}
-        <div className="space-y-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-            <h3 className="text-slate-200 text-sm font-semibold mb-3 flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-slate-400" />Stack & IA
-            </h3>
+        {/* Stack & Configuração */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 className="text-slate-200 text-sm font-semibold mb-3 flex items-center gap-2">
+            <Code2 className="w-4 h-4 text-slate-400" />
+            Stack Recomendada
+          </h3>
+          {Object.keys(stack).length > 0 ? (
             <div className="space-y-2">
-              {[
-                { k: 'Linguagem', v: data.stack?.language },
-                { k: 'Framework', v: data.stack?.framework },
-                { k: 'Banco', v: data.stack?.database },
-                { k: 'Provedor IA', v: data.ai ? `${data.ai.provider} - ${data.ai.model}` : 'N/A' },
-              ].map(({ k, v }) => (
-                <div key={k} className="flex justify-between">
-                  <span className="text-slate-500 text-xs">{k}</span>
-                  <span className="text-slate-300 text-xs">{v || '--'}</span>
+              {Object.entries(stack).map(([layer, config]: [string, any]) => (
+                <div key={layer} className="p-2 rounded-lg bg-slate-800/40">
+                  <span className="text-violet-400 text-xs font-medium capitalize">{layer}</span>
+                  {typeof config === 'object' && config !== null ? (
+                    <div className="mt-1 space-y-0.5">
+                      {Object.entries(config).filter(([k]) => k !== 'rationale').map(([k, v]) => (
+                        <div key={k} className="flex justify-between">
+                          <span className="text-slate-500 text-xs">{k}</span>
+                          <span className="text-slate-300 text-xs">{String(v)}</span>
+                        </div>
+                      ))}
+                      {config.rationale && (
+                        <p className="text-slate-500 text-[10px] mt-1 italic">{String(config.rationale).slice(0, 100)}</p>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-slate-300 text-xs">{String(config)}</p>
+                  )}
                 </div>
               ))}
             </div>
-          </div>
-          {data.repository && (
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-              <h3 className="text-slate-200 text-sm font-semibold mb-3 flex items-center gap-2">
-                <GitBranch className="w-4 h-4 text-slate-400" />Repositorio
-              </h3>
-              <div className="space-y-2">
-                <div className="flex justify-between"><span className="text-slate-500 text-xs">Provedor</span><span className="text-slate-300 text-xs capitalize">{data.repository.provider}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500 text-xs">Branch</span><span className="text-slate-300 text-xs">{data.repository.branch}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500 text-xs">Webhook</span><span className="text-slate-300 text-xs">{data.repository.webhook}</span></div>
-              </div>
-            </div>
+          ) : (
+            <p className="text-slate-500 text-sm py-4 text-center italic">Aguardando geração do OCG</p>
           )}
         </div>
 
-        {/* Team */}
+        {/* Equipe do Projeto */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <h3 className="text-slate-200 text-sm font-semibold mb-3 flex items-center gap-2">
-            <Users className="w-4 h-4 text-slate-400" />Equipe ({data.team?.length || 0})
+            <Users className="w-4 h-4 text-slate-400" />
+            Equipe ({members.length})
           </h3>
           <div className="space-y-2.5">
-            {(data.team || []).map((member, i) => (
+            {members.map((member, i) => (
               <div key={i} className="flex items-center gap-2.5">
                 <div className="w-7 h-7 rounded-full bg-violet-700/50 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
-                  {member.name.charAt(0)}
+                  {(member.full_name || member.email || '?').charAt(0).toUpperCase()}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-slate-200 text-xs truncate">{member.name}</p>
-                  {member.capabilities && member.capabilities.length > 0 && (
-                    <p className="text-slate-500 text-[10px] truncate">{member.capabilities.join(', ')}</p>
-                  )}
+                  <p className="text-slate-200 text-xs truncate">{member.full_name || member.email}</p>
+                  <p className="text-slate-500 text-[10px]">{member.email}</p>
                 </div>
                 <span className={`text-xs px-2 py-0.5 rounded ${ROLE_COLORS[member.role] || 'bg-slate-700 text-slate-400'}`}>
-                  {member.role}
+                  {ROLE_LABELS[member.role] || member.role}
                 </span>
               </div>
             ))}
-            {(!data.team || data.team.length === 0) && <p className="text-slate-500 text-xs">Nenhum membro.</p>}
+            {members.length === 0 && <p className="text-slate-500 text-xs italic">Nenhum membro na equipe.</p>}
           </div>
         </div>
       </div>
 
-      {/* Credentials */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-        <div className="flex items-center gap-2 mb-4">
-          <Key className="w-4 h-4 text-slate-400" />
-          <h3 className="text-slate-200 text-sm font-semibold">Credenciais do Projeto</h3>
+      {/* Scores por Pilar (detalhado) */}
+      {radarData.length > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <h3 className="text-slate-200 text-sm font-semibold mb-4">Distribuição de Scores por Pilar</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {Object.entries(pillarScores).map(([key, val]: [string, any]) => {
+              const shortKey = key.replace(/_.*/, '')
+              const score = typeof val === 'object' ? (val.score ?? 0) : (val ?? 0)
+              const color = score >= 80 ? 'emerald' : score >= 60 ? 'amber' : 'red'
+              return (
+                <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-slate-300 text-xs font-medium">{PILLAR_NAMES[shortKey] || key}</span>
+                    <span className={`text-xs font-bold text-${color}-400`}>{score}</span>
+                  </div>
+                  <div className="h-1.5 bg-slate-700 rounded-full">
+                    <div className={`h-full rounded-full bg-${color}-500`} style={{ width: `${Math.min(100, score)}%` }} />
+                  </div>
+                  {typeof val === 'object' && val.adherence_level && (
+                    <p className="text-slate-500 text-[10px] mt-1">{val.adherence_level}</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-          {(data.credentials || []).map((cred, i) => (
-            <div key={i} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-slate-300 text-xs font-medium">{cred.name}</span>
-                <span className={`text-xs px-1.5 py-0.5 rounded ${
-                  cred.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' :
-                  cred.status === 'expired' ? 'bg-red-500/20 text-red-300' :
-                  'bg-amber-500/20 text-amber-300'
-                }`}>{cred.status}</span>
-              </div>
-              <p className="text-slate-500 text-xs capitalize">{cred.type}</p>
-              {cred.expiresAt && <p className="text-slate-600 text-xs mt-1">Expira: {new Date(cred.expiresAt).toLocaleDateString('pt-BR')}</p>}
-            </div>
-          ))}
-          {(!data.credentials || data.credentials.length === 0) && <p className="text-slate-500 text-sm col-span-4">Nenhuma credencial configurada.</p>}
-        </div>
-      </div>
+      )}
     </div>
   )
 }

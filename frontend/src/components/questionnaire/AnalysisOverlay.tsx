@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 
 const STEPS = [
-  'Validando completude do questionario...',
+  'Validando completude do questionário...',
   'Analisando coerencia entre entregaveis e stack...',
   'Verificando uso obrigatorio de IA...',
   'Conferindo seguranca minima e observabilidade...',

@@ -65,8 +65,8 @@ export function GatekeeperPage() {
         <div className="flex items-center justify-center h-32 bg-slate-900 border border-slate-800 rounded-xl">
           <div className="text-center">
             <Shield className="w-8 h-8 text-slate-700 mx-auto mb-2" />
-            <p className="text-slate-500 text-sm">Gatekeeper nao iniciado</p>
-            <p className="text-slate-600 text-xs mt-1">Inicie apos a consolidacao dos artefatos</p>
+            <p className="text-slate-500 text-sm">Gatekeeper não iniciado</p>
+            <p className="text-slate-600 text-xs mt-1">Inicie após a consolidação dos artefatos</p>
           </div>
         </div>
       </div>
@@ -103,7 +103,7 @@ export function GatekeeperPage() {
             <h2 className="text-lg font-semibold text-slate-100">Gatekeeper</h2>
             <HelpTooltip text="O Gatekeeper é o controle de qualidade automático do GCA. Antes de qualquer módulo ser commitado no repositório do projeto, o código gerado passa por avaliação simultânea nos 7 Pilares de qualidade. Cada pilar recebe um score de 0 a 100. O pilar P1 (Conformidade) é bloqueante: score < 60 impede aprovação automática e manual. Os demais pilares apenas geram avisos e recomendações." />
           </div>
-          <p className="text-slate-500 text-sm mt-0.5">Avaliacao dos 7 pilares com scoring formal</p>
+          <p className="text-slate-500 text-sm mt-0.5">Avaliação dos 7 pilares com scoring formal</p>
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${
@@ -257,7 +257,7 @@ export function GatekeeperPage() {
             </div>
             <textarea
               value={overrideReason} onChange={e => setOverrideReason(e.target.value)}
-              rows={4} placeholder="Justificativa tecnica obrigatoria..."
+              rows={4} placeholder="Justificativa tecnica obrigatória..."
               className="w-full bg-dark-200 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 resize-none focus:outline-none focus:border-amber-500"
             />
             <div className="flex gap-3 mt-4">
