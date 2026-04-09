@@ -1124,3 +1124,23 @@ async def unblock_user(
     await db.commit()
     logger.info("admin.user_unblocked", user_id=str(user_id), email=user.email)
     return {"success": True, "message": f"Usuário {user.email} reativado"}
+
+
+@router.delete("/users/{user_id}")
+async def delete_user(
+    user_id: UUID,
+    current_user_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Excluir usuário (apenas admin). Não pode excluir a si mesmo."""
+    if user_id == current_user_id:
+        raise HTTPException(status_code=400, detail="Você não pode excluir sua própria conta")
+    result = await db.execute(select(User).where(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="Usuário não encontrado")
+    email = user.email
+    await db.delete(user)
+    await db.commit()
+    logger.info("admin.user_deleted", user_id=str(user_id), email=email)
+    return {"success": True, "message": f"Usuário {email} excluído"}

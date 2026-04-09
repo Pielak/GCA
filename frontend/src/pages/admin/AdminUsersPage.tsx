@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, Loader2, Zap } from 'lucide-react'
+import { Search, Loader2, Zap, Trash2 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { useAuthStore } from '@/stores/authStore'
 
 interface UserItem {
   id: string
@@ -14,11 +15,18 @@ interface UserItem {
 }
 
 export function AdminUsersPage() {
+  const { user: currentUser } = useAuthStore()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
   const [users, setUsers] = useState<UserItem[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type })
+    setTimeout(() => setToast(null), 4000)
+  }
 
   const toggleStatus = async (userId: string) => {
     setActionLoading(userId)
@@ -27,7 +35,24 @@ export function AdminUsersPage() {
       const action = user?.is_active !== false ? 'block' : 'unblock'
       await apiClient.post(`/admin/users/${userId}/${action}`)
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !(u.is_active !== false) } : u))
-    } catch { /* empty */ } finally {
+      showToast(`Usuário ${user?.is_active !== false ? 'desativado' : 'reativado'}`, 'success')
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao alterar status', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const deleteUser = async (userId: string, userName: string) => {
+    if (!confirm(`Tem certeza que deseja excluir "${userName}"? Esta ação não pode ser desfeita.`)) return
+    setActionLoading(userId)
+    try {
+      await apiClient.delete(`/admin/users/${userId}`)
+      setUsers(prev => prev.filter(u => u.id !== userId))
+      showToast(`Usuário "${userName}" excluído`, 'success')
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao excluir usuário', 'error')
+    } finally {
       setActionLoading(null)
     }
   }
@@ -62,8 +87,16 @@ export function AdminUsersPage() {
     catch { return '—' }
   }
 
+  const isSelf = (userId: string) => currentUser?.id === userId
+
   return (
     <div className="p-6 space-y-6">
+      {toast && (
+        <div className={`p-3 rounded-lg text-sm ${toast.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-red-900/30 border border-red-700 text-red-300'}`}>
+          {toast.message}
+        </div>
+      )}
+
       <div>
         <h1 className="text-xl font-semibold text-slate-100">Gestão de Usuários</h1>
         <p className="text-slate-500 text-sm mt-0.5">Controle de acesso e perfis do sistema</p>
@@ -143,21 +176,34 @@ export function AdminUsersPage() {
                     <span className="text-slate-400 text-xs">{formatDate(u.created_at)}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <button
-                      onClick={() => toggleStatus(u.id)}
-                      disabled={actionLoading === u.id}
-                      className={`p-1.5 rounded transition-colors ${
-                        isActive
-                          ? 'text-emerald-400 hover:text-red-400 hover:bg-red-500/10'
-                          : 'text-red-400 hover:text-emerald-400 hover:bg-emerald-500/10'
-                      }`}
-                      title={isActive ? 'Desativar usuário' : 'Reativar usuário'}
-                    >
-                      {actionLoading === u.id
-                        ? <Loader2 className="w-4 h-4 animate-spin" />
-                        : <Zap className="w-4 h-4" />
-                      }
-                    </button>
+                    <div className="flex items-center justify-end gap-1">
+                      {/* Excluir — não pode excluir a si mesmo */}
+                      <button
+                        onClick={() => deleteUser(u.id, u.full_name || u.email)}
+                        disabled={actionLoading === u.id || isSelf(u.id)}
+                        className="p-1.5 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                        title={isSelf(u.id) ? 'Você não pode excluir sua própria conta' : 'Excluir usuário'}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                      {/* Ativar/Desativar */}
+                      <button
+                        onClick={() => toggleStatus(u.id)}
+                        disabled={actionLoading === u.id || isSelf(u.id)}
+                        className={`p-1.5 rounded transition-colors ${
+                          isSelf(u.id) ? 'opacity-20 cursor-not-allowed text-slate-500' :
+                          isActive
+                            ? 'text-emerald-400 hover:text-red-400 hover:bg-red-500/10'
+                            : 'text-red-400 hover:text-emerald-400 hover:bg-emerald-500/10'
+                        }`}
+                        title={isSelf(u.id) ? 'Você não pode alterar sua própria conta' : isActive ? 'Desativar usuário' : 'Reativar usuário'}
+                      >
+                        {actionLoading === u.id
+                          ? <Loader2 className="w-4 h-4 animate-spin" />
+                          : <Zap className="w-4 h-4" />
+                        }
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
