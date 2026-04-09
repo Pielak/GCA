@@ -79,25 +79,72 @@ function ScoreBar({ score, max = 100 }: { score: number; max?: number }) {
   )
 }
 
+function renderListItem(item: any): React.ReactNode {
+  if (typeof item === 'string') return <span className="text-slate-300 text-sm">{item}</span>
+  if (typeof item !== 'object' || !item) return <span className="text-slate-400 text-sm">{String(item)}</span>
+
+  // Renderizar campos-chave de objetos estruturados (risk, finding, compliance, etc.)
+  const mainField = item.risk || item.finding || item.item || item.title || item.name || item.description || item.text
+  const details: string[] = []
+  if (item.mitigation) details.push(`Mitigação: ${item.mitigation}`)
+  if (item.owner) details.push(`Responsável: ${item.owner}`)
+  if (item.severity) details.push(`Severidade: ${item.severity}`)
+  if (item.status) details.push(`Status: ${item.status}`)
+  if (item.priority) details.push(`Prioridade: ${item.priority}`)
+  if (item.rationale) details.push(`Justificativa: ${item.rationale}`)
+  if (item.pillar) details.push(`Pilar: ${item.pillar}`)
+
+  if (mainField) {
+    return (
+      <div>
+        <span className="text-slate-200 text-sm">{mainField}</span>
+        {details.length > 0 && (
+          <div className="mt-1 space-y-0.5">
+            {details.map((d, i) => (
+              <p key={i} className="text-slate-500 text-xs ml-2">{d}</p>
+            ))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Fallback: renderizar todos os campos
+  return (
+    <div className="space-y-0.5">
+      {Object.entries(item).map(([k, v]) => (
+        <p key={k} className="text-sm">
+          <span className="text-slate-500">{k.replace(/_/g, ' ')}: </span>
+          <span className="text-slate-300">{typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>
+        </p>
+      ))}
+    </div>
+  )
+}
+
 function renderObject(obj: Record<string, any>, depth = 0): React.ReactNode {
   if (!obj || typeof obj !== 'object') return <span className="text-slate-400 text-sm">{String(obj)}</span>
 
   if (Array.isArray(obj)) {
+    if (obj.length === 0) return <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
     return (
-      <ul className="space-y-1 ml-2">
+      <ul className="space-y-2 ml-2">
         {obj.map((item, i) => (
           <li key={i} className="flex items-start gap-2">
             <span className="text-slate-600 mt-1">•</span>
-            <span className="text-slate-300 text-sm">{typeof item === 'object' ? JSON.stringify(item) : String(item)}</span>
+            {renderListItem(item)}
           </li>
         ))}
       </ul>
     )
   }
 
+  const entries = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined && v !== '')
+  if (entries.length === 0) return <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
+
   return (
     <div className={`grid grid-cols-2 gap-4 ${depth > 0 ? 'ml-2' : ''}`}>
-      {Object.entries(obj).map(([key, val]) => (
+      {entries.map(([key, val]) => (
         <OCGField
           key={key}
           label={key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}
