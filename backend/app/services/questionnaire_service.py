@@ -206,7 +206,8 @@ class QuestionnaireService:
                         <li><strong>GP:</strong> {gp_email}</li>
                         <li><strong>ID:</strong> {questionnaire_id}</li>
                     </ul>
-                    <p>Acesse a área de <strong>Administração → Projetos</strong> no GCA para revisar e aprovar.</p>
+                    <p>Acesse a área de <strong>Administração → Projetos</strong> no GCA para revisar e aprovar:</p>
+                    <p><a href="https://gca.code-auditor.com.br/login" style="color: #a78bfa; text-decoration: underline;">https://gca.code-auditor.com.br/login</a></p>
                     <hr style="border-color: #334155; margin: 20px 0;" />
                     <p style="color: #64748b; font-size: 12px;">GCA — Gestão de Codificação Assistida</p>
                 </div>
