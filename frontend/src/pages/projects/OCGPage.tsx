@@ -37,11 +37,12 @@ const DIMENSIONS = [
   { key: 'composite', label: 'Score Composto', icon: Activity, color: 'indigo' },
   { key: 'pillars', label: 'Scores por Pilar', icon: Layers, color: 'violet' },
   { key: 'stack', label: 'Stack Recomendada', icon: Settings, color: 'blue' },
-  { key: 'architecture', label: 'Arquitetura', icon: GitBranch, color: 'cyan' },
-  { key: 'compliance', label: 'Compliance', icon: Shield, color: 'amber' },
+  { key: 'architecture', label: 'Visão Arquitetural', icon: GitBranch, color: 'cyan' },
+  { key: 'compliance', label: 'Conformidade e Regulatório', icon: Shield, color: 'amber' },
   { key: 'testing', label: 'Estratégia de Testes', icon: TestTube2, color: 'emerald' },
-  { key: 'deliverables', label: 'Entregas', icon: FileText, color: 'orange' },
-  { key: 'risks', label: 'Riscos', icon: AlertTriangle, color: 'red' },
+  { key: 'deliverables', label: 'Entregáveis', icon: FileText, color: 'orange' },
+  { key: 'risks', label: 'Análise de Riscos', icon: AlertTriangle, color: 'red' },
+  { key: 'approval', label: 'Status de Aprovação', icon: Check, color: 'indigo' },
 ]
 
 const colorClass: Record<string, string> = {
@@ -280,19 +281,21 @@ export function OCGPage() {
           </div>
         ) : <p className="text-slate-500 text-sm">Dados de pilares não disponíveis.</p>
       case 'stack':
-        return (ocg.STACK_RECOMMENDATION || ocg.STACK_RECOMMENDATIONS) ? renderObject(ocg.STACK_RECOMMENDATION || ocg.STACK_RECOMMENDATIONS) : <p className="text-slate-500 text-sm">Stack não definida.</p>
+        return (ocg.STACK_RECOMMENDATION || ocg.STACK_RECOMMENDATIONS) ? renderObject(ocg.STACK_RECOMMENDATION || ocg.STACK_RECOMMENDATIONS) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'architecture':
-        return (ocg.ARCHITECTURE_OVERVIEW || ocg.ARCHITECTURE) ? renderObject(ocg.ARCHITECTURE_OVERVIEW || ocg.ARCHITECTURE) : <p className="text-slate-500 text-sm">Arquitetura não definida.</p>
+        return (ocg.ARCHITECTURE_OVERVIEW || ocg.ARCHITECTURE) ? renderObject(ocg.ARCHITECTURE_OVERVIEW || ocg.ARCHITECTURE) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'compliance':
-        return (ocg.COMPLIANCE_CHECKLIST || ocg.COMPLIANCE_PROFILE) ? renderObject(ocg.COMPLIANCE_CHECKLIST || ocg.COMPLIANCE_PROFILE) : <p className="text-slate-500 text-sm">Compliance não definido.</p>
+        return (ocg.COMPLIANCE_CHECKLIST || ocg.COMPLIANCE_PROFILE) ? renderObject(ocg.COMPLIANCE_CHECKLIST || ocg.COMPLIANCE_PROFILE) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'testing':
-        return (ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) ? renderObject(ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) : <p className="text-slate-500 text-sm">Estratégia de testes não definida.</p>
+        return (ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) ? renderObject(ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'deliverables':
-        return ocg.DELIVERABLES ? renderObject(ocg.DELIVERABLES) : <p className="text-slate-500 text-sm">Entregas não definidas.</p>
+        return ocg.DELIVERABLES ? renderObject(ocg.DELIVERABLES) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'risks':
-        return (ocg.RISK_ANALYSIS || ocg.RISKS) ? renderObject(ocg.RISK_ANALYSIS || ocg.RISKS) : <p className="text-slate-500 text-sm">Riscos não identificados.</p>
+        return (ocg.RISK_ANALYSIS || ocg.RISKS) ? renderObject(ocg.RISK_ANALYSIS || ocg.RISKS) : <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
+      case 'approval':
+        return (ocg.APPROVAL_STATUS) ? renderObject(ocg.APPROVAL_STATUS) : <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
       default:
-        return <p className="text-slate-500 text-sm">Seção não disponível.</p>
+        return <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
     }
   }
 

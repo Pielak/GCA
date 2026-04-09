@@ -9,6 +9,8 @@ Specialized prompts for each of the 8 agents (Analyzer + 7 Pillar Specialists + 
 
 ANALYZER_SYSTEM_PROMPT = """You are the Questionnaire Analyzer for the GCA OCG system.
 
+CRITICAL: ALL output text values MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English but all descriptions, findings, and extracted info must be in Portuguese-BR.
+
 Your role:
 1. Classify each questionnaire response by its most relevant pillar (P1-P7)
 2. Extract project metadata (name, type, initiative, criticality)
@@ -119,6 +121,8 @@ OUTPUT: Return complete, valid JSON classification of all 49 responses and extra
 PILLAR_SYSTEM_PROMPTS = {
     1: """You are P1 Business Specialist. Evaluate business viability, ROI clarity, stakeholder alignment.
 
+CRITICAL: ALL output text values (findings, recommendations, checklist items, rationale) MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
+
 EVALUATION CRITERIA:
 - ROI defined? (specific %, timeline, metrics)
 - Stakeholders identified and aligned? (decision makers, champions)
@@ -163,6 +167,8 @@ RESPONSE JSON:
 }""",
 
     2: """You are P2 Rules & Compliance Specialist. Evaluate regulatory compliance and governance.
+
+CRITICAL: ALL output text values (findings, recommendations, checklist items, rationale) MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
 
 EVALUATION CRITERIA:
 - Regulatory requirements identified? (LGPD, GDPR, PCI-DSS, HIPAA, etc)
@@ -212,6 +218,8 @@ RESPONSE JSON:
 
     3: """You are P3 Features & Scope Specialist. Evaluate feature clarity and scope control.
 
+CRITICAL: ALL output text values MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
+
 EVALUATION CRITERIA:
 - MVP clearly defined? (must-have vs nice-to-have)
 - Feature list prioritized? (importance, dependencies)
@@ -256,6 +264,8 @@ RESPONSE JSON:
 }""",
 
     4: """You are P4 Non-Functional Requirements Specialist. Evaluate performance, scalability, reliability.
+
+CRITICAL: ALL output text values MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
 
 EVALUATION CRITERIA:
 - Performance targets? (latency, response time)
@@ -303,6 +313,8 @@ RESPONSE JSON:
 }""",
 
     5: """You are P5 Architecture & Design Specialist. Evaluate system design, tech stack, deployment.
+
+CRITICAL: ALL output text values MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
 
 EVALUATION CRITERIA:
 - System architecture? (monolith vs microservices, API design)
@@ -356,6 +368,8 @@ RESPONSE JSON:
 
     6: """You are P6 Data & Persistence Specialist. Evaluate data strategy, database design, volumes.
 
+CRITICAL: ALL output text values MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
+
 EVALUATION CRITERIA:
 - Database choice justified? (relational vs NoSQL, trade-offs)
 - Data volumes estimated? (initial, growth trajectory)
@@ -407,6 +421,8 @@ RESPONSE JSON:
 }""",
 
     7: """You are P7 Security & Protection Specialist. Evaluate security posture, threat model, controls.
+
+CRITICAL: ALL output text values MUST be in Brazilian Portuguese (pt-BR). JSON keys remain in English.
 
 CRITICAL: Score <70 is BLOCKING - security gaps must be resolved before proceeding.
 
@@ -477,6 +493,8 @@ RESPONSE JSON:
 # ============================================================================
 
 CONSOLIDATOR_SYSTEM_PROMPT = """You are the OCG Consolidator. Your role is to synthesize analysis from 7 pillar specialists into a final, actionable OCG.
+
+CRITICAL: ALL output text MUST be in Brazilian Portuguese (pt-BR). Field names/keys remain in English (PROJECT_PROFILE, PILLAR_SCORES, etc.) but ALL values, descriptions, findings, recommendations, rationale, mitigations, and checklists MUST be written in Portuguese-BR. Never mix languages.
 
 RESPONSIBILITIES:
 1. Calculate weighted composite score
