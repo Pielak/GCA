@@ -333,17 +333,26 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 )
 
             tasks = []
-            for pillar_id in range(1, 8):
-                # Filtrar perguntas para este pilar
-                pillar_question_ids = analyzer_result.classification.get(f"P{pillar_id}", [])
-                pillar_questions = [q for q in req.questions if q.get("question_id") in pillar_question_ids]
+            all_questions = req.questions  # Todas as questões disponíveis
 
+            for pillar_id in range(1, 8):
+                # Filtrar perguntas classificadas para este pilar
+                pillar_question_ids = analyzer_result.classification.get(f"P{pillar_id}", [])
+
+                # Match flexível: tentar IDs diretos, com prefixo Q, e numéricos
+                pillar_questions = []
+                for q in all_questions:
+                    qid = str(q.get("question_id", ""))
+                    if (qid in pillar_question_ids or
+                        f"Q{qid}" in pillar_question_ids or
+                        qid.lstrip("Q") in [str(x).lstrip("Q") for x in pillar_question_ids]):
+                        pillar_questions.append(q)
+
+                # Se nenhum match, enviar TODAS as questões — o LLM filtra
                 if not pillar_questions:
-                    logger.warning(f"agent.pillar_no_questions", pillar_id=pillar_id)
-                    # Criar response vazio como coroutine
-                    task = create_empty_pillar_response(pillar_id)
-                    tasks.append(task)
-                    continue
+                    logger.info("agent.pillar_sending_all_questions", pillar_id=pillar_id,
+                               classified_ids=pillar_question_ids[:5])
+                    pillar_questions = all_questions
 
                 # Adaptar request para este pilar
                 pillar_req = PillarAgentRequest(
@@ -425,23 +434,49 @@ Return complete JSON analysis with score, classification, findings, and recommen
             # Extrair JSON
             ocg_json = self._extract_json(response_text)
 
-            # Construir OCGResponse
+            logger.info("agent.consolidator_raw_keys",
+                       keys=list(ocg_json.keys())[:15] if isinstance(ocg_json, dict) else "NOT_DICT",
+                       raw_len=len(response_text))
+
+            # Se o JSON não tem as chaves esperadas, usar resposta bruta como contexto
+            if not ocg_json.get("PROJECT_PROFILE") and not ocg_json.get("PILLAR_SCORES"):
+                # Consolidator pode ter usado chaves diferentes ou formato livre
+                # Salvar tudo o que veio como contexto
+                logger.warning("agent.consolidator_unexpected_format",
+                              keys=list(ocg_json.keys())[:10] if isinstance(ocg_json, dict) else "not_dict")
+
+            # Construir PILLAR_SCORES a partir dos resultados reais dos agentes (mais confiável)
+            pillar_scores_from_agents = {}
+            for pr in req.pillar_results:
+                pillar_scores_from_agents[f"P{pr.pillar_id}"] = {
+                    "score": pr.score,
+                    "adherence_level": pr.adherence_level,
+                    "is_blocking": pr.is_blocking,
+                    "findings_count": len(pr.findings),
+                }
+
+            # Score composto a partir dos pilares reais
+            scores = [pr.score for pr in req.pillar_results]
+            overall_score = round(sum(scores) / len(scores), 1) if scores else 0
+            any_blocking = any(pr.is_blocking for pr in req.pillar_results)
+
+            # Construir OCGResponse — mesclando dados do consolidator com os pilares reais
             ocg_response = OCGResponse(
                 ocg_id=uuid4(),
                 questionnaire_id=req.questionnaire_id,
                 project_id=req.project_id,
                 generated_at=datetime.now(timezone.utc),
-                PROJECT_PROFILE=ocg_json.get("PROJECT_PROFILE", {}),
-                PILLAR_SCORES=ocg_json.get("PILLAR_SCORES", {}),
-                COMPOSITE_SCORE=ocg_json.get("COMPOSITE_SCORE", {}),
-                STACK_RECOMMENDATION=ocg_json.get("STACK_RECOMMENDATION", {}),
-                CRITICAL_FINDINGS=ocg_json.get("CRITICAL_FINDINGS", []),
-                TESTING_REQUIREMENTS=ocg_json.get("TESTING_REQUIREMENTS", {}),
-                COMPLIANCE_CHECKLIST=ocg_json.get("COMPLIANCE_CHECKLIST", []),
-                DELIVERABLES=ocg_json.get("DELIVERABLES", {}),
-                ARCHITECTURE_OVERVIEW=ocg_json.get("ARCHITECTURE_OVERVIEW", {}),
-                RISK_ANALYSIS=ocg_json.get("RISK_ANALYSIS", {}),
-                APPROVAL_STATUS=ocg_json.get("APPROVAL_STATUS", {}),
+                PROJECT_PROFILE=ocg_json.get("PROJECT_PROFILE") or ocg_json.get("project_profile") or req.project_metadata or {},
+                PILLAR_SCORES=ocg_json.get("PILLAR_SCORES") or ocg_json.get("pillar_scores") or pillar_scores_from_agents,
+                COMPOSITE_SCORE=ocg_json.get("COMPOSITE_SCORE") or ocg_json.get("composite_score") or {"overall": overall_score, "is_blocking": any_blocking},
+                STACK_RECOMMENDATION=ocg_json.get("STACK_RECOMMENDATION") or ocg_json.get("stack_recommendation") or ocg_json.get("stack", {}),
+                CRITICAL_FINDINGS=ocg_json.get("CRITICAL_FINDINGS") or ocg_json.get("critical_findings") or [f for pr in req.pillar_results for f in pr.findings if f.get("severity") == "critical"],
+                TESTING_REQUIREMENTS=ocg_json.get("TESTING_REQUIREMENTS") or ocg_json.get("testing_requirements") or ocg_json.get("testing", {}),
+                COMPLIANCE_CHECKLIST=ocg_json.get("COMPLIANCE_CHECKLIST") or ocg_json.get("compliance_checklist") or ocg_json.get("compliance", []),
+                DELIVERABLES=ocg_json.get("DELIVERABLES") or ocg_json.get("deliverables", {}),
+                ARCHITECTURE_OVERVIEW=ocg_json.get("ARCHITECTURE_OVERVIEW") or ocg_json.get("architecture_overview") or ocg_json.get("architecture", {}),
+                RISK_ANALYSIS=ocg_json.get("RISK_ANALYSIS") or ocg_json.get("risk_analysis") or ocg_json.get("risks", {}),
+                APPROVAL_STATUS=ocg_json.get("APPROVAL_STATUS") or ocg_json.get("approval_status") or {"status": "NEEDS_REVIEW" if any_blocking else "APPROVED", "overall_score": overall_score},
             )
 
             # Salvar no banco
@@ -480,19 +515,33 @@ Return complete JSON analysis with score, classification, findings, and recommen
     async def save_ocg(self, ocg_response: OCGResponse) -> OCG:
         """Salvar OCG no banco de dados"""
         try:
+            # Extrair scores dos pilares (flexível: P1, P1_Business, etc.)
+            ps = ocg_response.PILLAR_SCORES
+            def _get_pillar_score(ps: dict, pillar_num: int) -> float:
+                """Busca score do pilar com fallback para diferentes formatos de chave"""
+                for key in [f"P{pillar_num}", f"P{pillar_num}_Business", f"P{pillar_num}_Rules",
+                           f"P{pillar_num}_Features", f"P{pillar_num}_NFR", f"P{pillar_num}_Architecture",
+                           f"P{pillar_num}_Data", f"P{pillar_num}_Security"]:
+                    val = ps.get(key)
+                    if isinstance(val, dict):
+                        return val.get("score", 0)
+                    elif isinstance(val, (int, float)):
+                        return val
+                return 0
+
             ocg = OCG(
                 id=ocg_response.ocg_id,
                 questionnaire_id=ocg_response.questionnaire_id,
                 project_id=ocg_response.project_id,
-                p1_business_score=ocg_response.PILLAR_SCORES.get("P1_Business", {}).get("score", 0),
-                p2_rules_score=ocg_response.PILLAR_SCORES.get("P2_Rules", {}).get("score", 0),
-                p3_features_score=ocg_response.PILLAR_SCORES.get("P3_Features", {}).get("score", 0),
-                p4_nfr_score=ocg_response.PILLAR_SCORES.get("P4_NFR", {}).get("score", 0),
-                p5_architecture_score=ocg_response.PILLAR_SCORES.get("P5_Architecture", {}).get("score", 0),
-                p6_data_score=ocg_response.PILLAR_SCORES.get("P6_Data", {}).get("score", 0),
-                p7_security_score=ocg_response.PILLAR_SCORES.get("P7_Security", {}).get("score", 0),
-                overall_score=ocg_response.COMPOSITE_SCORE.get("overall", 0),
-                status=ocg_response.COMPOSITE_SCORE.get("status", "NEEDS_REVIEW"),
+                p1_business_score=_get_pillar_score(ps, 1),
+                p2_rules_score=_get_pillar_score(ps, 2),
+                p3_features_score=_get_pillar_score(ps, 3),
+                p4_nfr_score=_get_pillar_score(ps, 4),
+                p5_architecture_score=_get_pillar_score(ps, 5),
+                p6_data_score=_get_pillar_score(ps, 6),
+                p7_security_score=_get_pillar_score(ps, 7),
+                overall_score=ocg_response.COMPOSITE_SCORE.get("overall") or ocg_response.COMPOSITE_SCORE.get("value") or 0,
+                status=ocg_response.COMPOSITE_SCORE.get("status") or ("BLOCKED" if ocg_response.COMPOSITE_SCORE.get("is_blocking") else "NEEDS_REVIEW"),
                 is_blocking=ocg_response.COMPOSITE_SCORE.get("is_blocking", False),
                 ocg_data=json.dumps(ocg_response.dict(), ensure_ascii=False, cls=UUIDEncoder),
                 generated_at=ocg_response.generated_at,
