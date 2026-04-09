@@ -1140,7 +1140,19 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     email = user.email
-    await db.delete(user)
-    await db.commit()
+
+    # Limpar referências FK antes de excluir
+    from sqlalchemy import text
+    try:
+        await db.execute(text("DELETE FROM invitation_tokens WHERE invited_by_id = :uid"), {"uid": user_id})
+        await db.execute(text("UPDATE project_requests SET approved_by = NULL WHERE approved_by = :uid"), {"uid": user_id})
+        await db.execute(text("DELETE FROM project_members WHERE user_id = :uid"), {"uid": user_id})
+        await db.delete(user)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error("admin.user_delete_failed", user_id=str(user_id), error=str(e))
+        raise HTTPException(status_code=409, detail=f"Não foi possível excluir: {str(e)[:200]}")
+
     logger.info("admin.user_deleted", user_id=str(user_id), email=email)
     return {"success": True, "message": f"Usuário {email} excluído"}
