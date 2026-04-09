@@ -136,8 +136,8 @@ export function OCGPage() {
 
     try {
       // Buscar OCG do projeto
-      const ocgRes = await apiClient.get(`/ocg/${id}`)
-      setOcg(ocgRes.data)
+      const ocgRes = await apiClient.get(`/projects/${id}/ocg`)
+      setOcg(ocgRes.data.ocg || ocgRes.data)
     } catch (err: any) {
       if (err?.status === 404 || err?.response?.status === 404) {
         setOcg(null) // OCG não gerado ainda

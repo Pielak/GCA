@@ -73,11 +73,37 @@ export function QuestionnairePage() {
   const [submitted, setSubmitted] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<any>(null)
+  const [loadingExisting, setLoadingExisting] = useState(true)
 
   // Analysis state
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null)
   const [showResult, setShowResult] = useState(false)
+
+  // Carregar questionário existente (se já foi preenchido via externo)
+  useEffect(() => {
+    const loadExisting = async () => {
+      if (!projectId) { setLoadingExisting(false); return }
+      try {
+        const res = await apiClient.get(`/projects/${projectId}/questionnaire`)
+        if (res.data.questionnaire) {
+          const q = res.data.questionnaire
+          setResponses(q.responses || {})
+          if (q.approved || q.status === 'ok') {
+            setSubmitted(true)
+            setResult({
+              adherenceScore: q.adherence_score,
+              status: q.status,
+              validations: q.validations,
+              observations: q.observations,
+            })
+          }
+        }
+      } catch { /* sem questionário existente */ }
+      setLoadingExisting(false)
+    }
+    loadExisting()
+  }, [projectId])
 
   const block = BLOCKS[currentBlock]
 

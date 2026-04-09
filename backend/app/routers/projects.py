@@ -372,3 +372,107 @@ async def activate_project_context(
                 project_id=str(project_id))
 
     return {"active_project_id": str(project_id), "message": "Contexto ativo definido"}
+
+
+# ============================================================================
+# Questionário e OCG por projeto
+# ============================================================================
+
+@router.get("/{project_id}/questionnaire")
+async def get_project_questionnaire(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna o questionário associado ao projeto (respostas + score)."""
+    from sqlalchemy import select
+    from app.models.base import Questionnaire
+    import json
+
+    result = await db.execute(
+        select(Questionnaire)
+        .where(Questionnaire.project_id == project_id)
+        .order_by(Questionnaire.submitted_at.desc())
+        .limit(1)
+    )
+    q = result.scalar_one_or_none()
+
+    if not q:
+        return {"questionnaire": None, "message": "Nenhum questionário vinculado a este projeto"}
+
+    try:
+        responses = json.loads(q.responses) if q.responses else {}
+    except json.JSONDecodeError:
+        responses = {}
+
+    try:
+        validations = json.loads(q.validations) if q.validations else {}
+    except json.JSONDecodeError:
+        validations = {}
+
+    return {
+        "questionnaire": {
+            "id": str(q.id),
+            "gp_email": q.gp_email,
+            "responses": responses,
+            "adherence_score": q.adherence_score,
+            "status": q.status,
+            "approved": q.approved,
+            "validations": validations,
+            "observations": q.observations,
+            "restrictions": q.restrictions,
+            "submitted_at": q.submitted_at.isoformat() if q.submitted_at else None,
+            "analyzed_at": q.analyzed_at.isoformat() if q.analyzed_at else None,
+        }
+    }
+
+
+@router.get("/{project_id}/ocg")
+async def get_project_ocg(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna o OCG mais recente do projeto."""
+    from sqlalchemy import select
+    from app.models.base import OCG
+    import json
+
+    result = await db.execute(
+        select(OCG)
+        .where(OCG.project_id == project_id)
+        .order_by(OCG.created_at.desc())
+        .limit(1)
+    )
+    ocg = result.scalar_one_or_none()
+
+    if not ocg:
+        return {
+            "ocg": None,
+            "message": "OCG ainda não gerado para este projeto. Aguardando análise do questionário."
+        }
+
+    try:
+        ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+    except json.JSONDecodeError:
+        ocg_data = {}
+
+    return {
+        "ocg": {
+            "id": str(ocg.id),
+            "version": getattr(ocg, 'version', 1),
+            "schema_version": getattr(ocg, 'schema_version', '1.0.0'),
+            "overall_score": ocg.overall_score,
+            "p1_business_score": ocg.p1_business_score,
+            "p2_rules_score": ocg.p2_rules_score,
+            "p3_features_score": ocg.p3_features_score,
+            "p4_nfr_score": ocg.p4_nfr_score,
+            "p5_architecture_score": ocg.p5_architecture_score,
+            "p6_data_score": ocg.p6_data_score,
+            "p7_security_score": ocg.p7_security_score,
+            "status": ocg.status,
+            "is_blocking": ocg.is_blocking,
+            "ocg_data": ocg_data,
+            "generated_at": ocg.generated_at.isoformat() if ocg.generated_at else None,
+        }
+    }
