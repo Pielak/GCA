@@ -106,7 +106,7 @@ class DocumentExtractor:
         """Usa Claude Vision para descrever imagem/wireframe."""
         try:
             import base64
-            client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+            client = self.client  # Reutiliza client com chave do projeto
             b64 = base64.b64encode(image_bytes).decode("ascii")
             response = await client.messages.create(
                 model=settings.ANTHROPIC_MODEL,
@@ -160,11 +160,16 @@ IMPORTANTE:
 
 
 class ArguiderService:
-    """Agent 9: Arguidor — analisa documentos e atualiza OCG."""
+    """Agent 9: Arguidor — analisa documentos e atualiza OCG.
+    CAMADA PROJETO — usa chave de IA configurada pelo GP do projeto.
+    Se não configurada, tenta chave GCA como fallback temporário.
+    """
 
-    def __init__(self, db: AsyncSession):
+    def __init__(self, db: AsyncSession, project_api_key: str = None):
         self.db = db
-        self.client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
+        # Preferência: chave do projeto (vault) > chave global (fallback)
+        api_key = project_api_key or settings.ANTHROPIC_API_KEY
+        self.client = AsyncAnthropic(api_key=api_key)
         self.extractor = DocumentExtractor()
 
     @gca_retry()

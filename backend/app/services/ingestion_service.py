@@ -177,8 +177,12 @@ class IngestionService:
         try:
             from app.db.database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
+                # Resolver chave IA do projeto (camada projeto, não GCA admin)
+                from app.services.ai_key_resolver import AIKeyResolver
+                project_api_key = await AIKeyResolver.get_project_key(db, project_id)
+
                 extractor = DocumentExtractor()
-                arguider = ArguiderService(db)
+                arguider = ArguiderService(db, project_api_key=project_api_key)
 
                 # Extrair texto
                 doc_text = await extractor.extract_text(file_bytes, file_type)

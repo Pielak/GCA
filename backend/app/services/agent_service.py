@@ -45,10 +45,14 @@ class UUIDEncoder(json.JSONEncoder):
 
 
 class AgentService:
-    """Service para gerenciar os 8 agentes OCG"""
+    """Service para gerenciar os 8 agentes OCG.
+    CAMADA GCA ADMIN — usa chave global configurada pelo admin.
+    Não deve usar chave de projeto. Avalia questionários externos apenas.
+    """
 
     def __init__(self, db: AsyncSession):
         self.db = db
+        # Chave GCA Admin (global) — APENAS para pipeline OCG do questionário externo
         self.client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
 
     # ========== AGENT 0: ANALYZER ==========

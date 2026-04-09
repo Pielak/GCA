@@ -140,11 +140,15 @@ Include tests if applicable.
 
 
 class CodeGenerationService:
-    """Service for orchestrating code generation"""
+    """Service for orchestrating code generation.
+    CAMADA PROJETO — usa chave de IA configurada pelo GP.
+    Se project_api_key fornecida, usa ela. Senão fallback para env vars.
+    """
 
-    def __init__(self, db: AsyncSession, llm_provider: LLMProvider = LLMProvider.ANTHROPIC):
+    def __init__(self, db: AsyncSession, llm_provider: LLMProvider = LLMProvider.ANTHROPIC, project_api_key: str = None):
         self.db = db
         self.llm_provider = llm_provider
+        self.project_api_key = project_api_key
         self.piloter_service = PiloterService(db)
 
     async def _load_ocg_context(self, ocg_id: UUID) -> Optional[Dict[str, Any]]:
@@ -350,7 +354,12 @@ class CodeGenerationService:
             return False
 
     def _get_provider_api_key(self) -> str:
-        """Get API key from environment"""
+        """Resolve API key: projeto (vault) > env vars (fallback)"""
+        # Preferência 1: chave do projeto fornecida na inicialização
+        if self.project_api_key:
+            return self.project_api_key
+
+        # Fallback: variáveis de ambiente
         import os
 
         key_mapping = {
@@ -366,7 +375,10 @@ class CodeGenerationService:
 
         api_key = os.getenv(env_key)
         if not api_key:
-            raise ValueError(f"API key not found for {self.llm_provider.value}: set {env_key}")
+            raise ValueError(
+                f"API key não encontrada para {self.llm_provider.value}. "
+                f"O GP deve configurar em Settings > Provedor IA do projeto."
+            )
 
         return api_key
 

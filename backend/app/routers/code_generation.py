@@ -126,13 +126,19 @@ async def generate_project_code(
             )
 
     try:
-        service = CodeGenerationService(db, llm_provider=provider)
+        # Resolver chave: request > vault do projeto > env
+        project_api_key = request.api_key
+        if not project_api_key and request.project_id:
+            from app.services.ai_key_resolver import AIKeyResolver
+            project_api_key = await AIKeyResolver.get_project_key(db, request.project_id, provider.value)
+
+        service = CodeGenerationService(db, llm_provider=provider, project_api_key=project_api_key)
         result = await service.generate_project_code(
             project_id=request.project_id,
             gp_id=request.gp_id,
             language=request.language,
             architecture=request.architecture,
-            api_key=request.api_key,
+            api_key=project_api_key,
             ocg_id=request.ocg_id  # ← PASS OCG
         )
 
