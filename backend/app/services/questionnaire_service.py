@@ -116,7 +116,6 @@ class QuestionnaireService:
             # Notificar admins por email
             asyncio.create_task(
                 QuestionnaireService._notify_admins_questionnaire_submitted(
-                    db_session_factory=None,
                     gp_email=gp_email,
                     project_name=project_name,
                     questionnaire_id=questionnaire_id,
@@ -212,8 +211,25 @@ class QuestionnaireService:
                     error=str(e),
                     questionnaire_id=questionnaire_id
                 )
-                # Don't fail submission if analysis fails
-                pass
+                # Análise falhou, mas ProjectRequest já foi criado (se fluxo externo)
+                # Salvar questionário sem análise para não perder a submissão
+                try:
+                    await db.rollback()
+                    questionnaire = Questionnaire(
+                        project_id=project_id,
+                        gp_email=gp_email,
+                        responses=json.dumps(responses),
+                        adherence_score=0,
+                        status="pending_analysis",
+                        approved=False,
+                        submitted_at=datetime.now(timezone.utc),
+                    )
+                    db.add(questionnaire)
+                    await db.commit()
+                    questionnaire_id = str(questionnaire.id)
+                    logger.info("questionnaire.saved_without_analysis", questionnaire_id=questionnaire_id)
+                except Exception as save_err:
+                    logger.error("questionnaire.save_fallback_failed", error=str(save_err))
 
             return True, questionnaire_id, None
 
@@ -223,9 +239,7 @@ class QuestionnaireService:
             return False, None, str(e)
 
     @staticmethod
-    @staticmethod
     async def _notify_admins_questionnaire_submitted(
-        db_session_factory,
         gp_email: str,
         project_name: str,
         questionnaire_id: str,
@@ -277,6 +291,7 @@ class QuestionnaireService:
         except Exception as e:
             logger.error("questionnaire.admin_notification_error", error=str(e))
 
+    @staticmethod
     async def _send_analysis_email(
         gp_email: str,
         project_id: str,

@@ -1,0 +1,41 @@
+name: Backend Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'backend/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install poetry
+        poetry install
+    
+    - name: Run tests
+      run: |
+        cd backend
+        if [ -d "tests/" ]; then
+          poetry run pytest tests/ --cov=app
+        else
+          echo "⚠️ No tests directory found. Skipping tests."
+        fi
+

@@ -1,0 +1,102 @@
+{
+  "name": "GCA External Project Validation (Haiku AI)",
+  "description": "Receives external project questionnaire, analyzes with Claude Haiku, returns gaps and recommendations",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "external-project",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook_trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "mode": "jsonTojsonata",
+        "expression": "{\n  \"request_id\": $request_id,\n  \"request_number\": $request_number,\n  \"gp_email\": $gp_email,\n  \"questionnaire\": $questionnaire_data,\n  \"analysis_prompt\": $join([\n    \"Analyze this technical project questionnaire and identify:\",\n    \"1. GAPS: Missing or incomplete required information\",\n    \"2. CONFLICTS: Contradictory choices (e.g., monolith + microservices)\",\n    \"3. RISKS: Technical or architectural concerns\",\n    \"4. RECOMMENDATIONS: Suggestions for improvement\",\n    \"\",\n    \"Format response as JSON with keys: gaps, conflicts, risks, recommendations, risk_level\",\n    \"\",\n    \"Questionnaire Data:\",\n    JSON.stringify($questionnaire_data, null, 2)\n  ], \"\\n\")\n}"
+      },
+      "id": "prepare_prompt",
+      "name": "Prepare Haiku Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "url": "https://api.anthropic.com/v1/messages",
+        "method": "POST",
+        "sendBody": true,
+        "bodyContentType": "application/json",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "anthropic",
+        "body": "{\n  \"model\": \"claude-3-5-haiku\",\n  \"max_tokens\": 2000,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": \"{{ $json.analysis_prompt }}\"\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "haiku_analysis",
+      "name": "Haiku AI Analysis",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [400, 300],
+      "alwaysOutputData": true,
+      "credentials": {
+        "anthropic": "Anthropic account"
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://backend:8000/api/v1/webhooks/external-project-result",
+        "method": "POST",
+        "sendBody": true,
+        "bodyContentType": "application/json",
+        "body": "{\n  \"request_id\": \"{{ $node['webhook_trigger'].json.request_id }}\",\n  \"request_number\": \"{{ $node['webhook_trigger'].json.request_number }}\",\n  \"gp_email\": \"{{ $node['webhook_trigger'].json.gp_email }}\",\n  \"analysis\": {{ JSON.parse($node['haiku_analysis'].json.content[0].text) }}\n}"
+      },
+      "id": "callback_backend",
+      "name": "Callback Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [600, 300],
+      "alwaysOutputData": true
+    }
+  ],
+  "connections": {
+    "webhook_trigger": {
+      "main": [
+        [
+          {
+            "node": "prepare_prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare_prompt": {
+      "main": [
+        [
+          {
+            "node": "haiku_analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "haiku_analysis": {
+      "main": [
+        [
+          {
+            "node": "callback_backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

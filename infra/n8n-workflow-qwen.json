@@ -1,0 +1,99 @@
+{
+  "name": "GCA External Project Validation (Qwen AI via OpenRouter)",
+  "description": "Receives external project questionnaire, analyzes with Qwen AI, returns gaps and recommendations",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "external-project",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook_trigger",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [0, 300]
+    },
+    {
+      "parameters": {
+        "mode": "jsonTojsonata",
+        "expression": "{\n  \"request_id\": $request_id,\n  \"request_number\": $request_number,\n  \"gp_email\": $gp_email,\n  \"questionnaire\": $questionnaire_data,\n  \"analysis_prompt\": $join([\n    \"Analyze this technical project questionnaire and identify:\",\n    \"1. GAPS: Missing or incomplete required information\",\n    \"2. CONFLICTS: Contradictory choices (e.g., monolith + microservices)\",\n    \"3. RISKS: Technical or architectural concerns\",\n    \"4. RECOMMENDATIONS: Suggestions for improvement\",\n    \"\",\n    \"Format response as JSON with keys: gaps, conflicts, recommendations, risk_level\",\n    \"\",\n    \"Questionnaire:\",\n    JSON.stringify($questionnaire_data, null, 2)\n  ], \"\\n\")\n}"
+      },
+      "id": "prepare_prompt",
+      "name": "Prepare Qwen Prompt",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [200, 300]
+    },
+    {
+      "parameters": {
+        "provider": "openrouter",
+        "model": "qwen/qwen-2.5-7b-instruct",
+        "prompt": "={{ $node['prepare_prompt'].json.analysis_prompt }}",
+        "options": {
+          "temperature": 0.5,
+          "topP": 0.9,
+          "maxTokens": 1000
+        }
+      },
+      "id": "qwen_analysis",
+      "name": "Qwen AI Analysis",
+      "type": "n8n-nodes-base.openai",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "credentials": {
+        "openRouterApi": "openrouter_api_key"
+      }
+    },
+    {
+      "parameters": {
+        "url": "http://localhost:8000/api/v1/webhooks/external-project-result",
+        "method": "POST",
+        "sendBody": true,
+        "bodyContentType": "application/json",
+        "body": "{\n  \"request_id\": \"{{ $node['webhook_trigger'].json.request_id }}\",\n  \"request_number\": \"{{ $node['webhook_trigger'].json.request_number }}\",\n  \"gp_email\": \"{{ $node['webhook_trigger'].json.gp_email }}\",\n  \"analysis\": {{ JSON.parse($node['qwen_analysis'].json.text) }}\n}"
+      },
+      "id": "callback_backend",
+      "name": "Callback Backend",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [600, 300]
+    }
+  ],
+  "connections": {
+    "webhook_trigger": {
+      "main": [
+        [
+          {
+            "node": "prepare_prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare_prompt": {
+      "main": [
+        [
+          {
+            "node": "qwen_analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "qwen_analysis": {
+      "main": [
+        [
+          {
+            "node": "callback_backend",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

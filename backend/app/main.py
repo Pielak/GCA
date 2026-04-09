@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import structlog
 from app.core.config import settings
 from app.db.database import init_db
-from app.routers import auth, users, organizations, projects, ocg, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, legacy_router, merge_router, admin_gca_router, setup, qa_router
+from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, legacy_router, merge_router, admin_gca_router, setup, qa_router
 
 logger = structlog.get_logger(__name__)
 
@@ -57,10 +57,7 @@ app.add_middleware(
 
 # Routes
 app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["auth"])
-app.include_router(users.router, prefix=f"{settings.API_PREFIX}/users", tags=["users"])
-app.include_router(organizations.router, prefix=f"{settings.API_PREFIX}/organizations", tags=["organizations"])
 app.include_router(projects.router, prefix=f"{settings.API_PREFIX}/projects", tags=["projects"])
-app.include_router(ocg.router, prefix=f"{settings.API_PREFIX}/ocg", tags=["ocg"])
 app.include_router(admin.router, prefix=f"{settings.API_PREFIX}/admin", tags=["admin"])
 app.include_router(onboarding.router, prefix=f"{settings.API_PREFIX}/onboarding", tags=["onboarding"])
 app.include_router(evaluation.router, prefix=f"{settings.API_PREFIX}", tags=["evaluation"])

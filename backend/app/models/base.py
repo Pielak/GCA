@@ -407,7 +407,7 @@ class Questionnaire(Base):
     __tablename__ = "questionnaires"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True, index=True)
     gp_email = Column(String(255), nullable=False, index=True)
 
     # Submitted responses
