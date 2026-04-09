@@ -38,13 +38,18 @@ export function ProjectDetailLayout() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const [project, setProject] = useState<ProjectHeader | null>(null)
+  const [repoConnected, setRepoConnected] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     const load = async () => {
       try {
-        const res = await apiClient.get(`/projects/${id}`)
-        setProject(res.data)
+        const [projRes, repoRes] = await Promise.all([
+          apiClient.get(`/projects/${id}`),
+          apiClient.get(`/projects/${id}/git/status`).catch(() => ({ data: { connected: false } })),
+        ])
+        setProject(projRes.data)
+        setRepoConnected(repoRes.data?.connected || false)
       } catch {
         setProject(null)
       } finally {
@@ -135,7 +140,7 @@ export function ProjectDetailLayout() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <Outlet />
+        <Outlet context={{ repoConnected }} />
       </div>
     </div>
   )

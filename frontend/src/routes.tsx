@@ -16,6 +16,7 @@ import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
 import { RepositoryPage } from './pages/projects/RepositoryPage';
+import { RequireRepository } from './components/guards/RequireRepository';
 import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
 import { ArguiderPage } from './pages/projects/ArguiderPage';
@@ -83,15 +84,15 @@ export const router = createBrowserRouter([
           { path: 'ocg', Component: OCGPage },
           { path: 'questionnaire', Component: QuestionnairePage },
           { path: 'repository', Component: RepositoryPage },
-          { path: 'external-repos', Component: ExternalReposPage },
-          { path: 'ingestion', Component: IngestionPage },
-          { path: 'gatekeeper', Component: GatekeeperPage },
-          { path: 'arguider', Component: ArguiderPage },
-          { path: 'codegen', Component: CodeGeneratorPage },
-          { path: 'qa', Component: QAReadinessPage },
-          { path: 'tester-review', Component: TesterReviewPage },
-          { path: 'roadmap', Component: RoadmapPage },
-          { path: 'docs', Component: LiveDocsPage },
+          { path: 'external-repos', element: <RequireRepository><ExternalReposPage /></RequireRepository> },
+          { path: 'ingestion', element: <RequireRepository><IngestionPage /></RequireRepository> },
+          { path: 'gatekeeper', element: <RequireRepository><GatekeeperPage /></RequireRepository> },
+          { path: 'arguider', element: <RequireRepository><ArguiderPage /></RequireRepository> },
+          { path: 'codegen', element: <RequireRepository><CodeGeneratorPage /></RequireRepository> },
+          { path: 'qa', element: <RequireRepository><QAReadinessPage /></RequireRepository> },
+          { path: 'tester-review', element: <RequireRepository><TesterReviewPage /></RequireRepository> },
+          { path: 'roadmap', element: <RequireRepository><RoadmapPage /></RequireRepository> },
+          { path: 'docs', element: <RequireRepository><LiveDocsPage /></RequireRepository> },
           { path: 'settings', Component: ProjectSettingsPage },
         ],
       },
