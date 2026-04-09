@@ -95,3 +95,26 @@ async def delete_document(
     if sc >= 400:
         raise HTTPException(status_code=sc, detail=result.get("error", ""))
     return result
+
+
+@router.post("/projects/{project_id}/ingestion/{document_id}/release")
+async def release_from_quarantine(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Liberar documento da quarentena e disparar análise + OCG update."""
+    from app.models.base import IngestedDocument
+
+    doc = await db.get(IngestedDocument, document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    if doc.quarantine_status != "quarantined":
+        raise HTTPException(status_code=400, detail="Documento não está em quarentena")
+
+    doc.quarantine_status = "released"
+    doc.arguider_status = "pending"
+    await db.commit()
+
+    return {"message": "Documento liberado da quarentena. Análise será iniciada.", "document_id": str(document_id)}

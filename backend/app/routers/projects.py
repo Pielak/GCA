@@ -476,3 +476,107 @@ async def get_project_ocg(
             "generated_at": ocg.generated_at.isoformat() if ocg.generated_at else None,
         }
     }
+
+
+@router.get("/{project_id}/ocg/history")
+async def get_ocg_history(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Histórico de versões do OCG."""
+    from sqlalchemy import select
+    from app.models.base import OCGDeltaLog
+
+    result = await db.execute(
+        select(OCGDeltaLog)
+        .where(OCGDeltaLog.project_id == project_id)
+        .order_by(OCGDeltaLog.created_at.desc())
+        .limit(50)
+    )
+    deltas = result.scalars().all()
+    return {
+        "history": [
+            {
+                "version_from": d.ocg_version_from,
+                "version_to": d.ocg_version_to,
+                "change_summary": d.change_summary,
+                "fields_changed": d.fields_changed,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in deltas
+        ]
+    }
+
+
+@router.get("/{project_id}/ocg/health")
+async def get_ocg_health(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Saúde do contexto OCG."""
+    from sqlalchemy import select
+    from app.models.base import OCG
+    import json
+
+    result = await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+    )
+    ocg = result.scalar_one_or_none()
+    if not ocg:
+        return {"health": None, "message": "OCG não encontrado"}
+
+    health = {}
+    if hasattr(ocg, 'context_health') and ocg.context_health:
+        try:
+            health = json.loads(ocg.context_health)
+        except json.JSONDecodeError:
+            pass
+
+    return {
+        "health": health,
+        "version": getattr(ocg, 'version', 1),
+        "change_type": getattr(ocg, 'change_type', 'INITIAL'),
+        "overall_score": ocg.overall_score,
+        "status": ocg.status,
+    }
+
+
+@router.post("/{project_id}/ocg/propagate")
+async def force_propagation(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Forçar re-propagação do OCG para módulos dependentes."""
+    from app.services.propagation_service import PropagationService
+    propagator = PropagationService(db)
+    result = await propagator.propagate(project_id, changes=[{"field": "MANUAL_PROPAGATION"}])
+    return result
+
+
+@router.get("/{project_id}/billing")
+async def get_project_billing(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Resumo de gastos de IA do projeto."""
+    from app.services.ai_billing_service import AIBillingService
+    billing = AIBillingService(db)
+    return await billing.get_project_summary(project_id)
+
+
+@router.get("/{project_id}/billing/detail")
+async def get_project_billing_detail(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+    limit: int = 50,
+):
+    """Log detalhado de chamadas IA do projeto."""
+    from app.services.ai_billing_service import AIBillingService
+    billing = AIBillingService(db)
+    entries = await billing.get_project_detail(project_id, limit)
+    return {"entries": entries, "count": len(entries)}
