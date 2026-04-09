@@ -248,7 +248,6 @@ class IngestionService:
                     try:
                         from app.services.ocg_updater_service import OCGUpdaterService
                         from app.services.propagation_service import PropagationService
-                        from app.models.base import ArguiderAnalysis
                         import json as _json
 
                         # Carregar análise do Arguidor

@@ -200,6 +200,10 @@ class OCGUpdaterService:
 
         Retorna dict com: raw_text, tokens_input, tokens_output, provider, model
         """
+        # Carregar chaves do banco (system_settings) antes de resolver
+        from app.routers.admin_gca_router import _load_ai_providers_from_db
+        await _load_ai_providers_from_db(self.db)
+
         provider = settings.DEFAULT_AI_PROVIDER
         api_key = await AIKeyResolver.get_gca_key(provider)
 
@@ -221,116 +225,38 @@ class OCGUpdaterService:
             prompt_len=len(user_prompt),
         )
 
-        if provider == "deepseek":
-            return await self._call_deepseek(api_key, model, system_prompt, user_prompt)
-        elif provider == "anthropic":
-            return await self._call_anthropic(api_key, model, system_prompt, user_prompt)
-        elif provider in ("openai", "grok"):
-            return await self._call_openai_compatible(
-                api_key=api_key,
-                model=model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                base_url=(
-                    "https://api.x.ai" if provider == "grok" else "https://api.openai.com/v1"
-                ),
-                provider=provider,
-            )
-        else:
-            # Fallback genérico: tenta como OpenAI-compatible
-            return await self._call_openai_compatible(
-                api_key=api_key,
-                model=model,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                base_url="https://api.openai.com/v1",
-                provider=provider,
-            )
+        # Chamada unificada via httpx (mesmo padrão do agent_service._call_llm)
+        import httpx
 
-    async def _call_deepseek(
-        self,
-        api_key: str,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-    ) -> Dict[str, Any]:
-        """Chama a API do DeepSeek (compatível com OpenAI)."""
-        import openai
-
-        client = openai.OpenAI(
-            api_key=api_key,
-            base_url="https://api.deepseek.com",
-        )
-        response = client.chat.completions.create(
-            model=model or "deepseek-chat",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            max_tokens=4096,
-        )
-        return {
-            "raw_text": response.choices[0].message.content,
-            "tokens_input": response.usage.prompt_tokens if response.usage else 0,
-            "tokens_output": response.usage.completion_tokens if response.usage else 0,
-            "provider": "deepseek",
-            "model": model or "deepseek-chat",
+        provider_urls = {
+            "deepseek": "https://api.deepseek.com/chat/completions",
+            "openai": "https://api.openai.com/v1/chat/completions",
+            "grok": "https://api.x.ai/v1/chat/completions",
         }
+        url = provider_urls.get(provider, "https://api.deepseek.com/chat/completions")
 
-    async def _call_anthropic(
-        self,
-        api_key: str,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-    ) -> Dict[str, Any]:
-        """Chama a API da Anthropic (Claude)."""
-        import anthropic
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(url, headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }, json={
+                "model": model,
+                "max_tokens": 8192,
+                "temperature": 0.3,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            })
 
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model=model or settings.ANTHROPIC_MODEL,
-            max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-            temperature=settings.ANTHROPIC_TEMPERATURE,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        raw_text = response.content[0].text if response.content else ""
+        if resp.status_code not in (200, 201):
+            raise ValueError(f"LLM API error ({resp.status_code}): {resp.text[:300]}")
+
+        data = resp.json()
         return {
-            "raw_text": raw_text,
-            "tokens_input": response.usage.input_tokens if response.usage else 0,
-            "tokens_output": response.usage.output_tokens if response.usage else 0,
-            "provider": "anthropic",
-            "model": model or settings.ANTHROPIC_MODEL,
-        }
-
-    async def _call_openai_compatible(
-        self,
-        api_key: str,
-        model: str,
-        system_prompt: str,
-        user_prompt: str,
-        base_url: str,
-        provider: str,
-    ) -> Dict[str, Any]:
-        """Chama qualquer API compatível com OpenAI (Grok, OpenAI, etc.)."""
-        import openai
-
-        client = openai.OpenAI(api_key=api_key, base_url=base_url)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=0.3,
-            max_tokens=4096,
-        )
-        return {
-            "raw_text": response.choices[0].message.content,
-            "tokens_input": response.usage.prompt_tokens if response.usage else 0,
-            "tokens_output": response.usage.completion_tokens if response.usage else 0,
+            "raw_text": data["choices"][0]["message"]["content"],
+            "tokens_input": data.get("usage", {}).get("prompt_tokens", 0),
+            "tokens_output": data.get("usage", {}).get("completion_tokens", 0),
             "provider": provider,
             "model": model,
         }
