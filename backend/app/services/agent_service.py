@@ -63,11 +63,15 @@ class AgentService:
         else:
             self.client = None  # Usará _call_llm via httpx
 
-    async def _call_llm(self, system_prompt: str, user_prompt: str, max_tokens: int = 4096) -> tuple[str, int]:
+    async def _call_llm(self, system_prompt: str, user_prompt: str, max_tokens: int = 4096, project_id: UUID = None, operation: str = "ocg_generation") -> tuple[str, int]:
         """Chamada unificada ao LLM — suporta Anthropic e OpenAI-compatible (DeepSeek, Grok, etc.)
         Returns: (response_text, tokens_used)
+        Integra billing ao final da chamada.
         """
         import httpx
+
+        tokens_in = 0
+        tokens_out = 0
 
         if self.provider == "anthropic" and self.client:
             response = await self.client.messages.create(
@@ -78,43 +82,63 @@ class AgentService:
                 messages=[{"role": "user", "content": user_prompt}],
             )
             text = response.content[0].text
-            tokens = response.usage.input_tokens + response.usage.output_tokens
-            return text, tokens
+            tokens_in = response.usage.input_tokens
+            tokens_out = response.usage.output_tokens
+            tokens = tokens_in + tokens_out
+        else:
+            # OpenAI-compatible (DeepSeek, Grok, OpenAI)
+            provider_urls = {
+                "deepseek": "https://api.deepseek.com/chat/completions",
+                "openai": "https://api.openai.com/v1/chat/completions",
+                "grok": "https://api.x.ai/v1/chat/completions",
+            }
+            url = provider_urls.get(self.provider)
+            if not url:
+                raise ValueError(f"Provider '{self.provider}' não suportado para OCG pipeline")
 
-        # OpenAI-compatible (DeepSeek, Grok, OpenAI)
-        provider_urls = {
-            "deepseek": "https://api.deepseek.com/chat/completions",
-            "openai": "https://api.openai.com/v1/chat/completions",
-            "grok": "https://api.x.ai/v1/chat/completions",
-        }
-        url = provider_urls.get(self.provider)
-        if not url:
-            raise ValueError(f"Provider '{self.provider}' não suportado para OCG pipeline")
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                resp = await client.post(
+                    url,
+                    headers={
+                        "Authorization": f"Bearer {self.api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self.model,
+                        "max_tokens": max_tokens,
+                        "temperature": 0.3,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                    },
+                )
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(
-                url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self.model,
-                    "max_tokens": max_tokens,
-                    "temperature": 0.3,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                },
+            if resp.status_code not in (200, 201):
+                raise ValueError(f"LLM API error ({resp.status_code}): {resp.text[:300]}")
+
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"]
+            tokens_in = data.get("usage", {}).get("prompt_tokens", 0)
+            tokens_out = data.get("usage", {}).get("completion_tokens", 0)
+            tokens = tokens_in + tokens_out
+
+        # Registrar billing
+        try:
+            from app.services.ai_billing_service import AIBillingService
+            billing = AIBillingService(self.db)
+            await billing.log_usage(
+                project_id=project_id,
+                provider=self.provider,
+                model=self.model,
+                operation=operation,
+                tokens_input=tokens_in,
+                tokens_output=tokens_out,
             )
+            await self.db.flush()
+        except Exception as e:
+            logger.warning("billing.log_failed", error=str(e))
 
-        if resp.status_code not in (200, 201):
-            raise ValueError(f"LLM API error ({resp.status_code}): {resp.text[:300]}")
-
-        data = resp.json()
-        text = data["choices"][0]["message"]["content"]
-        tokens = data.get("usage", {}).get("total_tokens", 0)
         return text, tokens
 
     # ========== AGENT 0: ANALYZER ==========
@@ -160,6 +184,8 @@ class AgentService:
                 system_prompt=ANALYZER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
+                project_id=None,
+                operation="analyzer",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
             ocg_json = self._extract_json(response_text)
@@ -261,6 +287,8 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
+                project_id=None,
+                operation=f"pillar_p{pillar_id}",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
@@ -429,6 +457,8 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 system_prompt=CONSOLIDATOR_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
+                project_id=req.project_id,
+                operation="consolidator",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
