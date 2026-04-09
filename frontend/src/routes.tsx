@@ -15,11 +15,9 @@ import { ProjectTeamPage } from './app/pages/projects/ProjectTeamPage';
 import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
-import { MergeEnginePage } from './pages/projects/MergeEnginePage';
 import { ArguiderPage } from './pages/projects/ArguiderPage';
 import { CodeGeneratorPage } from './pages/projects/CodeGeneratorPage';
 import { QAReadinessPage } from './pages/projects/QAReadinessPage';
-import { LegacyPage } from './pages/projects/LegacyPage';
 import { RoadmapPage } from './pages/projects/RoadmapPage';
 import { LiveDocsPage } from './pages/projects/LiveDocsPage';
 import { QuestionnairePage } from './pages/projects/QuestionnairePage';
@@ -83,12 +81,10 @@ export const router = createBrowserRouter([
           { path: 'questionnaire', Component: QuestionnairePage },
           { path: 'ingestion', Component: IngestionPage },
           { path: 'gatekeeper', Component: GatekeeperPage },
-          { path: 'merge', Component: MergeEnginePage },
           { path: 'arguider', Component: ArguiderPage },
           { path: 'codegen', Component: CodeGeneratorPage },
           { path: 'qa', Component: QAReadinessPage },
           { path: 'tester-review', Component: TesterReviewPage },
-          { path: 'legacy', Component: LegacyPage },
           { path: 'roadmap', Component: RoadmapPage },
           { path: 'docs', Component: LiveDocsPage },
         ],

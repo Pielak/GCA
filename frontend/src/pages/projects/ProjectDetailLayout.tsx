@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useParams, useNavigate } from 'react-router-dom'
 import {
-  ChevronLeft, Activity, Settings, FileText, Shield, GitBranch, Zap,
-  Code2, TestTube2, History, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2
+  ChevronLeft, Activity, Settings, FileText, Shield, Zap,
+  Code2, TestTube2, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
@@ -22,15 +22,14 @@ const MODULES = [
   { path: '', label: 'Dashboard', icon: Activity, end: true },
   { path: 'ocg', label: 'OCG', icon: Settings },
   { path: 'questionnaire', label: 'Questionário', icon: ClipboardList },
-  { path: 'ingestion', label: 'M4 - Ingestão', icon: FileText },
-  { path: 'gatekeeper', label: 'M5 - Gatekeeper', icon: Shield },
-  { path: 'merge', label: 'M6 - Merge', icon: GitBranch },
-  { path: 'arguider', label: 'M7 - Arguidor', icon: Zap },
-  { path: 'codegen', label: 'M8 - Code Gen', icon: Code2 },
-  { path: 'qa', label: 'M9 - QA', icon: TestTube2 },
-  { path: 'legacy', label: 'M10 - Legado', icon: History },
-  { path: 'roadmap', label: 'M11 - Roadmap', icon: Clock },
-  { path: 'docs', label: 'M12 - Docs Viva', icon: BookOpen },
+  { path: 'ingestion', label: 'Ingestão', icon: FileText },
+  { path: 'gatekeeper', label: 'Gatekeeper', icon: Shield },
+  { path: 'arguider', label: 'Arguidor', icon: Zap },
+  { path: 'codegen', label: 'Geração de Código', icon: Code2 },
+  { path: 'qa', label: 'Testes', icon: TestTube2 },
+  { path: 'tester-review', label: 'Revisão de Testes', icon: FileText },
+  { path: 'roadmap', label: 'Roadmap', icon: Clock },
+  { path: 'docs', label: 'Documentação Viva', icon: BookOpen },
 ]
 
 export function ProjectDetailLayout() {

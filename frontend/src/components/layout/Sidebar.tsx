@@ -182,16 +182,14 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionário" icon={<ClipboardList className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/ingestion`} label="M4 - Ingestão" icon={<FileText className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="M5 - Gatekeeper" icon={<Shield className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/merge`} label="M6 - Merge" icon={<GitBranch className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/arguider`} label="M7 - Arguidor" icon={<Zap className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/codegen`} label="M8 - Code Gen" icon={<Code2 className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/qa`} label="M9 - QA" icon={<TestTube2 className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Tester Review" icon={<FileText className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/legacy`} label="M10 - Legado" icon={<History className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/roadmap`} label="M11 - Roadmap" icon={<Clock className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/docs`} label="M12 - Docs" icon={<BookOpen className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/ingestion`} label="Ingestão" icon={<FileText className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="Gatekeeper" icon={<Shield className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/arguider`} label="Arguidor" icon={<Zap className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/codegen`} label="Geração de Código" icon={<Code2 className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/qa`} label="Testes" icon={<TestTube2 className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Revisão de Testes" icon={<FileText className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/roadmap`} label="Roadmap" icon={<Clock className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
                       </div>
                     )}
                   </div>
