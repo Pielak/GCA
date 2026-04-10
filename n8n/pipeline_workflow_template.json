@@ -1,5 +1,7 @@
 {
+  "id": "1",
   "name": "GCA Pipeline - CodeGen to QA",
+  "active": false,
   "nodes": [
     {
       "name": "Webhook Trigger",

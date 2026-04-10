@@ -84,6 +84,9 @@ services:
     restart: unless-stopped
     ports:
       - "5678:5678"
+    environment:
+      N8N_API_DISABLED: "false"
+      N8N_PUBLIC_API_DISABLED: "false"
     volumes:
       - /home/luiz/.n8n:/home/node/.n8n
 
