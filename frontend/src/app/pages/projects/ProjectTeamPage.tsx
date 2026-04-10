@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { UserPlus, Loader2, CheckCircle2, Clock, Lightbulb, Users } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 
 interface PendingInvite {
   invite_id: string
@@ -55,6 +56,8 @@ function formatDate(dateString: string): string {
 
 export function ProjectTeamPage() {
   const { id: projectId } = useParams<{ id: string }>()
+  const { can } = useProjectPermissions()
+  const canManageTeam = can('project:manage_team')
 
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<InviteRole>('dev_pleno')
@@ -124,7 +127,8 @@ export function ProjectTeamPage() {
         </p>
       </div>
 
-      {/* Invite Form */}
+      {/* Invite Form — visivel apenas para quem pode gerenciar equipe */}
+      {canManageTeam && (
       <div className="bg-dark-100 border border-slate-700 rounded-xl p-6">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
           <UserPlus className="w-5 h-5 text-violet-400" />
@@ -186,8 +190,10 @@ export function ProjectTeamPage() {
           </button>
         </form>
       </div>
+      )}
 
-      {/* Pending Invites */}
+      {/* Pending Invites — visivel para quem gerencia equipe */}
+      {canManageTeam && (
       <div className="bg-dark-100 border border-slate-700 rounded-xl p-6">
         <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">
           <Clock className="w-5 h-5 text-amber-400" />
@@ -228,8 +234,9 @@ export function ProjectTeamPage() {
           </div>
         )}
       </div>
+      )}
 
-      {/* Team Members */}
+      {/* Team Members — visivel para todos */}
       {members.length > 0 && (
         <div className="bg-dark-100 border border-slate-700 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white flex items-center gap-2 mb-4">

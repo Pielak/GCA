@@ -2,9 +2,12 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 
 export function ProjectSettingsPage() {
   const { id: projectId } = useParams<{ id: string }>()
+  const { can } = useProjectPermissions()
+  const canEdit = can('project:edit')
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'llm' | 'smtp' | 'n8n'>('llm')
 
@@ -178,7 +181,7 @@ export function ProjectSettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <button onClick={saveLlm} disabled={saving}
+            <button onClick={saveLlm} disabled={saving || !canEdit}
               className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
               Salvar Provedor de IA
@@ -224,7 +227,7 @@ export function ProjectSettingsPage() {
           </div>
 
           <div className="flex justify-end">
-            <button onClick={saveSmtp} disabled={saving}
+            <button onClick={saveSmtp} disabled={saving || !canEdit}
               className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
               Salvar SMTP
