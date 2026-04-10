@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap, Code2, Shield, X, TestTube2, GitBranch } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
+import { RoleAssumptionPrompt } from '@/components/projects/RoleAssumptionPrompt'
 
 interface BacklogItem {
   id: string
@@ -94,6 +95,21 @@ export function BacklogPage() {
   }
 
   const [generating, setGenerating] = useState(false)
+  const [rolePrompt, setRolePrompt] = useState<{ action: string; retry: () => void } | null>(null)
+
+  const withRoleCheck = (action: string, fn: () => Promise<void>) => {
+    return async () => {
+      try {
+        await fn()
+      } catch (err: any) {
+        if (err?.status === 403) {
+          setRolePrompt({ action, retry: () => { setRolePrompt(null); fn().then(() => loadData()) } })
+        } else {
+          showToast(err?.message || 'Erro', 'error')
+        }
+      }
+    }
+  }
   const handleGenerate = async () => {
     setGenerating(true)
     try {
@@ -120,6 +136,15 @@ export function BacklogPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Role Assumption Prompt */}
+      {rolePrompt && (
+        <RoleAssumptionPrompt
+          action={rolePrompt.action}
+          onRoleAssumed={rolePrompt.retry}
+          onCancel={() => setRolePrompt(null)}
+        />
+      )}
+
       {toast && (
         <div className={`p-3 rounded-lg text-sm ${toast.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-red-900/30 border border-red-700 text-red-300'}`}>
           {toast.message}
@@ -262,7 +287,7 @@ export function BacklogPage() {
                       )}
                       {item.status === 'generating' && (
                         <button
-                          onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/generate-tests`).then(() => loadData())}
+                          onClick={withRoleCheck('code:write', async () => { await apiClient.post(`/projects/${projectId}/backlog/${item.id}/generate-tests`); await loadData() })}
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600/20 border border-blue-600/30 text-blue-400 rounded-lg hover:bg-blue-600/30 transition-colors"
                         >
                           <TestTube2 className="w-3 h-3" />
@@ -277,7 +302,7 @@ export function BacklogPage() {
                       )}
                       {item.status === 'security_review' && (
                         <button
-                          onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/security-scan`).then(() => loadData())}
+                          onClick={withRoleCheck('security:review', async () => { await apiClient.post(`/projects/${projectId}/backlog/${item.id}/security-scan`); await loadData() })}
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-600/20 border border-orange-600/30 text-orange-400 rounded-lg hover:bg-orange-600/30 transition-colors"
                         >
                           <Shield className="w-3 h-3" />
@@ -286,7 +311,7 @@ export function BacklogPage() {
                       )}
                       {item.status === 'compliance_review' && (
                         <button
-                          onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/compliance-check`).then(() => loadData())}
+                          onClick={withRoleCheck('compliance:validate', async () => { await apiClient.post(`/projects/${projectId}/backlog/${item.id}/compliance-check`); await loadData() })}
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-amber-600/20 border border-amber-600/30 text-amber-400 rounded-lg hover:bg-amber-600/30 transition-colors"
                         >
                           <Shield className="w-3 h-3" />
@@ -296,14 +321,14 @@ export function BacklogPage() {
                       {item.status === 'awaiting_qa' && (
                         <div className="flex gap-1">
                           <button
-                            onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/qa-approve`, { approved: true, notes: 'Aprovado via backlog' }).then(() => loadData())}
+                            onClick={withRoleCheck('qa:approve', async () => { await apiClient.post(`/projects/${projectId}/backlog/${item.id}/qa-approve`, { approved: true, notes: 'Aprovado via backlog' }); await loadData() })}
                             className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg hover:bg-emerald-600/30 transition-colors"
                           >
                             <CheckCircle className="w-3 h-3" />
                             Aprovar
                           </button>
                           <button
-                            onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/qa-approve`, { approved: false, rejection_reason: 'Rejeitado via backlog' }).then(() => loadData())}
+                            onClick={withRoleCheck('qa:approve', async () => { await apiClient.post(`/projects/${projectId}/backlog/${item.id}/qa-approve`, { approved: false, rejection_reason: 'Rejeitado via backlog' }); await loadData() })}
                             className="flex items-center gap-1 px-2 py-1 text-xs bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg hover:bg-red-600/30 transition-colors"
                           >
                             <X className="w-3 h-3" />
