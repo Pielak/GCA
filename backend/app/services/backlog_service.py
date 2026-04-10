@@ -248,20 +248,38 @@ class BacklogService:
         return {"created": created, "skipped": len(all_candidates) - created}
 
     async def list_backlog(self, project_id: UUID, category: Optional[str] = None) -> list[dict]:
-        """Lista itens do backlog por projeto"""
-        query = select(BacklogItem).where(BacklogItem.project_id == project_id)
+        """Lista itens do backlog por projeto (exclui sub-items, mostra contagem)"""
+        from sqlalchemy import func
+
+        # Listar apenas itens raiz (sem parent_item_id)
+        query = select(BacklogItem).where(
+            BacklogItem.project_id == project_id,
+            BacklogItem.parent_item_id == None,
+        )
         if category:
             query = query.where(BacklogItem.category == category)
         query = query.order_by(
-            BacklogItem.priority.asc(),  # critical first
+            BacklogItem.priority.asc(),
             BacklogItem.created_at.desc(),
         )
 
         result = await self.db.execute(query)
         items = result.scalars().all()
 
-        return [
-            {
+        # Contar sub-items por item pai
+        items_list = []
+        for i in items:
+            child_count_result = await self.db.execute(
+                select(
+                    func.count().label("total"),
+                    func.count().filter(BacklogItem.status == "done").label("resolved"),
+                ).where(BacklogItem.parent_item_id == i.id)
+            )
+            child_row = child_count_result.first()
+            issues_total = child_row.total if child_row else 0
+            issues_resolved = child_row.resolved if child_row else 0
+
+            items_list.append({
                 "id": str(i.id),
                 "category": i.category,
                 "module_type": i.module_type,
@@ -277,7 +295,11 @@ class BacklogService:
                 "warnings": json.loads(i.warnings) if i.warnings else [],
                 "generated_code_path": i.generated_code_path,
                 "commit_sha": i.commit_sha,
+                "fix_severity": i.fix_severity,
+                "fix_remediation": i.fix_remediation,
+                "issues_total": issues_total,
+                "issues_resolved": issues_resolved,
                 "created_at": i.created_at.isoformat() if i.created_at else None,
-            }
-            for i in items
-        ]
+            })
+
+        return items_list

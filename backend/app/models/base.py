@@ -295,6 +295,11 @@ class BacklogItem(Base):
     compliance_iso27001 = Column(Text, nullable=True)  # JSON: checklist ISO 27001 aplicavel
     warnings = Column(Text, nullable=True)  # JSON: avisos sobre artefatos faltantes ou ferramentas
 
+    # Hierarquia: item pai → sub-items (fixes de security/compliance)
+    parent_item_id = Column(UUID(as_uuid=True), ForeignKey("backlog_items.id"), nullable=True)
+    fix_severity = Column(String(20), nullable=True)  # CRITICAL, MEDIUM, LOW (para items tipo fix)
+    fix_remediation = Column(Text, nullable=True)  # Sugestao de correcao do LLM
+
     # Rastreamento de pipeline
     generated_code_path = Column(String(500), nullable=True)  # Caminho do arquivo gerado
     generated_tests_path = Column(String(500), nullable=True)  # Caminho dos testes gerados

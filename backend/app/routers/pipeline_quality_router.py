@@ -19,6 +19,7 @@ from app.services.vault_service import VaultService
 from app.services.llm_service import LLMServiceFactory, LLMProvider
 from app.services.git_service import GitService
 from app.services.pipeline_audit_service import PipelineAuditService
+from app.services.issue_ticket_service import IssueTicketService
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["Pipeline Quality"])
@@ -351,19 +352,29 @@ Responda em JSON:
     # Verificar criticidade
     has_critical = any(v.get("severity") == "CRITICAL" for v in result.get("vulnerabilities", []))
 
+    vulnerabilities = result.get("vulnerabilities", [])
+
     if has_critical:
         item.status = "blocked"
         audit_status = "FAILED"
     else:
         item.status = "compliance_review"
-        audit_status = "COMPLETED_WITH_WARNINGS" if result.get("vulnerabilities") else "COMPLETED"
+        audit_status = "COMPLETED_WITH_WARNINGS" if vulnerabilities else "COMPLETED"
+
+    # Criar tickets para cada vulnerabilidade
+    tickets = []
+    if vulnerabilities:
+        ticket_service = IssueTicketService()
+        tickets = await ticket_service.create_tickets_from_security(
+            db, project_id, item_id, vulnerabilities
+        )
 
     audit = PipelineAuditService(db)
     await audit.log_phase(
         project_id=project_id, backlog_item_id=item_id,
         user_id=permissions["user_id"], role_used=permissions.get("role", "unknown"),
         phase="security_review", status=audit_status,
-        context={"vulnerabilities": len(result.get("vulnerabilities", [])), "has_critical": has_critical},
+        context={"vulnerabilities": len(vulnerabilities), "has_critical": has_critical, "tickets_created": len(tickets)},
     )
     await db.commit()
 
@@ -371,6 +382,7 @@ Responda em JSON:
         "item_id": str(item.id),
         **result,
         "item_status": item.status,
+        "tickets_created": tickets,
     }
 
 
@@ -430,6 +442,8 @@ Responda em JSON:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na validacao de compliance: {str(e)}")
 
+    issues = result.get("issues", [])
+
     if result.get("status") == "FAIL":
         item.status = "blocked"
         audit_status = "FAILED"
@@ -437,12 +451,20 @@ Responda em JSON:
         item.status = "awaiting_qa"
         audit_status = "COMPLETED"
 
+    # Criar tickets para cada issue de compliance
+    tickets = []
+    if issues:
+        ticket_service = IssueTicketService()
+        tickets = await ticket_service.create_tickets_from_compliance(
+            db, project_id, item_id, issues
+        )
+
     audit = PipelineAuditService(db)
     await audit.log_phase(
         project_id=project_id, backlog_item_id=item_id,
         user_id=permissions["user_id"], role_used=permissions.get("role", "unknown"),
         phase="compliance_check", status=audit_status,
-        context={"checks_passed": result.get("checks_passed", 0), "lgpd_compliant": result.get("lgpd_compliant")},
+        context={"checks_passed": result.get("checks_passed", 0), "lgpd_compliant": result.get("lgpd_compliant"), "tickets_created": len(tickets)},
     )
     await db.commit()
 
@@ -450,6 +472,7 @@ Responda em JSON:
         "item_id": str(item.id),
         **result,
         "item_status": item.status,
+        "tickets_created": tickets,
     }
 
 
@@ -502,4 +525,94 @@ async def qa_approve(
         "approved": request.approved,
         "status": item.status,
         "notes": request.notes,
+    }
+
+
+# ============================================================================
+# Sub-items (fixes) e Correcao com IA
+# ============================================================================
+
+@router.get("/projects/{project_id}/backlog/{item_id}/issues")
+async def get_item_issues(
+    project_id: UUID,
+    item_id: UUID,
+    permissions: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista sub-items (fixes de security/compliance) de um item."""
+    ticket_service = IssueTicketService()
+    tickets = await ticket_service.get_child_tickets(db, item_id)
+    progress = await ticket_service.get_fix_progress(db, item_id)
+    return {"tickets": tickets, "progress": progress}
+
+
+@router.post("/projects/{project_id}/backlog/{item_id}/issues/{fix_id}/resolve")
+async def resolve_fix(
+    project_id: UUID,
+    item_id: UUID,
+    fix_id: UUID,
+    permissions: dict = Depends(require_action("code:write")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marca um fix como resolvido."""
+    ticket_service = IssueTicketService()
+    result = await ticket_service.mark_fix_done(db, fix_id)
+
+    # Verificar se todos os fixes foram resolvidos
+    progress = await ticket_service.get_fix_progress(db, item_id)
+    if progress["all_resolved"]:
+        item = await db.get(BacklogItem, item_id)
+        if item and item.status == "blocked":
+            item.status = "security_review"
+            await db.commit()
+            return {**result, "progress": progress, "parent_status": "security_review", "message": "Todos os fixes resolvidos. Item liberado para re-scan."}
+
+    return {**result, "progress": progress}
+
+
+@router.post("/projects/{project_id}/backlog/{item_id}/issues/{fix_id}/fix-with-ai")
+async def fix_with_ai(
+    project_id: UUID,
+    item_id: UUID,
+    fix_id: UUID,
+    permissions: dict = Depends(require_action("code:write")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Gera codigo de correcao via LLM para um fix especifico."""
+    fix_item = await db.get(BacklogItem, fix_id)
+    if not fix_item:
+        raise HTTPException(status_code=404, detail="Fix nao encontrado")
+
+    parent = await db.get(BacklogItem, item_id)
+    client, provider = await _get_llm_client(db, project_id)
+
+    prompt = f"""Voce e um desenvolvedor senior corrigindo uma vulnerabilidade/issue no modulo: {parent.title if parent else 'unknown'}
+
+## Problema
+{fix_item.title}
+
+## Descricao
+{fix_item.description}
+
+## Severidade
+{fix_item.fix_severity}
+
+## Remediacao Sugerida
+{fix_item.fix_remediation}
+
+Gere APENAS o codigo de correcao (patch). Seja preciso e minimalista.
+Inclua comentarios explicando a mudanca.
+Se for uma configuracao, mostre o antes e depois."""
+
+    try:
+        fix_code = await client.generate(prompt=prompt, max_tokens=2048, temperature=0.2)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar correcao: {str(e)}")
+
+    return {
+        "fix_id": str(fix_id),
+        "title": fix_item.title,
+        "severity": fix_item.fix_severity,
+        "fix_code": fix_code,
+        "provider": provider,
     }
