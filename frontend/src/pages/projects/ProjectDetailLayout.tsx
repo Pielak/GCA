@@ -36,6 +36,7 @@ const MODULES = [
   { path: 'backlog', label: 'Backlog', icon: ClipboardList },
   { path: 'roadmap', label: 'Roadmap', icon: Clock },
   { path: 'docs', label: 'Documentação Viva', icon: BookOpen },
+  { path: 'audit', label: 'Auditoria', icon: Shield },
 ]
 
 const PIPELINE_PATHS = new Set([

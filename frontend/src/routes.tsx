@@ -30,6 +30,7 @@ import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { NovoProjetoPage } from './pages/NovoProjetoPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { TesterReviewPage } from './pages/projects/TesterReviewPage';
+import { PipelineAuditPage } from './pages/projects/PipelineAuditPage';
 
 export const router = createBrowserRouter([
   {
@@ -96,6 +97,7 @@ export const router = createBrowserRouter([
           { path: 'roadmap', element: <RequireRepository><RoadmapPage /></RequireRepository> },
           { path: 'docs', element: <RequireRepository><LiveDocsPage /></RequireRepository> },
           { path: 'settings', Component: ProjectSettingsPage },
+          { path: 'audit', Component: PipelineAuditPage },
         ],
       },
     ],
