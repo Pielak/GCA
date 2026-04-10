@@ -599,7 +599,7 @@ async def get_project_billing_detail(
     return {"entries": entries, "count": len(entries)}
 
 
-@router.get("/projects/{project_id}/permissions")
+@router.get("/{project_id}/permissions")
 async def get_user_permissions(
     project_id: UUID,
     user_id: UUID = Depends(get_current_user_from_token),
