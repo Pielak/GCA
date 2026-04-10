@@ -15,6 +15,7 @@ from app.db.database import get_db
 from app.middleware.auth import get_current_user_from_token
 from app.models.base import ProjectSettings
 from app.services.vault_service import VaultService
+from app.dependencies.require_action import require_action
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["settings"])
@@ -80,7 +81,7 @@ async def _get_or_create_settings(db: AsyncSession, project_id: UUID, setting_ty
 @router.get("/projects/{project_id}/settings")
 async def get_project_settings(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Retorna todas configurações do projeto. Secrets mascarados."""
@@ -126,10 +127,11 @@ async def get_project_settings(
 async def save_smtp_settings(
     project_id: UUID,
     req: SmtpSettingsRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Salva configurações SMTP do projeto."""
+    user_id = permissions["user_id"]
     settings_obj = await _get_or_create_settings(db, project_id, "smtp")
     settings_obj.settings_json = json.dumps({
         "host": req.host,
@@ -139,11 +141,11 @@ async def save_smtp_settings(
         "from_email": req.from_email,
         "from_name": req.from_name,
     })
-    settings_obj.updated_by = current_user_id
+    settings_obj.updated_by = user_id
     await db.commit()
 
     # Salvar senha no vault
-    await vault.store_secret(db, project_id, "smtp_password", "main", req.password, current_user_id)
+    await vault.store_secret(db, project_id, "smtp_password", "main", req.password, user_id)
 
     return {"success": True}
 
@@ -152,7 +154,7 @@ async def save_smtp_settings(
 async def test_smtp_settings(
     project_id: UUID,
     req: SmtpTestRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Testa SMTP enviando email de teste."""
@@ -201,10 +203,11 @@ async def test_smtp_settings(
 async def save_llm_settings(
     project_id: UUID,
     req: LlmSettingsRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Salva configurações LLM do projeto."""
+    user_id = permissions["user_id"]
     valid_providers = ("anthropic", "openai", "grok", "deepseek")
     if req.provider not in valid_providers:
         raise HTTPException(status_code=400, detail=f"Provider inválido. Aceitos: {', '.join(valid_providers)}")
@@ -214,11 +217,11 @@ async def save_llm_settings(
         "provider": req.provider,
         "model_preference": req.model_preference,
     })
-    settings_obj.updated_by = current_user_id
+    settings_obj.updated_by = user_id
     await db.commit()
 
     # Salvar API key no vault
-    await vault.store_secret(db, project_id, "llm_api_key", req.provider, req.api_key, current_user_id)
+    await vault.store_secret(db, project_id, "llm_api_key", req.provider, req.api_key, user_id)
 
     return {"success": True}
 
@@ -226,7 +229,7 @@ async def save_llm_settings(
 @router.post("/projects/{project_id}/settings/llm/validate")
 async def validate_llm_settings(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Valida a API key do LLM provider."""
@@ -284,19 +287,20 @@ async def validate_llm_settings(
 async def save_n8n_settings(
     project_id: UUID,
     req: N8nSettingsRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Salva configurações n8n do projeto."""
+    user_id = permissions["user_id"]
     settings_obj = await _get_or_create_settings(db, project_id, "n8n")
     settings_obj.settings_json = json.dumps({
         "webhook_url": req.webhook_url,
         "workflow_id": req.workflow_id,
     })
-    settings_obj.updated_by = current_user_id
+    settings_obj.updated_by = user_id
     await db.commit()
 
     if req.api_token:
-        await vault.store_secret(db, project_id, "n8n_token", "main", req.api_token, current_user_id)
+        await vault.store_secret(db, project_id, "n8n_token", "main", req.api_token, user_id)
 
     return {"success": True}

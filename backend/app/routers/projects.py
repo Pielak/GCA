@@ -8,6 +8,8 @@ import structlog
 from app.db.database import get_db
 from app.services.project_team_service import ProjectTeamService
 from app.middleware.auth import get_current_user_from_token
+from app.dependencies.require_action import require_action, resolve_user_role_in_project
+from app.core.permissions import get_actions_for_role
 
 logger = structlog.get_logger(__name__)
 
@@ -207,7 +209,7 @@ async def list_project_members(
 @router.get("/{project_id}/pending-invites")
 async def list_pending_invites_alias(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:manage_team")),
     db: AsyncSession = Depends(get_db),
 ):
     """Alias: lista convites pendentes (usado pelo ProjectTeamPage)."""
@@ -219,17 +221,18 @@ async def list_pending_invites_alias(
 async def invite_team_member(
     project_id: UUID,
     req: InviteTeamMemberRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:manage_team")),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Invite user to join project with specific role (GP only).
     Sends invitation email with acceptance link.
     """
+    user_id = permissions["user_id"]
     success, invite_token, error = await ProjectTeamService.invite_team_member(
         db=db,
         project_id=project_id,
-        gp_user_id=current_user_id,
+        gp_user_id=user_id,
         email=req.email,
         role=req.role,
     )
@@ -255,7 +258,7 @@ async def invite_team_member(
 @router.get("/{project_id}/invites", response_model=PendingInvitesResponse)
 async def list_pending_invites(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:manage_team")),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -298,18 +301,19 @@ async def accept_invite(
 async def revoke_invite(
     project_id: UUID,
     invite_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("project:manage_team")),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Revoga convite pendente (somente GP do projeto).
     Spec seção 6.1: revogar convite antes de ser aceito.
     """
+    user_id = permissions["user_id"]
     success, error = await ProjectTeamService.revoke_invite(
         db=db,
         project_id=project_id,
         invite_id=invite_id,
-        gp_user_id=current_user_id,
+        gp_user_id=user_id,
     )
 
     if not success:
@@ -546,7 +550,7 @@ async def get_ocg_health(
 @router.post("/{project_id}/ocg/propagate")
 async def force_propagation(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    permissions: dict = Depends(require_action("pipeline:execute")),
     db: AsyncSession = Depends(get_db),
 ):
     """Forçar re-propagação do OCG para módulos dependentes."""
@@ -580,3 +584,19 @@ async def get_project_billing_detail(
     billing = AIBillingService(db)
     entries = await billing.get_project_detail(project_id, limit)
     return {"entries": entries, "count": len(entries)}
+
+
+@router.get("/projects/{project_id}/permissions")
+async def get_user_permissions(
+    project_id: UUID,
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna o papel e acoes do usuario no projeto."""
+    role = await resolve_user_role_in_project(user_id, project_id, db)
+    actions = get_actions_for_role(role)
+    return {
+        "role": role,
+        "actions": sorted(actions),
+        "is_read_only": role == "admin_viewer" or actions <= {"project:view", "project:manage_gp"},
+    }
