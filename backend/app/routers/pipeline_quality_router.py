@@ -18,6 +18,7 @@ from app.models.base import BacklogItem, OCG, ProjectSettings, ProjectGitConfig
 from app.services.vault_service import VaultService
 from app.services.llm_service import LLMServiceFactory, LLMProvider
 from app.services.git_service import GitService
+from app.services.pipeline_audit_service import PipelineAuditService
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["Pipeline Quality"])
@@ -122,9 +123,15 @@ Gere APENAS o arquivo de testes, pronto para execucao."""
 
     item.generated_tests_path = f"tests/test_{item.title.lower().replace(' ', '_')}"
     item.status = "tests_running"
-    await db.commit()
 
-    logger.info("testgen.completed", project_id=str(project_id), item_id=str(item_id))
+    audit = PipelineAuditService(db)
+    await audit.log_phase(
+        project_id=project_id, backlog_item_id=item_id,
+        user_id=permissions["user_id"], role_used=permissions.get("role", "unknown"),
+        phase="test_generation", status="COMPLETED",
+        context={"test_file": item.generated_tests_path, "provider": provider},
+    )
+    await db.commit()
 
     return {
         "item_id": str(item.id),
@@ -346,11 +353,19 @@ Responda em JSON:
 
     if has_critical:
         item.status = "blocked"
+        audit_status = "FAILED"
     else:
         item.status = "compliance_review"
+        audit_status = "COMPLETED_WITH_WARNINGS" if result.get("vulnerabilities") else "COMPLETED"
 
+    audit = PipelineAuditService(db)
+    await audit.log_phase(
+        project_id=project_id, backlog_item_id=item_id,
+        user_id=permissions["user_id"], role_used=permissions.get("role", "unknown"),
+        phase="security_review", status=audit_status,
+        context={"vulnerabilities": len(result.get("vulnerabilities", [])), "has_critical": has_critical},
+    )
     await db.commit()
-    logger.info("security.scan", project_id=str(project_id), item_id=str(item_id), status=result.get("status"))
 
     return {
         "item_id": str(item.id),
@@ -417,11 +432,19 @@ Responda em JSON:
 
     if result.get("status") == "FAIL":
         item.status = "blocked"
+        audit_status = "FAILED"
     else:
         item.status = "awaiting_qa"
+        audit_status = "COMPLETED"
 
+    audit = PipelineAuditService(db)
+    await audit.log_phase(
+        project_id=project_id, backlog_item_id=item_id,
+        user_id=permissions["user_id"], role_used=permissions.get("role", "unknown"),
+        phase="compliance_check", status=audit_status,
+        context={"checks_passed": result.get("checks_passed", 0), "lgpd_compliant": result.get("lgpd_compliant")},
+    )
     await db.commit()
-    logger.info("compliance.check", project_id=str(project_id), item_id=str(item_id), status=result.get("status"))
 
     return {
         "item_id": str(item.id),
@@ -465,17 +488,14 @@ async def qa_approve(
             warnings.append(f"QA rejeitou: {request.rejection_reason}")
             item.warnings = json.dumps(warnings)
 
-    await db.commit()
-
-    logger.info(
-        "qa.approval",
-        project_id=str(project_id),
-        item_id=str(item_id),
-        approved=request.approved,
-        user_id=str(user_id),
-        roles=roles,
-        notes=request.notes,
+    audit = PipelineAuditService(db)
+    await audit.log_phase(
+        project_id=project_id, backlog_item_id=item_id,
+        user_id=user_id, role_used=roles[0] if roles else "unknown",
+        phase="qa_approval", status="APPROVED" if request.approved else "REJECTED",
+        context={"notes": request.notes, "rejection_reason": request.rejection_reason},
     )
+    await db.commit()
 
     return {
         "item_id": str(item.id),
