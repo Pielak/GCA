@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap, Code2 } from 'lucide-react'
+import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap, Code2, Shield, X, TestTube2, GitBranch } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
 
@@ -250,6 +250,7 @@ export function BacklogPage() {
                         <span>Fonte: {item.source}</span>
                         {item.commit_sha && <span className="text-emerald-400">SHA: {item.commit_sha.slice(0, 7)}</span>}
                       </div>
+                      {/* Acoes contextuais por status */}
                       {item.category === 'modules' && (item.status === 'pending' || item.status === 'ready') && (
                         <button
                           onClick={() => navigate(`/projects/${projectId}/codegen?backlog_item=${item.id}`)}
@@ -257,6 +258,66 @@ export function BacklogPage() {
                         >
                           <Code2 className="w-3 h-3" />
                           Gerar Codigo
+                        </button>
+                      )}
+                      {item.status === 'generating' && (
+                        <button
+                          onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/generate-tests`).then(() => loadData())}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-blue-600/20 border border-blue-600/30 text-blue-400 rounded-lg hover:bg-blue-600/30 transition-colors"
+                        >
+                          <TestTube2 className="w-3 h-3" />
+                          Gerar Testes
+                        </button>
+                      )}
+                      {item.status === 'tests_running' && (
+                        <span className="flex items-center gap-1 px-2 py-1 text-xs text-blue-400">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Testes executando...
+                        </span>
+                      )}
+                      {item.status === 'security_review' && (
+                        <button
+                          onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/security-scan`).then(() => loadData())}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-orange-600/20 border border-orange-600/30 text-orange-400 rounded-lg hover:bg-orange-600/30 transition-colors"
+                        >
+                          <Shield className="w-3 h-3" />
+                          Security Scan
+                        </button>
+                      )}
+                      {item.status === 'compliance_review' && (
+                        <button
+                          onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/compliance-check`).then(() => loadData())}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-amber-600/20 border border-amber-600/30 text-amber-400 rounded-lg hover:bg-amber-600/30 transition-colors"
+                        >
+                          <Shield className="w-3 h-3" />
+                          Compliance Check
+                        </button>
+                      )}
+                      {item.status === 'awaiting_qa' && (
+                        <div className="flex gap-1">
+                          <button
+                            onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/qa-approve`, { approved: true, notes: 'Aprovado via backlog' }).then(() => loadData())}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg hover:bg-emerald-600/30 transition-colors"
+                          >
+                            <CheckCircle className="w-3 h-3" />
+                            Aprovar
+                          </button>
+                          <button
+                            onClick={() => apiClient.post(`/projects/${projectId}/backlog/${item.id}/qa-approve`, { approved: false, rejection_reason: 'Rejeitado via backlog' }).then(() => loadData())}
+                            className="flex items-center gap-1 px-2 py-1 text-xs bg-red-600/20 border border-red-600/30 text-red-400 rounded-lg hover:bg-red-600/30 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                            Rejeitar
+                          </button>
+                        </div>
+                      )}
+                      {item.status === 'ready_to_merge' && (
+                        <button
+                          onClick={() => navigate(`/projects/${projectId}/codegen?backlog_item=${item.id}`)}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 rounded-lg hover:bg-emerald-600/30 transition-colors"
+                        >
+                          <GitBranch className="w-3 h-3" />
+                          Commit Final
                         </button>
                       )}
                     </div>
