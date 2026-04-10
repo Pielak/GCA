@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap } from 'lucide-react'
+import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap, Code2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
 
 interface BacklogItem {
@@ -40,6 +41,7 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }>
 
 export function BacklogPage() {
   const { id: projectId } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [items, setItems] = useState<BacklogItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
@@ -182,10 +184,21 @@ export function BacklogPage() {
                     {item.description && (
                       <p className="text-slate-500 text-xs mt-1">{item.description}</p>
                     )}
-                    <div className="flex items-center gap-3 mt-2 text-slate-600 text-xs">
-                      <span>{cat.label}</span>
-                      {item.source_version && <span>OCG v{item.source_version}</span>}
-                      <span>Fonte: {item.source}</span>
+                    <div className="flex items-center justify-between mt-2">
+                      <div className="flex items-center gap-3 text-slate-600 text-xs">
+                        <span>{cat.label}</span>
+                        {item.source_version && <span>OCG v{item.source_version}</span>}
+                        <span>Fonte: {item.source}</span>
+                      </div>
+                      {item.category === 'modules' && item.status === 'pending' && (
+                        <button
+                          onClick={() => navigate(`/projects/${projectId}/codegen`)}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600/20 border border-violet-600/30 text-violet-400 rounded-lg hover:bg-violet-600/30 transition-colors"
+                        >
+                          <Code2 className="w-3 h-3" />
+                          Gerar Código
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

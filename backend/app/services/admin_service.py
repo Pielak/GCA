@@ -296,6 +296,26 @@ class AdminService:
             )
             await self.db.commit()
 
+            # === AUTO-START: Se score >= 90, disparar geração do OCG automaticamente ===
+            if adherence_score is not None and adherence_score >= 90 and questionnaire:
+                try:
+                    import asyncio
+                    from app.services.ocg_service import OCGService
+                    from app.routers.admin_gca_router import _load_ai_providers_from_db
+
+                    # Carregar chaves IA do banco
+                    await _load_ai_providers_from_db(self.db)
+
+                    ocg_service = OCGService(self.db)
+                    asyncio.create_task(
+                        self._generate_ocg_async(questionnaire.id, project.id)
+                    )
+                    logger.info("project.ocg_auto_generation_triggered",
+                               project_slug=request.project_slug,
+                               score=adherence_score)
+                except Exception as e:
+                    logger.warning("project.ocg_auto_generation_failed", error=str(e))
+
             return request
 
         except Exception as e:
@@ -344,6 +364,24 @@ class AdminService:
         )
 
         return result.scalars().all()
+
+    async def _generate_ocg_async(self, questionnaire_id, project_id):
+        """Gera OCG em background após aprovação com score >= 90."""
+        try:
+            from app.db.database import AsyncSessionLocal
+            from app.services.ocg_service import OCGService
+
+            async with AsyncSessionLocal() as db:
+                ocg_service = OCGService(db)
+                await ocg_service.generate_ocg_from_questionnaire(
+                    questionnaire_id=questionnaire_id,
+                    project_id=project_id,
+                )
+                logger.info("project.ocg_auto_generated",
+                           questionnaire_id=str(questionnaire_id),
+                           project_id=str(project_id))
+        except Exception as e:
+            logger.error("project.ocg_auto_generation_error", error=str(e))
 
     # ========== ORGANIZATION HELPER ==========
 
