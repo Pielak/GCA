@@ -1,128 +1,127 @@
 {
   "id": "1",
   "name": "GCA Pipeline - CodeGen to QA",
-  "active": false,
+  "active": true,
   "nodes": [
     {
+      "id": "webhook-1",
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
       "position": [250, 300],
+      "webhookId": "gca-pipeline",
       "parameters": {
         "httpMethod": "POST",
         "path": "gca-pipeline",
-        "responseMode": "onReceived"
+        "responseMode": "onReceived",
+        "options": {}
       }
     },
     {
+      "id": "codegen-1",
       "name": "Generate Code",
       "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [500, 300],
       "parameters": {
         "method": "POST",
-        "url": "=http://gca-backend:8000/api/v1/projects/{{$json.project_id}}/backlog/{{$json.backlog_item_id}}/generate-code",
-        "authentication": "genericCredentialType",
+        "url": "=http://gca-backend:8000/api/v1/projects/{{ $json.body.project_id }}/backlog/{{ $json.body.backlog_item_id }}/generate-code",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{"name": "Authorization", "value": "Bearer {{$json.token}}"}]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.body.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
         }
       }
     },
     {
+      "id": "testgen-1",
       "name": "Generate Tests",
       "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [750, 300],
       "parameters": {
         "method": "POST",
-        "url": "=http://gca-backend:8000/api/v1/projects/{{$json.project_id}}/backlog/{{$json.backlog_item_id}}/generate-tests",
+        "url": "=http://gca-backend:8000/api/v1/projects/{{ $('Webhook Trigger').item.json.body.project_id }}/backlog/{{ $('Webhook Trigger').item.json.body.backlog_item_id }}/generate-tests",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{"name": "Authorization", "value": "Bearer {{$json.token}}"}]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook Trigger').item.json.body.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
         }
       }
     },
     {
-      "name": "Run Tests (CI)",
+      "id": "security-1",
+      "name": "Security Scan",
       "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
       "position": [1000, 300],
       "parameters": {
         "method": "POST",
-        "url": "=http://gca-backend:8000/api/v1/projects/{{$json.project_id}}/backlog/{{$json.backlog_item_id}}/run-tests",
+        "url": "=http://gca-backend:8000/api/v1/projects/{{ $('Webhook Trigger').item.json.body.project_id }}/backlog/{{ $('Webhook Trigger').item.json.body.backlog_item_id }}/security-scan",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{"name": "Authorization", "value": "Bearer {{$json.token}}"}]
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook Trigger').item.json.body.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
         }
       }
     },
     {
-      "name": "Wait for CI",
-      "type": "n8n-nodes-base.wait",
-      "position": [1250, 300],
-      "parameters": {
-        "amount": 30,
-        "unit": "seconds"
-      }
-    },
-    {
-      "name": "Check CI Status",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [1500, 300],
-      "parameters": {
-        "method": "GET",
-        "url": "=http://gca-backend:8000/api/v1/projects/{{$json.project_id}}/backlog/{{$json.backlog_item_id}}/test-status",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [{"name": "Authorization", "value": "Bearer {{$json.token}}"}]
-        }
-      }
-    },
-    {
-      "name": "CI Pass?",
-      "type": "n8n-nodes-base.if",
-      "position": [1750, 300],
-      "parameters": {
-        "conditions": {
-          "string": [{"value1": "={{$json.conclusion}}", "value2": "success"}]
-        }
-      }
-    },
-    {
-      "name": "Security Scan",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [2000, 200],
-      "parameters": {
-        "method": "POST",
-        "url": "=http://gca-backend:8000/api/v1/projects/{{$json.project_id}}/backlog/{{$json.backlog_item_id}}/security-scan",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [{"name": "Authorization", "value": "Bearer {{$json.token}}"}]
-        }
-      }
-    },
-    {
+      "id": "compliance-1",
       "name": "Compliance Check",
       "type": "n8n-nodes-base.httpRequest",
-      "position": [2250, 200],
+      "typeVersion": 4.2,
+      "position": [1250, 300],
       "parameters": {
         "method": "POST",
-        "url": "=http://gca-backend:8000/api/v1/projects/{{$json.project_id}}/backlog/{{$json.backlog_item_id}}/compliance-check",
+        "url": "=http://gca-backend:8000/api/v1/projects/{{ $('Webhook Trigger').item.json.body.project_id }}/backlog/{{ $('Webhook Trigger').item.json.body.backlog_item_id }}/compliance-check",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [{"name": "Authorization", "value": "Bearer {{$json.token}}"}]
-        }
-      }
-    },
-    {
-      "name": "Notify QA",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [2500, 200],
-      "parameters": {
-        "method": "POST",
-        "url": "={{$json.notification_webhook}}",
-        "sendBody": true,
-        "bodyParameters": {
           "parameters": [
-            {"name": "text", "value": "=Codigo pronto para review: {{$json.item_title}} - Aguardando aprovacao QA"}
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Webhook Trigger').item.json.body.token }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
+        },
+        "options": {
+          "timeout": 120000
         }
       }
     }
@@ -130,12 +129,10 @@
   "connections": {
     "Webhook Trigger": {"main": [[{"node": "Generate Code", "type": "main", "index": 0}]]},
     "Generate Code": {"main": [[{"node": "Generate Tests", "type": "main", "index": 0}]]},
-    "Generate Tests": {"main": [[{"node": "Run Tests (CI)", "type": "main", "index": 0}]]},
-    "Run Tests (CI)": {"main": [[{"node": "Wait for CI", "type": "main", "index": 0}]]},
-    "Wait for CI": {"main": [[{"node": "Check CI Status", "type": "main", "index": 0}]]},
-    "Check CI Status": {"main": [[{"node": "CI Pass?", "type": "main", "index": 0}]]},
-    "CI Pass?": {"main": [[{"node": "Security Scan", "type": "main", "index": 0}]]},
-    "Security Scan": {"main": [[{"node": "Compliance Check", "type": "main", "index": 0}]]},
-    "Compliance Check": {"main": [[{"node": "Notify QA", "type": "main", "index": 0}]]}
+    "Generate Tests": {"main": [[{"node": "Security Scan", "type": "main", "index": 0}]]},
+    "Security Scan": {"main": [[{"node": "Compliance Check", "type": "main", "index": 0}]]}
+  },
+  "settings": {
+    "executionOrder": "v1"
   }
 }

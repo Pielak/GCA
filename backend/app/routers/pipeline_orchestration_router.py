@@ -60,7 +60,7 @@ async def run_pipeline(
     # Tentar disparar n8n webhook se configurado
     n8n_triggered = await _try_n8n_trigger(db, project_id, item, user_id)
     if n8n_triggered:
-        item.status = "generating"
+        # NAO mudar status aqui — o endpoint generate-code faz isso
         await audit.log_phase(
             project_id=project_id, backlog_item_id=item.id,
             user_id=user_id, role_used=roles[0] if roles else "unknown",
@@ -75,7 +75,6 @@ async def run_pipeline(
         }
 
     # Fallback: disparar sequencialmente via API interna
-    item.status = "generating"
     await audit.log_phase(
         project_id=project_id, backlog_item_id=item.id,
         user_id=user_id, role_used=roles[0] if roles else "unknown",
@@ -104,6 +103,8 @@ async def _try_n8n_trigger(
     db: AsyncSession, project_id: UUID, item: BacklogItem, user_id: UUID
 ) -> bool:
     """Tenta disparar workflow n8n se configurado."""
+    from app.core.security import create_access_token
+
     # Buscar config n8n do projeto
     result = await db.execute(
         select(ProjectSettings).where(
@@ -120,12 +121,16 @@ async def _try_n8n_trigger(
     if not webhook_url:
         return False
 
+    # Gerar JWT para n8n usar nas chamadas ao backend
+    token = create_access_token(data={"sub": str(user_id)})
+
     payload = {
         "project_id": str(project_id),
         "backlog_item_id": str(item.id),
         "item_title": item.title,
         "module_type": item.module_type,
         "user_id": str(user_id),
+        "token": token,
         "callback_base": f"{settings.API_PREFIX}/projects/{project_id}",
     }
 
