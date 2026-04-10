@@ -16,6 +16,7 @@ import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
 import { RepositoryPage } from './pages/projects/RepositoryPage';
+import { BacklogPage } from './pages/projects/BacklogPage';
 import { RequireRepository } from './components/guards/RequireRepository';
 import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
@@ -91,6 +92,7 @@ export const router = createBrowserRouter([
           { path: 'codegen', element: <RequireRepository><CodeGeneratorPage /></RequireRepository> },
           { path: 'qa', element: <RequireRepository><QAReadinessPage /></RequireRepository> },
           { path: 'tester-review', element: <RequireRepository><TesterReviewPage /></RequireRepository> },
+          { path: 'backlog', element: <RequireRepository><BacklogPage /></RequireRepository> },
           { path: 'roadmap', element: <RequireRepository><RoadmapPage /></RequireRepository> },
           { path: 'docs', element: <RequireRepository><LiveDocsPage /></RequireRepository> },
           { path: 'settings', Component: ProjectSettingsPage },

@@ -30,6 +30,7 @@ const MODULES = [
   { path: 'codegen', label: 'Geração de Código', icon: Code2 },
   { path: 'qa', label: 'Testes', icon: TestTube2 },
   { path: 'tester-review', label: 'Revisão de Testes', icon: FileText },
+  { path: 'backlog', label: 'Backlog', icon: ClipboardList },
   { path: 'roadmap', label: 'Roadmap', icon: Clock },
   { path: 'docs', label: 'Documentação Viva', icon: BookOpen },
 ]
