@@ -53,6 +53,16 @@ class FigmaSettingsRequest(BaseModel):
     team_id: str | None = None
 
 
+class SemgrepSettingsRequest(BaseModel):
+    api_token: str
+
+
+class SonarQubeSettingsRequest(BaseModel):
+    url: str
+    api_token: str
+    project_key: str | None = None
+
+
 class SmtpTestRequest(BaseModel):
     to_email: str
 
@@ -410,3 +420,41 @@ async def test_notification(
         details="Se voce recebeu esta mensagem, as notificacoes estao funcionando!",
     )
     return result
+
+
+# ============================================================================
+# SAST Tools (Semgrep / SonarQube)
+# ============================================================================
+
+@router.post("/projects/{project_id}/settings/semgrep")
+async def save_semgrep_settings(
+    project_id: UUID,
+    req: SemgrepSettingsRequest,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Salvar token Semgrep para SAST."""
+    user_id = permissions["user_id"]
+    settings_obj = await _get_or_create_settings(db, project_id, "semgrep")
+    settings_obj.settings_json = json.dumps({"configured": True})
+    settings_obj.updated_by = user_id
+    await db.commit()
+    await vault.store_secret(db, project_id, "semgrep_token", "main", req.api_token, user_id)
+    return {"success": True}
+
+
+@router.post("/projects/{project_id}/settings/sonarqube")
+async def save_sonarqube_settings(
+    project_id: UUID,
+    req: SonarQubeSettingsRequest,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Salvar configuracao SonarQube."""
+    user_id = permissions["user_id"]
+    settings_obj = await _get_or_create_settings(db, project_id, "sonarqube")
+    settings_obj.settings_json = json.dumps({"url": req.url, "project_key": req.project_key})
+    settings_obj.updated_by = user_id
+    await db.commit()
+    await vault.store_secret(db, project_id, "sonarqube_token", "main", req.api_token, user_id)
+    return {"success": True}

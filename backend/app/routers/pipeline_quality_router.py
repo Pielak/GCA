@@ -21,6 +21,7 @@ from app.services.git_service import GitService
 from app.services.pipeline_audit_service import PipelineAuditService
 from app.services.issue_ticket_service import IssueTicketService
 from app.services.notification_service import NotificationService
+from app.services.sast_service import SASTService
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["Pipeline Quality"])
@@ -354,6 +355,22 @@ Responda em JSON:
     has_critical = any(v.get("severity") == "CRITICAL" for v in result.get("vulnerabilities", []))
 
     vulnerabilities = result.get("vulnerabilities", [])
+
+    # Complementar com Semgrep se disponivel
+    sast = SASTService()
+    semgrep_result = await sast.scan_with_semgrep(db, project_id, item.description or "")
+    if semgrep_result and semgrep_result.get("findings"):
+        for finding in semgrep_result["findings"]:
+            vulnerabilities.append({
+                "severity": finding["severity"].upper(),
+                "type": f"[Semgrep] {finding['type']}",
+                "location": finding["location"],
+                "remediation": finding["message"],
+            })
+        result["semgrep_findings"] = semgrep_result["count"]
+
+    # Recalcular criticidade
+    has_critical = any(v.get("severity") == "CRITICAL" for v in vulnerabilities)
 
     if has_critical:
         item.status = "blocked"
