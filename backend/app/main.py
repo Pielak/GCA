@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.db.database import init_db
 from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, admin_gca_router, setup, qa_router, external_repos_router
 from app.routers.admin_gp_router import router as admin_gp_router
+from app.routers.project_setup_router import router as project_setup_router
 
 logger = structlog.get_logger(__name__)
 
@@ -81,6 +82,7 @@ app.include_router(setup.router, prefix=f"{settings.API_PREFIX}", tags=["setup"]
 app.include_router(qa_router.router, prefix=f"{settings.API_PREFIX}", tags=["qa"])
 app.include_router(external_repos_router.router, prefix=f"{settings.API_PREFIX}", tags=["external-repos"])
 app.include_router(admin_gp_router, prefix=f"{settings.API_PREFIX}", tags=["admin-gp"])
+app.include_router(project_setup_router, prefix=f"{settings.API_PREFIX}")
 
 
 @app.get("/health")
