@@ -11,6 +11,7 @@ import structlog
 from app.db.database import get_db
 from app.services.git_service import GitService
 from app.middleware.auth import get_current_user_from_token
+from app.dependencies.require_action import require_action
 
 logger = structlog.get_logger(__name__)
 
@@ -124,3 +125,53 @@ async def disconnect_git_repository(
             detail="Configuração Git não encontrada",
         )
     return {"success": True}
+
+
+class GitCommitRequest(BaseModel):
+    file_path: str
+    content: str
+    message: str
+    backlog_item_id: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/git/commit")
+async def commit_file(
+    project_id: UUID,
+    request: GitCommitRequest,
+    permissions: dict = Depends(require_action("git:commit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Commit arquivo ao repositorio com audit log."""
+    user_id = permissions["user_id"]
+    roles = permissions.get("roles", [permissions.get("role", "unknown")])
+
+    git_service = GitService(db)
+    result = await git_service.commit_file(
+        project_id=project_id,
+        file_path=request.file_path,
+        content=request.content,
+        commit_message=request.message,
+    )
+
+    if not result.get("success"):
+        raise HTTPException(status_code=500, detail=result.get("message", "Erro ao commitar"))
+
+    # Atualizar backlog item se fornecido
+    if request.backlog_item_id:
+        from app.models.base import BacklogItem
+        item = await db.get(BacklogItem, request.backlog_item_id)
+        if item:
+            item.commit_sha = result.get("commit_sha")
+            item.status = "committed"
+            await db.commit()
+
+    logger.info(
+        "git.commit",
+        project_id=str(project_id),
+        user_id=str(user_id),
+        roles=roles,
+        file_path=request.file_path,
+        commit_sha=result.get("commit_sha"),
+    )
+
+    return result
