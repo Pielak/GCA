@@ -272,19 +272,35 @@ class AIUsageLog(Base):
 
 
 class BacklogItem(Base):
-    """Item do backlog vivo do projeto (spec seção 7.2)"""
+    """Item do backlog inteligente do projeto (spec v2.0 secao 5)"""
     __tablename__ = "backlog_items"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    category = Column(String(50), nullable=False)  # modules, tests, compliance, security, agile, other
+    category = Column(String(50), nullable=False)  # modules, tests, compliance, security, agile, ui_screen, ui_flow, other
+    module_type = Column(String(50), nullable=True)  # service, controller, model, middleware, test, migration, ui_screen, ui_flow
     title = Column(String(500), nullable=False)
     description = Column(Text, nullable=True)
     priority = Column(String(20), nullable=False, default="medium")  # critical, high, medium, low
-    status = Column(String(20), nullable=False, default="pending")  # pending, in_progress, done, blocked
+    # Status expandido: pending, ready, generating, tests_running, security_review,
+    # compliance_review, awaiting_qa, ready_to_merge, committed, published, blocked
+    status = Column(String(30), nullable=False, default="pending")
     source = Column(String(50), nullable=False, default="ocg")  # ocg, ingestion, gatekeeper, arguider, manual
     source_version = Column(Integer, nullable=True)  # OCG version que gerou este item
     dependencies = Column(Text, nullable=True)  # JSON array de backlog_item IDs
+
+    # Campos de artefatos (spec v2.0)
+    required_artifacts = Column(Text, nullable=True)  # JSON: ["spec_tela", "erd", "regras_negocio"]
+    present_artifacts = Column(Text, nullable=True)  # JSON: ["spec_auth_flow.md", "user_model_erd.sql"]
+    compliance_iso27001 = Column(Text, nullable=True)  # JSON: checklist ISO 27001 aplicavel
+    warnings = Column(Text, nullable=True)  # JSON: avisos sobre artefatos faltantes ou ferramentas
+
+    # Rastreamento de pipeline
+    generated_code_path = Column(String(500), nullable=True)  # Caminho do arquivo gerado
+    generated_tests_path = Column(String(500), nullable=True)  # Caminho dos testes gerados
+    commit_sha = Column(String(64), nullable=True)  # SHA do commit no repo
+    branch_name = Column(String(200), nullable=True)  # Branch temporaria
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -298,7 +314,7 @@ class BacklogItem(Base):
     )
 
     def __repr__(self):
-        return f"<BacklogItem {self.title[:30]} ({self.category}/{self.priority})>"
+        return f"<BacklogItem {self.title[:30]} ({self.category}/{self.priority}/{self.status})>"
 
 
 class AccessAttempt(Base):
