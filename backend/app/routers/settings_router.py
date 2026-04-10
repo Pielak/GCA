@@ -48,6 +48,11 @@ class N8nSettingsRequest(BaseModel):
     workflow_id: str | None = None
 
 
+class FigmaSettingsRequest(BaseModel):
+    api_token: str
+    team_id: str | None = None
+
+
 class SmtpTestRequest(BaseModel):
     to_email: str
 
@@ -304,3 +309,58 @@ async def save_n8n_settings(
         await vault.store_secret(db, project_id, "n8n_token", "main", req.api_token, user_id)
 
     return {"success": True}
+
+
+# ============================================================================
+# Figma Integration
+# ============================================================================
+
+@router.post("/projects/{project_id}/settings/figma")
+async def save_figma_settings(
+    project_id: UUID,
+    req: FigmaSettingsRequest,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Salvar token Figma para integracao de design."""
+    user_id = permissions["user_id"]
+
+    settings_obj = await _get_or_create_settings(db, project_id, "figma")
+    settings_obj.settings_json = json.dumps({
+        "team_id": req.team_id,
+        "configured": True,
+    })
+    settings_obj.updated_by = user_id
+    await db.commit()
+
+    await vault.store_secret(db, project_id, "figma_token", "main", req.api_token, user_id)
+
+    return {"success": True}
+
+
+@router.post("/projects/{project_id}/settings/figma/validate")
+async def validate_figma_settings(
+    project_id: UUID,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Validar token Figma testando contra a API."""
+    import httpx
+
+    token = await vault.get_secret(db, project_id, "figma_token", "main")
+    if not token:
+        return {"valid": False, "error": "Token Figma nao configurado"}
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                "https://api.figma.com/v1/me",
+                headers={"X-Figma-Token": token},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                return {"valid": True, "user": data.get("handle", ""), "email": data.get("email", "")}
+            else:
+                return {"valid": False, "error": f"Figma API retornou {resp.status_code}"}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
