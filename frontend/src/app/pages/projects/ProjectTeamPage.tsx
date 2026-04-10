@@ -54,6 +54,15 @@ function formatDate(dateString: string): string {
   }
 }
 
+const SELF_ROLE_OPTIONS = [
+  { value: 'tech_lead', label: 'Tech Lead' },
+  { value: 'dev_senior', label: 'Dev Senior' },
+  { value: 'dev_pleno', label: 'Dev Pleno' },
+  { value: 'qa', label: 'QA' },
+  { value: 'compliance', label: 'Compliance' },
+  { value: 'stakeholder', label: 'Stakeholder' },
+]
+
 export function ProjectTeamPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const { can } = useProjectPermissions()
@@ -68,6 +77,11 @@ export function ProjectTeamPage() {
   const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([])
   const [members, setMembers] = useState<TeamMember[]>([])
   const [loadingData, setLoadingData] = useState(true)
+
+  // Multi-papeis
+  const [myRoles, setMyRoles] = useState<{role: string, is_base: boolean}[]>([])
+  const [addingRole, setAddingRole] = useState(false)
+  const [selectedNewRole, setSelectedNewRole] = useState('')
 
   const loadTeamData = useCallback(async () => {
     if (!projectId) return
@@ -93,6 +107,26 @@ export function ProjectTeamPage() {
   useEffect(() => {
     loadTeamData()
   }, [loadTeamData])
+
+  // Carregar meus papeis
+  useEffect(() => {
+    if (!projectId) return
+    apiClient.get(`/projects/${projectId}/members/self/roles`)
+      .then(res => setMyRoles(res.data.roles || []))
+      .catch(() => {})
+  }, [projectId])
+
+  const handleAddRole = async () => {
+    if (!selectedNewRole || !projectId) return
+    setAddingRole(true)
+    try {
+      await apiClient.post(`/projects/${projectId}/members/self/roles`, { roles: [selectedNewRole] })
+      const res = await apiClient.get(`/projects/${projectId}/members/self/roles`)
+      setMyRoles(res.data.roles || [])
+      setSelectedNewRole('')
+    } catch { /* silently handle */ }
+    finally { setAddingRole(false) }
+  }
 
   const handleInvite = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -126,6 +160,42 @@ export function ProjectTeamPage() {
           Convide membros da sua equipe para colaborar neste projeto.
         </p>
       </div>
+
+      {/* Meus Papeis — auto-atribuicao para GP */}
+      {canManageTeam && myRoles.length > 0 && (
+      <div className="bg-dark-100 border border-slate-700 rounded-xl p-6">
+        <h2 className="text-lg font-semibold text-white mb-4">Meus Papeis no Projeto</h2>
+        <div className="flex flex-wrap gap-2 mb-4">
+          {myRoles.map(r => (
+            <span key={r.role} className={`px-3 py-1 rounded-full text-xs font-medium ${
+              r.is_base ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-violet-500/20 text-violet-300 border border-violet-500/30'
+            }`}>
+              {SELF_ROLE_OPTIONS.find(o => o.value === r.role)?.label || getRoleLabel(r.role)}
+              {r.is_base && ' (base)'}
+            </span>
+          ))}
+        </div>
+        <div className="flex gap-2">
+          <select
+            value={selectedNewRole}
+            onChange={e => setSelectedNewRole(e.target.value)}
+            className="bg-dark-200 border border-slate-700 rounded-lg px-4 py-2 text-sm text-slate-100 focus:outline-none focus:border-violet-600"
+          >
+            <option value="">Adicionar papel...</option>
+            {SELF_ROLE_OPTIONS.filter(r => !myRoles.find(mr => mr.role === r.value)).map(r => (
+              <option key={r.value} value={r.value}>{r.label}</option>
+            ))}
+          </select>
+          <button
+            onClick={handleAddRole}
+            disabled={!selectedNewRole || addingRole}
+            className="bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          >
+            Adicionar
+          </button>
+        </div>
+      </div>
+      )}
 
       {/* Invite Form — visivel apenas para quem pode gerenciar equipe */}
       {canManageTeam && (
