@@ -104,14 +104,18 @@ export const router = createBrowserRouter([
 
 /**
  * Redireciona a rota "/" com base no papel do usuário:
- * - Admin → /admin
+ * - Admin sem projetos como membro → /admin
+ * - Admin com projetos como membro → /projects (com link admin no header)
  * - Outros → /projects
  */
 function IndexRedirect() {
   const user = useAuthStore((s) => s.user);
 
   if (user?.is_admin) {
-    return <Navigate to="/admin" replace />;
+    const hasMemberships = user.project_roles && user.project_roles.length > 0;
+    if (!hasMemberships) {
+      return <Navigate to="/admin" replace />;
+    }
   }
   return <Navigate to="/projects" replace />;
 }
