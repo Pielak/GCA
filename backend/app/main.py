@@ -14,6 +14,7 @@ from app.routers.project_setup_router import router as project_setup_router
 from app.routers.member_roles_router import router as member_roles_router
 from app.routers.pipeline_quality_router import router as pipeline_quality_router
 from app.routers.pipeline_audit_router import router as pipeline_audit_router
+from app.routers.pipeline_orchestration_router import router as pipeline_orchestration_router
 
 logger = structlog.get_logger(__name__)
 
@@ -89,6 +90,7 @@ app.include_router(project_setup_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(member_roles_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_quality_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_audit_router, prefix=f"{settings.API_PREFIX}")
+app.include_router(pipeline_orchestration_router, prefix=f"{settings.API_PREFIX}")
 
 
 @app.get("/health")
