@@ -12,6 +12,7 @@ from app.routers import auth, projects, onboarding, admin, evaluation, code_gene
 from app.routers.admin_gp_router import router as admin_gp_router
 from app.routers.project_setup_router import router as project_setup_router
 from app.routers.member_roles_router import router as member_roles_router
+from app.routers.pipeline_quality_router import router as pipeline_quality_router
 
 logger = structlog.get_logger(__name__)
 
@@ -85,6 +86,7 @@ app.include_router(external_repos_router.router, prefix=f"{settings.API_PREFIX}"
 app.include_router(admin_gp_router, prefix=f"{settings.API_PREFIX}", tags=["admin-gp"])
 app.include_router(project_setup_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(member_roles_router, prefix=f"{settings.API_PREFIX}")
+app.include_router(pipeline_quality_router, prefix=f"{settings.API_PREFIX}")
 
 
 @app.get("/health")
