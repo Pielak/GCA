@@ -197,6 +197,56 @@ class BacklogService:
             source_version=version,
         )
 
+    async def ingest_module_candidates(self, project_id: UUID) -> dict:
+        """Converte ModuleCandidates do Arguider em BacklogItems."""
+        from app.models.base import ModuleCandidate
+        from app.services.artifact_verification_service import ArtifactVerificationService
+
+        # Buscar candidates que ainda nao estao no backlog
+        candidates = await self.db.execute(
+            select(ModuleCandidate).where(
+                ModuleCandidate.project_id == project_id,
+            )
+        )
+        all_candidates = candidates.scalars().all()
+
+        # Buscar titulos existentes para evitar duplicatas
+        existing = await self.db.execute(
+            select(BacklogItem.title).where(
+                BacklogItem.project_id == project_id,
+                BacklogItem.source == "arguider",
+            )
+        )
+        existing_titles = {r.title for r in existing.all()}
+
+        created = 0
+        for mc in all_candidates:
+            if mc.name in existing_titles:
+                continue
+
+            item = BacklogItem(
+                project_id=project_id,
+                category="modules",
+                module_type=mc.module_type or "service",
+                title=mc.name,
+                description=mc.description,
+                priority=mc.priority or "medium",
+                status="pending",
+                source="arguider",
+                dependencies=mc.dependencies,
+            )
+            self.db.add(item)
+            created += 1
+
+        await self.db.commit()
+
+        # Verificar artefatos de itens novos
+        verifier = ArtifactVerificationService()
+        await verifier.verify_all_items(self.db, project_id)
+
+        logger.info("backlog.arguider_ingested", project_id=str(project_id), created=created)
+        return {"created": created, "skipped": len(all_candidates) - created}
+
     async def list_backlog(self, project_id: UUID, category: Optional[str] = None) -> list[dict]:
         """Lista itens do backlog por projeto"""
         query = select(BacklogItem).where(BacklogItem.project_id == project_id)
@@ -214,12 +264,19 @@ class BacklogService:
             {
                 "id": str(i.id),
                 "category": i.category,
+                "module_type": i.module_type,
                 "title": i.title,
                 "description": i.description,
                 "priority": i.priority,
                 "status": i.status,
                 "source": i.source,
                 "source_version": i.source_version,
+                "required_artifacts": json.loads(i.required_artifacts) if i.required_artifacts else [],
+                "present_artifacts": json.loads(i.present_artifacts) if i.present_artifacts else [],
+                "compliance_iso27001": json.loads(i.compliance_iso27001) if i.compliance_iso27001 else [],
+                "warnings": json.loads(i.warnings) if i.warnings else [],
+                "generated_code_path": i.generated_code_path,
+                "commit_sha": i.commit_sha,
                 "created_at": i.created_at.isoformat() if i.created_at else None,
             }
             for i in items
