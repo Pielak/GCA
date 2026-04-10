@@ -4,6 +4,7 @@ import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, 
 import { useNavigate } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
 import { RoleAssumptionPrompt } from '@/components/projects/RoleAssumptionPrompt'
+import { BacklogIssuePanel } from '@/components/projects/BacklogIssuePanel'
 
 interface BacklogItem {
   id: string
@@ -21,6 +22,8 @@ interface BacklogItem {
   warnings: string[]
   generated_code_path: string | null
   commit_sha: string | null
+  issues_total: number
+  issues_resolved: number
   created_at: string | null
 }
 
@@ -362,6 +365,16 @@ export function BacklogPage() {
                         </button>
                       )}
                     </div>
+
+                    {/* Issue Panel — sub-items de security/compliance */}
+                    {item.issues_total > 0 && projectId && (
+                      <BacklogIssuePanel
+                        projectId={projectId}
+                        itemId={item.id}
+                        issuesTotal={item.issues_total}
+                        issuesResolved={item.issues_resolved}
+                      />
+                    )}
                   </div>
                 </div>
               </div>
