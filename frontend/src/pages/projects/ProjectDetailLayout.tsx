@@ -38,6 +38,11 @@ const MODULES = [
   { path: 'docs', label: 'Documentação Viva', icon: BookOpen },
 ]
 
+const PIPELINE_PATHS = new Set([
+  'ingestion', 'gatekeeper', 'arguider', 'codegen',
+  'qa', 'tester-review', 'backlog', 'roadmap', 'docs',
+])
+
 export function ProjectDetailLayout() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -135,6 +140,21 @@ export function ProjectDetailLayout() {
         {MODULES.map(mod => {
           const Icon = mod.icon
           const to = mod.path ? `/projects/${id}/${mod.path}` : `/projects/${id}`
+          const isBlocked = project?.status === 'initializing' && PIPELINE_PATHS.has(mod.path)
+
+          if (isBlocked) {
+            return (
+              <span
+                key={mod.path || 'dashboard'}
+                title="Complete a configuracao obrigatoria para acessar"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap text-slate-600 cursor-not-allowed opacity-50"
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {mod.label}
+              </span>
+            )
+          }
+
           return (
             <NavLink
               key={mod.path || 'dashboard'}
