@@ -245,7 +245,7 @@ def header_footer(canvas, doc):
 
     canvas.setFont("Helvetica", 7)
     canvas.setFillColor(SLATE_500)
-    canvas.drawString(20*mm, 10*mm, "Agilize TI - Confidencial")
+    canvas.drawString(20*mm, 10*mm, "GCA Software - Confidencial")
     canvas.drawCentredString(A4[0]/2, 10*mm, f"Versao 1.0 - {datetime.now().strftime('%d/%m/%Y')}")
     canvas.drawRightString(A4[0] - 20*mm, 10*mm, f"Pagina {doc.page}")
 
@@ -264,7 +264,7 @@ def build_document():
         leftMargin=20*mm, rightMargin=20*mm,
         topMargin=22*mm, bottomMargin=22*mm,
         title="GCA - Documento de Analise de Requisitos",
-        author="Agilize TI",
+        author="GCA Software",
     )
 
     story = []
@@ -288,7 +288,7 @@ def build_document():
         ["Versao", "1.0"],
         ["Data", "07/04/2026"],
         ["Autor", "Luiz Carlos Pielak"],
-        ["Organizacao", "Agilize TI"],
+        ["Organizacao", "GCA Software"],
         ["Classificacao", "Confidencial"],
         ["Status", "Em desenvolvimento"],
     ]
@@ -1422,7 +1422,7 @@ def build_document():
     story.append(p(
         "<b>Fim do Documento</b><br/>"
         "GCA - Gestao de Codificacao Assistida | Versao 1.0 | 07/04/2026<br/>"
-        "Agilize TI - Todos os direitos reservados",
+        "GCA Software - Todos os direitos reservados",
         ParagraphStyle("Footer", parent=BODY, alignment=TA_CENTER, fontSize=9, textColor=SLATE_500)
     ))
 

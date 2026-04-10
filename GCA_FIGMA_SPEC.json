@@ -3,7 +3,7 @@
     "project": "GCA - Gestao de Codificacao Assistida",
     "version": "1.0",
     "date": "2026-04-07",
-    "author": "Agilize TI",
+    "author": "GCA Software",
     "description": "Especificacao completa de UI para geracao de telas no Figma Make. Cada pagina inclui layout, campos, validacoes, estados, transicoes e regras de negocio vinculadas."
   },
 

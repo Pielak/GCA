@@ -22,7 +22,7 @@
           { "icon": "Zap", "label": "QA Readiness", "desc": "Testes em containers isolados" },
           { "icon": "Lock", "label": "Multi-tenant", "desc": "Isolamento por schema" }
         ],
-        "footer": "2026 GCA - Agilize TI"
+        "footer": "2026 GCA - GCA Software"
       },
       "rightPanel": {
         "title": "Entrar no GCA",

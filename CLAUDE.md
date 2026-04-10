@@ -10,6 +10,17 @@ GCA (Gerenciador Central de Arquiteturas) is an architectural governance and AI-
 
 All communication, commit messages, comments, and documentation must be in **Portuguese-BR**.
 
+## OCG (Obrigatório)
+
+Sempre usar a skill `gca-ocg-engine` para decisões de contexto.
+
+Regras:
+- O OCG começa no questionário externo
+- O OCG é um objeto de estado evolutivo
+- O OCG expande com boa ingestão
+- O OCG contrai com ingestão ruim ou conflitante
+- Nenhuma decisão deve ignorar o OCG
+
 ## Development Commands
 
 ### Backend (FastAPI + Python 3.11)
