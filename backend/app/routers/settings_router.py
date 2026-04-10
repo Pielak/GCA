@@ -364,3 +364,49 @@ async def validate_figma_settings(
                 return {"valid": False, "error": f"Figma API retornou {resp.status_code}"}
     except Exception as e:
         return {"valid": False, "error": str(e)}
+
+
+# ============================================================================
+# Notifications (Slack / Discord)
+# ============================================================================
+
+class NotificationSettingsRequest(BaseModel):
+    slack_webhook_url: str | None = None
+    discord_webhook_url: str | None = None
+
+
+@router.post("/projects/{project_id}/settings/notifications")
+async def save_notification_settings(
+    project_id: UUID,
+    req: NotificationSettingsRequest,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Configurar webhooks de notificacao (Slack/Discord)."""
+    user_id = permissions["user_id"]
+    settings_obj = await _get_or_create_settings(db, project_id, "notifications")
+    settings_obj.settings_json = json.dumps({
+        "slack_webhook_url": req.slack_webhook_url,
+        "discord_webhook_url": req.discord_webhook_url,
+    })
+    settings_obj.updated_by = user_id
+    await db.commit()
+    return {"success": True}
+
+
+@router.post("/projects/{project_id}/settings/notifications/test")
+async def test_notification(
+    project_id: UUID,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Envia notificacao de teste para canais configurados."""
+    from app.services.notification_service import NotificationService
+    service = NotificationService()
+    result = await service.notify_pipeline_event(
+        db, project_id,
+        event="pipeline_complete",
+        item_title="Teste de Notificacao",
+        details="Se voce recebeu esta mensagem, as notificacoes estao funcionando!",
+    )
+    return result

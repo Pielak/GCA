@@ -20,6 +20,7 @@ from app.services.llm_service import LLMServiceFactory, LLMProvider
 from app.services.git_service import GitService
 from app.services.pipeline_audit_service import PipelineAuditService
 from app.services.issue_ticket_service import IssueTicketService
+from app.services.notification_service import NotificationService
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["Pipeline Quality"])
@@ -450,6 +451,14 @@ Responda em JSON:
     else:
         item.status = "awaiting_qa"
         audit_status = "COMPLETED"
+
+        # Notificar QA que item esta pronto
+        notifier = NotificationService()
+        await notifier.notify_pipeline_event(
+            db, project_id, event="qa_pending",
+            item_title=item.title,
+            details="Compliance aprovado. Codigo pronto para review de QA.",
+        )
 
     # Criar tickets para cada issue de compliance
     tickets = []
