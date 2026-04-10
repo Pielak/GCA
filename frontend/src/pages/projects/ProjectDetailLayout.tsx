@@ -49,7 +49,7 @@ export function ProjectDetailLayout() {
   const [project, setProject] = useState<ProjectHeader | null>(null)
   const [repoConnected, setRepoConnected] = useState<boolean | null>(null)
   const [loading, setLoading] = useState(true)
-  const { can, role, isReadOnly } = useProjectPermissions()
+  const { can, role, roles, isReadOnly } = useProjectPermissions()
   const user = useAuthStore((s) => s.user)
 
   useEffect(() => {
@@ -175,7 +175,7 @@ export function ProjectDetailLayout() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <Outlet context={{ repoConnected, can, role, isReadOnly, projectStatus: project?.status }} />
+        <Outlet context={{ repoConnected, can, role, roles, isReadOnly, projectStatus: project?.status }} />
       </div>
     </div>
   )

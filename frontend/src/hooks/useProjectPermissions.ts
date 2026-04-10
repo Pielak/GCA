@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
 
 interface ProjectPermissions {
-  role: string
+  roles: string[]
   actions: string[]
   isReadOnly: boolean
 }
@@ -11,7 +11,7 @@ interface ProjectPermissions {
 export function useProjectPermissions() {
   const { id: projectId } = useParams<{ id: string }>()
   const [permissions, setPermissions] = useState<ProjectPermissions>({
-    role: '',
+    roles: [],
     actions: [],
     isReadOnly: true,
   })
@@ -24,12 +24,12 @@ export function useProjectPermissions() {
       try {
         const res = await apiClient.get(`/projects/${projectId}/permissions`)
         setPermissions({
-          role: res.data.role,
-          actions: res.data.actions,
-          isReadOnly: res.data.is_read_only,
+          roles: res.data.roles || [],
+          actions: res.data.actions || [],
+          isReadOnly: res.data.is_read_only ?? true,
         })
       } catch {
-        setPermissions({ role: '', actions: [], isReadOnly: true })
+        setPermissions({ roles: [], actions: [], isReadOnly: true })
       } finally {
         setLoading(false)
       }
@@ -42,9 +42,15 @@ export function useProjectPermissions() {
     return permissions.actions.includes(action)
   }
 
+  const hasRole = (role: string): boolean => {
+    return permissions.roles.includes(role)
+  }
+
   return {
     can,
-    role: permissions.role,
+    hasRole,
+    roles: permissions.roles,
+    role: permissions.roles[0] || '',
     isReadOnly: permissions.isReadOnly,
     loading,
   }
