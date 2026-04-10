@@ -605,11 +605,14 @@ async def get_user_permissions(
     user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Retorna o papel e acoes do usuario no projeto."""
-    role = await resolve_user_role_in_project(user_id, project_id, db)
-    actions = get_actions_for_role(role)
+    """Retorna os papeis e acoes do usuario no projeto."""
+    from app.dependencies.require_action import resolve_user_roles_in_project
+    from app.core.permissions import get_actions_for_roles
+
+    roles = await resolve_user_roles_in_project(user_id, project_id, db)
+    actions = get_actions_for_roles(roles)
     return {
-        "role": role,
+        "roles": roles,
         "actions": sorted(actions),
-        "is_read_only": role == "admin_viewer" or actions <= {"project:view", "project:manage_gp"},
+        "is_read_only": roles == ["admin_viewer"] or actions <= {"project:view", "project:manage_gp"},
     }

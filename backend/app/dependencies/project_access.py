@@ -21,18 +21,54 @@ async def get_user_project_role(
     db: AsyncSession,
 ) -> str | None:
     """
-    Retorna o papel do usuário no projeto ('gp', 'developer', 'qa', 'tester', 'viewer')
-    ou None se o usuário não tem papel no projeto.
+    Retorna o papel base do usuario no projeto ou None.
+    DEPRECATED: usar get_user_project_roles() para multi-papeis.
     """
     result = await db.execute(
         select(ProjectMember.role).where(
             ProjectMember.project_id == project_id,
             ProjectMember.user_id == user_id,
-            ProjectMember.accepted_at.isnot(None),  # Só membros que aceitaram
+            ProjectMember.accepted_at.isnot(None),
         )
     )
     row = result.scalar_one_or_none()
     return row
+
+
+async def get_user_project_roles(
+    user_id: UUID,
+    project_id: UUID,
+    db: AsyncSession,
+) -> list[str]:
+    """
+    Retorna TODOS os papeis do usuario no projeto.
+    Consulta ProjectMemberRole + papel base do ProjectMember.
+    """
+    from app.models.project_member_role import ProjectMemberRole
+
+    member_result = await db.execute(
+        select(ProjectMember.id, ProjectMember.role).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+            ProjectMember.is_active == True,
+        )
+    )
+    member_row = member_result.first()
+    if not member_row:
+        return []
+
+    member_id = member_row.id
+    base_role = member_row.role
+
+    roles_result = await db.execute(
+        select(ProjectMemberRole.role).where(
+            ProjectMemberRole.member_id == member_id,
+        )
+    )
+    additional_roles = [r.role for r in roles_result.all()]
+
+    all_roles = list(set([base_role] + additional_roles))
+    return all_roles
 
 
 async def verify_project_access(
