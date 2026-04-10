@@ -141,7 +141,7 @@ export function QAReadinessPage() {
       )}
 
       <div className="flex items-start justify-between">
-        <div>
+        <div></div>
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate(`/projects/${id}/tester-review`)}
