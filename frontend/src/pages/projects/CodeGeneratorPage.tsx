@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import {
   Code2, Play, Save, GitBranch, Loader2, CheckCircle2, AlertTriangle,
   FolderTree, ChevronRight, ChevronDown, FileCode, FileText, File,
@@ -182,6 +182,12 @@ export function CodeGeneratorPage() {
   const isTestFile = selectedFile.includes('test') || selectedFile.includes('spec')
   const canEdit = isTestFile ? isDevOrQA : isDevOrQA
 
+  // Backlog item auto-generation
+  const [searchParams] = useSearchParams()
+  const backlogItemId = searchParams.get('backlog_item')
+  const [generating, setGenerating] = useState(false)
+  const [generatedFromBacklog, setGeneratedFromBacklog] = useState(false)
+
   // OCG context para referência
   const [ocgContext, setOcgContext] = useState<any>(null)
 
@@ -201,6 +207,30 @@ export function CodeGeneratorPage() {
       }
     }).catch(() => {})
   }, [projectId])
+
+  // ================================================================
+  // Auto-generate from backlog item
+  // ================================================================
+  useEffect(() => {
+    if (!backlogItemId || !projectId || generatedFromBacklog) return
+
+    const autoGenerate = async () => {
+      setGenerating(true)
+      try {
+        const res = await apiClient.post(`/projects/${projectId}/backlog/${backlogItemId}/generate-code`)
+        setFileContent(res.data.generated_code || '')
+        setNewFilePath(res.data.title || 'generated_module')
+        setGeneratedFromBacklog(true)
+        setHasChanges(true)
+      } catch (err: any) {
+        console.error('Erro ao gerar codigo:', err)
+      } finally {
+        setGenerating(false)
+      }
+    }
+
+    autoGenerate()
+  }, [backlogItemId, projectId, generatedFromBacklog])
 
   // ================================================================
   // Load file tree
@@ -392,6 +422,14 @@ export function CodeGeneratorPage() {
         </div>
       )}
       <div className="flex flex-1 overflow-hidden">
+      {/* Banner de geracao em andamento */}
+      {generating && (
+        <div className="flex items-center gap-3 px-4 py-3 bg-violet-950/30 border-b border-violet-600/30">
+          <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
+          <span className="text-sm text-violet-300">Gerando codigo via IA a partir do backlog...</span>
+        </div>
+      )}
+
       {/* === EDITOR AREA (expande quando sidebar fecha) === */}
       <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${sidebarOpen ? 'mr-0' : ''}`}>
         {/* Toolbar */}

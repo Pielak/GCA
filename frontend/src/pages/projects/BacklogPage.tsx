@@ -252,7 +252,7 @@ export function BacklogPage() {
                       </div>
                       {item.category === 'modules' && (item.status === 'pending' || item.status === 'ready') && (
                         <button
-                          onClick={() => navigate(`/projects/${projectId}/codegen`)}
+                          onClick={() => navigate(`/projects/${projectId}/codegen?backlog_item=${item.id}`)}
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600/20 border border-violet-600/30 text-violet-400 rounded-lg hover:bg-violet-600/30 transition-colors"
                         >
                           <Code2 className="w-3 h-3" />
