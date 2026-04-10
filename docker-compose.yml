@@ -71,7 +71,6 @@ services:
       - "5173:5173"
     working_dir: /app
     environment:
-      VITE_API_URL: http://localhost:8000
       VITE_APP_URL: http://localhost:5173
     volumes:
       - ./frontend:/app

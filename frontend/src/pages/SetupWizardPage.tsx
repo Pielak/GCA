@@ -3,7 +3,9 @@ import { useNavigate } from 'react-router-dom'
 import { Code2, User, Brain, Server, FolderPlus, ChevronRight, ChevronLeft, Check, Loader2, Eye, EyeOff } from 'lucide-react'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 
-const API = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+import { getApiBaseUrl } from '@/lib/api'
+
+const API = getApiBaseUrl()
 
 interface StepProps {
   data: FormData
