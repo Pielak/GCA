@@ -21,6 +21,8 @@ class EmailService:
         text_content: Optional[str] = None,
         cc: Optional[List[str]] = None,
         bcc: Optional[List[str]] = None,
+        from_name_override: Optional[str] = None,
+        reply_to: Optional[str] = None,
     ) -> tuple[bool, Optional[str]]:
         """
         Send email via SMTP.
@@ -32,6 +34,8 @@ class EmailService:
             text_content: Plain text body (fallback)
             cc: List of CC email addresses
             bcc: List of BCC email addresses
+            from_name_override: Override sender name (default: settings.SMTP_FROM_NAME)
+            reply_to: Reply-To email address
 
         Returns:
             (success, error_message)
@@ -44,7 +48,10 @@ class EmailService:
             # Create message
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
-            msg["From"] = f"{settings.SMTP_FROM_NAME} <{settings.SMTP_FROM_EMAIL}>"
+            from_name = from_name_override or settings.SMTP_FROM_NAME
+            msg["From"] = f"{from_name} <{settings.SMTP_FROM_EMAIL}>"
+            if reply_to:
+                msg["Reply-To"] = reply_to
             msg["To"] = to_email
 
             if cc:
@@ -910,3 +917,30 @@ GCA — Gestão de Codificação Assistida
         except Exception as e:
             structlog.get_logger().error("email.ocg_generated_failed", to=to_email, error=str(e))
             return False, str(e)
+
+    @staticmethod
+    def send_project_email(
+        to_email: str,
+        subject: str,
+        html_content: str,
+        project_name: str,
+        reply_to: Optional[str] = None,
+        text_content: Optional[str] = None,
+    ) -> tuple[bool, Optional[str]]:
+        """
+        Envia e-mail contextualizado com nome do projeto no subject.
+        Subject format: [GCA - {project_name}] {subject}
+        From: GCA - {project_name} <noreply@...>
+        Reply-To: e-mail do GP ou membro responsavel.
+        """
+        full_subject = f"[GCA - {project_name}] {subject}"
+        from_name = f"GCA - {project_name}"
+
+        return EmailService.send_email(
+            to_email=to_email,
+            subject=full_subject,
+            html_content=html_content,
+            text_content=text_content,
+            from_name_override=from_name,
+            reply_to=reply_to,
+        )
