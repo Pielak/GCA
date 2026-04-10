@@ -320,6 +320,22 @@ export function BacklogPage() {
                           Commit Final
                         </button>
                       )}
+                      {['committed', 'published', 'ready_to_merge', 'awaiting_qa'].includes(item.status) && (
+                        <button
+                          onClick={async () => {
+                            const res = await apiClient.get(`/projects/${projectId}/audit/pipeline/${item.id}/export`)
+                            const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+                            const url = URL.createObjectURL(blob)
+                            const a = document.createElement('a')
+                            a.href = url
+                            a.download = `audit-${item.title.replace(/\s+/g, '-')}.json`
+                            a.click()
+                          }}
+                          className="flex items-center gap-1 px-2 py-1 text-xs bg-slate-700/50 border border-slate-600/30 text-slate-400 rounded-lg hover:bg-slate-600/30 transition-colors"
+                        >
+                          Exportar Audit
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
