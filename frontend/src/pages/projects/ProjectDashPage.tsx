@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useOutletContext } from 'react-router-dom'
+import { SetupChecklist } from '@/components/projects/SetupChecklist'
 import { FileText, Code2, TestTube2, Cpu, Shield, Users, GitBranch, Key, Loader2, AlertTriangle } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '@/lib/api'
@@ -44,6 +45,8 @@ function MiniKPI({ label, value, sub, icon }: { label: string; value: string | n
 
 export function ProjectDashPage() {
   const { id } = useParams<{ id: string }>()
+  const context = useOutletContext<{ projectStatus?: string }>()
+  const projectStatus = context?.projectStatus
   const [loading, setLoading] = useState(true)
   const [ocg, setOcg] = useState<any>(null)
   const [members, setMembers] = useState<any[]>([])
@@ -114,6 +117,11 @@ export function ProjectDashPage() {
 
   return (
     <div className="p-6 space-y-6">
+      {/* Setup Checklist — visivel quando projeto em initializing */}
+      {projectStatus === 'initializing' && (
+        <SetupChecklist />
+      )}
+
       {/* KPIs */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <MiniKPI

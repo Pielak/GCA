@@ -155,7 +155,7 @@ export function ProjectDetailLayout() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <Outlet context={{ repoConnected, can, role, isReadOnly }} />
+        <Outlet context={{ repoConnected, can, role, isReadOnly, projectStatus: project?.status }} />
       </div>
     </div>
   )
