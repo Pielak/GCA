@@ -219,8 +219,8 @@ Gere o codigo completo do modulo, pronto para commit."""
 
     # Chamar LLM
     try:
-        provider_enum = LLMProvider(provider.upper()) if provider.upper() in LLMProvider.__members__ else LLMProvider.DEEPSEEK
-        client = LLMServiceFactory.create(provider_enum, api_key)
+        provider_enum = LLMProvider(provider) if provider in [p.value for p in LLMProvider] else LLMProvider.DEEPSEEK
+        client = LLMServiceFactory.create_client(provider_enum, api_key)
         generated_code = await client.generate(
             prompt=prompt,
             max_tokens=4096,

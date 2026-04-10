@@ -231,9 +231,9 @@ class GrokClient(BaseLLMClient):
 class DeepSeekClient(BaseLLMClient):
     """DeepSeek client"""
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, model: str = "deepseek-chat"):
         self.api_key = api_key
-        self.model = "deepseek-coder"
+        self.model = model
 
     async def generate(
         self,
@@ -262,7 +262,7 @@ class DeepSeekClient(BaseLLMClient):
                 "temperature": temperature
             }
 
-            async with httpx.AsyncClient(timeout=60) as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.post(
                     "https://api.deepseek.com/v1/chat/completions",
                     json=payload,

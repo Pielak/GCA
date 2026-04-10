@@ -54,8 +54,8 @@ async def _get_llm_client(db: AsyncSession, project_id: UUID):
     if not api_key:
         raise HTTPException(status_code=400, detail=f"API key nao encontrada para {provider}")
 
-    provider_enum = LLMProvider(provider.upper()) if provider.upper() in LLMProvider.__members__ else LLMProvider.DEEPSEEK
-    return LLMServiceFactory.create(provider_enum, api_key), provider
+    provider_enum = LLMProvider(provider) if provider in [p.value for p in LLMProvider] else LLMProvider.DEEPSEEK
+    return LLMServiceFactory.create_client(provider_enum, api_key), provider
 
 
 async def _get_git_config(db: AsyncSession, project_id: UUID) -> ProjectGitConfig:
