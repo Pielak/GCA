@@ -7,12 +7,19 @@ import { apiClient } from '@/lib/api'
 interface BacklogItem {
   id: string
   category: string
+  module_type: string | null
   title: string
   description: string
   priority: string
   status: string
   source: string
   source_version: number | null
+  required_artifacts: string[]
+  present_artifacts: string[]
+  compliance_iso27001: string[]
+  warnings: string[]
+  generated_code_path: string | null
+  commit_sha: string | null
   created_at: string | null
 }
 
@@ -34,9 +41,18 @@ const PRIORITY_CONFIG: Record<string, { label: string; bg: string; text: string 
 
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
   pending: { label: 'Pendente', bg: 'bg-slate-800', text: 'text-slate-400' },
-  in_progress: { label: 'Em andamento', bg: 'bg-blue-900/40', text: 'text-blue-400' },
-  done: { label: 'Concluído', bg: 'bg-emerald-900/40', text: 'text-emerald-400' },
+  ready: { label: 'Pronto', bg: 'bg-emerald-900/40', text: 'text-emerald-400' },
+  generating: { label: 'Gerando', bg: 'bg-violet-900/40', text: 'text-violet-400' },
+  tests_running: { label: 'Testes', bg: 'bg-blue-900/40', text: 'text-blue-400' },
+  security_review: { label: 'Seguranca', bg: 'bg-orange-900/40', text: 'text-orange-400' },
+  compliance_review: { label: 'Compliance', bg: 'bg-amber-900/40', text: 'text-amber-400' },
+  awaiting_qa: { label: 'Aguardando QA', bg: 'bg-cyan-900/40', text: 'text-cyan-400' },
+  ready_to_merge: { label: 'Pronto p/ Merge', bg: 'bg-emerald-900/40', text: 'text-emerald-300' },
+  committed: { label: 'Commitado', bg: 'bg-emerald-800/40', text: 'text-emerald-300' },
+  published: { label: 'Publicado', bg: 'bg-emerald-700/40', text: 'text-emerald-200' },
   blocked: { label: 'Bloqueado', bg: 'bg-red-900/40', text: 'text-red-400' },
+  in_progress: { label: 'Em andamento', bg: 'bg-blue-900/40', text: 'text-blue-400' },
+  done: { label: 'Concluido', bg: 'bg-emerald-900/40', text: 'text-emerald-400' },
 }
 
 export function BacklogPage() {
@@ -77,6 +93,19 @@ export function BacklogPage() {
     setRefreshing(false)
   }
 
+  const [generating, setGenerating] = useState(false)
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const res = await apiClient.post(`/projects/${projectId}/backlog/generate`)
+      showToast(`Backlog inteligente: ${res.data.ocg_items} OCG + ${res.data.arguider_items} Arguider. ${res.data.ready} prontos, ${res.data.blocked} bloqueados.`, 'success')
+      await loadData()
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || 'Erro ao gerar', 'error')
+    }
+    setGenerating(false)
+  }
+
   const filtered = items.filter(i => {
     if (categoryFilter !== 'all' && i.category !== categoryFilter) return false
     if (priorityFilter !== 'all' && i.priority !== priorityFilter) return false
@@ -105,14 +134,24 @@ export function BacklogPage() {
             {items.length > 0 && ` ${items.length} itens no total.`}
           </p>
         </div>
-        <button
-          onClick={handleRegenerate}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 px-3 py-2 bg-violet-600/20 border border-violet-600/30 text-violet-400 text-sm rounded-lg hover:bg-violet-600/30 disabled:opacity-40 transition-colors"
-        >
-          {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          Regenerar do OCG
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={handleGenerate}
+            disabled={generating}
+            className="flex items-center gap-1.5 px-3 py-2 bg-emerald-600/20 border border-emerald-600/30 text-emerald-400 text-sm rounded-lg hover:bg-emerald-600/30 disabled:opacity-40 transition-colors"
+          >
+            {generating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />}
+            Gerar Backlog Inteligente
+          </button>
+          <button
+            onClick={handleRegenerate}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-3 py-2 bg-violet-600/20 border border-violet-600/30 text-violet-400 text-sm rounded-lg hover:bg-violet-600/30 disabled:opacity-40 transition-colors"
+          >
+            {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Regenerar do OCG
+          </button>
+        </div>
       </div>
 
       {/* Stats por categoria */}
@@ -184,19 +223,40 @@ export function BacklogPage() {
                     {item.description && (
                       <p className="text-slate-500 text-xs mt-1">{item.description}</p>
                     )}
+                    {/* Warnings */}
+                    {item.warnings && item.warnings.length > 0 && (
+                      <div className="mt-2 space-y-1">
+                        {item.warnings.map((w, i) => (
+                          <div key={i} className="flex items-center gap-1.5 text-xs text-amber-400">
+                            <AlertTriangle className="w-3 h-3 shrink-0" />
+                            <span>{w}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* ISO 27001 */}
+                    {item.compliance_iso27001 && item.compliance_iso27001.length > 0 && (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {item.compliance_iso27001.map((c, i) => (
+                          <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/20 text-amber-500 border border-amber-800/30">{c.split(' - ')[0]}</span>
+                        ))}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between mt-2">
                       <div className="flex items-center gap-3 text-slate-600 text-xs">
                         <span>{cat.label}</span>
+                        {item.module_type && <span className="text-violet-400">{item.module_type}</span>}
                         {item.source_version && <span>OCG v{item.source_version}</span>}
                         <span>Fonte: {item.source}</span>
+                        {item.commit_sha && <span className="text-emerald-400">SHA: {item.commit_sha.slice(0, 7)}</span>}
                       </div>
-                      {item.category === 'modules' && item.status === 'pending' && (
+                      {item.category === 'modules' && (item.status === 'pending' || item.status === 'ready') && (
                         <button
                           onClick={() => navigate(`/projects/${projectId}/codegen`)}
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600/20 border border-violet-600/30 text-violet-400 rounded-lg hover:bg-violet-600/30 transition-colors"
                         >
                           <Code2 className="w-3 h-3" />
-                          Gerar Código
+                          Gerar Codigo
                         </button>
                       )}
                     </div>
