@@ -8,6 +8,7 @@ import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { AdminProjectsPage } from './pages/admin/AdminProjectsPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
+import { DesignShowcasePage } from './pages/DesignShowcasePage';
 import { ProjectListPage } from './pages/projects/ProjectListPage';
 import { ProjectDetailLayout } from './pages/projects/ProjectDetailLayout';
 import { ProjectDashPage } from './pages/projects/ProjectDashPage';
@@ -75,6 +76,10 @@ export const router = createBrowserRouter([
       {
         path: 'admin/audit',
         element: <RequireAdmin><AdminAuditPage /></RequireAdmin>,
+      },
+      {
+        path: 'design-showcase',
+        element: <RequireAdmin><DesignShowcasePage /></RequireAdmin>,
       },
       { path: 'projects', Component: ProjectListPage },
       {
