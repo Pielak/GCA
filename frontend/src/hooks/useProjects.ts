@@ -15,10 +15,13 @@ export interface ProjectRequest {
   rejected_reason?: string
 }
 
+export type DeliverableType = 'new_system' | 'mobile_app' | 'module' | 'enhancement' | 'integration' | 'modernization' | 'etl' | 'maintenance'
+
 export interface CreateProjectInput {
   project_name: string
   project_slug: string
   description?: string
+  deliverable_type: DeliverableType
 }
 
 export const usePendingProjects = () => {

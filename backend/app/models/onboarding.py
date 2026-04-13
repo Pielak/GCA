@@ -12,6 +12,18 @@ import enum
 from app.db.database import Base
 
 
+class DeliverableType(str, enum.Enum):
+    """Tipo de entregável — gate bloqueante na criação do projeto"""
+    NEW_SYSTEM = "new_system"              # Sistema web novo
+    MOBILE_APP = "mobile_app"              # Aplicação mobile
+    MODULE = "module"                      # Módulo funcional / Extensão de ecossistema
+    ENHANCEMENT = "enhancement"            # Melhoria em sistema existente
+    INTEGRATION = "integration"            # Integração com sistema legado
+    MODERNIZATION = "modernization"        # Modernização / Refatoração
+    ETL = "etl"                            # ETL / ELT / Integração de dados
+    MAINTENANCE = "maintenance"            # Sustentação evolutiva
+
+
 class ProjectRequestStatus(str, enum.Enum):
     PENDING = "pending"
     APPROVED = "approved"
@@ -47,6 +59,9 @@ class ProjectRequest(Base):
     project_name = Column(String(255), nullable=False)
     project_slug = Column(String(100), unique=True, nullable=False)
     description = Column(Text)
+
+    # Gate bloqueante: tipo de entregável (obrigatório)
+    deliverable_type = Column(SQLEnum(DeliverableType), nullable=False)
 
     # Schema PostgreSQL
     schema_name = Column(String(100), unique=True)

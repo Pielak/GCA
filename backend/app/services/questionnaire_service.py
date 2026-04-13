@@ -69,7 +69,7 @@ class QuestionnaireService:
 
             # Se fluxo externo (sem project_id), criar ProjectRequest para aprovação
             if not project_id:
-                from app.models.onboarding import ProjectRequest, ProjectRequestStatus
+                from app.models.onboarding import ProjectRequest, ProjectRequestStatus, DeliverableType
 
                 # Criar user GP se não existir
                 if not gp_user:
@@ -94,12 +94,27 @@ class QuestionnaireService:
                 if existing_slug.scalar_one_or_none():
                     project_slug = f"{project_slug}-{secrets.token_hex(3)}"
 
+                # Mapear tipo de entregável do questionário para enum
+                deliverable_type_map = {
+                    'Sistema web novo': DeliverableType.NEW_SYSTEM,
+                    'Aplicação mobile': DeliverableType.MOBILE_APP,
+                    'Módulo funcional / Extensão de ecossistema': DeliverableType.MODULE,
+                    'Melhoria em sistema existente': DeliverableType.ENHANCEMENT,
+                    'Integração com sistema legado': DeliverableType.INTEGRATION,
+                    'Modernização / Refatoração': DeliverableType.MODERNIZATION,
+                    'ETL / ELT / Integração de dados': DeliverableType.ETL,
+                    'Sustentação evolutiva': DeliverableType.MAINTENANCE,
+                }
+                raw_deliverable = responses.get('deliverable_type', 'Sistema web novo')
+                deliverable_type = deliverable_type_map.get(raw_deliverable, DeliverableType.NEW_SYSTEM)
+
                 # Criar solicitação de projeto
                 proj_request = ProjectRequest(
                     gp_id=gp_user.id,
                     project_name=project_name,
                     project_slug=project_slug,
                     description=responses.get('description', ''),
+                    deliverable_type=deliverable_type,
                     schema_name=f"proj_{project_slug.replace('-', '_')}",
                     status=ProjectRequestStatus.PENDING,
                 )

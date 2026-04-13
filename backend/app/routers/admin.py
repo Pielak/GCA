@@ -17,6 +17,7 @@ from app.services.admin_service import AdminService
 from app.services.email_service import EmailService
 from app.middleware.auth import get_current_user_from_token, require_admin
 from app.models.base import User
+from app.models.onboarding import DeliverableType
 from app.core.security import hash_password
 
 logger = structlog.get_logger(__name__)
@@ -31,6 +32,7 @@ class CreateProjectRequest(BaseModel):
     project_name: str
     project_slug: str
     description: str = None
+    deliverable_type: DeliverableType  # Gate bloqueante — obrigatório
 
 
 class RejectProjectRequest(BaseModel):
@@ -83,7 +85,8 @@ async def create_project(
             gp_id=current_user_id,
             project_name=req.project_name,
             project_slug=req.project_slug,
-            description=req.description
+            description=req.description,
+            deliverable_type=req.deliverable_type
         )
 
         return {
@@ -91,6 +94,7 @@ async def create_project(
             "project_id": str(project.id),
             "project_name": project.project_name,
             "project_slug": project.project_slug,
+            "deliverable_type": project.deliverable_type.value,
             "schema_name": project.schema_name,
             "message": "Project request created. Waiting for admin approval.",
             "next_step": "admin_approval"
@@ -108,6 +112,35 @@ async def create_project(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating project"
         )
+
+
+@router.get("/deliverable-types")
+async def get_deliverable_types():
+    """Retorna os tipos de entregável disponíveis (gate bloqueante)"""
+    labels = {
+        "new_system": "Sistema web novo",
+        "mobile_app": "Aplicação mobile",
+        "module": "Módulo funcional / Extensão de ecossistema",
+        "enhancement": "Melhoria em sistema existente",
+        "integration": "Integração com sistema legado",
+        "modernization": "Modernização / Refatoração",
+        "etl": "ETL / ELT / Integração de dados",
+        "maintenance": "Sustentação evolutiva",
+    }
+    descriptions = {
+        "new_system": "Projeto standalone criado do zero, sem dependência de sistemas existentes",
+        "mobile_app": "Aplicativo para dispositivos móveis (iOS, Android, híbrido)",
+        "module": "Módulo com domínio próprio que complementa um ecossistema existente (ex: seção de investimentos em internet banking)",
+        "enhancement": "Alteração ou evolução de funcionalidades já existentes em um sistema",
+        "integration": "Conectar sistemas distintos via APIs, filas ou protocolos de dados",
+        "modernization": "Refatoração arquitetural, migração de stack ou decomposição de monolito",
+        "etl": "Pipeline de extração, transformação e carga de dados entre sistemas",
+        "maintenance": "Correções contínuas, ajustes evolutivos e sustentação operacional",
+    }
+    return [
+        {"value": dt.value, "label": labels[dt.value], "description": descriptions[dt.value]}
+        for dt in DeliverableType
+    ]
 
 
 @router.get("/projects/pending")
@@ -135,6 +168,7 @@ async def get_pending_projects(
                 "project_name": p.project_name,
                 "project_slug": p.project_slug,
                 "description": p.description or "",
+                "deliverable_type": p.deliverable_type.value if hasattr(p.deliverable_type, 'value') else (p.deliverable_type or "new_system"),
                 "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
                 "gp_name": gp.full_name if gp else "",
                 "gp_email": gp.email if gp else "",

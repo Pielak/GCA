@@ -103,6 +103,9 @@ class Project(Base):
     slug = Column(String(100), nullable=False)  # Used to create proj_{slug}_* schemas
     description = Column(String, nullable=True)
 
+    # Gate bloqueante: tipo de entregável
+    deliverable_type = Column(String(50), nullable=False)
+
     # Project status
     status = Column(String(50), default="initializing", index=True)  # initializing, wizard_step_1-4, active, archived
     wizard_completed_at = Column(DateTime(timezone=True), nullable=True)

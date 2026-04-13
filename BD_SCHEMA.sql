@@ -62,6 +62,10 @@ CREATE TABLE IF NOT EXISTS public.projects (
     slug VARCHAR(100) NOT NULL, -- usado para criar schema proj_{slug}_*
     description TEXT,
 
+    -- Gate bloqueante: tipo de entregável (obrigatório na criação)
+    deliverable_type VARCHAR(50) NOT NULL DEFAULT 'new_system',
+    -- Valores: new_system, mobile_app, module, enhancement, integration, modernization, etl, maintenance
+
     -- Estados do projeto
     status VARCHAR(50) DEFAULT 'initializing', -- initializing, wizard_step_1, wizard_step_2, wizard_step_3, wizard_step_4, active, archived
 

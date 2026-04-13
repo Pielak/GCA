@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink, Package } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
 interface PendingProject {
@@ -8,11 +8,23 @@ interface PendingProject {
   project_name: string
   project_slug: string
   description: string
+  deliverable_type: string
   status: string
   gp_name: string
   gp_email: string
   requested_at: string
   rejection_reason: string
+}
+
+const DELIVERABLE_LABELS: Record<string, { label: string; color: string }> = {
+  new_system:     { label: 'Sistema Novo',       color: 'bg-blue-500/20 text-blue-300' },
+  mobile_app:     { label: 'Mobile',             color: 'bg-purple-500/20 text-purple-300' },
+  module:         { label: 'Módulo Funcional',   color: 'bg-cyan-500/20 text-cyan-300' },
+  enhancement:    { label: 'Melhoria',           color: 'bg-emerald-500/20 text-emerald-300' },
+  integration:    { label: 'Integração',         color: 'bg-orange-500/20 text-orange-300' },
+  modernization:  { label: 'Modernização',       color: 'bg-yellow-500/20 text-yellow-300' },
+  etl:            { label: 'ETL / Dados',        color: 'bg-indigo-500/20 text-indigo-300' },
+  maintenance:    { label: 'Sustentação',        color: 'bg-slate-500/20 text-slate-300' },
 }
 
 const STATUS_LABELS: Record<string, { label: string; bg: string; text: string }> = {
@@ -162,6 +174,7 @@ export function AdminProjectsPage() {
             <thead>
               <tr className="border-b border-slate-800">
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PROJETO</th>
+                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">TIPO</th>
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">STATUS</th>
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">GERENTE DE PROJETO</th>
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PENDÊNCIAS</th>
@@ -177,6 +190,19 @@ export function AdminProjectsPage() {
                     <td className="px-4 py-3">
                       <p className="text-slate-200 text-sm font-medium">{proj.project_name}</p>
                       <p className="text-slate-500 text-xs">{proj.project_slug}</p>
+                    </td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const dt = DELIVERABLE_LABELS[proj.deliverable_type]
+                        return dt ? (
+                          <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${dt.color}`}>
+                            <Package className="w-3 h-3" />
+                            {dt.label}
+                          </span>
+                        ) : (
+                          <span className="text-slate-600 text-xs">—</span>
+                        )
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`text-xs px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
@@ -266,7 +292,7 @@ export function AdminProjectsPage() {
                 )
               }) : (
                 <tr>
-                  <td colSpan={5} className="px-4 py-8 text-center text-slate-500 text-sm">
+                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">
                     Nenhum projeto encontrado
                   </td>
                 </tr>

@@ -12,7 +12,7 @@ import secrets
 
 from app.core.config import settings
 from app.core.security import hash_password
-from app.models.onboarding import ProjectRequest, ProjectRequestStatus, OnboardingProgress
+from app.models.onboarding import ProjectRequest, ProjectRequestStatus, OnboardingProgress, DeliverableType
 from app.models.base import User, Organization, Project, ProjectMember, AccessAttempt, SupportTicket, TicketResponse, IntegrationWebhook, SystemAlert
 from app.models.pillar import PillarTemplate
 from app.models.tenant import PillarConfiguration, OGCVersion
@@ -31,9 +31,20 @@ class AdminService:
         gp_id: UUID,
         project_name: str,
         project_slug: str,
-        description: Optional[str] = None
+        description: Optional[str] = None,
+        deliverable_type: DeliverableType = None
     ) -> ProjectRequest:
-        """Admin creates a new project request"""
+        """Admin creates a new project request.
+        deliverable_type é gate bloqueante — sem ele, o projeto não avança.
+        """
+
+        # Gate bloqueante: tipo de entregável obrigatório
+        if not deliverable_type:
+            raise ValueError(
+                "Tipo de entregável é obrigatório. "
+                "Opções: new_system, mobile_app, module, enhancement, "
+                "integration, modernization, etl, maintenance"
+            )
 
         # Valida slug
         if not self._validate_slug(project_slug):
@@ -52,6 +63,7 @@ class AdminService:
             project_name=project_name,
             project_slug=project_slug,
             description=description,
+            deliverable_type=deliverable_type,
             schema_name=f"proj_{project_slug}",
             status=ProjectRequestStatus.PENDING
         )
@@ -170,6 +182,7 @@ class AdminService:
                 name=request.project_name,
                 slug=request.project_slug,
                 description=request.description,
+                deliverable_type=request.deliverable_type.value if request.deliverable_type else "new_system",
                 status="active",
                 provisioning_status="completed",
             )
