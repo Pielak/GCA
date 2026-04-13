@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink, Package } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
 
 interface PendingProject {
   id: string
@@ -44,6 +45,7 @@ export function AdminProjectsPage() {
   const [realProjects, setRealProjects] = useState<{id: string, slug: string}[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
+  const [operationMsg, setOperationMsg] = useState<{ message: string; detail: string; status: 'running' | 'success' | 'error' } | null>(null)
 
   // Modal de mensagem ao GP
   const [messageModal, setMessageModal] = useState<PendingProject | null>(null)
@@ -77,14 +79,17 @@ export function AdminProjectsPage() {
 
   const handleApprove = async (p: PendingProject) => {
     setActionLoading(p.id)
+    setOperationMsg({ message: 'Aprovando projeto', detail: `${p.project_name} — provisionando tenant e configurando agentes`, status: 'running' })
     try {
       await apiClient.post(`/admin/projects/${p.id}/approve`)
-      showToast(`Projeto "${p.project_name}" aprovado com sucesso`, 'success')
+      setOperationMsg({ message: 'Projeto aprovado', detail: `${p.project_name} — tenant provisionado com sucesso`, status: 'success' })
       await loadData()
     } catch (err: any) {
+      setOperationMsg({ message: 'Erro na aprovação', detail: err?.message || 'Falha ao provisionar tenant', status: 'error' })
       showToast(err?.message || 'Erro ao aprovar projeto', 'error')
     } finally {
       setActionLoading(null)
+      setTimeout(() => setOperationMsg(null), 4000)
     }
   }
 
@@ -128,15 +133,35 @@ export function AdminProjectsPage() {
   })
 
   if (loading) {
-    return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
+    return (
+      <div className="p-6 space-y-6">
+        <SkeletonPulse className="h-8 w-64" />
+        <SkeletonPulse className="h-10 w-full" />
+        <div className="space-y-3">
+          <SkeletonPulse className="h-16 w-full rounded-xl" />
+          <SkeletonPulse className="h-16 w-full rounded-xl" />
+          <SkeletonPulse className="h-16 w-full rounded-xl" />
+        </div>
+      </div>
+    )
   }
 
   return (
+    <PageTransition>
     <div className="p-6 space-y-6">
       {toast && (
         <div className={`p-3 rounded-lg text-sm ${toast.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-red-900/30 border border-red-700 text-red-300'}`}>
           {toast.message}
         </div>
+      )}
+
+      {operationMsg && (
+        <OperationBar
+          message={operationMsg.message}
+          detail={operationMsg.detail}
+          status={operationMsg.status}
+          onComplete={() => setOperationMsg(null)}
+        />
       )}
 
       <div>
@@ -359,5 +384,6 @@ export function AdminProjectsPage() {
         </div>
       )}
     </div>
+    </PageTransition>
   )
 }

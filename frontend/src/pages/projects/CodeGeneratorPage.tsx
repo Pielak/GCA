@@ -8,6 +8,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import { OperationBar, PulseIndicator } from '@/components/ui/PipelineProgress'
 
 // ============================================================================
 // Tipos
@@ -424,9 +425,12 @@ export function CodeGeneratorPage() {
       <div className="flex flex-1 overflow-hidden">
       {/* Banner de geracao em andamento */}
       {generating && (
-        <div className="flex items-center gap-3 px-4 py-3 bg-violet-950/30 border-b border-violet-600/30">
-          <Loader2 className="w-5 h-5 text-violet-400 animate-spin" />
-          <span className="text-sm text-violet-300">Gerando codigo via IA a partir do backlog...</span>
+        <div className="px-4 py-3 border-b border-edge-brand">
+          <OperationBar
+            message="Gerando código via IA"
+            detail="Analisando OCG e criando módulo a partir do backlog"
+            status="running"
+          />
         </div>
       )}
 

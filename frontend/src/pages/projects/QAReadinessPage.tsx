@@ -4,6 +4,7 @@ import { TestTube2, Play, Clock, CheckCircle, XCircle, AlertTriangle, Download, 
 import { apiClient } from '@/lib/api';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { StatusBadge } from '@/components/ui/StatusBadge';
+import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress';
 
 interface CoverageCategory {
   type: string;
@@ -96,8 +97,15 @@ export function QAReadinessPage() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+      <div className="p-6 space-y-6">
+        <SkeletonPulse className="h-8 w-48" />
+        <div className="grid grid-cols-4 gap-4">
+          <SkeletonPulse className="h-24 rounded-xl" />
+          <SkeletonPulse className="h-24 rounded-xl" />
+          <SkeletonPulse className="h-24 rounded-xl" />
+          <SkeletonPulse className="h-24 rounded-xl" />
+        </div>
+        <SkeletonPulse className="h-48 rounded-xl" />
       </div>
     );
   }
@@ -109,7 +117,15 @@ export function QAReadinessPage() {
   const categories = coverage?.categories ?? [];
 
   return (
+    <PageTransition>
     <div className="p-6 space-y-6">
+      {running && (
+        <OperationBar
+          message="Executando testes"
+          detail="Rodando suíte completa em containers isolados"
+          status="running"
+        />
+      )}
       <div className="flex items-start justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
@@ -258,5 +274,6 @@ export function QAReadinessPage() {
         </div>
       </div>
     </div>
+    </PageTransition>
   );
 }

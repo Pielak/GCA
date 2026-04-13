@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Upload, FileText, Trash2, Play, Terminal, Loader2, RefreshCw } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useDocuments, useUploadDocument, useDeleteDocument, type IngestedDocument } from '@/hooks/useIngestion';
+import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
 
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
 
@@ -77,7 +78,17 @@ export function IngestionPage() {
   }, [deleteMutation]);
 
   return (
+    <PageTransition>
     <div className="p-6 space-y-6">
+      {/* Upload operation feedback */}
+      {uploadMutation.isPending && (
+        <OperationBar
+          message="Enviando documento"
+          detail="Processando upload e validando formato"
+          status="running"
+        />
+      )}
+
       {/* Header + Iniciar Arguidor */}
       <div className="flex items-center justify-between">
         <div>
@@ -97,10 +108,7 @@ export function IngestionPage() {
             maxWidth="max-w-96"
           />
           {processingCount > 0 && (
-            <span className="flex items-center gap-1.5 text-amber-400 text-xs">
-              <Loader2 className="w-3.5 h-3.5 animate-spin" />
-              {processingCount} processando...
-            </span>
+            <PulseIndicator message={`${processingCount} processando`} variant="warning" />
           )}
           <button
             onClick={() => refetch()}
@@ -248,5 +256,6 @@ export function IngestionPage() {
         </div>
       )}
     </div>
+    </PageTransition>
   );
 }
