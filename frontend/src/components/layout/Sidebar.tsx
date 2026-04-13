@@ -200,11 +200,11 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/ingestion`} label="Ingestão" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="Gatekeeper" icon={<Shield className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/arguider`} label="Arguidor" icon={<Zap className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/backlog`} label="Backlog" icon={<ClipboardList className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/roadmap`} label="Roadmap" icon={<Clock className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/codegen`} label="Geração de Código" icon={<Code2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/qa`} label="Testes" icon={<TestTube2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Revisão de Testes" icon={<FileText className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/backlog`} label="Backlog" icon={<ClipboardList className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/roadmap`} label="Roadmap" icon={<Clock className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
                       </div>

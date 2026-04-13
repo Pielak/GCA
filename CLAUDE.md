@@ -78,7 +78,7 @@ cd /home/luiz/GCA/frontend && npm run type-check  # TypeScript check
 
 ### Key Pipeline Flow (Project Pages)
 
-Questionnaire → Ingestion → Gatekeeper → OCG → ArguiderPage → CodeGenerator → QAReadiness → TesterReview → Legacy → MergeEngine → Roadmap → LiveDocs
+Questionnaire → Repos Externos → Ingestion → Gatekeeper → OCG → Arguidor → Backlog → Roadmap → CodeGen → Testes → Revisão de Testes → Documentação Viva
 
 ### Infrastructure
 
