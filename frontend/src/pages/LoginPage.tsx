@@ -1,62 +1,164 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, Hexagon, Activity, Shield, Cpu, Database, GitBranch } from 'lucide-react'
+import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 
-function OrbitalRing({ size, duration, delay, opacity }: { size: number; duration: number; delay: number; opacity: number }) {
-  return (
-    <div
-      className="absolute rounded-full border border-brand-500/[var(--ring-opacity)]"
-      style={{
-        width: size,
-        height: size,
-        left: '50%',
-        top: '50%',
-        transform: 'translate(-50%, -50%)',
-        '--ring-opacity': opacity,
-        animation: `spin ${duration}s linear infinite`,
-        animationDelay: `${delay}s`,
-      } as React.CSSProperties}
-    >
-      <div
-        className="absolute w-1.5 h-1.5 rounded-full bg-brand-400"
-        style={{ top: 0, left: '50%', transform: 'translate(-50%, -50%)', opacity: opacity * 3 }}
-      />
-    </div>
-  )
+// ═══════════════════════════════════════════════════════════════════════
+// Particle Network — canvas animado de fundo
+// ═══════════════════════════════════════════════════════════════════════
+
+interface Particle {
+  x: number; y: number; vx: number; vy: number; r: number; o: number
 }
 
-function GridPattern() {
-  return (
-    <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-      <defs>
-        <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
-          <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(112, 56, 224, 0.04)" strokeWidth="1" />
-        </pattern>
-      </defs>
-      <rect width="100%" height="100%" fill="url(#grid)" />
-    </svg>
-  )
+function ParticleCanvas() {
+  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const particles = useRef<Particle[]>([])
+  const mouse = useRef({ x: -1000, y: -1000 })
+  const raf = useRef<number>(0)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')!
+    let w = 0, h = 0
+
+    const resize = () => {
+      w = canvas.width = canvas.offsetWidth * devicePixelRatio
+      h = canvas.height = canvas.offsetHeight * devicePixelRatio
+      ctx.scale(devicePixelRatio, devicePixelRatio)
+    }
+
+    const init = () => {
+      resize()
+      const count = Math.floor((canvas.offsetWidth * canvas.offsetHeight) / 8000)
+      particles.current = Array.from({ length: Math.min(count, 120) }, () => ({
+        x: Math.random() * canvas.offsetWidth,
+        y: Math.random() * canvas.offsetHeight,
+        vx: (Math.random() - 0.5) * 0.4,
+        vy: (Math.random() - 0.5) * 0.4,
+        r: Math.random() * 1.5 + 0.5,
+        o: Math.random() * 0.5 + 0.2,
+      }))
+    }
+
+    const draw = () => {
+      const cw = canvas.offsetWidth, ch = canvas.offsetHeight
+      ctx.clearRect(0, 0, cw, ch)
+
+      const pts = particles.current
+      const mx = mouse.current.x, my = mouse.current.y
+
+      for (let i = 0; i < pts.length; i++) {
+        const p = pts[i]
+        p.x += p.vx
+        p.y += p.vy
+        if (p.x < 0 || p.x > cw) p.vx *= -1
+        if (p.y < 0 || p.y > ch) p.vy *= -1
+
+        // Mouse repulsion
+        const dx = p.x - mx, dy = p.y - my
+        const dist = Math.sqrt(dx * dx + dy * dy)
+        if (dist < 120) {
+          p.vx += dx / dist * 0.15
+          p.vy += dy / dist * 0.15
+        }
+
+        // Draw particle
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(133, 80, 246, ${p.o})`
+        ctx.fill()
+
+        // Draw connections
+        for (let j = i + 1; j < pts.length; j++) {
+          const q = pts[j]
+          const d = Math.hypot(p.x - q.x, p.y - q.y)
+          if (d < 100) {
+            ctx.beginPath()
+            ctx.moveTo(p.x, p.y)
+            ctx.lineTo(q.x, q.y)
+            ctx.strokeStyle = `rgba(133, 80, 246, ${0.08 * (1 - d / 100)})`
+            ctx.lineWidth = 0.5
+            ctx.stroke()
+          }
+        }
+      }
+
+      raf.current = requestAnimationFrame(draw)
+    }
+
+    const handleMouse = (e: MouseEvent) => {
+      const rect = canvas.getBoundingClientRect()
+      mouse.current = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    }
+
+    init()
+    draw()
+    window.addEventListener('resize', () => { resize(); })
+    canvas.addEventListener('mousemove', handleMouse)
+
+    return () => {
+      cancelAnimationFrame(raf.current)
+      window.removeEventListener('resize', resize)
+      canvas.removeEventListener('mousemove', handleMouse)
+    }
+  }, [])
+
+  return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full" />
 }
 
-function FloatingIcon({ icon: Icon, x, y, delay }: { icon: typeof Shield; x: string; y: string; delay: number }) {
-  return (
-    <div
-      className="absolute animate-float"
-      style={{
-        left: x,
-        top: y,
-        animationDelay: `${delay}s`,
-        animationDuration: `${5 + delay}s`,
-      }}
-    >
-      <div className="w-10 h-10 rounded-xl bg-surface-raised/80 border border-edge-subtle backdrop-blur-sm flex items-center justify-center shadow-card">
-        <Icon className="w-4.5 h-4.5 text-brand-300/60" />
-      </div>
-    </div>
-  )
-}
+// ═══════════════════════════════════════════════════════════════════════
+// Feature cards com expansão
+// ═══════════════════════════════════════════════════════════════════════
+
+const FEATURES = [
+  {
+    id: 'pilares',
+    icon: '🛡️',
+    label: '7 Pilares',
+    summary: 'Gatekeeper documental',
+    detail: 'Cada projeto passa por avaliação em 7 dimensões: Negócio, Compliance, Escopo, NFR, Arquitetura, Dados e Segurança. Scores abaixo de 70% em Segurança ou Compliance bloqueiam todo o pipeline.',
+    gradient: 'from-violet-600/20 to-purple-600/20',
+    border: 'border-violet-500/30',
+    glow: 'hover:shadow-[0_0_30px_rgba(139,92,246,0.15)]',
+  },
+  {
+    id: 'ia',
+    icon: '🧠',
+    label: 'IA Assistida',
+    summary: '8 agentes especializados',
+    detail: 'Pipeline de 8 agentes IA trabalham em paralelo: Analyzer decompõe o problema, 7 especialistas avaliam cada pilar, Consolidator gera o OCG. Cada agente declara confiança e gaps encontrados.',
+    gradient: 'from-cyan-600/20 to-blue-600/20',
+    border: 'border-cyan-500/30',
+    glow: 'hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]',
+  },
+  {
+    id: 'tenant',
+    icon: '🔐',
+    label: 'Multi-tenant',
+    summary: 'Isolamento por schema',
+    detail: 'Cada projeto opera em schema PostgreSQL isolado com RLS. Contextos nunca se misturam — mesmo usuários em múltiplos projetos veem apenas dados do projeto ativo. Credenciais segregadas por projeto.',
+    gradient: 'from-emerald-600/20 to-green-600/20',
+    border: 'border-emerald-500/30',
+    glow: 'hover:shadow-[0_0_30px_rgba(16,185,129,0.15)]',
+  },
+  {
+    id: 'codegen',
+    icon: '⚡',
+    label: 'CodeGen',
+    summary: 'Geração governada',
+    detail: 'Código gerado pela IA passa por avaliação de políticas, revisão técnica por QA e GP, e só é publicado via PR com aprovação humana. Toda decisão fica registrada com aprovador, data e motivo.',
+    gradient: 'from-amber-600/20 to-orange-600/20',
+    border: 'border-amber-500/30',
+    glow: 'hover:shadow-[0_0_30px_rgba(245,158,11,0.15)]',
+  },
+]
+
+// ═══════════════════════════════════════════════════════════════════════
+// LoginPage
+// ═══════════════════════════════════════════════════════════════════════
 
 export function LoginPage() {
   const navigate = useNavigate()
@@ -69,9 +171,11 @@ export function LoginPage() {
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
+  const [expandedCard, setExpandedCard] = useState<string | null>(null)
 
   useEffect(() => {
-    requestAnimationFrame(() => setMounted(true))
+    const t = setTimeout(() => setMounted(true), 50)
+    return () => clearTimeout(t)
   }, [])
 
   const handleNewProject = () => {
@@ -90,12 +194,7 @@ export function LoginPage() {
     try {
       const success = await login(email, password)
       if (success) {
-        const currentUser = useAuthStore.getState().user
-        if (currentUser && !(currentUser as any).first_access_completed) {
-          navigate('/')
-        } else {
-          navigate('/')
-        }
+        navigate('/')
       } else {
         setError('Email ou senha incorretos')
       }
@@ -110,156 +209,201 @@ export function LoginPage() {
     }
   }
 
-  const features = [
-    { icon: Shield, label: '7 Pilares', desc: 'Gatekeeper documental com avaliação por pilar' },
-    { icon: Cpu, label: 'IA Assistida', desc: 'Agentes especializados para cada domínio' },
-    { icon: Database, label: 'Multi-tenant', desc: 'Isolamento total por schema por projeto' },
-    { icon: GitBranch, label: 'CodeGen', desc: 'Geração governada com gates humanos' },
-  ]
-
   return (
-    <div className="min-h-screen flex bg-surface-void overflow-hidden">
-      {/* Noise texture overlay */}
-      <div className="fixed inset-0 bg-noise pointer-events-none z-10" />
+    <div className="min-h-screen flex bg-[#06060e] overflow-hidden relative">
+      {/* ── Particle network background ── */}
+      <div className="absolute inset-0 z-0">
+        <ParticleCanvas />
+      </div>
 
-      {/* === LEFT PANEL — Identity & Atmosphere === */}
-      <div className="hidden lg:flex lg:w-[52%] relative flex-col justify-between p-12 xl:p-16">
-        {/* Background layers */}
-        <div className="absolute inset-0 bg-gradient-to-br from-surface-deep via-surface-base to-surface-void" />
-        <GridPattern />
+      {/* ── Gradient overlays ── */}
+      <div className="absolute inset-0 z-[1] bg-gradient-to-br from-violet-950/30 via-transparent to-cyan-950/20 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 right-0 h-1/3 z-[1] bg-gradient-to-t from-[#06060e] to-transparent pointer-events-none" />
 
-        {/* Radial glow */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-gradient-radial from-brand-glow via-transparent to-transparent rounded-full" />
-        <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-gradient-radial from-accent-glow via-transparent to-transparent rounded-full" />
+      {/* ── Animated glow orbs ── */}
+      <div className="absolute top-[15%] left-[20%] w-[500px] h-[500px] rounded-full z-[1] pointer-events-none"
+        style={{
+          background: 'radial-gradient(circle, rgba(112,56,224,0.08) 0%, transparent 70%)',
+          animation: 'breathe 8s ease-in-out infinite',
+        }}
+      />
+      <div className="absolute bottom-[10%] right-[15%] w-[400px] h-[400px] rounded-full z-[1] pointer-events-none"
+        style={{
+          background: 'radial-gradient(circle, rgba(0,184,204,0.06) 0%, transparent 70%)',
+          animation: 'breathe 10s ease-in-out infinite 3s',
+        }}
+      />
 
-        {/* Floating tech icons */}
-        <FloatingIcon icon={Shield} x="15%" y="25%" delay={0} />
-        <FloatingIcon icon={Activity} x="75%" y="18%" delay={1.2} />
-        <FloatingIcon icon={Hexagon} x="65%" y="65%" delay={2.4} />
-        <FloatingIcon icon={Cpu} x="20%" y="72%" delay={0.8} />
+      {/* ═══ LEFT PANEL ═══ */}
+      <div className="hidden lg:flex lg:w-[55%] relative z-10 flex-col justify-between p-12 xl:p-16">
 
-        {/* Orbital rings - centro decorativo */}
-        <div className="absolute top-[40%] left-[45%]">
-          <OrbitalRing size={180} duration={20} delay={0} opacity={0.08} />
-          <OrbitalRing size={280} duration={30} delay={2} opacity={0.05} />
-          <OrbitalRing size={400} duration={45} delay={4} opacity={0.03} />
-        </div>
-
-        {/* Content - relative to sit above decorations */}
-        <div className="relative z-20">
-          <div
-            className={`flex items-center gap-3.5 transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'}`}
-          >
-            <img src="/images/gca-logo-120.png" alt="GCA" className="h-11 drop-shadow-lg" />
+        {/* Logo */}
+        <div className={`transition-all duration-1000 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-6'}`}>
+          <div className="flex items-center gap-4">
+            <div className="relative">
+              <img src="/images/gca-logo-120.png" alt="GCA" className="h-12 drop-shadow-[0_0_20px_rgba(112,56,224,0.3)]" />
+              <div className="absolute -inset-2 bg-violet-500/10 rounded-2xl blur-xl -z-10" />
+            </div>
             <div>
-              <span className="text-ink-primary font-display text-xl font-bold tracking-tight">GCA</span>
-              <p className="text-ink-muted text-xs tracking-wide uppercase">Governança e Codificação Assistida</p>
+              <span className="text-white font-display text-2xl font-bold tracking-tight">GCA</span>
+              <div className="flex items-center gap-2 mt-0.5">
+                <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <p className="text-slate-500 text-xs tracking-[0.2em] uppercase">Sistema Operacional</p>
+              </div>
             </div>
           </div>
         </div>
 
-        <div className="relative z-20 max-w-lg">
-          <div
-            className={`transition-all duration-700 delay-200 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}
+        {/* Hero text */}
+        <div className="max-w-xl">
+          <h1
+            className={`font-display text-[3.5rem] leading-[1.05] font-bold text-white tracking-tight transition-all duration-1000 delay-200 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
           >
-            <h1 className="font-display text-display-xl text-ink-primary">
-              Orquestre.{' '}
-              <span className="bg-gradient-brand bg-clip-text text-transparent">
-                Governe.
-              </span>
-              <br />
-              Entregue.
-            </h1>
-            <p className="mt-6 text-ink-secondary text-base leading-relaxed max-w-md">
-              Plataforma de orquestração e governança de projetos de software com
-              IA assistida, isolamento por tenant e rastreabilidade ponta a ponta.
-            </p>
-          </div>
+            Orquestre.<br />
+            <span className="bg-gradient-to-r from-violet-400 via-purple-400 to-cyan-400 bg-clip-text text-transparent">
+              Governe.
+            </span><br />
+            Entregue.
+          </h1>
+          <p className={`mt-6 text-slate-400 text-lg leading-relaxed max-w-md transition-all duration-1000 delay-400 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
+            Meta-plataforma de orquestração, governança e geração assistida
+            de software com rastreabilidade total.
+          </p>
+        </div>
 
-          {/* Feature cards */}
-          <div
-            className={`grid grid-cols-2 gap-3 mt-10 transition-all duration-700 delay-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
-          >
-            {features.map(({ icon: Icon, label, desc }, i) => (
-              <div
-                key={label}
-                className="group relative p-4 rounded-2xl bg-surface-raised/60 border border-edge-subtle backdrop-blur-sm hover:border-edge-brand hover:bg-surface-raised transition-all duration-300"
-                style={{ animationDelay: `${600 + i * 100}ms` }}
-              >
-                <div className="w-9 h-9 rounded-xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center mb-3 group-hover:bg-brand-500/20 group-hover:border-brand-500/30 transition-colors duration-300">
-                  <Icon className="w-4 h-4 text-brand-300" />
-                </div>
-                <p className="text-ink-primary text-sm font-semibold">{label}</p>
-                <p className="text-ink-muted text-xs mt-1 leading-relaxed">{desc}</p>
-              </div>
-            ))}
+        {/* Feature cards — reativos */}
+        <div className={`transition-all duration-1000 delay-500 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+          <div className="grid grid-cols-2 gap-3">
+            {FEATURES.map((f) => {
+              const isExpanded = expandedCard === f.id
+              return (
+                <button
+                  key={f.id}
+                  onClick={() => setExpandedCard(isExpanded ? null : f.id)}
+                  className={`
+                    relative text-left p-4 rounded-2xl border backdrop-blur-sm
+                    transition-all duration-500 ease-out cursor-pointer group
+                    ${isExpanded
+                      ? `bg-gradient-to-br ${f.gradient} ${f.border} scale-[1.02]`
+                      : `bg-white/[0.03] border-white/[0.06] hover:bg-white/[0.06] hover:border-white/[0.12] ${f.glow}`
+                    }
+                  `}
+                >
+                  {/* Icon + label */}
+                  <div className="flex items-center gap-3 mb-1">
+                    <span className={`text-xl transition-transform duration-300 ${isExpanded ? 'scale-125' : 'group-hover:scale-110'}`}>
+                      {f.icon}
+                    </span>
+                    <div>
+                      <p className="text-white text-sm font-semibold">{f.label}</p>
+                      <p className={`text-xs transition-all duration-300 ${isExpanded ? 'text-slate-300' : 'text-slate-500'}`}>
+                        {f.summary}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Expanded detail */}
+                  <div className={`overflow-hidden transition-all duration-500 ease-out ${isExpanded ? 'max-h-40 opacity-100 mt-3' : 'max-h-0 opacity-0 mt-0'}`}>
+                    <div className="h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-3" />
+                    <p className="text-xs text-slate-300 leading-relaxed">
+                      {f.detail}
+                    </p>
+                  </div>
+                </button>
+              )
+            })}
           </div>
         </div>
 
-        <div
-          className={`relative z-20 flex items-center gap-6 transition-all duration-700 delay-700 ${mounted ? 'opacity-100' : 'opacity-0'}`}
-        >
-          <p className="text-ink-muted text-xs">&copy; 2026 GCA — Gestão de Codificação Assistida</p>
-          <div className="h-px flex-1 bg-gradient-to-r from-edge-subtle to-transparent" />
+        {/* Footer */}
+        <div className={`flex items-center gap-4 transition-all duration-1000 delay-700 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
+          <p className="text-slate-600 text-xs">&copy; 2026 GCA</p>
+          <div className="h-px flex-1 bg-gradient-to-r from-white/5 to-transparent" />
+          <p className="text-slate-600 text-xs font-mono">v0.8.0</p>
         </div>
       </div>
 
-      {/* === RIGHT PANEL — Login Form === */}
-      <div className="flex-1 flex flex-col items-center justify-center p-8 relative">
-        {/* Subtle gradient background */}
-        <div className="absolute inset-0 bg-gradient-to-b from-surface-base via-surface-deep to-surface-void" />
-        <div className="absolute top-0 left-0 w-full h-px bg-gradient-to-r from-transparent via-edge-brand to-transparent" />
-
+      {/* ═══ RIGHT PANEL — Login ═══ */}
+      <div className="flex-1 flex flex-col items-center justify-center p-8 relative z-10">
+        {/* Glass card */}
         <div
-          className={`relative z-20 w-full max-w-[380px] transition-all duration-700 delay-300 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
+          className={`
+            w-full max-w-[400px] p-8 rounded-3xl
+            bg-white/[0.04] backdrop-blur-xl border border-white/[0.08]
+            shadow-[0_8px_60px_rgba(0,0,0,0.5),inset_0_1px_0_rgba(255,255,255,0.05)]
+            transition-all duration-1000 delay-300
+            ${mounted ? 'opacity-100 translate-y-0 scale-100' : 'opacity-0 translate-y-10 scale-95'}
+          `}
         >
           {/* Mobile logo */}
-          <div className="lg:hidden flex items-center gap-2.5 mb-10">
+          <div className="lg:hidden flex items-center gap-3 mb-8">
             <img src="/images/gca-icon-40.png" alt="GCA" className="w-10 h-10" />
-            <span className="text-ink-primary font-display text-xl font-bold">GCA</span>
+            <span className="text-white font-display text-xl font-bold">GCA</span>
           </div>
 
+          {/* Heading */}
           <div className="mb-8">
-            <h2 className="font-display text-display-md text-ink-primary">Bem-vindo</h2>
-            <p className="mt-2 text-ink-secondary text-sm">
-              Informe suas credenciais para acessar a plataforma.
+            <h2 className="font-display text-2xl font-bold text-white">Acesse o GCA</h2>
+            <p className="mt-2 text-slate-400 text-sm">
+              Suas credenciais protegidas com criptografia end-to-end.
             </p>
           </div>
 
+          {/* Error */}
           {error && (
-            <div className="mb-6 bg-status-error/10 border border-status-error/20 rounded-xl p-3.5 animate-fade-in">
+            <div className="mb-5 flex items-center gap-3 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 animate-[shake_0.5s_ease-in-out]">
+              <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <X className="w-4 h-4 text-red-400" />
+              </div>
               <p className="text-red-300 text-sm">{error}</p>
             </div>
           )}
 
+          {/* Form */}
           <form onSubmit={handleLogin} className="space-y-5">
-            <div className="space-y-1.5">
-              <label className="block text-xs text-ink-secondary font-medium uppercase tracking-wider">Email</label>
-              <div className="relative group">
-                <Mail className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-brand-400 transition-colors" />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={e => setEmail(e.target.value)}
-                  className="w-full bg-surface-raised border border-edge rounded-xl pl-10 pr-4 py-3 text-sm text-ink-primary placeholder-ink-muted focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-glow transition-all duration-200"
-                  placeholder="seu@email.com"
-                  required
-                  autoComplete="email"
-                  disabled={loading}
-                />
-              </div>
+            {/* Email */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                <Mail className="w-3.5 h-3.5" />
+                EMAIL
+              </label>
+              <input
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                className="
+                  w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-3.5
+                  text-sm text-white placeholder-slate-600
+                  focus:outline-none focus:border-violet-500/50 focus:bg-white/[0.08]
+                  focus:shadow-[0_0_0_3px_rgba(112,56,224,0.1),inset_0_0_20px_rgba(112,56,224,0.03)]
+                  transition-all duration-300
+                "
+                placeholder="seu@email.com"
+                required
+                autoComplete="email"
+                disabled={loading}
+              />
             </div>
 
-            <div className="space-y-1.5">
-              <label className="block text-xs text-ink-secondary font-medium uppercase tracking-wider">Senha</label>
-              <div className="relative group">
-                <Lock className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-muted group-focus-within:text-brand-400 transition-colors" />
+            {/* Password */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                <Lock className="w-3.5 h-3.5" />
+                SENHA
+              </label>
+              <div className="relative">
                 <input
                   type={showPass ? 'text' : 'password'}
                   value={password}
                   onChange={e => setPassword(e.target.value)}
-                  className="w-full bg-surface-raised border border-edge rounded-xl pl-10 pr-11 py-3 text-sm text-ink-primary placeholder-ink-muted focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-glow transition-all duration-200"
-                  placeholder="Sua senha"
+                  className="
+                    w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 pr-12 py-3.5
+                    text-sm text-white placeholder-slate-600
+                    focus:outline-none focus:border-violet-500/50 focus:bg-white/[0.08]
+                    focus:shadow-[0_0_0_3px_rgba(112,56,224,0.1),inset_0_0_20px_rgba(112,56,224,0.03)]
+                    transition-all duration-300
+                  "
+                  placeholder="••••••••"
                   required
                   autoComplete="current-password"
                   disabled={loading}
@@ -267,7 +411,7 @@ export function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPass(v => !v)}
-                  className="absolute right-3.5 top-1/2 -translate-y-1/2 text-ink-muted hover:text-ink-secondary transition-colors"
+                  className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
                   tabIndex={-1}
                 >
                   {showPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -275,83 +419,118 @@ export function LoginPage() {
               </div>
             </div>
 
+            {/* Submit */}
             <button
               type="submit"
               disabled={loading || !email || !password}
-              className="relative w-full bg-brand-500 hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-xl py-3 text-sm font-semibold transition-all duration-200 flex items-center justify-center gap-2 shadow-glow-brand hover:shadow-glow-brand group overflow-hidden"
+              className="
+                relative w-full py-3.5 rounded-xl text-sm font-semibold text-white
+                bg-gradient-to-r from-violet-600 via-violet-500 to-purple-600
+                hover:from-violet-500 hover:via-violet-400 hover:to-purple-500
+                disabled:opacity-40 disabled:cursor-not-allowed
+                shadow-[0_4px_20px_rgba(112,56,224,0.3),0_0_60px_rgba(112,56,224,0.1)]
+                hover:shadow-[0_4px_30px_rgba(112,56,224,0.45),0_0_80px_rgba(112,56,224,0.15)]
+                transition-all duration-300 group overflow-hidden
+              "
             >
-              {/* Shimmer effect on hover */}
-              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent opacity-0 group-hover:opacity-100 group-hover:animate-shimmer" style={{ backgroundSize: '200% 100%' }} />
-              <span className="relative">
+              {/* Shine sweep */}
+              <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/15 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-700" />
+              </div>
+              <span className="relative flex items-center justify-center gap-2">
                 {loading ? (
-                  <span className="flex items-center gap-2">
+                  <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Autenticando...
-                  </span>
+                    Autenticando
+                    <span className="animate-pulse">...</span>
+                  </>
                 ) : (
-                  <span className="flex items-center gap-2">
+                  <>
                     Entrar
-                    <ArrowRight className="w-4 h-4 group-hover:translate-x-0.5 transition-transform" />
-                  </span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform duration-300" />
+                  </>
                 )}
               </span>
             </button>
           </form>
 
+          {/* Links */}
           <div className="mt-5 text-center">
             <Link
               to="/reset-password"
-              className="text-sm text-ink-secondary hover:text-brand-300 transition-colors"
+              className="text-sm text-slate-500 hover:text-violet-400 transition-colors duration-300"
             >
               Esqueci minha senha
             </Link>
           </div>
 
-          {/* Criar Novo Projeto */}
-          <div className="mt-8 pt-8 border-t border-edge-subtle">
+          {/* Separator */}
+          <div className="mt-7 pt-7 border-t border-white/[0.06]">
             <button
               type="button"
               onClick={handleNewProject}
-              className="w-full flex items-center justify-center gap-2.5 bg-accent-500/10 border border-accent-500/20 hover:bg-accent-500/15 hover:border-accent-500/30 text-accent-300 rounded-xl py-3 text-sm font-medium transition-all duration-200"
+              className="
+                w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl
+                text-sm font-medium text-cyan-300
+                bg-cyan-500/[0.07] border border-cyan-500/[0.15]
+                hover:bg-cyan-500/[0.12] hover:border-cyan-500/[0.25]
+                hover:shadow-[0_0_25px_rgba(0,184,204,0.1)]
+                transition-all duration-300
+              "
             >
               <FolderPlus className="w-4 h-4" />
               Criar Novo Projeto
             </button>
           </div>
-
-          <p className="mt-8 text-xs text-ink-muted text-center flex items-center justify-center gap-1.5">
-            <Lock className="w-3 h-3" />
-            Dados protegidos com criptografia ponta a ponta
-          </p>
         </div>
 
-        {/* Toast */}
-        {toast && (
-          <div className="fixed bottom-6 right-6 max-w-sm bg-surface-overlay border border-edge-brand rounded-2xl p-5 shadow-elevated animate-fade-up z-50">
-            <p className="text-ink-primary text-sm leading-relaxed">{toast}</p>
+        {/* Security badge */}
+        <div className={`mt-6 flex items-center gap-2 text-slate-600 text-xs transition-all duration-1000 delay-500 ${mounted ? 'opacity-100' : 'opacity-0'}`}>
+          <Lock className="w-3 h-3" />
+          <span>Criptografia end-to-end ativa</span>
+          <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
+        </div>
+      </div>
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 max-w-sm z-50 animate-[fadeUp_0.4s_ease-out]">
+          <div className="bg-[#1c1c34]/95 backdrop-blur-xl border border-violet-500/20 rounded-2xl p-5 shadow-[0_8px_40px_rgba(0,0,0,0.5)]">
+            <p className="text-slate-200 text-sm leading-relaxed">{toast}</p>
             <div className="flex gap-2.5 mt-4">
               <button
                 onClick={() => { setToast(null); navigate('/novo-projeto') }}
-                className="flex-1 bg-brand-500 hover:bg-brand-400 text-white rounded-xl py-2.5 text-xs font-semibold transition-colors"
+                className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white rounded-xl py-2.5 text-xs font-semibold transition-colors"
               >
                 Continuar
               </button>
               <button
                 onClick={() => setToast(null)}
-                className="flex-1 bg-surface-raised hover:bg-surface-float text-ink-secondary rounded-xl py-2.5 text-xs font-medium border border-edge-subtle transition-colors"
+                className="flex-1 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl py-2.5 text-xs font-medium border border-white/10 transition-colors"
               >
                 Cancelar
               </button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      {/* CSS for orbital animation */}
+      {/* Animations */}
       <style>{`
-        @keyframes spin {
-          from { transform: translate(-50%, -50%) rotate(0deg); }
-          to { transform: translate(-50%, -50%) rotate(360deg); }
+        @keyframes breathe {
+          0%, 100% { transform: scale(1); opacity: 0.5; }
+          50% { transform: scale(1.15); opacity: 1; }
+        }
+        @keyframes fadeUp {
+          from { opacity: 0; transform: translateY(12px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-6px); }
+          40% { transform: translateX(6px); }
+          60% { transform: translateX(-4px); }
+          80% { transform: translateX(4px); }
         }
       `}</style>
     </div>
