@@ -991,20 +991,25 @@ class ModuleCandidate(Base):
 
 
 class OCGDeltaLog(Base):
-    """Histórico de mudanças no OCG causadas por ingestão de documentos"""
+    """Histórico de mudanças no OCG — auditoria + rollback"""
     __tablename__ = "ocg_delta_log"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id"), nullable=False)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id"), nullable=True)
     ocg_version_from = Column(Integer, nullable=False)
     ocg_version_to = Column(Integer, nullable=False)
     fields_changed = Column(Text, nullable=False, default="{}")  # JSON {field: {old, new, reasoning}}
     change_summary = Column(Text, nullable=True)
+    changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    trigger_source = Column(String(50), nullable=False, default="document_ingestion")
+    ocg_snapshot = Column(Text, nullable=True)  # JSON completo do OCG na versão_to — fonte do rollback
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_ocg_delta_project", project_id),
+        Index("idx_ocg_delta_trigger", project_id, trigger_source),
+        Index("idx_ocg_delta_version", project_id, ocg_version_to),
     )
 
 
