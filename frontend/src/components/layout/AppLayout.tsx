@@ -1,15 +1,110 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
-import { Bell, Search, LogOut, Command } from 'lucide-react'
+import { Bell, Search, LogOut, Command, Check, CheckCheck } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
+import { apiClient } from '@/lib/api'
+
+type Notification = {
+  id: string
+  event_type: string
+  title: string
+  message: string
+  link: string | null
+  severity: string
+  read_at: string | null
+  created_at: string | null
+}
 
 export function AppLayout() {
   const { user, isLoggedIn } = useAuthStore()
   const { logout } = useAuth()
   const navigate = useNavigate()
   const [searchFocused, setSearchFocused] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [notifOpen, setNotifOpen] = useState(false)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [notifLoading, setNotifLoading] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+
+  const refreshCount = useCallback(async () => {
+    if (!isLoggedIn) return
+    try {
+      const res = await apiClient.get('/notifications/count')
+      setUnreadCount(res.data?.unread ?? 0)
+    } catch { /* silencioso */ }
+  }, [isLoggedIn])
+
+  useEffect(() => {
+    refreshCount()
+    const interval = setInterval(refreshCount, 60_000) // poll a cada 60s
+    return () => clearInterval(interval)
+  }, [refreshCount])
+
+  const loadNotifications = async () => {
+    setNotifLoading(true)
+    try {
+      const res = await apiClient.get('/notifications?limit=20')
+      setNotifications(res.data?.notifications || [])
+    } catch { setNotifications([]) }
+    setNotifLoading(false)
+  }
+
+  const handleBellClick = () => {
+    const next = !notifOpen
+    setNotifOpen(next)
+    if (next) loadNotifications()
+  }
+
+  // Close dropdown ao clicar fora
+  useEffect(() => {
+    if (!notifOpen) return
+    const onClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setNotifOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [notifOpen])
+
+  const markRead = async (id: string, link: string | null) => {
+    try {
+      await apiClient.post(`/notifications/${id}/read`)
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read_at: new Date().toISOString() } : n))
+      setUnreadCount(c => Math.max(0, c - 1))
+    } catch { /* silencioso */ }
+    if (link) {
+      setNotifOpen(false)
+      navigate(link)
+    }
+  }
+
+  const markAllRead = async () => {
+    try {
+      await apiClient.post('/notifications/read-all')
+      setNotifications(prev => prev.map(n => ({ ...n, read_at: n.read_at || new Date().toISOString() })))
+      setUnreadCount(0)
+    } catch { /* silencioso */ }
+  }
+
+  const formatTime = (iso: string | null) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const diffMin = (Date.now() - d.getTime()) / 60_000
+    if (diffMin < 1) return 'agora'
+    if (diffMin < 60) return `${Math.floor(diffMin)}min atrás`
+    if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}h atrás`
+    return d.toLocaleDateString('pt-BR')
+  }
+
+  const sevDot = (s: string) => {
+    if (s === 'error') return 'bg-red-500'
+    if (s === 'warning') return 'bg-amber-500'
+    if (s === 'success') return 'bg-emerald-500'
+    return 'bg-violet-500'
+  }
 
   useEffect(() => {
     if (!isLoggedIn || !user) {
@@ -59,10 +154,63 @@ export function AppLayout() {
           {/* Right */}
           <div className="flex items-center gap-2">
             {/* Notifications */}
-            <button className="relative p-2 rounded-xl text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-all duration-200 group">
-              <Bell className="w-4 h-4" />
-              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-red-500 rounded-full ring-2 ring-[#0a0a16]" />
-            </button>
+            <div ref={notifRef} className="relative">
+              <button
+                onClick={handleBellClick}
+                className="relative p-2 rounded-xl text-slate-500 hover:text-slate-200 hover:bg-white/[0.05] transition-all duration-200 group"
+                aria-label="Notificações"
+              >
+                <Bell className="w-4 h-4" />
+                {unreadCount > 0 && (
+                  <span className="absolute top-0.5 right-0.5 min-w-[16px] h-4 px-1 bg-red-500 rounded-full ring-2 ring-[#0a0a16] text-[10px] font-bold text-white flex items-center justify-center">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </button>
+
+              {notifOpen && (
+                <div className="absolute right-0 top-full mt-2 w-96 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                  <div className="flex items-center justify-between px-4 py-2.5 border-b border-slate-800">
+                    <h3 className="text-slate-100 text-sm font-semibold">Notificações</h3>
+                    {unreadCount > 0 && (
+                      <button
+                        onClick={markAllRead}
+                        className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200"
+                      >
+                        <CheckCheck className="w-3 h-3" /> Marcar todas como lidas
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-[28rem] overflow-y-auto">
+                    {notifLoading ? (
+                      <p className="text-slate-500 text-xs text-center py-6">Carregando…</p>
+                    ) : notifications.length === 0 ? (
+                      <p className="text-slate-500 text-xs text-center py-6">Sem notificações por enquanto.</p>
+                    ) : (
+                      notifications.map(n => (
+                        <button
+                          key={n.id}
+                          onClick={() => markRead(n.id, n.link)}
+                          className={`w-full text-left px-4 py-3 border-b border-slate-800/80 hover:bg-slate-800/40 transition-colors ${!n.read_at ? 'bg-violet-500/5' : ''}`}
+                        >
+                          <div className="flex items-start gap-2.5">
+                            <span className={`mt-1 w-2 h-2 rounded-full flex-shrink-0 ${sevDot(n.severity)} ${n.read_at ? 'opacity-30' : ''}`} />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={`text-sm font-medium truncate ${n.read_at ? 'text-slate-400' : 'text-slate-100'}`}>{n.title}</p>
+                                <span className="text-[10px] text-slate-500 flex-shrink-0">{formatTime(n.created_at)}</span>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-0.5 line-clamp-2">{n.message}</p>
+                            </div>
+                            {!n.read_at && <Check className="w-3 h-3 text-slate-600 flex-shrink-0 mt-1" />}
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
 
             {/* Divider */}
             <div className="w-px h-6 bg-white/[0.06] mx-1" />
