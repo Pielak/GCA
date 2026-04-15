@@ -5,171 +5,50 @@
       "parameters": {
         "httpMethod": "POST",
         "path": "read-external-repo",
-        "responseMode": "lastNode"
+        "responseMode": "responseNode"
       },
       "name": "Webhook",
       "type": "n8n-nodes-base.webhook",
       "position": [250, 300],
-      "typeVersion": 1
+      "typeVersion": 2
     },
     {
       "parameters": {
-        "functionCode": "// Extrair dados do webhook\nconst data = items[0].json;\nconst repoUrl = data.repo_url;\nconst provider = data.provider;\nconst branch = data.branch || 'main';\nconst accessToken = data.access_token;\nconst projectId = data.project_id;\nconst repoId = data.repo_id;\nconst callbackUrl = data.callback_url;\n\n// Determinar API base\nlet apiBase = '';\nlet repoPath = '';\nif (provider === 'github') {\n  const match = repoUrl.match(/github\\.com\\/([^/]+)\\/([^/]+)/);\n  if (match) {\n    repoPath = match[1] + '/' + match[2].replace('.git', '');\n    apiBase = 'https://api.github.com';\n  }\n} else if (provider === 'gitlab') {\n  const match = repoUrl.match(/gitlab\\.com\\/(.+?)(?:\\.git)?$/);\n  if (match) {\n    repoPath = encodeURIComponent(match[1]);\n    apiBase = 'https://gitlab.com/api/v4';\n  }\n} else if (provider === 'bitbucket') {\n  const match = repoUrl.match(/bitbucket\\.org\\/([^/]+)\\/([^/]+)/);\n  if (match) {\n    repoPath = match[1] + '/' + match[2].replace('.git', '');\n    apiBase = 'https://api.bitbucket.org/2.0';\n  }\n}\n\nreturn [{\n  json: {\n    ...data,\n    apiBase,\n    repoPath,\n    projectId,\n    repoId,\n    callbackUrl,\n    accessToken,\n    branch\n  }\n}];"
+        "method": "POST",
+        "url": "={{ $json.analyze_url }}",
+        "options": {
+          "timeout": 300000
+        }
       },
-      "name": "Preparar Dados",
-      "type": "n8n-nodes-base.function",
-      "position": [450, 300],
-      "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "url": "={{ $json.apiBase }}/repos/{{ $json.repoPath }}/git/trees/{{ $json.branch }}?recursive=1",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $json.accessToken }}"
-            },
-            {
-              "name": "Accept",
-              "value": "application/vnd.github.v3+json"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "name": "Listar Arquivos do Repo",
+      "name": "Chamar Engine GCA",
       "type": "n8n-nodes-base.httpRequest",
-      "position": [650, 300],
-      "typeVersion": 3
+      "position": [500, 300],
+      "typeVersion": 4
     },
     {
       "parameters": {
-        "functionCode": "// Categorizar arquivos do repositório\nconst tree = items[0].json.tree || [];\nconst prevData = items[0].json;\n\nconst categories = {\n  code: [],\n  docs: [],\n  config: [],\n  ci_cd: [],\n  tests: [],\n  schema: []\n};\n\nconst codeExts = ['py','ts','js','tsx','jsx','java','go','rs','cs','kt','rb','php','swift','cpp','c','h'];\nconst docExts = ['md','txt','rst'];\nconst configExts = ['yml','yaml','json','toml','ini','cfg'];\nconst schemaExts = ['sql','prisma'];\nconst skipDirs = ['node_modules','.git','dist','build','__pycache__','.next','vendor','.venv','venv'];\nconst skipExts = ['png','jpg','jpeg','gif','svg','ico','woff','woff2','ttf','eot','map','lock'];\n\nfor (const file of tree) {\n  if (file.type !== 'blob') continue;\n  const path = file.path;\n  \n  // Skip\n  if (skipDirs.some(d => path.includes(d + '/'))) continue;\n  const ext = path.split('.').pop().toLowerCase();\n  if (skipExts.includes(ext)) continue;\n  if (path.includes('package-lock') || path.includes('yarn.lock')) continue;\n  \n  // Categorizar\n  if (path.includes('.github/workflows') || path.includes('.gitlab-ci') || path.includes('Jenkinsfile') || path.includes('.circleci')) {\n    categories.ci_cd.push(path);\n  } else if (path.includes('test') || path.includes('spec') || path.includes('__tests__')) {\n    categories.tests.push(path);\n  } else if (path.includes('migration') || schemaExts.includes(ext) || path.includes('alembic')) {\n    categories.schema.push(path);\n  } else if (path.toLowerCase().includes('readme') || path.toLowerCase().includes('changelog') || path.toLowerCase().includes('contributing') || path.toLowerCase().includes('license') || docExts.includes(ext)) {\n    categories.docs.push(path);\n  } else if (path.includes('Dockerfile') || path.includes('docker-compose') || configExts.includes(ext)) {\n    categories.config.push(path);\n  } else if (codeExts.includes(ext)) {\n    categories.code.push(path);\n  }\n}\n\n// Limitar cada categoria a 30 arquivos\nconst limited = {};\nfor (const [cat, files] of Object.entries(categories)) {\n  limited[cat] = files.slice(0, 30);\n}\n\nconst totalFiles = Object.values(categories).reduce((sum, files) => sum + files.length, 0);\n\n// Criar um item por categoria não-vazia\nconst output = [];\nfor (const [category, files] of Object.entries(limited)) {\n  if (files.length > 0) {\n    output.push({\n      json: {\n        category,\n        files,\n        filesCount: files.length,\n        totalFiles,\n        projectId: prevData.projectId,\n        repoId: prevData.repoId,\n        repoUrl: prevData.repo_url || prevData.repoUrl,\n        repoPath: prevData.repoPath,\n        accessToken: prevData.accessToken,\n        apiBase: prevData.apiBase,\n        branch: prevData.branch,\n        callbackUrl: prevData.callbackUrl\n      }\n    });\n  }\n}\n\nreturn output;"
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'triggered', result: $json }) }}"
       },
-      "name": "Categorizar Arquivos",
-      "type": "n8n-nodes-base.function",
-      "position": [850, 300],
+      "name": "Responder",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "position": [750, 300],
       "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "url": "https://api.deepseek.com/chat/completions",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Authorization",
-              "value": "Bearer sk-ab2caeccff40491aa3093cebb399e80d"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "model",
-              "value": "deepseek-chat"
-            },
-            {
-              "name": "max_tokens",
-              "value": "4096"
-            },
-            {
-              "name": "temperature",
-              "value": "0.3"
-            },
-            {
-              "name": "messages",
-              "value": "=[{\"role\":\"system\",\"content\":\"Você é um analista técnico do GCA. Analise os arquivos de um repositório externo e gere um resumo técnico em Português-BR. Inclua: estrutura, tecnologias, padrões, dependências e pontos de atenção para integração.\"},{\"role\":\"user\",\"content\":\"Categoria: {{ $json.category }}\\nRepositório: {{ $json.repoUrl }}\\nArquivos ({{ $json.filesCount }}):\\n{{ $json.files.join('\\n') }}\\n\\nGere um documento resumo desta categoria.\"}]"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "name": "DeepSeek Analisa Categoria",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [1050, 300],
-      "typeVersion": 3
-    },
-    {
-      "parameters": {
-        "functionCode": "// Preparar documento para injetar no GCA\nconst prevData = items[0].json;\nconst response = prevData.choices ? prevData.choices[0].message.content : 'Análise não disponível';\nconst category = prevData.category || 'unknown';\nconst repoUrl = prevData.repoUrl || '';\nconst projectId = prevData.projectId;\n\nreturn [{\n  json: {\n    projectId,\n    category,\n    repoUrl,\n    content: response,\n    filename: `repo-externo-${category}.md`,\n    description: `Repositório externo: ${repoUrl} — ${category}`,\n    callbackUrl: prevData.callbackUrl,\n    repoId: prevData.repoId,\n    totalFiles: prevData.totalFiles || 0,\n    filesCount: prevData.filesCount || 0\n  }\n}];"
-      },
-      "name": "Preparar Documento",
-      "type": "n8n-nodes-base.function",
-      "position": [1250, 300],
-      "typeVersion": 1
-    },
-    {
-      "parameters": {
-        "url": "=http://gca-backend:8000/api/v1/projects/{{ $json.projectId }}/external-repos/{{ $json.repoId }}/callback",
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "status",
-              "value": "completed"
-            },
-            {
-              "name": "files_total",
-              "value": "={{ $json.totalFiles }}"
-            },
-            {
-              "name": "files_processed",
-              "value": "={{ $json.filesCount }}"
-            },
-            {
-              "name": "files_skipped",
-              "value": "0"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "name": "Callback GCA",
-      "type": "n8n-nodes-base.httpRequest",
-      "position": [1450, 300],
-      "typeVersion": 3
     }
   ],
   "connections": {
     "Webhook": {
       "main": [
-        [{ "node": "Preparar Dados", "type": "main", "index": 0 }]
+        [{ "node": "Chamar Engine GCA", "type": "main", "index": 0 }]
       ]
     },
-    "Preparar Dados": {
+    "Chamar Engine GCA": {
       "main": [
-        [{ "node": "Listar Arquivos do Repo", "type": "main", "index": 0 }]
-      ]
-    },
-    "Listar Arquivos do Repo": {
-      "main": [
-        [{ "node": "Categorizar Arquivos", "type": "main", "index": 0 }]
-      ]
-    },
-    "Categorizar Arquivos": {
-      "main": [
-        [{ "node": "DeepSeek Analisa Categoria", "type": "main", "index": 0 }]
-      ]
-    },
-    "DeepSeek Analisa Categoria": {
-      "main": [
-        [{ "node": "Preparar Documento", "type": "main", "index": 0 }]
-      ]
-    },
-    "Preparar Documento": {
-      "main": [
-        [{ "node": "Callback GCA", "type": "main", "index": 0 }]
+        [{ "node": "Responder", "type": "main", "index": 0 }]
       ]
     }
+  },
+  "settings": {
+    "executionTimeout": 600
   }
 }
