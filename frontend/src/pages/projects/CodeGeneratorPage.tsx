@@ -20,6 +20,7 @@ interface GitFile {
   type: 'file' | 'dir'
   size?: number
   children?: GitFile[]
+  status?: 'complete' | 'todo' | 'nmi'
 }
 
 interface AIReviewResult {
@@ -87,6 +88,8 @@ function TreeNode({
     >
       <FileIcon name={node.name} type="file" />
       <span className="truncate">{node.name}</span>
+      {node.status === 'nmi' && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/20 text-red-400 ml-1 flex-shrink-0">NMI</span>}
+      {node.status === 'todo' && <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 ml-1 flex-shrink-0">TODO</span>}
     </button>
   )
 }
@@ -189,6 +192,11 @@ export function CodeGeneratorPage() {
   const [generating, setGenerating] = useState(false)
   const [generatedFromBacklog, setGeneratedFromBacklog] = useState(false)
 
+  // Scaffold state
+  const [scaffoldFiles, setScaffoldFiles] = useState<Map<string, { content: string; status: string }>>(new Map())
+  const [scaffoldGenerating, setScaffoldGenerating] = useState(false)
+  const [scaffoldSummary, setScaffoldSummary] = useState<string | null>(null)
+
   // OCG context para referência
   const [ocgContext, setOcgContext] = useState<any>(null)
 
@@ -208,6 +216,61 @@ export function CodeGeneratorPage() {
       }
     }).catch(() => {})
   }, [projectId])
+
+  // ================================================================
+  // Gerar Scaffold do Projeto
+  // ================================================================
+
+  const handleGenerateScaffold = async () => {
+    if (!projectId) return
+    if (scaffoldFiles.size > 0 && !confirm('Isso substituirá o scaffold atual. Continuar?')) return
+
+    setScaffoldGenerating(true)
+    setScaffoldSummary(null)
+    try {
+      const res = await apiClient.post('/code-generation/scaffold', { project_id: projectId })
+      const data = res.data
+      const files: { path: string; content: string; status: string }[] = data.files || []
+
+      // Armazenar conteúdos no map
+      const newMap = new Map<string, { content: string; status: string }>()
+      const paths: string[] = []
+      for (const f of files) {
+        newMap.set(f.path, { content: f.content, status: f.status })
+        paths.push(f.path)
+      }
+      setScaffoldFiles(newMap)
+
+      // Sumário combinando geração e commits
+      const cs = data.commit_summary as { committed?: number; failed?: number } | undefined
+      const baseSummary = data.summary || `Gerados ${files.length} arquivos`
+      const commitPart = cs
+        ? ` — Commitados ${cs.committed || 0} no repositório${cs.failed ? `, ${cs.failed} falharam` : ''}`
+        : ''
+      setScaffoldSummary(baseSummary + commitPart)
+
+      // Construir árvore a partir dos caminhos gerados, propagando status
+      const tree = buildTreeWithStatus(files)
+      setFileTree(tree)
+
+      // Refetch árvore do Git (caso haja arquivos já commitados do scaffold inicial)
+      loadTree()
+
+      // Selecionar o primeiro arquivo
+      if (paths.length > 0) {
+        const firstFile = paths[0]
+        setSelectedFile(firstFile)
+        setFileContent(newMap.get(firstFile)?.content || '')
+        setOriginalContent(newMap.get(firstFile)?.content || '')
+        setHasChanges(false)
+      }
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Erro ao gerar scaffold'
+      alert(`Falha na geração: ${detail}`)
+    } finally {
+      setScaffoldGenerating(false)
+    }
+  }
 
   // ================================================================
   // Auto-generate from backlog item
@@ -239,6 +302,10 @@ export function CodeGeneratorPage() {
 
   const loadTree = useCallback(async () => {
     if (!projectId) return
+
+    // Se já temos scaffold gerado, usar ele
+    if (scaffoldFiles.size > 0) return
+
     setTreeLoading(true)
     try {
       const res = await apiClient.get(`/projects/${projectId}/git/status`)
@@ -251,7 +318,6 @@ export function CodeGeneratorPage() {
           const tree = buildTree(sections.map((s: any) => s.path || s.name))
           setFileTree(tree)
         } catch {
-          // Fallback: árvore estática baseada na estrutura esperada
           setFileTree(getDefaultTree())
         }
       } else {
@@ -262,7 +328,7 @@ export function CodeGeneratorPage() {
     } finally {
       setTreeLoading(false)
     }
-  }, [projectId])
+  }, [projectId, scaffoldFiles.size])
 
   useEffect(() => { loadTree() }, [loadTree])
 
@@ -278,8 +344,16 @@ export function CodeGeneratorPage() {
     setHasChanges(false)
     setAiReview(null)
     setSaveSuccess(false)
-    setFileLoading(true)
 
+    // Verificar se o arquivo está no scaffold gerado
+    const scaffoldFile = scaffoldFiles.get(path)
+    if (scaffoldFile) {
+      setFileContent(scaffoldFile.content)
+      setOriginalContent(scaffoldFile.content)
+      return
+    }
+
+    setFileLoading(true)
     try {
       const res = await apiClient.get(`/projects/${projectId}/livedocs/content`, {
         params: { path },
@@ -422,7 +496,6 @@ export function CodeGeneratorPage() {
           }`}>{ocgContext.overall_score?.toFixed(1) || '—'}</span>
         </div>
       )}
-      <div className="flex flex-1 overflow-hidden">
       {/* Banner de geracao em andamento */}
       {generating && (
         <div className="px-4 py-3 border-b border-edge-brand">
@@ -433,6 +506,39 @@ export function CodeGeneratorPage() {
           />
         </div>
       )}
+
+      {/* Banner scaffold em andamento */}
+      {scaffoldGenerating && (
+        <div className="px-4 py-3 border-b border-emerald-700/40">
+          <OperationBar
+            message="Gerando scaffold do projeto"
+            detail="Analisando OCG, documentos e regras de negocio para gerar codigo real..."
+            status="running"
+          />
+        </div>
+      )}
+
+      {/* Resumo do scaffold gerado */}
+      {scaffoldSummary && !scaffoldGenerating && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-emerald-900/20 border-b border-emerald-700/30">
+          <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+          <span className="text-xs text-emerald-300">{scaffoldSummary}</span>
+          <span className="text-xs text-slate-500 ml-auto">
+            {scaffoldFiles.size} arquivos |
+            {' '}{Array.from(scaffoldFiles.values()).filter(f => f.status === 'complete').length} completos,
+            {' '}{Array.from(scaffoldFiles.values()).filter(f => f.status === 'todo').length} TODO,
+            {' '}{Array.from(scaffoldFiles.values()).filter(f => f.status === 'nmi').length} NMI
+          </span>
+          <button
+            onClick={() => { setScaffoldSummary(null) }}
+            className="text-slate-500 hover:text-slate-300"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
+      <div className="flex flex-1 overflow-hidden">
 
       {/* === EDITOR AREA (expande quando sidebar fecha) === */}
       <div className={`flex-1 flex flex-col overflow-hidden transition-all duration-300 ${sidebarOpen ? 'mr-0' : ''}`}>
@@ -451,6 +557,20 @@ export function CodeGeneratorPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Gerar Scaffold */}
+            <button
+              onClick={handleGenerateScaffold}
+              disabled={scaffoldGenerating}
+              className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+              title="Gerar scaffold completo do projeto via IA"
+            >
+              {scaffoldGenerating ? (
+                <><Loader2 className="w-3.5 h-3.5 animate-spin" />Gerando...</>
+              ) : (
+                <><Code2 className="w-3.5 h-3.5" />Gerar Codigo</>
+              )}
+            </button>
+
             {/* New file */}
             <button
               onClick={() => setShowNewFile(true)}
@@ -459,6 +579,17 @@ export function CodeGeneratorPage() {
             >
               <Plus className="w-3.5 h-3.5" /> Novo
             </button>
+
+            {/* Editar Codigo — alterna de visualizacao para edicao */}
+            {selectedFile && scaffoldFiles.has(selectedFile) && !hasChanges && (
+              <button
+                onClick={() => setHasChanges(true)}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
+                title="Alternar para modo de edicao"
+              >
+                <FileCode className="w-3.5 h-3.5" /> Editar Codigo
+              </button>
+            )}
 
             {/* Run tests (qualquer membro) */}
             {isTestFile && (
@@ -591,21 +722,60 @@ export function CodeGeneratorPage() {
                 </div>
               </div>
 
-              {/* Textarea editor */}
-              <textarea
-                value={fileContent}
-                onChange={e => {
-                  if (!canEdit) return
-                  setFileContent(e.target.value)
-                  setHasChanges(e.target.value !== originalContent)
-                }}
-                readOnly={!canEdit}
-                spellCheck={false}
-                className={`flex-1 w-full bg-[#0d1117] text-slate-200 font-mono text-sm p-4 resize-none focus:outline-none leading-relaxed ${
-                  !canEdit ? 'cursor-default opacity-80' : ''
-                }`}
-                placeholder="// Escreva seu código aqui..."
-              />
+              {/* Editor com highlighting para NMI/TODO */}
+              {scaffoldFiles.has(selectedFile) && !hasChanges ? (
+                <div className="flex-1 overflow-auto bg-[#0d1117]">
+                  <div className="font-mono text-sm leading-relaxed">
+                    {fileContent.split('\n').map((line, idx) => {
+                      const isNMI = line.includes('[NMI]')
+                      const isTODO = !isNMI && (line.includes('TODO') || line.includes('todo:'))
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex ${
+                            isNMI ? 'bg-red-900/30 border-l-2 border-red-500' :
+                            isTODO ? 'bg-amber-900/30 border-l-2 border-amber-500' :
+                            'border-l-2 border-transparent'
+                          }`}
+                        >
+                          <span className="text-slate-600 text-right w-10 flex-shrink-0 pr-3 select-none py-0.5">{idx + 1}</span>
+                          <pre className={`py-0.5 pr-4 whitespace-pre-wrap break-all ${
+                            isNMI ? 'text-red-300' :
+                            isTODO ? 'text-amber-300' :
+                            'text-slate-200'
+                          }`}>{line || ' '}</pre>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {/* Badges de status NMI/TODO */}
+                  {(scaffoldFiles.get(selectedFile)?.status === 'nmi' || scaffoldFiles.get(selectedFile)?.status === 'todo') && (
+                    <div className="sticky bottom-0 bg-dark-100 border-t border-slate-800 px-4 py-2 flex items-center gap-2">
+                      {scaffoldFiles.get(selectedFile)?.status === 'nmi' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-400">Necessita mais informacoes (NMI)</span>
+                      )}
+                      {scaffoldFiles.get(selectedFile)?.status === 'todo' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">Contem TODOs para implementar</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <textarea
+                  value={fileContent}
+                  onChange={e => {
+                    if (!canEdit) return
+                    setFileContent(e.target.value)
+                    setHasChanges(e.target.value !== originalContent)
+                  }}
+                  readOnly={!canEdit}
+                  spellCheck={false}
+                  className={`flex-1 w-full bg-[#0d1117] text-slate-200 font-mono text-sm p-4 resize-none focus:outline-none leading-relaxed ${
+                    !canEdit ? 'cursor-default opacity-80' : ''
+                  }`}
+                  placeholder="// Escreva seu codigo aqui..."
+                />
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-full">
@@ -613,9 +783,21 @@ export function CodeGeneratorPage() {
                 <Code2 className="w-10 h-10 text-slate-700 mx-auto mb-3" />
                 <p className="text-slate-500 text-sm font-medium">Nenhum arquivo selecionado</p>
                 <p className="text-slate-600 text-xs mt-1">
-                  Selecione um arquivo na árvore do repositório à direita<br />
-                  ou clique em "Novo" para criar um arquivo
+                  {scaffoldFiles.size > 0
+                    ? 'Selecione um arquivo na arvore a direita para visualizar o codigo gerado'
+                    : <>Clique em <strong className="text-emerald-400">"Gerar Codigo"</strong> para criar o scaffold do projeto<br />ou selecione um arquivo na arvore do repositorio</>
+                  }
                 </p>
+                {scaffoldFiles.size === 0 && (
+                  <button
+                    onClick={handleGenerateScaffold}
+                    disabled={scaffoldGenerating}
+                    className="mt-4 px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg transition-colors inline-flex items-center gap-2"
+                  >
+                    {scaffoldGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Code2 className="w-4 h-4" />}
+                    Gerar Codigo do Projeto
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -745,6 +927,55 @@ function getDefaultTree(): GitFile[] {
     'tests/integration/.gitkeep',
     'tests/uat/.gitkeep',
   ])
+}
+
+/**
+ * Constroi arvore de arquivos com status (complete/todo/nmi) propagado
+ */
+function buildTreeWithStatus(files: { path: string; content: string; status: string }[]): GitFile[] {
+  const root: GitFile[] = []
+  const statusMap = new Map<string, string>()
+
+  for (const f of files) {
+    statusMap.set(f.path, f.status)
+  }
+
+  for (const file of files) {
+    const parts = file.path.split('/')
+    let current = root
+
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i]
+      const isLast = i === parts.length - 1
+      const fullPath = parts.slice(0, i + 1).join('/')
+
+      let existing = current.find(n => n.name === name)
+      if (!existing) {
+        existing = {
+          name,
+          path: fullPath,
+          type: isLast ? 'file' : 'dir',
+          children: isLast ? undefined : [],
+          status: isLast ? (file.status as GitFile['status']) : undefined,
+        }
+        current.push(existing)
+      }
+      if (!isLast && existing.children) {
+        current = existing.children
+      }
+    }
+  }
+
+  // Ordenar: dirs primeiro, depois files
+  const sort = (nodes: GitFile[]) => {
+    nodes.sort((a, b) => {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+    nodes.forEach(n => n.children && sort(n.children))
+  }
+  sort(root)
+  return root
 }
 
 export default CodeGeneratorPage
