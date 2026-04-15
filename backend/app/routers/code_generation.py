@@ -170,6 +170,22 @@ class ValidateCodeRequest(BaseModel):
     language: Optional[str] = Field(None, description="Override explícito da linguagem")
 
 
+class RegenerateFileRequest(BaseModel):
+    """Payload para regenerar UM arquivo específico via LLM."""
+    project_id: UUID = Field(..., description="ID do projeto")
+    path: str = Field(..., description="Caminho do arquivo no repo")
+    current_content: Optional[str] = Field(None, description="Conteúdo atual (para contexto de 'melhorar')")
+    instructions: Optional[str] = Field(None, description="Instrução adicional (ex: 'corrija erro de importação')")
+
+
+class RegenerateFileResponse(BaseModel):
+    path: str
+    content: str
+    status: str
+    committed: bool
+    commit_error: Optional[str] = None
+
+
 class ValidateCodeIssue(BaseModel):
     line: int
     column: int
@@ -914,3 +930,159 @@ async def validate_code_endpoint(request: ValidateCodeRequest) -> ValidateCodeRe
         valid=result.valid,
         issues=[ValidateCodeIssue(**i.to_dict()) for i in result.issues],
     )
+
+
+@router.post(
+    "/regenerate-file",
+    response_model=RegenerateFileResponse,
+    summary="Regerar UM arquivo específico preservando os demais",
+)
+async def regenerate_single_file(
+    request: RegenerateFileRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Gera apenas o arquivo indicado (não toca nos outros) e commita no Git."""
+    project_id = request.project_id
+
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    # Guard de Git
+    from app.models.base import ProjectGitConfig
+    git_config = (
+        await db.execute(
+            select(ProjectGitConfig).where(ProjectGitConfig.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if not git_config or not git_config.repository_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Repositório Git do projeto não configurado. Configure em Admin → Projetos antes de gerar código.",
+        )
+
+    # Contexto enxuto do OCG
+    ocg_result = await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(desc(OCG.version)).limit(1)
+    )
+    ocg = ocg_result.scalar_one_or_none()
+    ocg_data = {}
+    if ocg and ocg.ocg_data:
+        try:
+            ocg_data = json.loads(ocg.ocg_data) if isinstance(ocg.ocg_data, str) else ocg.ocg_data
+        except (json.JSONDecodeError, TypeError):
+            pass
+    stack = ocg_data.get("STACK_RECOMMENDATION", {})
+    architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
+
+    extra = request.instructions or "Reescreva completamente o arquivo mantendo o propósito detectado pelo path."
+    current_block = (
+        f"\n## Conteúdo Atual (referência — pode ser inteiramente substituído)\n```\n{request.current_content[:6000]}\n```\n"
+        if request.current_content else ""
+    )
+
+    prompt = f"""Você é um engenheiro de software sênior. Gere o CONTEÚDO COMPLETO de um único arquivo de código.
+
+## REGRA INEGOCIÁVEL — DOCSTRINGS OBRIGATÓRIAS
+Todo módulo, classe e função pública DEVE ter docstring (PEP 257 para Python, JSDoc para TS/JS, godoc, Javadoc).
+
+## Projeto
+- Nome: {project.name}
+- Descrição: {project.description or 'Sem descrição'}
+
+## Stack (do OCG)
+{json.dumps(stack, indent=2, ensure_ascii=False) if stack else 'Não definida'}
+
+## Arquitetura (do OCG)
+{json.dumps(architecture, indent=2, ensure_ascii=False) if architecture else 'Padrão: Clean Architecture'}
+
+## Arquivo a gerar
+Caminho: `{request.path}`
+
+## Instrução
+{extra}
+{current_block}
+
+## FORMATO DE RESPOSTA
+Responda APENAS com JSON válido, sem markdown:
+{{
+  "content": "conteúdo completo do arquivo (use \\n para quebras)",
+  "status": "complete"
+}}
+
+Status possíveis:
+- "complete": funcional
+- "todo": estrutura + TODOs
+- "nmi": faltam informações do projeto
+"""
+
+    api_key = app_settings.ANTHROPIC_API_KEY
+    if not api_key:
+        raise HTTPException(status_code=503, detail="API key do Anthropic não configurada.")
+
+    try:
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=api_key)
+        response = await client.messages.create(
+            model=app_settings.ANTHROPIC_MODEL,
+            max_tokens=4096,
+            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw_text = response.content[0].text
+
+        # Parse JSON com fallbacks
+        parsed = None
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            m = re.search(r"\{[\s\S]*\"content\"[\s\S]*\}", raw_text)
+            if m:
+                try:
+                    parsed = json.loads(m.group())
+                except json.JSONDecodeError:
+                    pass
+        if not parsed or "content" not in parsed:
+            raise HTTPException(status_code=500, detail="Resposta da IA sem JSON válido. Tente novamente.")
+
+        content = parsed.get("content") or ""
+        status_value = parsed.get("status") or ("complete" if content.strip() else "todo")
+
+        # Validação de docstring (reaproveitada)
+        if status_value == "complete" and _missing_required_docstring(request.path, content):
+            status_value = "todo"
+            content = (
+                "# [DOCSTRING MISSING] Regerar este arquivo com docstrings completas.\n\n" + content
+            )
+
+        # Commit no Git
+        from app.services.git_service import GitService
+        git_service = GitService(db)
+        commit_result = await git_service.commit_file(
+            project_id=project_id,
+            file_path=request.path,
+            content=content,
+            commit_message=f"feat(codegen): regenerar {request.path}",
+        )
+
+        logger.info(
+            "regenerate_file.done",
+            project_id=str(project_id),
+            path=request.path,
+            status=status_value,
+            committed=bool(commit_result.get("success")),
+        )
+
+        return RegenerateFileResponse(
+            path=request.path,
+            content=content,
+            status=status_value,
+            committed=bool(commit_result.get("success")),
+            commit_error=None if commit_result.get("success") else commit_result.get("message"),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("regenerate_file.failed", project_id=str(project_id), path=request.path, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Falha ao regenerar arquivo: {e}")
