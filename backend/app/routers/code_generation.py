@@ -2,15 +2,24 @@
 Code Generation Router
 REST endpoints for code generation workflows
 """
+import json
+import re
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, desc
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from uuid import UUID
 
 from app.db.database import get_db
 from app.services.code_generation_service import CodeGenerationService
-from app.services.llm_service import LLMProvider
+from app.services.llm_service import LLMProvider, LLMServiceFactory
+from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
+from app.models.base import Project
+from app.core.config import settings as app_settings
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/code-generation", tags=["code-generation"])
 
@@ -76,9 +85,372 @@ class GenerationHistoryItem(BaseModel):
     size_bytes: int
 
 
+class ScaffoldRequest(BaseModel):
+    """Request para gerar scaffold completo do projeto"""
+    project_id: UUID = Field(..., description="ID do projeto")
+
+
+class ScaffoldFileItem(BaseModel):
+    """Arquivo individual do scaffold gerado"""
+    path: str
+    content: str
+    status: str  # "complete", "todo", "nmi"
+
+
+class ScaffoldResponse(BaseModel):
+    """Response do scaffold gerado"""
+    files: List[ScaffoldFileItem]
+    summary: str
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
+
+@router.post(
+    "/scaffold",
+    response_model=ScaffoldResponse,
+    summary="Gerar scaffold completo do projeto",
+    description="Gera estrutura de código real baseada no OCG, documentos ingeridos e análises do Arguidor"
+)
+async def generate_scaffold(
+    request: ScaffoldRequest,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Gera scaffold completo do projeto com código fonte real.
+
+    Fluxo:
+    1. Busca OCG mais recente do projeto
+    2. Busca documentos ingeridos com análises do Arguidor
+    3. Constrói prompt abrangente com stack, arquitetura e regras de negócio
+    4. Chama LLM pedindo JSON com arquivos de código
+    5. Retorna lista de arquivos com status (complete/todo/nmi)
+    """
+    project_id = request.project_id
+
+    # 1. Buscar projeto
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Projeto não encontrado"
+        )
+
+    # Guard: projeto precisa ter Git configurado para receber os commits
+    from sqlalchemy import select as _select
+    from app.models.base import ProjectGitConfig
+    git_config = (
+        await db.execute(
+            _select(ProjectGitConfig).where(ProjectGitConfig.project_id == project_id)
+        )
+    ).scalar_one_or_none()
+    if not git_config or not git_config.repository_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Repositório Git do projeto não configurado. "
+                "Configure em Admin → Projetos antes de gerar código."
+            ),
+        )
+
+    # 2. Buscar OCG mais recente do projeto
+    ocg_result = await db.execute(
+        select(OCG)
+        .where(OCG.project_id == project_id)
+        .order_by(desc(OCG.version))
+        .limit(1)
+    )
+    ocg = ocg_result.scalar_one_or_none()
+
+    ocg_data = {}
+    if ocg and ocg.ocg_data:
+        try:
+            ocg_data = json.loads(ocg.ocg_data) if isinstance(ocg.ocg_data, str) else ocg.ocg_data
+        except (json.JSONDecodeError, TypeError):
+            ocg_data = {}
+
+    # 3. Buscar documentos ingeridos e análises do Arguidor
+    docs_result = await db.execute(
+        select(IngestedDocument)
+        .where(IngestedDocument.project_id == project_id)
+        .order_by(IngestedDocument.created_at.desc())
+    )
+    ingested_docs = docs_result.scalars().all()
+
+    # Buscar análises do Arguidor para esses documentos
+    doc_ids = [d.id for d in ingested_docs]
+    arguider_analyses = []
+    if doc_ids:
+        analyses_result = await db.execute(
+            select(ArguiderAnalysis)
+            .where(ArguiderAnalysis.document_id.in_(doc_ids))
+        )
+        arguider_analyses = analyses_result.scalars().all()
+
+    # 4. Construir prompt abrangente
+    stack = ocg_data.get("STACK_RECOMMENDATION", {})
+    architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
+    testing = ocg_data.get("TESTING_REQUIREMENTS", {})
+    modules = ocg_data.get("MODULE_CANDIDATES", [])
+    business_rules = ocg_data.get("BUSINESS_RULES", [])
+    critical_findings = ocg_data.get("CRITICAL_FINDINGS", [])
+    compliance = ocg_data.get("COMPLIANCE_CHECKLIST", [])
+
+    # Extrair module candidates das análises do Arguidor
+    arguider_modules = []
+    arguider_gaps = []
+    for analysis in arguider_analyses:
+        try:
+            mc = json.loads(analysis.module_candidates) if isinstance(analysis.module_candidates, str) else analysis.module_candidates
+            arguider_modules.extend(mc if isinstance(mc, list) else [])
+        except (json.JSONDecodeError, TypeError):
+            pass
+        try:
+            gaps = json.loads(analysis.gaps) if isinstance(analysis.gaps, str) else analysis.gaps
+            arguider_gaps.extend(gaps if isinstance(gaps, list) else [])
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    # Documentos ingeridos como contexto
+    doc_context = ""
+    for doc in ingested_docs[:10]:  # Limitar a 10 para não estourar tokens
+        doc_context += f"- {doc.original_filename} ({doc.file_type}, categoria: {doc.document_category or 'N/A'})\n"
+
+    prompt = f"""Você é um engenheiro de software sênior. Gere o scaffold completo de um projeto com código fonte REAL.
+
+## Projeto
+- Nome: {project.name}
+- Slug: {project.slug}
+- Descrição: {project.description or 'Sem descrição'}
+
+## Stack Tecnológica (do OCG)
+{json.dumps(stack, indent=2, ensure_ascii=False) if stack else 'Não definida — use Python + FastAPI como padrão'}
+
+## Arquitetura (do OCG)
+{json.dumps(architecture, indent=2, ensure_ascii=False) if architecture else 'Padrão: Clean Architecture com camadas service/repository'}
+
+## Requisitos de Testes (do OCG)
+{json.dumps(testing, indent=2, ensure_ascii=False) if testing else 'Testes unitários e de integração obrigatórios'}
+
+## Módulos Identificados (OCG + Arguidor)
+{json.dumps(modules, indent=2, ensure_ascii=False) if modules else 'Nenhum módulo identificado no OCG'}
+{json.dumps(arguider_modules[:10], indent=2, ensure_ascii=False) if arguider_modules else ''}
+
+## Regras de Negócio
+{json.dumps(business_rules[:10], indent=2, ensure_ascii=False) if business_rules else 'Sem regras de negócio explícitas'}
+
+## Gaps Identificados pelo Arguidor
+{json.dumps(arguider_gaps[:10], indent=2, ensure_ascii=False) if arguider_gaps else 'Nenhum gap identificado'}
+
+## Findings Críticos
+{json.dumps(critical_findings[:5], indent=2, ensure_ascii=False) if critical_findings else 'Nenhum'}
+
+## Compliance
+{json.dumps(compliance[:5], indent=2, ensure_ascii=False) if compliance else 'Não definido'}
+
+## Documentos Ingeridos
+{doc_context if doc_context else 'Nenhum documento ingerido'}
+
+## INSTRUÇÕES IMPORTANTES
+
+1. Gere arquivos de código REAIS (NÃO .md, NÃO placeholders vazios)
+2. Use a stack definida no OCG. Se não definida, use Python + FastAPI + PostgreSQL
+3. Os caminhos dos arquivos devem seguir a convenção da stack (ex: Python → .py, TypeScript → .ts/.tsx)
+4. Cada arquivo DEVE ter conteúdo real com:
+   - Imports necessários
+   - TODAS as classes e funções DEVEM ter docstrings completas explicando: propósito, parâmetros, retorno e exceções
+   - Módulos devem ter docstring no topo explicando a responsabilidade do arquivo
+   - Tratamento de erro básico com mensagens descritivas
+   - Type hints em todos os parâmetros e retornos
+5. Para partes que precisam de mais detalhes, use comentários TODO:
+   `# TODO: Implementar lógica de <funcionalidade>`
+6. Para partes onde FALTAM INFORMAÇÕES do projeto, use marcador NMI:
+   `# [NMI] Need More Information: <o que falta>`
+7. Gere pelo menos: main/entry point, models, routes/controllers, services, config, testes
+8. MÁXIMO 25 arquivos para caber no response
+
+## FORMATO DE RESPOSTA
+
+Responda EXCLUSIVAMENTE com JSON válido, sem markdown, sem explicações.
+CRÍTICO: No campo "content", use \\n para quebras de linha e escape aspas com \\". NÃO use quebras de linha literais dentro de strings JSON.
+{{
+  "files": [
+    {{
+      "path": "src/main.py",
+      "content": "conteúdo completo do arquivo aqui",
+      "status": "complete"
+    }},
+    {{
+      "path": "src/routes/payments.py",
+      "content": "# TODO: Implementar processamento de pagamentos\\n# [NMI] Need More Information: gateway de pagamento\\ndef process_payment():\\n    pass",
+      "status": "nmi"
+    }}
+  ],
+  "summary": "Gerados X arquivos para projeto Y com framework Z"
+}}
+
+Status possíveis:
+- "complete": arquivo com implementação funcional
+- "todo": arquivo com TODOs mas estrutura definida
+- "nmi": arquivo que precisa de mais informações do projeto
+"""
+
+    # 5. Chamar LLM
+    api_key = app_settings.ANTHROPIC_API_KEY
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key do Anthropic não configurada. Configure em Admin > Configurações."
+        )
+
+    try:
+        from anthropic import AsyncAnthropic
+
+        client = AsyncAnthropic(api_key=api_key)
+        response = await client.messages.create(
+            model=app_settings.ANTHROPIC_MODEL,
+            max_tokens=8192,
+            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        raw_text = response.content[0].text
+
+        logger.info(
+            "scaffold.llm_response",
+            project_id=str(project_id),
+            tokens_used=response.usage.output_tokens,
+            response_length=len(raw_text),
+        )
+
+        # 6. Parsear resposta JSON (com múltiplas estratégias de fallback)
+        result = None
+        parse_attempts = [
+            lambda: json.loads(raw_text),
+        ]
+
+        # Extrair de bloco markdown
+        json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*\})\s*```', raw_text)
+        if json_match:
+            parse_attempts.append(lambda m=json_match: json.loads(m.group(1)))
+
+        # Extrair JSON direto
+        json_match2 = re.search(r'\{[\s\S]*"files"[\s\S]*\}', raw_text)
+        if json_match2:
+            parse_attempts.append(lambda m=json_match2: json.loads(m.group()))
+
+        for attempt in parse_attempts:
+            try:
+                result = attempt()
+                if isinstance(result, dict) and "files" in result:
+                    break
+                result = None
+            except (json.JSONDecodeError, Exception):
+                continue
+
+        if not result or "files" not in result:
+            # Último recurso: tentar reparar JSON truncado/malformado
+            try:
+                # Encontrar o array "files" e extrair arquivos individuais
+                files_match = re.search(r'"files"\s*:\s*\[([\s\S]*)', raw_text)
+                if files_match:
+                    files_text = files_match.group(1)
+                    # Extrair objetos individuais do array
+                    file_objects = re.findall(r'\{[^{}]*"path"\s*:\s*"[^"]*"[^{}]*"content"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}', files_text)
+                    if file_objects:
+                        repaired = '{"files": [' + ','.join(file_objects) + '], "summary": "Scaffold gerado (JSON reparado)"}'
+                        result = json.loads(repaired)
+            except Exception:
+                pass
+
+        if not result or "files" not in result:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Resposta da IA não contém JSON válido. Tente novamente."
+            )
+
+        files = result.get("files", [])
+        summary = result.get("summary", f"Gerados {len(files)} arquivos para {project.name}")
+
+        # Validar e normalizar status
+        valid_statuses = {"complete", "todo", "nmi"}
+        for f in files:
+            if f.get("status") not in valid_statuses:
+                # Determinar status baseado no conteúdo
+                content = f.get("content", "")
+                if "[NMI]" in content:
+                    f["status"] = "nmi"
+                elif "TODO" in content:
+                    f["status"] = "todo"
+                else:
+                    f["status"] = "complete"
+
+        logger.info(
+            "scaffold.generation_success",
+            project_id=str(project_id),
+            files_count=len(files),
+            complete=sum(1 for f in files if f["status"] == "complete"),
+            todo=sum(1 for f in files if f["status"] == "todo"),
+            nmi=sum(1 for f in files if f["status"] == "nmi"),
+        )
+
+        # Persistir cada arquivo no repositório Git do projeto
+        from app.services.git_service import GitService
+        from fastapi.responses import JSONResponse
+        git_service = GitService(db)
+
+        commit_results = []
+        committed = 0
+        failed = 0
+        for f in files:
+            if f.get("status") == "nmi":
+                continue
+            path = f.get("path") or f.get("file_path")
+            content = f.get("content") or ""
+            if not path or not content:
+                continue
+            result = await git_service.commit_file(
+                project_id=project_id,
+                file_path=path,
+                content=content,
+                commit_message=f"feat(codegen): {path}",
+            )
+            if result.get("success"):
+                committed += 1
+                commit_results.append({"path": path, "status": "ok"})
+            else:
+                failed += 1
+                commit_results.append({"path": path, "status": "error", "error": result.get("message")})
+
+        logger.info(
+            "scaffold.commits_finished",
+            project_id=str(project_id),
+            committed=committed,
+            failed=failed,
+        )
+
+        response = ScaffoldResponse(
+            files=[ScaffoldFileItem(**f) for f in files],
+            summary=summary,
+        )
+        response_dict = response.model_dump()
+        response_dict["commit_summary"] = {
+            "committed": committed,
+            "failed": failed,
+            "results": commit_results,
+        }
+        return JSONResponse(content=response_dict)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("scaffold.generation_failed", project_id=str(project_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Falha na geração do scaffold: {str(e)}"
+        )
+
 
 @router.post(
     "/project",
