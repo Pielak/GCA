@@ -163,6 +163,27 @@ class ScaffoldResponse(BaseModel):
     summary: str
 
 
+class ValidateCodeRequest(BaseModel):
+    """Payload para validar código antes de salvar."""
+    code: str = Field(..., description="Conteúdo do arquivo a validar")
+    path: Optional[str] = Field(None, description="Caminho do arquivo (infere linguagem)")
+    language: Optional[str] = Field(None, description="Override explícito da linguagem")
+
+
+class ValidateCodeIssue(BaseModel):
+    line: int
+    column: int
+    message: str
+    severity: str
+
+
+class ValidateCodeResponse(BaseModel):
+    supported: bool
+    language: str
+    valid: bool
+    issues: List[ValidateCodeIssue]
+
+
 # ============================================================================
 # Endpoints
 # ============================================================================
@@ -879,3 +900,17 @@ Responda SOMENTE com JSON válido:
                 "suggestions": [],
             }
         }
+
+
+@router.post("/validate", response_model=ValidateCodeResponse, summary="Validar código antes de salvar")
+async def validate_code_endpoint(request: ValidateCodeRequest) -> ValidateCodeResponse:
+    """Valida sintaxe/lint do código. Retorna issues com linha/coluna para markers no editor."""
+    from app.core.validation import validate_code
+
+    result = validate_code(request.code, request.language, request.path)
+    return ValidateCodeResponse(
+        supported=result.supported,
+        language=result.language,
+        valid=result.valid,
+        issues=[ValidateCodeIssue(**i.to_dict()) for i in result.issues],
+    )
