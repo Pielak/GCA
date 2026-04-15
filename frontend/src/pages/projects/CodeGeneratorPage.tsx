@@ -310,13 +310,16 @@ export function CodeGeneratorPage() {
     try {
       const res = await apiClient.get(`/projects/${projectId}/git/status`)
       if (res.data?.connected) {
-        // Buscar arquivos do repositório
+        // Buscar árvore completa do repositório (arquivos + diretórios, recursivo)
         try {
-          const filesRes = await apiClient.get(`/projects/${projectId}/livedocs`)
-          const sections = filesRes.data?.sections || []
-          // Converter lista plana em árvore
-          const tree = buildTree(sections.map((s: any) => s.path || s.name))
-          setFileTree(tree)
+          const treeRes = await apiClient.get(`/projects/${projectId}/git/tree`)
+          const entries = (treeRes.data?.tree || []) as Array<{ path: string; type: string }>
+          const filePaths = entries.filter(e => e.type === 'file').map(e => e.path)
+          if (filePaths.length > 0) {
+            setFileTree(buildTree(filePaths))
+          } else {
+            setFileTree(getDefaultTree())
+          }
         } catch {
           setFileTree(getDefaultTree())
         }

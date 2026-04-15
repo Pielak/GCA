@@ -227,6 +227,46 @@ class GitService:
             return await self._github_list_files(config, path)
         return []
 
+    async def list_tree(self, project_id: UUID) -> list[dict]:
+        """Retorna a árvore completa recursiva do repositório (paths planos)."""
+        config = await self._get_config(project_id)
+        if not config:
+            return []
+        if config.provider == "github":
+            return await self._github_list_tree(config)
+        return []
+
+    async def _github_list_tree(self, config: ProjectGitConfig) -> list[dict]:
+        """Git Trees API recursiva."""
+        parsed = _parse_github_url(config.repository_url)
+        if not parsed:
+            return []
+        owner, repo = parsed
+        try:
+            async with httpx.AsyncClient(timeout=GIT_API_TIMEOUT) as client:
+                resp = await client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/git/trees/{config.default_branch}",
+                    headers={
+                        "Authorization": f"Bearer {config.pat_encrypted}",
+                        "Accept": "application/vnd.github.v3+json",
+                    },
+                    params={"recursive": "1"},
+                )
+                if resp.status_code != 200:
+                    return []
+                data = resp.json()
+                return [
+                    {
+                        "path": node["path"],
+                        "type": "dir" if node["type"] == "tree" else "file",
+                        "size": node.get("size", 0),
+                    }
+                    for node in data.get("tree", [])
+                ]
+        except Exception as e:
+            logger.error("git.github_tree_error", error=str(e))
+            return []
+
     async def initialize_repository_structure(self, project_id: UUID) -> bool:
         """
         Cria estrutura inicial de diretórios no repositório via commits.

@@ -88,6 +88,18 @@ async def get_git_status(
     return GitStatusResponse(**result)
 
 
+@router.get("/projects/{project_id}/git/tree")
+async def get_git_tree(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Árvore completa do repositório Git conectado (paths recursivos)."""
+    git_service = GitService(db)
+    tree = await git_service.list_tree(project_id)
+    return {"tree": tree}
+
+
 @router.post(
     "/projects/{project_id}/git/verify",
     response_model=GitConnectResponse,
