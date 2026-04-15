@@ -1506,9 +1506,14 @@ Gere um documento de análise completo e estruturado em Markdown."""
         if existing.scalar_one_or_none():
             return  # Já existe
 
+        # Persistir markdown em storage para abertura read-only
+        from app.utils.ingested_storage import write_ingested
+        generated_filename = f"{uuid4()}.md"
+        write_ingested(project_id, generated_filename, file_bytes)
+
         doc = IngestedDocument(
             project_id=project_id,
-            filename=f"{uuid4()}.md",
+            filename=generated_filename,
             original_filename=filename,
             file_type="markdown",
             file_hash=file_hash,
@@ -1517,7 +1522,7 @@ Gere um documento de análise completo e estruturado em Markdown."""
             quarantine_status="none",
             pii_detected=False,
             arguider_status="pending",
-            git_file_path=f"docs/ingested/external/{filename}",
+            git_file_path=f"docs/ingested/external/{generated_filename}",
             source_type="external_repo",
             source_url=repo_url,
             source_repo_id=repo_id,

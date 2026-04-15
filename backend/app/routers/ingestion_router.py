@@ -118,3 +118,46 @@ async def release_from_quarantine(
     await db.commit()
 
     return {"message": "Documento liberado da quarentena. Análise será iniciada.", "document_id": str(document_id)}
+
+
+@router.get("/projects/{project_id}/ingestion/{document_id}/content")
+async def get_document_content(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Serve o conteúdo original do documento (read-only, inline)."""
+    from fastapi.responses import Response
+    from app.models.base import IngestedDocument
+    from app.utils.ingested_storage import read_ingested
+
+    doc = await db.get(IngestedDocument, document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    content = read_ingested(project_id, doc.filename)
+    if content is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Conteúdo não disponível. Documento foi ingerido antes da persistência — requer re-ingestão.",
+        )
+
+    mime_map = {
+        "pdf": "application/pdf",
+        "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "markdown": "text/markdown; charset=utf-8",
+        "image": "image/png",
+        "spreadsheet": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "code": "text/plain; charset=utf-8",
+    }
+    content_type = mime_map.get(doc.file_type, "application/octet-stream")
+
+    return Response(
+        content=content,
+        media_type=content_type,
+        headers={
+            "Content-Disposition": f'inline; filename="{doc.original_filename}"',
+            "Cache-Control": "private, max-age=60",
+        },
+    )

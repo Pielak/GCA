@@ -77,6 +77,10 @@ class IngestionService:
         # Gerar filename único
         filename = f"{uuid4()}.{ext}"
 
+        # Persistir bytes em storage para abertura read-only posterior
+        from app.utils.ingested_storage import write_ingested
+        write_ingested(project_id, filename, file_bytes)
+
         # PII detection — triagem básica no conteúdo textual
         pii_detected, pii_fields = self._detect_pii(file_bytes, file_type)
         quarantine_status = "quarantined" if pii_detected else "none"
