@@ -246,6 +246,11 @@ class ProjectExternalRepo(Base):
     is_approved_for_integration = Column(Boolean, default=False)
     approved_by_gp = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
+    # --- Progresso de análise ---
+    analysis_phase = Column(Integer, default=0)  # 0-6 (0=idle, 1-6=fases)
+    analysis_phase_label = Column(String(100), nullable=True)
+    analysis_progress = Column(Integer, default=0)  # 0-100%
+
     project = relationship("Project", foreign_keys=[project_id])
 
     __table_args__ = (

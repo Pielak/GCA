@@ -406,6 +406,7 @@ class RepoAnalysisService:
             await self.db.commit()
 
             # ── Fase 1: Stack Detection ──
+            await self._update_progress(repo, 1, "Detectando stack tecnológico...", 5)
             logger.info("repo_analysis.phase1_start", repo_id=str(repo_id))
             tree = await self._list_files(repo.provider, repo.repo_url, repo.branch, repo_id)
             if not tree:
@@ -415,10 +416,12 @@ class RepoAnalysisService:
             await self._save_stack(repo, stack)
 
             # ── Fase 2: Security & Deprecation (determinístico) ──
+            await self._update_progress(repo, 2, "Verificando segurança e deprecações...", 15)
             logger.info("repo_analysis.phase2_start", repo_id=str(repo_id))
             vulnerabilities = self._analyze_security(stack)
 
             # ── Fase 3: GCA Compatibility (IA) ──
+            await self._update_progress(repo, 3, "Avaliando compatibilidade com GCA...", 25)
             logger.info("repo_analysis.phase3_start", repo_id=str(repo_id))
             ai_provider_str = repo.ai_provider or "deepseek"
             api_key = await AIKeyResolver.get_project_key(self.db, project_id, ai_provider_str)
@@ -432,6 +435,7 @@ class RepoAnalysisService:
             )
 
             # ── Fase 4: Análise por categoria (IA) ──
+            await self._update_progress(repo, 4, "Analisando categorias de conhecimento...", 35)
             logger.info("repo_analysis.phase4_start", repo_id=str(repo_id))
             categories = self._categorize_files(tree)
             repo_path = self._extract_repo_path(repo.provider, repo.repo_url)
@@ -439,9 +443,12 @@ class RepoAnalysisService:
             processed = 0
             documents = []
 
-            for category, files in categories.items():
-                if not files:
-                    continue
+            active_categories = [(c, f) for c, f in categories.items() if f]
+            total_active = len(active_categories) or 1
+
+            for idx, (category, files) in enumerate(active_categories):
+                cat_progress = 35 + int((idx / total_active) * 50)
+                await self._update_progress(repo, 4, f"Analisando: {category.replace('_', ' ')}...", cat_progress)
                 contents = await self._fetch_file_contents(
                     repo.provider, repo_path, files, repo.branch, repo_id
                 )
@@ -465,6 +472,7 @@ class RepoAnalysisService:
                 await self.db.commit()
 
             # ── Fase 5: Decisão ──
+            await self._update_progress(repo, 5, "Avaliando decisão de integração...", 88)
             logger.info("repo_analysis.phase5_start", repo_id=str(repo_id))
             overall_status = (
                 compatibility
@@ -487,6 +495,7 @@ class RepoAnalysisService:
                 await self._create_roadmap(repo_id, project_id, compatibility)
 
             # ── Fase 6: Ingestão ──
+            await self._update_progress(repo, 6, "Injetando documentos na ingestão...", 92)
             logger.info("repo_analysis.phase6_start", repo_id=str(repo_id))
             repo_name = self._extract_repo_name(repo.repo_url)
             if overall_status == "compatível" or repo.is_approved_for_integration:
@@ -511,6 +520,9 @@ class RepoAnalysisService:
             repo.last_read_at = datetime.now(timezone.utc)
             repo.files_total = total_files
             repo.files_processed = processed
+            repo.analysis_phase = 0
+            repo.analysis_phase_label = "Concluído"
+            repo.analysis_progress = 100
             await self.db.commit()
 
             logger.info(
@@ -536,17 +548,19 @@ class RepoAnalysisService:
     # Utilidades
     # ──────────────────────────────────────────────────────────
 
+    async def _update_progress(self, repo: ProjectExternalRepo, phase: int, label: str, progress: int):
+        """Atualiza progresso da análise para feedback visual no frontend."""
+        repo.analysis_phase = phase
+        repo.analysis_phase_label = label
+        repo.analysis_progress = min(progress, 100)
+        await self.db.commit()
+
     async def _fail(self, repo: ProjectExternalRepo, error_msg: str) -> dict:
-        """Marca o repo como erro e retorna resultado de falha.
-
-        Args:
-            repo: Instância do repositório externo.
-            error_msg: Mensagem de erro.
-
-        Returns:
-            Dicionário com status de erro.
-        """
+        """Marca o repo como erro e retorna resultado de falha."""
         repo.status = "error"
+        repo.analysis_phase = 0
+        repo.analysis_phase_label = None
+        repo.analysis_progress = 0
         repo.error_message = error_msg
         await self.db.commit()
         return {"error": error_msg, "status": "error"}

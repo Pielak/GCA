@@ -44,6 +44,10 @@ interface ExternalRepo {
   files_skipped: number
   error_message: string | null
   created_at: string
+  analysis_phase: number
+  analysis_phase_label: string | null
+  analysis_progress: number
+  compatibility_status: string | null
 }
 
 const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }> = {
@@ -98,6 +102,14 @@ export function ExternalReposPage() {
   }, [projectId])
 
   useEffect(() => { loadRepos() }, [loadRepos])
+
+  // Polling: atualizar a cada 3s quando algum repo está em análise
+  useEffect(() => {
+    const hasReading = repos.some(r => r.status === 'reading')
+    if (!hasReading) return
+    const interval = setInterval(loadRepos, 3000)
+    return () => clearInterval(interval)
+  }, [repos, loadRepos])
 
   const loadAnalysis = async (repoId: string) => {
     if (!projectId) return
@@ -300,11 +312,22 @@ export function ExternalReposPage() {
                     <div className="flex items-center gap-2">
                       <p className="text-slate-200 text-sm font-medium truncate">{repo.repo_url}</p>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
+                      {repo.status === 'completed' && repo.compatibility_status && (
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${
+                          repo.compatibility_status === 'compatível' ? 'bg-emerald-500/20 text-emerald-400' :
+                          repo.compatibility_status === 'requer_adaptação' ? 'bg-amber-500/20 text-amber-400' :
+                          'bg-red-500/20 text-red-400'
+                        }`}>
+                          {repo.compatibility_status === 'compatível' ? '✅ Compatível' :
+                           repo.compatibility_status === 'requer_adaptação' ? '⚠️ Requer Adaptação' :
+                           '❌ Incompatível'}
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-slate-500 text-xs">
                       <span>Branch: {repo.branch}</span>
                       {repo.last_read_at && <span>Última leitura: {new Date(repo.last_read_at).toLocaleString('pt-BR')}</span>}
-                      {repo.files_total > 0 && <span>{repo.files_processed}/{repo.files_total} arquivos</span>}
+                      {repo.files_total > 0 && !isReading && <span>{repo.files_processed}/{repo.files_total} arquivos</span>}
                     </div>
                     {repo.error_message && (
                       <p className="text-red-400 text-xs mt-1">{repo.error_message}</p>
@@ -312,12 +335,32 @@ export function ExternalReposPage() {
                   </div>
 
                   {/* Progress bar (se em leitura) */}
-                  {isReading && repo.files_total > 0 && (
-                    <div className="w-24">
-                      <div className="h-1.5 bg-slate-700 rounded-full">
-                        <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${progress}%` }} />
+                  {isReading && (
+                    <div className="w-48 flex-shrink-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-blue-300 text-[10px] font-medium truncate max-w-[140px]">
+                          {repo.analysis_phase_label || 'Iniciando...'}
+                        </span>
+                        <span className="text-blue-400 text-[10px] font-bold ml-1">
+                          {repo.analysis_progress || 0}%
+                        </span>
                       </div>
-                      <p className="text-slate-500 text-[10px] text-center mt-0.5">{progress}%</p>
+                      <div className="h-2 bg-slate-700/80 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-blue-500 to-violet-500 transition-all duration-700 ease-out"
+                          style={{ width: `${repo.analysis_progress || 2}%` }}
+                        />
+                      </div>
+                      <div className="flex items-center justify-between mt-0.5">
+                        <span className="text-slate-500 text-[9px]">
+                          Fase {repo.analysis_phase || 1}/6
+                        </span>
+                        {repo.files_total > 0 && (
+                          <span className="text-slate-500 text-[9px]">
+                            {repo.files_processed}/{repo.files_total} arquivos
+                          </span>
+                        )}
+                      </div>
                     </div>
                   )}
 

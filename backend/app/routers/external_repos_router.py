@@ -64,6 +64,10 @@ async def list_external_repos(
                 "files_skipped": r.files_skipped,
                 "error_message": r.error_message,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
+                "analysis_phase": r.analysis_phase,
+                "analysis_phase_label": r.analysis_phase_label,
+                "analysis_progress": r.analysis_progress,
+                "compatibility_status": r.compatibility_status,
             }
             for r in repos
         ]
@@ -226,6 +230,9 @@ async def get_repo_status(
         "files_skipped": repo.files_skipped,
         "error_message": repo.error_message,
         "last_read_at": repo.last_read_at.isoformat() if repo.last_read_at else None,
+        "analysis_phase": repo.analysis_phase,
+        "analysis_phase_label": repo.analysis_phase_label,
+        "analysis_progress": repo.analysis_progress,
     }
 
 
