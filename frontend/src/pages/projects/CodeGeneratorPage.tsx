@@ -358,15 +358,26 @@ export function CodeGeneratorPage() {
 
     setFileLoading(true)
     try {
-      const res = await apiClient.get(`/projects/${projectId}/livedocs/content`, {
+      // Tentar buscar direto do repo Git (arquivos commitados pelo CodeGen)
+      const res = await apiClient.get(`/projects/${projectId}/git/file`, {
         params: { path },
       })
       const content = res.data?.content || ''
       setFileContent(content)
       setOriginalContent(content)
     } catch {
-      setFileContent('// Arquivo ainda não existe. Escreva o conteúdo e salve.')
-      setOriginalContent('')
+      // Fallback: tentar /livedocs/content para docs markdown específicos
+      try {
+        const res2 = await apiClient.get(`/projects/${projectId}/livedocs/content`, {
+          params: { path },
+        })
+        const content = res2.data?.content || ''
+        setFileContent(content)
+        setOriginalContent(content)
+      } catch {
+        setFileContent('// Arquivo ainda não existe. Escreva o conteúdo e salve.')
+        setOriginalContent('')
+      }
     } finally {
       setFileLoading(false)
     }

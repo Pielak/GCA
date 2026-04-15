@@ -100,6 +100,22 @@ async def get_git_tree(
     return {"tree": tree}
 
 
+@router.get("/projects/{project_id}/git/file")
+async def get_git_file(
+    project_id: UUID,
+    path: str,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna o conteúdo de um arquivo no repo Git conectado."""
+    from fastapi import HTTPException
+    git_service = GitService(db)
+    content = await git_service.get_file_content(project_id, path)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Arquivo não encontrado no repositório")
+    return {"path": path, "content": content}
+
+
 @router.post(
     "/projects/{project_id}/git/verify",
     response_model=GitConnectResponse,
