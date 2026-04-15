@@ -9,6 +9,7 @@ import secrets
 
 from app.models.base import User, Project, ProjectMember
 from app.core.security import hash_password
+from app.core.config import settings
 from app.services.email_service import EmailService
 
 logger = structlog.get_logger(__name__)
@@ -49,12 +50,12 @@ class ProjectTeamService:
             if not project:
                 return False, None, "Projeto não encontrado"
 
-            # Check if user already in project
+            # Check if user already in project (by email → user_id)
             result = await db.execute(
                 select(ProjectMember).where(
-                    (ProjectMember.project_id == project_id) &
-                    (ProjectMember.user_id == email) |  # Check by email or user_id
-                    (ProjectMember.user_id.in_(
+                    (ProjectMember.project_id == project_id)
+                    & (ProjectMember.is_active == True)
+                    & (ProjectMember.user_id.in_(
                         select(User.id).where(User.email == email)
                     ))
                 )
@@ -104,8 +105,12 @@ class ProjectTeamService:
             gp_user = result.scalar_one_or_none()
             gp_name = gp_user.full_name if gp_user else "Gestor do Projeto"
 
+            # Build project-specific accept link using short_slug
+            slug = project.short_slug or str(project_id)
+            project_url = f"{settings.FRONTEND_URL}/p/{slug}"
+            accept_link = f"{project_url}?invite={invite_token}"
+
             # Send invitation email
-            accept_link = f"https://gca.com/projects/{project_id}/accept-invite?token={invite_token}"
             EmailService.send_team_invitation_email(
                 to_email=email,
                 user_name=user.full_name,
@@ -113,6 +118,7 @@ class ProjectTeamService:
                 gp_name=gp_name,
                 role_name=role.replace("_", " ").title(),
                 accept_link=accept_link,
+                project_url=project_url,
             )
 
             logger.info("project_team.member_invited", project_id=str(project_id), email=email)
@@ -130,10 +136,13 @@ class ProjectTeamService:
     ) -> List[dict]:
         """Get list of pending invitations for a project"""
         try:
+            # Convite pendente de verdade: tem token, ainda não entrou no projeto
             result = await db.execute(
                 select(ProjectMember).where(
-                    (ProjectMember.project_id == project_id) &
-                    (ProjectMember.accepted_at == None)  # Pending
+                    (ProjectMember.project_id == project_id)
+                    & (ProjectMember.invite_token != None)
+                    & (ProjectMember.joined_at == None)
+                    & (ProjectMember.is_active == True)
                 )
             )
             members = result.scalars().all()
