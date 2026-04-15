@@ -108,6 +108,7 @@ class AIService:
         system_prompt: Optional[str] = None,
         temperature: float = 0.7,
         max_tokens: Optional[int] = None,
+        api_key: Optional[str] = None,
     ) -> tuple[bool, Optional[str], Optional[str]]:
         """
         Query an AI provider.
@@ -119,6 +120,7 @@ class AIService:
             system_prompt: System prompt for context
             temperature: Temperature (0-2, default 0.7)
             max_tokens: Max tokens in response
+            api_key: Optional API key override (bypasses config lookup)
 
         Returns:
             (success, response_text, error_message)
@@ -129,7 +131,8 @@ class AIService:
         if model is None:
             model = AIService.get_default_model()
 
-        api_key = AIService.get_api_key(provider)
+        if api_key is None:
+            api_key = AIService.get_api_key(provider)
         if not api_key:
             error_msg = f"No API key configured for {provider.value}"
             logger.warning("ai.missing_api_key", provider=provider.value)
