@@ -24,6 +24,66 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/code-generation", tags=["code-generation"])
 
 
+def _missing_required_docstring(path: str, content: str) -> bool:
+    """True se o arquivo exige docstring e não tem.
+
+    Regras por extensão:
+    - .py  → exige `\"\"\"...\"\"\"` ou `'''...'''` logo após declarações `def`/`class`
+             e docstring de módulo (primeiras linhas não-vazias começam com aspas triplas).
+    - .ts/.tsx/.js/.jsx/.mjs → exige bloco `/** ... */` antes de cada `export function`,
+                                `export class` ou `export default function`.
+    - .go / .java → idem (comentário `//` ou `/** */` antes de funções/métodos).
+    - Arquivos `__init__.py` triviais (vazios ou só imports) e arquivos de config
+      (`pyproject.toml`, `package.json`, `Dockerfile`, `.env*`, `*.yaml`, `*.yml`,
+      `*.md`, `*.json`) são isentos.
+    """
+    if not path or not content:
+        return False
+    lowered = path.lower()
+    # Isenções: arquivos não-código ou scaffolding trivial
+    for ext in (".md", ".json", ".yaml", ".yml", ".toml", ".env", ".lock", ".txt", ".cfg", ".ini"):
+        if lowered.endswith(ext):
+            return False
+    if lowered.endswith("__init__.py") and len(content.strip().splitlines()) <= 3:
+        return False
+    if lowered.endswith(".py"):
+        # Módulo precisa começar com docstring (ignorando shebang/encoding/imports/comentários puros)
+        first_code = next(
+            (ln for ln in content.splitlines() if ln.strip() and not ln.lstrip().startswith("#")),
+            "",
+        ).lstrip()
+        if not (first_code.startswith('"""') or first_code.startswith("'''")):
+            return True
+        # Toda `def`/`class` precisa ter aspas triplas na próxima linha não-vazia
+        import re as _re
+        for m in _re.finditer(r"^(\s*)(?:async\s+)?(?:def|class)\s+\w+[^\n]*:\s*$", content, _re.MULTILINE):
+            tail = content[m.end():].lstrip()
+            if not (tail.startswith('"""') or tail.startswith("'''")):
+                return True
+        return False
+    if any(lowered.endswith(ext) for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs")):
+        import re as _re
+        for m in _re.finditer(
+            r"^(\s*)export\s+(?:default\s+)?(?:async\s+)?(?:function|class)\s+\w+",
+            content,
+            _re.MULTILINE,
+        ):
+            # Procurar `/**` nas linhas imediatamente acima (máx 2 linhas vazias entre)
+            preceding = content[: m.start()].rstrip().splitlines()[-4:]
+            if not any("*/" in ln for ln in preceding):
+                return True
+        return False
+    if lowered.endswith(".go") or lowered.endswith(".java"):
+        import re as _re
+        pattern = r"^(\s*)(?:public\s+|private\s+|protected\s+)?(?:func|class)\s+\w+"
+        for m in _re.finditer(pattern, content, _re.MULTILINE):
+            preceding = content[: m.start()].rstrip().splitlines()[-4:]
+            if not any(ln.lstrip().startswith(("//", "/**", "*")) for ln in preceding):
+                return True
+        return False
+    return False
+
+
 # ============================================================================
 # Pydantic Models
 # ============================================================================
@@ -219,6 +279,17 @@ async def generate_scaffold(
 
     prompt = f"""Você é um engenheiro de software sênior. Gere o scaffold completo de um projeto com código fonte REAL.
 
+## REGRA INEGOCIÁVEL — DOCSTRINGS OBRIGATÓRIAS
+
+**TODO arquivo de código DEVE ter docstrings. Sem exceção, sem parametrização.**
+
+- **Python (.py)**: docstring no topo do módulo (aspas triplas) + docstring em toda classe + docstring em toda função/método (exceto `__init__` se trivial). Use PEP 257.
+- **TypeScript/JavaScript (.ts/.tsx/.js/.jsx)**: bloco JSDoc (`/** ... */`) em toda função exportada, classe e componente React. Inclua `@param`, `@returns`.
+- **Go (.go)**: comentário iniciando com o nome do identificador em toda função, tipo e package (godoc).
+- **Java (.java)**: Javadoc (`/** ... */`) em toda classe e método público.
+
+Arquivos sem docstrings serão rejeitados pela validação automática e marcados como TODO. Isso atrasa o projeto — faça direito na primeira vez.
+
 ## Projeto
 - Nome: {project.name}
 - Slug: {project.slug}
@@ -385,6 +456,28 @@ Status possíveis:
                     f["status"] = "todo"
                 else:
                     f["status"] = "complete"
+
+        # Validação OBRIGATÓRIA de docstrings — arquivos sem docstring caem para status=todo
+        docstring_failures = []
+        for f in files:
+            if f.get("status") != "complete":
+                continue
+            path = f.get("path", "")
+            content = f.get("content", "")
+            if _missing_required_docstring(path, content):
+                f["status"] = "todo"
+                f["content"] = (
+                    f"# [DOCSTRING MISSING] Regerar este arquivo com docstrings completas.\n"
+                    f"# Regra: todo módulo, classe e função exige docstring (PEP 257 para Python, JSDoc para TS/JS).\n\n"
+                    + content
+                )
+                docstring_failures.append(path)
+        if docstring_failures:
+            logger.warning(
+                "scaffold.docstring_validation_failed",
+                project_id=str(project_id),
+                files=docstring_failures,
+            )
 
         logger.info(
             "scaffold.generation_success",
