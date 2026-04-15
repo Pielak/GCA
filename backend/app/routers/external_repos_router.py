@@ -306,18 +306,21 @@ async def get_analysis_results(
     db: AsyncSession = Depends(get_db),
 ):
     """Retorna resultados da análise para o frontend."""
-    # Buscar resultado da análise
+    # Buscar todos os resultados da análise (um por categoria)
     result = await db.execute(
         select(RepoAnalysisResult)
         .where(
             (RepoAnalysisResult.repo_id == repo_id) &
             (RepoAnalysisResult.project_id == project_id)
         )
-        .order_by(RepoAnalysisResult.created_at.desc())
+        .order_by(RepoAnalysisResult.category)
     )
-    analysis = result.scalar_one_or_none()
-    if not analysis:
+    all_results = result.scalars().all()
+    if not all_results:
         raise HTTPException(status_code=404, detail="Análise não encontrada para este repositório")
+
+    # Usar o primeiro resultado para dados compartilhados (stack, compat, etc.)
+    analysis = all_results[0]
 
     # Buscar roadmap de integração
     roadmap_result = await db.execute(
@@ -351,35 +354,43 @@ async def get_analysis_results(
             return val
 
     return {
-        "stack": {
-            "primary_language": analysis.primary_language,
-            "framework_name": analysis.framework_name,
-            "framework_version": analysis.framework_version,
-            "has_docker": analysis.has_docker,
+        "stack": safe_json(analysis.stack_json) or {
+            "language": {"primary": analysis.primary_language},
+            "repository": {"files_total": 0},
+            "frameworks": [{"name": analysis.framework_name, "version": analysis.framework_version}] if analysis.framework_name else [],
+            "has_dockerfile": analysis.has_docker,
             "has_cicd": analysis.has_cicd,
             "has_tests": analysis.has_tests,
-            "details": safe_json(analysis.stack_json),
         },
-        "vulnerabilities": {
-            "count": analysis.vulnerabilities_count,
-            "critical": analysis.critical_vulnerabilities,
-            "details": safe_json(analysis.vulnerabilities_json),
+        "vulnerabilities": safe_json(analysis.vulnerabilities_json) or {
+            "security_summary": {
+                "total_vulnerabilities": analysis.vulnerabilities_count,
+                "critical": analysis.critical_vulnerabilities,
+                "risk_level": analysis.risk_level,
+            },
+            "vulnerabilities": [],
         },
-        "compatibility": {
-            "backend_compatible": analysis.gca_backend_compatible,
-            "frontend_compatible": analysis.gca_frontend_compatible,
-            "database_compatible": analysis.gca_database_compatible,
-            "integration_effort_days": analysis.gca_integration_effort_days,
-            "matrix": safe_json(analysis.compatibility_matrix),
+        "compatibility": safe_json(analysis.compatibility_matrix) or {
+            "compatibility_assessment": {
+                "overall_status": analysis.gca_overall_status,
+                "effort_estimate_days": analysis.gca_integration_effort_days,
+            },
+            "gca_backend_compatibility": {"status": "compatível" if analysis.gca_backend_compatible else "incompatível", "reason": ""},
+            "gca_frontend_compatibility": {"status": "compatível" if analysis.gca_frontend_compatible else "incompatível", "reason": ""},
+            "gca_database_compatibility": {"status": "compatível" if analysis.gca_database_compatible else "incompatível", "reason": ""},
         },
         "gca_overall_status": analysis.gca_overall_status,
         "risk_level": analysis.risk_level,
-        "category": analysis.category,
-        "summary": analysis.summary,
-        "files_analyzed": analysis.files_analyzed,
-        "ai_provider_used": analysis.ai_provider_used,
-        "metrics": safe_json(analysis.metrics),
-        "categories": safe_json(analysis.metrics) if analysis.metrics else [],
+        "categories": [
+            {
+                "category": r.category,
+                "summary": r.summary,
+                "files_analyzed": r.files_analyzed,
+                "ai_provider": r.ai_provider_used,
+                "metrics": safe_json(r.metrics) if r.metrics else {},
+            }
+            for r in all_results
+        ],
         "roadmap": [
             {
                 "id": str(r.id),
@@ -395,10 +406,9 @@ async def get_analysis_results(
         "injected_documents": [
             {
                 "id": str(d.id),
-                "original_filename": d.original_filename,
+                "filename": d.original_filename,
                 "file_type": d.file_type,
-                "document_category": d.document_category,
-                "arguider_status": d.arguider_status,
+                "source_url": d.source_url,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
             }
             for d in injected_docs
