@@ -1,7 +1,36 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { GitBranch, Plus, Trash2, Play, Loader2, CheckCircle, AlertTriangle, Clock, RefreshCw, Eye, EyeOff } from 'lucide-react'
+import { GitBranch, Plus, Trash2, Play, Loader2, CheckCircle, AlertTriangle, Clock, RefreshCw, Eye, EyeOff, BarChart3, X, ChevronDown, ChevronRight, FileText, Shield, Layers, FolderTree, BookOpen } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+
+interface AnalysisResult {
+  stack: Record<string, any>
+  vulnerabilities: Record<string, any>
+  compatibility: Record<string, any>
+  gca_overall_status: string | null
+  risk_level: string | null
+  categories: Array<{
+    category: string
+    summary: string
+    metrics: Record<string, any>
+    files_analyzed: number
+    ai_provider: string
+  }>
+  roadmap: Array<{
+    step_number: number
+    title: string
+    description: string
+    effort_hours: number
+    status: string
+  }>
+  injected_documents: Array<{
+    id: string
+    filename: string
+    file_type: string
+    source_url: string
+    created_at: string
+  }>
+}
 
 interface ExternalRepo {
   id: string
@@ -46,6 +75,12 @@ export function ExternalReposPage() {
   const [showToken, setShowToken] = useState(false)
   const [saving, setSaving] = useState(false)
 
+  // Análise
+  const [analysisData, setAnalysisData] = useState<AnalysisResult | null>(null)
+  const [showAnalysis, setShowAnalysis] = useState<string | null>(null)
+  const [analysisLoading, setAnalysisLoading] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>('stack')
+
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -63,6 +98,26 @@ export function ExternalReposPage() {
   }, [projectId])
 
   useEffect(() => { loadRepos() }, [loadRepos])
+
+  const loadAnalysis = async (repoId: string) => {
+    if (!projectId) return
+    if (showAnalysis === repoId) {
+      setShowAnalysis(null)
+      setAnalysisData(null)
+      return
+    }
+    setAnalysisLoading(true)
+    setShowAnalysis(repoId)
+    setActiveTab('stack')
+    try {
+      const res = await apiClient.get(`/projects/${projectId}/external-repos/${repoId}/analysis`)
+      setAnalysisData(res.data)
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || 'Erro ao carregar análise', 'error')
+      setShowAnalysis(null)
+    }
+    setAnalysisLoading(false)
+  }
 
   const handleAdd = async () => {
     if (!repoUrl.trim()) return
@@ -268,6 +323,25 @@ export function ExternalReposPage() {
 
                   {/* Ações */}
                   <div className="flex items-center gap-1 flex-shrink-0">
+                    {repo.status === 'completed' && (
+                      <button
+                        onClick={() => loadAnalysis(repo.id)}
+                        disabled={analysisLoading && showAnalysis === repo.id}
+                        className={`flex items-center gap-1 px-3 py-1.5 text-xs rounded-lg transition-colors ${
+                          showAnalysis === repo.id
+                            ? 'bg-violet-600/30 border border-violet-500/40 text-violet-300'
+                            : 'bg-violet-500/20 border border-violet-600/30 text-violet-400 hover:bg-violet-500/30'
+                        }`}
+                        title="Ver análise do repositório"
+                      >
+                        {analysisLoading && showAnalysis === repo.id ? (
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        ) : (
+                          <BarChart3 className="w-3.5 h-3.5" />
+                        )}
+                        Ver Análise
+                      </button>
+                    )}
                     <button
                       onClick={() => handleRead(repo)}
                       disabled={isReading || actionLoading === repo.id}
@@ -290,6 +364,268 @@ export function ExternalReposPage() {
               </div>
             )
           })}
+        </div>
+      )}
+
+      {/* Painel de análise */}
+      {showAnalysis && (
+        <div className="bg-dark-200/50 border border-dark-100/20 rounded-xl overflow-hidden">
+          {/* Header do painel */}
+          <div className="flex items-center justify-between px-5 py-3 border-b border-dark-100/20">
+            <h3 className="text-white text-sm font-semibold flex items-center gap-2">
+              <BarChart3 className="w-4 h-4 text-violet-400" />
+              Resultado da Análise
+            </h3>
+            <button
+              onClick={() => { setShowAnalysis(null); setAnalysisData(null) }}
+              className="p-1 rounded-lg text-dark-100/60 hover:text-white hover:bg-dark-200 transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Tabs */}
+          <div className="flex border-b border-dark-100/20 px-2">
+            {[
+              { key: 'stack', label: 'Stack Detectado', icon: Layers },
+              { key: 'security', label: 'Segurança', icon: Shield },
+              { key: 'compatibility', label: 'Compatibilidade GCA', icon: CheckCircle },
+              { key: 'categories', label: 'Categorias', icon: FolderTree },
+              { key: 'documents', label: 'Documentos', icon: BookOpen },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 ${
+                  activeTab === tab.key
+                    ? 'border-violet-500 text-violet-300'
+                    : 'border-transparent text-dark-100/60 hover:text-dark-100/80'
+                }`}
+              >
+                <tab.icon className="w-3.5 h-3.5" />
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Conteúdo da tab */}
+          <div className="p-5">
+            {analysisLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
+              </div>
+            ) : !analysisData ? (
+              <p className="text-dark-100/60 text-sm text-center py-8">Nenhum dado de análise disponível.</p>
+            ) : (
+              <>
+                {/* Tab 1: Stack Detectado */}
+                {activeTab === 'stack' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                      {[
+                        { label: 'Linguagem', value: analysisData.stack?.language || '-' },
+                        { label: 'Arquivos Total', value: analysisData.stack?.files_total ?? '-' },
+                        { label: 'Docker', value: analysisData.stack?.has_docker ? 'Sim' : 'Não' },
+                        { label: 'Testes', value: analysisData.stack?.has_tests ? 'Sim' : 'Não' },
+                        { label: 'CI/CD', value: analysisData.stack?.has_ci_cd ? 'Sim' : 'Não' },
+                      ].map(item => (
+                        <div key={item.label} className="bg-dark-200 rounded-lg p-3">
+                          <p className="text-dark-100/60 text-xs">{item.label}</p>
+                          <p className="text-white text-sm font-medium mt-0.5">{String(item.value)}</p>
+                        </div>
+                      ))}
+                    </div>
+                    {analysisData.stack?.frameworks && Array.isArray(analysisData.stack.frameworks) && analysisData.stack.frameworks.length > 0 && (
+                      <div>
+                        <p className="text-dark-100/60 text-xs mb-2">Frameworks Detectados</p>
+                        <div className="flex flex-wrap gap-2">
+                          {analysisData.stack.frameworks.map((fw: string, i: number) => (
+                            <span key={i} className="px-2.5 py-1 bg-violet-500/20 text-violet-300 text-xs rounded-full">
+                              {fw}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 2: Segurança */}
+                {activeTab === 'security' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-dark-100/60 text-xs">Nível de Risco:</span>
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                        analysisData.risk_level === 'low' ? 'bg-emerald-500/20 text-emerald-400'
+                        : analysisData.risk_level === 'medium' ? 'bg-amber-500/20 text-amber-400'
+                        : analysisData.risk_level === 'high' ? 'bg-red-500/20 text-red-400'
+                        : 'bg-dark-200 text-dark-100/60'
+                      }`}>
+                        {analysisData.risk_level === 'low' ? 'Baixo'
+                         : analysisData.risk_level === 'medium' ? 'Médio'
+                         : analysisData.risk_level === 'high' ? 'Alto'
+                         : analysisData.risk_level || 'N/A'}
+                      </span>
+                    </div>
+                    {analysisData.vulnerabilities?.items && Array.isArray(analysisData.vulnerabilities.items) ? (
+                      <div className="space-y-2">
+                        {analysisData.vulnerabilities.items.map((vuln: any, i: number) => (
+                          <div key={i} className="bg-dark-200 rounded-lg p-3 flex items-start gap-3">
+                            <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${
+                              vuln.severity === 'critical' ? 'bg-red-500/20 text-red-400'
+                              : vuln.severity === 'high' ? 'bg-amber-500/20 text-amber-400'
+                              : vuln.severity === 'medium' ? 'bg-amber-500/20 text-amber-400'
+                              : 'bg-dark-200 text-dark-100/60'
+                            }`}>
+                              {vuln.severity || 'info'}
+                            </span>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-white text-sm">{vuln.description || vuln.name || 'Vulnerabilidade detectada'}</p>
+                              {vuln.recommended_version && (
+                                <p className="text-dark-100/60 text-xs mt-1">Versão recomendada: {vuln.recommended_version}</p>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-dark-100/60 text-sm">Nenhuma vulnerabilidade identificada.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 3: Compatibilidade GCA */}
+                {activeTab === 'compatibility' && (
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <span className="text-dark-100/60 text-xs">Status Geral:</span>
+                      <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                        analysisData.gca_overall_status === 'compativel' ? 'bg-emerald-500/20 text-emerald-400'
+                        : analysisData.gca_overall_status === 'requer_adaptacao' ? 'bg-amber-500/20 text-amber-400'
+                        : analysisData.gca_overall_status === 'incompativel' ? 'bg-red-500/20 text-red-400'
+                        : 'bg-dark-200 text-dark-100/60'
+                      }`}>
+                        {analysisData.gca_overall_status === 'compativel' ? 'Compatível'
+                         : analysisData.gca_overall_status === 'requer_adaptacao' ? 'Requer Adaptação'
+                         : analysisData.gca_overall_status === 'incompativel' ? 'Incompatível'
+                         : analysisData.gca_overall_status || 'N/A'}
+                      </span>
+                    </div>
+
+                    {analysisData.compatibility?.effort_estimate && (
+                      <div className="bg-dark-200 rounded-lg p-3">
+                        <p className="text-dark-100/60 text-xs">Estimativa de Esforço</p>
+                        <p className="text-white text-sm font-medium mt-0.5">{analysisData.compatibility.effort_estimate}</p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      {['backend', 'frontend', 'database'].map(area => {
+                        const data = analysisData.compatibility?.[area]
+                        if (!data) return null
+                        return (
+                          <div key={area} className="bg-dark-200 rounded-lg p-4">
+                            <p className="text-violet-400 text-xs font-semibold uppercase mb-2">{area}</p>
+                            <p className="text-white text-sm">{data.status || data.compatible ? 'Compatível' : 'N/A'}</p>
+                            {data.notes && <p className="text-dark-100/60 text-xs mt-1">{data.notes}</p>}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {analysisData.roadmap && analysisData.roadmap.length > 0 && (
+                      <div>
+                        <p className="text-dark-100/80 text-xs font-semibold mb-2">Roadmap de Adaptação</p>
+                        <div className="space-y-2">
+                          {analysisData.roadmap.map(step => (
+                            <div key={step.step_number} className="bg-dark-200 rounded-lg p-3 flex items-start gap-3">
+                              <span className="w-6 h-6 rounded-full bg-violet-500/20 text-violet-300 text-xs font-bold flex items-center justify-center flex-shrink-0">
+                                {step.step_number}
+                              </span>
+                              <div className="flex-1 min-w-0">
+                                <p className="text-white text-sm font-medium">{step.title}</p>
+                                <p className="text-dark-100/60 text-xs mt-0.5">{step.description}</p>
+                                <div className="flex items-center gap-3 mt-1.5">
+                                  <span className="text-dark-100/60 text-[10px]">{step.effort_hours}h estimadas</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded ${
+                                    step.status === 'done' ? 'bg-emerald-500/20 text-emerald-400'
+                                    : step.status === 'in_progress' ? 'bg-blue-500/20 text-blue-300'
+                                    : 'bg-dark-200 text-dark-100/60 border border-dark-100/20'
+                                  }`}>
+                                    {step.status === 'done' ? 'Concluído' : step.status === 'in_progress' ? 'Em andamento' : 'Pendente'}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 4: Categorias */}
+                {activeTab === 'categories' && (
+                  <div className="space-y-2">
+                    {analysisData.categories && analysisData.categories.length > 0 ? (
+                      analysisData.categories.map((cat, i) => (
+                        <details key={i} className="bg-dark-200 rounded-lg group">
+                          <summary className="flex items-center gap-2 px-4 py-3 cursor-pointer text-white text-sm font-medium hover:bg-dark-200/80 rounded-lg transition-colors list-none">
+                            <ChevronRight className="w-4 h-4 text-dark-100/60 group-open:rotate-90 transition-transform" />
+                            <span className="flex-1">{cat.category}</span>
+                            <span className="text-dark-100/60 text-xs">{cat.files_analyzed} arquivos</span>
+                            {cat.ai_provider && (
+                              <span className="text-xs px-2 py-0.5 rounded bg-violet-500/20 text-violet-300">{cat.ai_provider}</span>
+                            )}
+                          </summary>
+                          <div className="px-4 pb-3 pt-0">
+                            <p className="text-dark-100/80 text-sm leading-relaxed">{cat.summary}</p>
+                            {cat.metrics && Object.keys(cat.metrics).length > 0 && (
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {Object.entries(cat.metrics).map(([k, v]) => (
+                                  <span key={k} className="text-xs px-2 py-0.5 bg-dark-200/50 border border-dark-100/20 rounded text-dark-100/60">
+                                    {k}: {String(v)}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        </details>
+                      ))
+                    ) : (
+                      <p className="text-dark-100/60 text-sm text-center py-4">Nenhuma categoria analisada.</p>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 5: Documentos */}
+                {activeTab === 'documents' && (
+                  <div className="space-y-2">
+                    {analysisData.injected_documents && analysisData.injected_documents.length > 0 ? (
+                      analysisData.injected_documents.map(doc => (
+                        <div key={doc.id} className="bg-dark-200 rounded-lg p-3 flex items-center gap-3">
+                          <FileText className="w-4 h-4 text-violet-400 flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <p className="text-white text-sm truncate">{doc.filename}</p>
+                              <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 flex-shrink-0">EXTERNO</span>
+                            </div>
+                            <div className="flex items-center gap-3 mt-0.5 text-dark-100/60 text-xs">
+                              <span>{doc.file_type}</span>
+                              {doc.source_url && <span className="truncate max-w-xs">{doc.source_url}</span>}
+                              <span>{new Date(doc.created_at).toLocaleString('pt-BR')}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-dark-100/60 text-sm text-center py-4">Nenhum documento injetado.</p>
+                    )}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
