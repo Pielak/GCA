@@ -62,6 +62,43 @@ class AcceptInviteResponse(BaseModel):
     first_access_required: bool
 
 
+@router.get("/by-slug/{slug}")
+async def get_project_by_slug(
+    slug: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Resolução pública de projeto por short_slug.
+    NÃO requer autenticação — usado na tela de login por projeto.
+    Retorna apenas dados públicos (id, nome, status).
+    """
+    from app.models.base import Project
+    from sqlalchemy import select as sa_select
+
+    result = await db.execute(
+        sa_select(Project).where(Project.short_slug == slug)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Projeto não encontrado",
+        )
+
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Projeto arquivado",
+        )
+
+    return {
+        "project_id": str(project.id),
+        "name": project.name,
+        "status": project.status or "active",
+    }
+
+
 @router.get("/")
 @router.get("")
 async def list_projects(
@@ -501,28 +538,137 @@ async def get_ocg_history(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Histórico de versões do OCG."""
+    """Histórico de versões do OCG com autor, trigger e flag de rollback disponível."""
     from sqlalchemy import select
-    from app.models.base import OCGDeltaLog
+    from app.models.base import OCGDeltaLog, User, OCG
 
     result = await db.execute(
-        select(OCGDeltaLog)
+        select(OCGDeltaLog, User)
+        .outerjoin(User, OCGDeltaLog.changed_by == User.id)
         .where(OCGDeltaLog.project_id == project_id)
         .order_by(OCGDeltaLog.created_at.desc())
         .limit(50)
     )
-    deltas = result.scalars().all()
+    rows = result.all()
+
+    # Versão atual para marcar qual linha permite rollback (todas exceto a atual com snapshot)
+    current_ocg = await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+    )
+    current = current_ocg.scalar_one_or_none()
+    current_version = current.version if current else 0
+
     return {
+        "current_version": current_version,
         "history": [
             {
+                "id": str(d.id),
                 "version_from": d.ocg_version_from,
                 "version_to": d.ocg_version_to,
                 "change_summary": d.change_summary,
                 "fields_changed": d.fields_changed,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
+                "changed_by": {
+                    "id": str(u.id),
+                    "full_name": u.full_name or u.email.split("@")[0],
+                    "email": u.email,
+                } if u else None,
+                "trigger_source": d.trigger_source,
+                "can_rollback": d.ocg_snapshot is not None and d.ocg_version_to != current_version,
             }
-            for d in deltas
-        ]
+            for d, u in rows
+        ],
+    }
+
+
+@router.get("/{project_id}/ocg/snapshot/{version_to}")
+async def get_ocg_snapshot(
+    project_id: UUID,
+    version_to: int,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna o snapshot completo do OCG na versão indicada."""
+    from sqlalchemy import select
+    from app.models.base import OCGDeltaLog
+
+    result = await db.execute(
+        select(OCGDeltaLog)
+        .where(OCGDeltaLog.project_id == project_id, OCGDeltaLog.ocg_version_to == version_to)
+        .order_by(OCGDeltaLog.created_at.desc())
+        .limit(1)
+    )
+    delta = result.scalar_one_or_none()
+    if not delta or not delta.ocg_snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot não disponível para essa versão")
+    import json as _json
+    return {"version": version_to, "snapshot": _json.loads(delta.ocg_snapshot)}
+
+
+@router.post("/{project_id}/ocg/rollback/{version_to}")
+async def rollback_ocg(
+    project_id: UUID,
+    version_to: int,
+    permissions: dict = Depends(require_action("project:manage_team")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Reverte OCG para snapshot de versão anterior. Cria nova versão com trigger_source='rollback'."""
+    from sqlalchemy import select
+    from app.models.base import OCGDeltaLog, OCG
+    import json as _json
+    from datetime import datetime, timezone
+
+    current_user_id = permissions["user_id"]
+
+    # Buscar snapshot
+    snap_result = await db.execute(
+        select(OCGDeltaLog)
+        .where(OCGDeltaLog.project_id == project_id, OCGDeltaLog.ocg_version_to == version_to)
+        .order_by(OCGDeltaLog.created_at.desc())
+        .limit(1)
+    )
+    delta = snap_result.scalar_one_or_none()
+    if not delta or not delta.ocg_snapshot:
+        raise HTTPException(status_code=404, detail="Snapshot não disponível para rollback")
+
+    snapshot = _json.loads(delta.ocg_snapshot)
+
+    # OCG atual
+    ocg_result = await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+    )
+    ocg = ocg_result.scalar_one_or_none()
+    if not ocg:
+        raise HTTPException(status_code=404, detail="OCG do projeto não encontrado")
+
+    version_from = ocg.version
+    new_version = version_from + 1
+
+    ocg.ocg_data = _json.dumps(snapshot, ensure_ascii=False)
+    ocg.version = new_version
+    ocg.updated_at = datetime.now(timezone.utc)
+    db.add(ocg)
+
+    # Gravar delta de rollback (snapshot mantém histórico)
+    rollback_delta = OCGDeltaLog(
+        project_id=project_id,
+        document_id=None,
+        ocg_version_from=version_from,
+        ocg_version_to=new_version,
+        fields_changed=_json.dumps({"__rollback__": {"restored_from_version": version_to}}, ensure_ascii=False),
+        change_summary=f"Rollback para versão {version_to}",
+        changed_by=current_user_id,
+        trigger_source="rollback",
+        ocg_snapshot=_json.dumps(snapshot, ensure_ascii=False),
+    )
+    db.add(rollback_delta)
+    await db.commit()
+
+    return {
+        "success": True,
+        "previous_version": version_from,
+        "new_version": new_version,
+        "restored_from": version_to,
     }
 
 
