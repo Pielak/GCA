@@ -268,7 +268,13 @@ class IngestionService:
 
                         # Atualizar OCG via IA
                         updater = OCGUpdaterService(db)
-                        update_result = await updater.update_ocg_from_arguider(project_id, analysis_data)
+                        update_result = await updater.update_ocg_from_arguider(
+                            project_id=project_id,
+                            arguider_analysis=analysis_data,
+                            document_id=document_id,
+                            actor_id=doc.uploaded_by if doc else None,
+                            trigger_source="document_ingestion",
+                        )
 
                         # Propagar se houve mudanças
                         if update_result and update_result.get("changes"):

@@ -52,9 +52,10 @@ class OCGUpdaterService:
         self,
         project_id: UUID,
         arguider_analysis: Dict[str, Any],
-        actor_id: Optional[UUID] = None,
         document_id: Optional[UUID] = None,
-    ) -> Dict[str, Any]:
+        actor_id: Optional[UUID] = None,
+        trigger_source: str = "document_ingestion",
+    ) -> Optional[Dict[str, Any]]:
         """
         Atualiza o OCG do projeto com base na análise do Arguidor.
 
@@ -121,6 +122,9 @@ class OCGUpdaterService:
             ocg_version_from=version_from,
             ocg_version_to=version_to,
             changes=changes,
+            changed_by=actor_id,
+            trigger_source=trigger_source,
+            ocg_snapshot=updated_ocg,
         )
 
         # 6. Registrar billing
@@ -400,24 +404,11 @@ class OCGUpdaterService:
         ocg_version_from: int,
         ocg_version_to: int,
         changes: List[Dict[str, Any]],
+        changed_by: Optional[UUID] = None,
+        trigger_source: str = "document_ingestion",
+        ocg_snapshot: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Registra o delta de mudança no ocg_delta_log.
-        document_id é opcional neste contexto (update disparado por Arguidor, não por ingestão direta).
-        """
-        if not document_id:
-            # OCGDeltaLog requer document_id por FK — registramos apenas se disponível.
-            # Quando não há documento associado, logamos via structured logging.
-            logger.info(
-                "ocg_updater.delta_skipped_no_document",
-                project_id=str(project_id),
-                version_from=ocg_version_from,
-                version_to=ocg_version_to,
-                changes_count=len(changes),
-            )
-            return
-
-        # Construir o campo fields_changed {field: {old, new, reasoning}}
+        """Registra delta sempre — document_id opcional (updates não-ingestão também contam)."""
         fields_changed: Dict[str, Any] = {}
         for change in changes:
             field = change.get("field", "unknown")
@@ -429,9 +420,9 @@ class OCGUpdaterService:
 
         summary_parts = [
             f"{c.get('field', '?')}: {c.get('reasoning', '')}"
-            for c in changes[:5]  # máximo 5 no resumo
+            for c in changes[:5]
         ]
-        change_summary = "; ".join(summary_parts) if summary_parts else "Nenhuma mudança registrada."
+        change_summary = "; ".join(summary_parts) if summary_parts else f"Mudança via {trigger_source}"
 
         delta_entry = OCGDeltaLog(
             project_id=project_id,
@@ -440,6 +431,9 @@ class OCGUpdaterService:
             ocg_version_to=ocg_version_to,
             fields_changed=json.dumps(fields_changed, ensure_ascii=False),
             change_summary=change_summary,
+            changed_by=changed_by,
+            trigger_source=trigger_source,
+            ocg_snapshot=json.dumps(ocg_snapshot, ensure_ascii=False) if ocg_snapshot else None,
         )
         self.db.add(delta_entry)
         await self.db.flush()
