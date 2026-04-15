@@ -9,11 +9,13 @@ from uuid import UUID
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timezone
+import asyncio
+import json
 import structlog
 
-from app.db.database import get_db
+from app.db.database import get_db, AsyncSessionLocal
 from app.middleware.auth import get_current_user_from_token
-from app.models.base import ProjectExternalRepo
+from app.models.base import ProjectExternalRepo, RepoAnalysisResult, RepoIntegrationRoadmap, IngestedDocument
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["external-repos"])
@@ -165,12 +167,14 @@ async def trigger_read(
     repo.error_message = None
     await db.commit()
 
-    # Disparar n8n webhook
+    # Disparar n8n webhook com fallback para análise direta
     try:
         import httpx
         from app.core.config import settings
 
-        n8n_url = getattr(settings, 'N8N_WEBHOOK_URL', None) or "http://n8n:5678/webhook/read-external-repo"
+        n8n_base = getattr(settings, 'N8N_WEBHOOK_URL', None) or "http://n8n:5678/webhook"
+        n8n_url = f"{n8n_base}/gca-external-repo-reader/webhook/read-external-repo"
+        analyze_url = f"{settings.API_PREFIX}/projects/{project_id}/external-repos/{repo_id}/analyze"
 
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(n8n_url, json={
@@ -181,20 +185,20 @@ async def trigger_read(
                 "branch": repo.branch,
                 "access_token": access_token,
                 "callback_url": f"{settings.API_PREFIX}/projects/{project_id}/external-repos/{repo_id}/callback",
+                "analyze_url": analyze_url,
             })
 
         if resp.status_code not in (200, 201):
             logger.warning("external_repo.n8n_trigger_failed", status=resp.status_code, body=resp.text[:200])
-            # Não bloquear — n8n pode não estar configurado ainda
-            repo.status = "error"
-            repo.error_message = f"n8n webhook retornou {resp.status_code}. Verifique se o workflow está ativo."
-            await db.commit()
+            # Fallback: rodar análise diretamente sem n8n
+            logger.info("external_repo.fallback_direct_analysis", repo_id=str(repo_id))
+            asyncio.create_task(_run_analysis_fallback(project_id, repo_id))
 
     except Exception as e:
         logger.warning("external_repo.n8n_trigger_error", error=str(e))
-        repo.status = "error"
-        repo.error_message = f"Não foi possível conectar ao n8n: {str(e)[:200]}"
-        await db.commit()
+        # Fallback: rodar análise diretamente sem n8n
+        logger.info("external_repo.fallback_direct_analysis", repo_id=str(repo_id))
+        asyncio.create_task(_run_analysis_fallback(project_id, repo_id))
 
     logger.info("external_repo.read_triggered",
                 repo_id=str(repo_id),
@@ -253,3 +257,204 @@ async def repo_read_callback(
                 files_processed=req.files_processed)
 
     return {"message": "Status atualizado"}
+
+
+async def _run_analysis_fallback(project_id: UUID, repo_id: UUID):
+    """Executa análise direta quando n8n não está disponível."""
+    try:
+        from app.services.repo_analysis_service import RepoAnalysisService
+        async with AsyncSessionLocal() as db:
+            service = RepoAnalysisService(db)
+            await service.analyze_repository(project_id, repo_id)
+            logger.info("external_repo.fallback_analysis_complete", repo_id=str(repo_id))
+    except Exception as e:
+        logger.error("external_repo.fallback_analysis_error", repo_id=str(repo_id), error=str(e))
+        try:
+            async with AsyncSessionLocal() as db:
+                repo = await db.get(ProjectExternalRepo, repo_id)
+                if repo:
+                    repo.status = "error"
+                    repo.error_message = f"Análise direta falhou: {str(e)[:200]}"
+                    await db.commit()
+        except Exception:
+            pass
+
+
+# ──────────────────────────────────────────────────────────
+# Endpoints de Análise
+# ──────────────────────────────────────────────────────────
+
+
+@router.post("/projects/{project_id}/external-repos/{repo_id}/analyze")
+async def analyze_repo(
+    project_id: UUID,
+    repo_id: UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Executa análise completa do repositório (chamado pelo n8n ou diretamente)."""
+    from app.services.repo_analysis_service import RepoAnalysisService
+    service = RepoAnalysisService(db)
+    result = await service.analyze_repository(project_id, repo_id)
+    return result
+
+
+@router.get("/projects/{project_id}/external-repos/{repo_id}/analysis")
+async def get_analysis_results(
+    project_id: UUID,
+    repo_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna resultados da análise para o frontend."""
+    # Buscar resultado da análise
+    result = await db.execute(
+        select(RepoAnalysisResult)
+        .where(
+            (RepoAnalysisResult.repo_id == repo_id) &
+            (RepoAnalysisResult.project_id == project_id)
+        )
+        .order_by(RepoAnalysisResult.created_at.desc())
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Análise não encontrada para este repositório")
+
+    # Buscar roadmap de integração
+    roadmap_result = await db.execute(
+        select(RepoIntegrationRoadmap)
+        .where(
+            (RepoIntegrationRoadmap.repo_id == repo_id) &
+            (RepoIntegrationRoadmap.project_id == project_id)
+        )
+        .order_by(RepoIntegrationRoadmap.step_number)
+    )
+    roadmap_items = roadmap_result.scalars().all()
+
+    # Buscar documentos injetados
+    docs_result = await db.execute(
+        select(IngestedDocument)
+        .where(
+            (IngestedDocument.project_id == project_id) &
+            (IngestedDocument.source_repo_id == repo_id)
+        )
+        .order_by(IngestedDocument.created_at.desc())
+    )
+    injected_docs = docs_result.scalars().all()
+
+    # Parse JSON fields com fallback seguro
+    def safe_json(val):
+        if not val:
+            return None
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return val
+
+    return {
+        "stack": {
+            "primary_language": analysis.primary_language,
+            "framework_name": analysis.framework_name,
+            "framework_version": analysis.framework_version,
+            "has_docker": analysis.has_docker,
+            "has_cicd": analysis.has_cicd,
+            "has_tests": analysis.has_tests,
+            "details": safe_json(analysis.stack_json),
+        },
+        "vulnerabilities": {
+            "count": analysis.vulnerabilities_count,
+            "critical": analysis.critical_vulnerabilities,
+            "details": safe_json(analysis.vulnerabilities_json),
+        },
+        "compatibility": {
+            "backend_compatible": analysis.gca_backend_compatible,
+            "frontend_compatible": analysis.gca_frontend_compatible,
+            "database_compatible": analysis.gca_database_compatible,
+            "integration_effort_days": analysis.gca_integration_effort_days,
+            "matrix": safe_json(analysis.compatibility_matrix),
+        },
+        "gca_overall_status": analysis.gca_overall_status,
+        "risk_level": analysis.risk_level,
+        "category": analysis.category,
+        "summary": analysis.summary,
+        "files_analyzed": analysis.files_analyzed,
+        "ai_provider_used": analysis.ai_provider_used,
+        "metrics": safe_json(analysis.metrics),
+        "categories": safe_json(analysis.metrics) if analysis.metrics else [],
+        "roadmap": [
+            {
+                "id": str(r.id),
+                "step_number": r.step_number,
+                "title": r.title,
+                "description": r.description,
+                "effort_hours": r.effort_hours,
+                "status": r.status,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            }
+            for r in roadmap_items
+        ],
+        "injected_documents": [
+            {
+                "id": str(d.id),
+                "original_filename": d.original_filename,
+                "file_type": d.file_type,
+                "document_category": d.document_category,
+                "arguider_status": d.arguider_status,
+                "created_at": d.created_at.isoformat() if d.created_at else None,
+            }
+            for d in injected_docs
+        ],
+        "analyzed_at": analysis.created_at.isoformat() if analysis.created_at else None,
+    }
+
+
+@router.post("/projects/{project_id}/external-repos/{repo_id}/approve-integration")
+async def approve_integration(
+    project_id: UUID,
+    repo_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """GP aprova integração de repos que requerem adaptação."""
+    repo = await db.get(ProjectExternalRepo, repo_id)
+    if not repo or repo.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Repositório não encontrado")
+
+    # Verificar se existe análise com status requer_adaptação
+    result = await db.execute(
+        select(RepoAnalysisResult)
+        .where(
+            (RepoAnalysisResult.repo_id == repo_id) &
+            (RepoAnalysisResult.project_id == project_id)
+        )
+        .order_by(RepoAnalysisResult.created_at.desc())
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=400, detail="Repositório ainda não foi analisado")
+
+    if analysis.gca_overall_status not in ("requer_adaptacao", "requer_adaptação"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Repositório com status '{analysis.gca_overall_status}' não requer aprovação manual"
+        )
+
+    # Aprovar integração
+    repo.is_approved_for_integration = True
+    await db.commit()
+
+    # Disparar injeção dos documentos já analisados
+    try:
+        from app.services.repo_analysis_service import RepoAnalysisService
+        service = RepoAnalysisService(db)
+        await service.analyze_repository(project_id, repo_id)
+        logger.info("external_repo.integration_approved_and_injected",
+                     repo_id=str(repo_id), approved_by=str(current_user_id))
+    except Exception as e:
+        logger.warning("external_repo.injection_after_approval_failed",
+                       repo_id=str(repo_id), error=str(e))
+
+    return {
+        "message": "Integração aprovada com sucesso",
+        "repo_id": str(repo_id),
+        "is_approved_for_integration": True,
+    }
