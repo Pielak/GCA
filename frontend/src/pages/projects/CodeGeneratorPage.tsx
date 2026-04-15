@@ -500,8 +500,13 @@ export function CodeGeneratorPage() {
         alert(`Código com ${issues.length} problema(s). Corrija os erros sublinhados em vermelho antes de salvar.`)
         return
       }
-      await commitFile(path, fileContent)
-      // Limpar markers após save
+      // Validou limpo — commita se houver mudanças, senão só confirma
+      if (hasChanges) {
+        await commitFile(path, fileContent)
+      } else {
+        setSaveSuccess(true)
+        setTimeout(() => setSaveSuccess(false), 2500)
+      }
       applyMarkers([])
       setValidationErrors([])
     } catch (err: any) {
@@ -696,7 +701,7 @@ export function CodeGeneratorPage() {
               <>
                 <button
                   onClick={handleReviewAndSave}
-                  disabled={validating || saving || (!hasChanges && !validationBlocked)}
+                  disabled={validating || saving || (!selectedFile && !newFilePath)}
                   className="flex items-center gap-1 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                 >
                   {validating ? (
