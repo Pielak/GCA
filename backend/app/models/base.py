@@ -101,6 +101,7 @@ class Project(Base):
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     name = Column(String(255), nullable=False)
     slug = Column(String(100), nullable=False)  # Used to create proj_{slug}_* schemas
+    short_slug = Column(String(15), unique=True, nullable=True, index=True)  # Human-friendly URL slug e.g. /p/financehub-pro
     description = Column(String, nullable=True)
 
     # Gate bloqueante: tipo de entregável
@@ -237,6 +238,14 @@ class ProjectExternalRepo(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    # --- Campos de análise (novos) ---
+    stack_json = Column(Text, nullable=True)
+    compatibility_status = Column(String(50), nullable=True)
+    last_compatibility_check = Column(DateTime(timezone=True), nullable=True)
+    ai_provider = Column(String(50), default="deepseek")
+    is_approved_for_integration = Column(Boolean, default=False)
+    approved_by_gp = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
     project = relationship("Project", foreign_keys=[project_id])
 
     __table_args__ = (
@@ -246,6 +255,83 @@ class ProjectExternalRepo(Base):
 
     def __repr__(self):
         return f"<ProjectExternalRepo {self.repo_url} ({self.status})>"
+
+
+class RepoAnalysisResult(Base):
+    """Resultado da análise de repositório externo"""
+    __tablename__ = "repo_analysis_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    repo_id = Column(UUID(as_uuid=True), ForeignKey("project_external_repos.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+
+    # Stack
+    stack_json = Column(Text, nullable=True)
+    primary_language = Column(String(50), nullable=True)
+    framework_name = Column(String(100), nullable=True)
+    framework_version = Column(String(30), nullable=True)
+    has_docker = Column(Boolean, default=False)
+    has_cicd = Column(Boolean, default=False)
+    has_tests = Column(Boolean, default=False)
+
+    # Security
+    vulnerabilities_json = Column(Text, nullable=True)
+    risk_level = Column(String(20), nullable=True)
+    vulnerabilities_count = Column(Integer, default=0)
+    critical_vulnerabilities = Column(Integer, default=0)
+
+    # Compatibility
+    compatibility_matrix = Column(Text, nullable=True)
+    gca_overall_status = Column(String(30), nullable=True)
+    gca_integration_effort_days = Column(Integer, nullable=True)
+    gca_backend_compatible = Column(Boolean, nullable=True)
+    gca_frontend_compatible = Column(Boolean, nullable=True)
+    gca_database_compatible = Column(Boolean, nullable=True)
+
+    # Analysis
+    category = Column(String(50), nullable=True)
+    summary = Column(Text, nullable=True)
+    metrics = Column(Text, nullable=True)
+    files_analyzed = Column(Integer, default=0)
+    ai_provider_used = Column(String(50), nullable=True)
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    repo = relationship("ProjectExternalRepo", foreign_keys=[repo_id])
+    project = relationship("Project", foreign_keys=[project_id])
+
+    __table_args__ = (
+        Index("idx_repo_analysis_repo_id", repo_id),
+        Index("idx_repo_analysis_gca_status", gca_overall_status),
+    )
+
+    def __repr__(self):
+        return f"<RepoAnalysisResult repo={self.repo_id} status={self.gca_overall_status}>"
+
+
+class RepoIntegrationRoadmap(Base):
+    """Roadmap de integração de repositório externo"""
+    __tablename__ = "repo_integration_roadmaps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    repo_id = Column(UUID(as_uuid=True), ForeignKey("project_external_repos.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    step_number = Column(Integer, nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    effort_hours = Column(Integer, nullable=True)
+    status = Column(String(20), default="pending")
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    repo = relationship("ProjectExternalRepo", foreign_keys=[repo_id])
+
+    def __repr__(self):
+        return f"<RepoIntegrationRoadmap step={self.step_number} title={self.title}>"
 
 
 class AIUsageLog(Base):
@@ -825,6 +911,11 @@ class IngestedDocument(Base):
     ocg_updated = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # --- Rastreabilidade de origem (novos) ---
+    source_type = Column(String(20), default="upload")
+    source_url = Column(Text, nullable=True)
+    source_repo_id = Column(UUID(as_uuid=True), ForeignKey("project_external_repos.id", ondelete="SET NULL"), nullable=True)
 
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])
