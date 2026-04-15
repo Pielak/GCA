@@ -165,6 +165,7 @@ export function OCGPage() {
   const [ocg, setOcg] = useState<OCGData | null>(null)
   const [project, setProject] = useState<ProjectData | null>(null)
   const [history, setHistory] = useState<any[]>([])
+  const [currentVersion, setCurrentVersion] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<string | null>('composite')
@@ -205,6 +206,7 @@ export function OCGPage() {
     try {
       const histRes = await apiClient.get(`/projects/${id}/ocg/history`)
       setHistory(histRes.data?.history || [])
+      setCurrentVersion(histRes.data?.current_version || 0)
     } catch { setHistory([]) }
 
     } finally {
@@ -305,30 +307,64 @@ export function OCGPage() {
       case 'history':
         return history.length > 0 ? (
           <div className="space-y-3">
-            {history.map((h, i) => (
-              <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/40">
+            {history.map((h: any) => (
+              <div key={h.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/40">
                 <div className="flex-shrink-0 w-8 h-8 rounded-full bg-violet-900/40 border border-violet-800/40 flex items-center justify-center">
                   <span className="text-violet-400 text-xs font-bold">v{h.version_to}</span>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
-                    <span className="text-slate-200 text-sm font-medium">Versão {h.version_from} → {h.version_to}</span>
-                    <span className="text-slate-500 text-xs">{h.created_at ? new Date(h.created_at).toLocaleString('pt-BR') : ''}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-slate-200 text-sm font-medium">
+                      Versão {h.version_from} → {h.version_to}
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400 uppercase tracking-wide">
+                      {h.trigger_source || 'system'}
+                    </span>
+                    {h.changed_by && (
+                      <span className="text-slate-400 text-xs">
+                        por <span className="text-slate-300">{h.changed_by.full_name}</span>
+                      </span>
+                    )}
+                    <span className="text-slate-500 text-xs">
+                      {h.created_at ? new Date(h.created_at).toLocaleString('pt-BR') : ''}
+                    </span>
                   </div>
                   {h.change_summary && <p className="text-slate-400 text-xs mt-1">{h.change_summary}</p>}
                   {h.fields_changed && (
                     <details className="mt-1">
-                      <summary className="text-slate-500 text-xs cursor-pointer hover:text-slate-300">Ver campos alterados</summary>
+                      <summary className="text-slate-500 text-xs cursor-pointer hover:text-slate-300">
+                        Ver campos alterados
+                      </summary>
                       <pre className="text-slate-500 text-xs mt-1 bg-slate-900/50 rounded p-2 overflow-x-auto max-h-24">
                         {typeof h.fields_changed === 'string' ? h.fields_changed : JSON.stringify(h.fields_changed, null, 2)}
                       </pre>
                     </details>
                   )}
+                  {h.can_rollback && (
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Reverter o OCG para a versão ${h.version_to}? Isso cria uma nova versão e mantém o histórico.`)) return
+                        try {
+                          await apiClient.post(`/projects/${id}/ocg/rollback/${h.version_to}`)
+                          await loadData()
+                        } catch (e: any) {
+                          alert(e?.response?.data?.detail || 'Erro ao reverter')
+                        }
+                      }}
+                      className="mt-2 text-xs px-2 py-1 rounded bg-amber-600/20 border border-amber-600/30 text-amber-300 hover:bg-amber-600/30 transition-colors"
+                    >
+                      ↶ Reverter para esta versão
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
           </div>
-        ) : <p className="text-slate-500 text-sm italic">Nenhuma alteração registrada. O histórico será preenchido quando documentos forem ingeridos e o OCG atualizado.</p>
+        ) : (
+          <p className="text-slate-500 text-sm italic">
+            Nenhuma alteração registrada. O histórico se preenche automaticamente a cada mudança do OCG (ingestão, agente, edição ou propagação).
+          </p>
+        )
       default:
         return <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
     }
