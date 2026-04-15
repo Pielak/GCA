@@ -547,6 +547,45 @@ export function CodeGeneratorPage() {
   }
 
   // ================================================================
+  // Regenerate single file
+  // ================================================================
+
+  const [regenerating, setRegenerating] = useState(false)
+
+  const handleRegenerateFile = async () => {
+    const path = selectedFile || newFilePath
+    if (!path) return
+    if (!confirm(`Regenerar "${path}" via IA? O conteúdo atual será substituído e commitado.`)) return
+
+    setRegenerating(true)
+    try {
+      const res = await apiClient.post('/code-generation/regenerate-file', {
+        project_id: projectId,
+        path,
+        current_content: fileContent || null,
+      })
+      const content = res.data?.content ?? ''
+      setFileContent(content)
+      setOriginalContent(content)
+      setHasChanges(false)
+      // Limpa markers antigos e estado de bloqueio
+      applyMarkers([])
+      setValidationErrors([])
+      setValidationBlocked(false)
+      if (res.data?.committed === false) {
+        alert(`Gerado mas não commitado: ${res.data?.commit_error || 'erro desconhecido'}`)
+      } else {
+        setSaveSuccess(true)
+        setTimeout(() => setSaveSuccess(false), 2500)
+      }
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Falha ao regenerar arquivo')
+    } finally {
+      setRegenerating(false)
+    }
+  }
+
+  // ================================================================
   // Run tests
   // ================================================================
 
@@ -693,6 +732,19 @@ export function CodeGeneratorPage() {
               >
                 {runningTests ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
                 Executar Teste
+              </button>
+            )}
+
+            {/* Regenerate single file via LLM */}
+            {canEdit && (selectedFile || newFilePath) && (
+              <button
+                onClick={handleRegenerateFile}
+                disabled={regenerating || saving || validating}
+                className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300 rounded-lg hover:bg-amber-900/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                title="Regenera apenas este arquivo via LLM (preserva os demais)"
+              >
+                {regenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>🔁</span>}
+                Regenerar
               </button>
             )}
 
