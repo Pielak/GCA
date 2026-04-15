@@ -43,23 +43,43 @@ ExternalReposPage (frontend)
 Métodos:
 - `analyze_repository(project_id, repo_id)` — orquestra o fluxo completo
 - `_list_files(provider, repo_url, branch, token)` — lista árvore via API do provider
-- `_categorize_files(tree)` — categoriza em 6 categorias de conhecimento
+- `_categorize_files(tree)` — categoriza em 13 categorias de conhecimento
 - `_fetch_file_contents(provider, repo_path, files, branch, token)` — baixa conteúdo via API
 - `_analyze_category(category, files_content, ai_provider)` — envia para IA e recebe análise
 - `_extract_metrics(analysis_results)` — extrai métricas estruturadas
 - `_inject_into_ingestion(project_id, repo_id, repo_url, documents)` — cria documentos na ingestão
 - `_update_status(repo_id, status, files_total, files_processed, error)` — atualiza status do repo
 
-### 2. Categorias de extração (6)
+### 2. Categorias de extração (13)
 
+#### Grupo A — Conhecimento de Negócio
 | Categoria | O que busca | Arquivos-alvo |
 |-----------|-------------|---------------|
 | `business_rules` | Validações, constantes, enums, lógica de domínio | *.py, *.ts, *.java, *.go (excluindo testes) |
-| `technical_docs` | Arquitetura, setup, APIs, decisões técnicas | README*, docs/*, CONTRIBUTING*, ARCHITECTURE* |
-| `api_contracts` | Endpoints, schemas, interfaces, tipos | openapi.*, *.proto, schemas/, types/, interfaces/ |
+| `domain_glossary` | Termos de domínio, entidades de negócio, vocabulário ubíquo | models/, entities/, domain/, *.py, *.ts (classes/interfaces) |
+| `workflows` | Fluxos de usuário, máquinas de estado, processos step-by-step | *workflow*, *flow*, *state*, *machine*, *saga*, *pipeline* |
+
+#### Grupo B — Conhecimento Técnico
+| Categoria | O que busca | Arquivos-alvo |
+|-----------|-------------|---------------|
+| `technical_docs` | Arquitetura, setup, APIs, decisões técnicas | README*, docs/*, CONTRIBUTING*, ARCHITECTURE*, ADR* |
+| `architecture_patterns` | Design patterns, organização de módulos, camadas, separação de responsabilidades | src/, lib/, app/, core/, services/, controllers/, routes/ |
+| `data_models` | Schemas de banco, entidades, relacionamentos, migrations | models/, schemas/, migrations/, alembic/, prisma/, *.sql |
+| `api_contracts` | Endpoints, schemas, interfaces, tipos | openapi.*, *.proto, schemas/, types/, interfaces/, routes/ |
+
+#### Grupo C — Infraestrutura e Processos
+| Categoria | O que busca | Arquivos-alvo |
+|-----------|-------------|---------------|
 | `processes` | CI/CD, deploy, migrations, infra | .github/, Dockerfile, docker-compose*, alembic/, Makefile |
-| `test_patterns` | Estratégia de testes, cobertura, fixtures | tests/, *test*, *spec*, conftest*, jest.config* |
 | `dependencies` | Stack, versões, compatibilidade | package.json, requirements.txt, pyproject.toml, go.mod, Cargo.toml |
+| `integration_points` | Serviços externos, webhooks, filas, APIs de terceiros, SDKs | *client*, *sdk*, *webhook*, *queue*, *broker*, *integration* |
+
+#### Grupo D — Qualidade e Segurança
+| Categoria | O que busca | Arquivos-alvo |
+|-----------|-------------|---------------|
+| `security_patterns` | Auth, RBAC, criptografia, sessões, tokens, middleware de segurança | auth/, security/, middleware/, *guard*, *policy*, *permission* |
+| `error_handling` | Códigos de erro, fallbacks, retry, circuit breakers, logging | *error*, *exception*, *handler*, *fallback*, *retry*, logger* |
+| `test_patterns` | Estratégia de testes, cobertura, fixtures, padrões de mock | tests/, *test*, *spec*, conftest*, jest.config*, *.test.* |
 
 ### 3. Tabela `repo_analysis_results`
 
@@ -174,10 +194,10 @@ Filename pattern: `external_{repo_name}_{category}.md`
 2. GP clica "Ler Dados" → backend envia trigger ao n8n
 3. n8n chama `POST /external-repos/{repo_id}/analyze`
 4. Engine lista 21 arquivos via GitHub API
-5. Categoriza: code (2), docs (5+), config (3+), tests (2)
-6. Baixa conteúdo dos arquivos relevantes
-7. Envia cada categoria para DeepSeek com prompt focado em extração de conhecimento
-8. Gera 4-6 documentos `.md`, injeta na Ingestão como `source_type="external_repo"`
+5. Categoriza em até 13 categorias de conhecimento
+6. Baixa conteúdo dos arquivos relevantes por categoria
+7. Envia cada categoria para DeepSeek com prompt específico de extração de conhecimento
+8. Gera até 13 documentos `.md`, injeta na Ingestão como `source_type="external_repo"`
 9. Salva métricas estruturadas em `repo_analysis_results`
 10. Status → `completed`, GP vê análise no painel
 
@@ -185,11 +205,25 @@ Filename pattern: `external_{repo_name}_{category}.md`
 
 ## Prompts de IA por categoria
 
-Cada categoria recebe um prompt específico que orienta a IA a extrair o tipo certo de conhecimento:
+Cada categoria recebe um prompt específico que orienta a IA a extrair o tipo certo de conhecimento. Todos os prompts incluem o contexto: "Você está analisando um repositório externo para extrair conhecimento que será reutilizado em outro projeto. Documente de forma clara e completa em Português-BR."
 
-- **business_rules**: "Identifique validações, constantes de domínio, enums, regras de negócio implícitas no código. Documente cada regra com contexto e impacto."
-- **technical_docs**: "Extraia decisões de arquitetura, padrões utilizados, setup necessário, requisitos de ambiente. Organize como documentação técnica."
-- **api_contracts**: "Mapeie todos os endpoints, schemas, tipos, interfaces. Documente contratos de entrada/saída."
-- **processes**: "Descreva o pipeline de CI/CD, processo de deploy, migrations, scripts de automação. Identifique dependências de infra."
-- **test_patterns**: "Analise a estratégia de testes, cobertura, fixtures, padrões de mock. Identifique gaps."
-- **dependencies**: "Liste todas as dependências com versões, identifique potenciais conflitos, vulnerabilidades conhecidas, compatibilidade."
+### Grupo A — Conhecimento de Negócio
+- **business_rules**: "Identifique validações, constantes de domínio, enums, regras de negócio implícitas no código. Documente cada regra com contexto, condições e impacto. Separe regras explícitas (validações escritas) de regras implícitas (assumidas no fluxo)."
+- **domain_glossary**: "Extraia todos os termos de domínio: nomes de entidades, conceitos de negócio, estados, tipos enumerados. Monte um glossário com definição, sinônimos e relacionamentos entre termos. Isso será a linguagem ubíqua do novo projeto."
+- **workflows**: "Mapeie fluxos de usuário, processos de negócio, máquinas de estado e pipelines. Para cada fluxo, documente: trigger, passos, condições de decisão, resultado esperado, tratamento de erro."
+
+### Grupo B — Conhecimento Técnico
+- **technical_docs**: "Extraia decisões de arquitetura, padrões utilizados, setup necessário, requisitos de ambiente. Organize como documentação técnica de referência."
+- **architecture_patterns**: "Identifique padrões de design (MVC, CQRS, Event Sourcing, etc.), organização de camadas, separação de responsabilidades, injeção de dependências. Documente como cada módulo se conecta."
+- **data_models**: "Mapeie todas as entidades, seus campos, tipos, relacionamentos (1:1, 1:N, N:N), índices, constraints. Documente o modelo de dados como referência para o novo projeto."
+- **api_contracts**: "Mapeie todos os endpoints, schemas, tipos, interfaces. Documente contratos de entrada/saída, códigos de status, paginação, filtros."
+
+### Grupo C — Infraestrutura e Processos
+- **processes**: "Descreva o pipeline de CI/CD, processo de deploy, migrations, scripts de automação. Identifique dependências de infra e requisitos de ambiente."
+- **dependencies**: "Liste todas as dependências com versões, identifique potenciais conflitos, vulnerabilidades conhecidas, compatibilidade. Classifique em: core, dev, optional."
+- **integration_points**: "Identifique todas as integrações externas: APIs de terceiros, SDKs, webhooks, filas de mensagens, bancos externos. Para cada um, documente: URL/endpoint, autenticação, formato de dados, frequência de uso."
+
+### Grupo D — Qualidade e Segurança
+- **security_patterns**: "Analise padrões de segurança: autenticação, autorização/RBAC, criptografia, gestão de sessões/tokens, sanitização de input, CORS, rate limiting. Documente como referência de segurança."
+- **error_handling**: "Mapeie a estratégia de tratamento de erros: códigos de erro customizados, fallbacks, retry patterns, circuit breakers, logging estruturado. Documente padrões para reuso."
+- **test_patterns**: "Analise a estratégia de testes: unitários, integração, E2E. Documente fixtures, factories, padrões de mock, cobertura estimada. Identifique gaps e boas práticas."
