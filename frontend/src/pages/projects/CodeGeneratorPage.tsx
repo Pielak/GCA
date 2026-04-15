@@ -551,18 +551,27 @@ export function CodeGeneratorPage() {
   // ================================================================
 
   const [regenerating, setRegenerating] = useState(false)
+  const [regenModalOpen, setRegenModalOpen] = useState(false)
+  const [regenInstructions, setRegenInstructions] = useState('')
+
+  const openRegenerateModal = () => {
+    const path = selectedFile || newFilePath
+    if (!path) return
+    setRegenInstructions('')
+    setRegenModalOpen(true)
+  }
 
   const handleRegenerateFile = async () => {
     const path = selectedFile || newFilePath
     if (!path) return
-    if (!confirm(`Regenerar "${path}" via IA? O conteúdo atual será substituído e commitado.`)) return
-
+    setRegenModalOpen(false)
     setRegenerating(true)
     try {
       const res = await apiClient.post('/code-generation/regenerate-file', {
         project_id: projectId,
         path,
         current_content: fileContent || null,
+        instructions: regenInstructions.trim() || null,
       })
       const content = res.data?.content ?? ''
       setFileContent(content)
@@ -738,7 +747,7 @@ export function CodeGeneratorPage() {
             {/* Regenerate single file via LLM */}
             {canEdit && (selectedFile || newFilePath) && (
               <button
-                onClick={handleRegenerateFile}
+                onClick={openRegenerateModal}
                 disabled={regenerating || saving || validating}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-amber-900/30 border border-amber-700/40 text-amber-300 rounded-lg hover:bg-amber-900/50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 title="Regenera apenas este arquivo via LLM (preserva os demais)"
@@ -1026,6 +1035,55 @@ export function CodeGeneratorPage() {
         </div>
       </div>
       </div>
+
+      {/* Modal de regeneração com instruções */}
+      {regenModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60" onClick={() => setRegenModalOpen(false)}>
+          <div
+            onClick={e => e.stopPropagation()}
+            className="w-full max-w-xl bg-slate-900 border border-slate-700 rounded-xl shadow-2xl p-5 space-y-4"
+          >
+            <div>
+              <h3 className="text-slate-100 text-sm font-semibold flex items-center gap-2">
+                <span>🔁</span> Regenerar arquivo
+              </h3>
+              <p className="text-slate-400 text-xs mt-1 font-mono truncate">{selectedFile || newFilePath}</p>
+            </div>
+
+            <div>
+              <label className="text-slate-300 text-xs font-medium block mb-1.5">
+                Instruções para o LLM <span className="text-slate-500">(opcional)</span>
+              </label>
+              <textarea
+                value={regenInstructions}
+                onChange={e => setRegenInstructions(e.target.value)}
+                placeholder="Ex: adicione logging estruturado em cada função; corrija o bug de null check; use async/await em vez de callbacks..."
+                className="w-full h-28 bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-600 focus:outline-none focus:border-violet-600 resize-none"
+                autoFocus
+              />
+              <p className="text-slate-500 text-[11px] mt-1.5">
+                Se deixar em branco, o LLM regera o arquivo do zero com base no OCG e no path.
+                O conteúdo atual é enviado como referência.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2">
+              <button
+                onClick={() => setRegenModalOpen(false)}
+                className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleRegenerateFile}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
+              >
+                <span>🔁</span> Regenerar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
