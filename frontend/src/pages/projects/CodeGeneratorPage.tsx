@@ -696,7 +696,7 @@ export function CodeGeneratorPage() {
               <>
                 <button
                   onClick={handleReviewAndSave}
-                  disabled={validating || saving || !hasChanges}
+                  disabled={validating || saving || (!hasChanges && !validationBlocked)}
                   className="flex items-center gap-1 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                 >
                   {validating ? (
@@ -860,6 +860,12 @@ export function CodeGeneratorPage() {
                       const next = v ?? ''
                       setFileContent(next)
                       setHasChanges(next !== originalContent)
+                      // Limpar estado de bloqueio e markers ao editar — evita ruído visual
+                      if (validationBlocked) {
+                        setValidationBlocked(false)
+                        setValidationErrors([])
+                        applyMarkers([])
+                      }
                     }}
                     onMount={(editor, monaco) => {
                       editorRef.current = editor
