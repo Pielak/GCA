@@ -1,0 +1,195 @@
+# Engine de Análise de Repositórios Externos
+
+**Data:** 2026-04-15
+**Status:** Aprovado
+**Objetivo:** Construir engine Python para análise de repositórios externos, extraindo conhecimento técnico, negocial e regras de negócio que alimentam a ingestão do projeto.
+
+---
+
+## Arquitetura
+
+```
+ExternalReposPage (frontend)
+    ↓ POST /external-repos/{repo_id}/read
+Backend (external_repos_router)
+    ↓ POST n8n webhook (trigger)
+n8n Workflow (orquestrador)
+    ↓ POST /external-repos/{repo_id}/analyze (callback para o backend)
+Backend — RepoAnalysisService (engine Python)
+    ├── 1. Listar árvore de arquivos via API do provider (GitHub/GitLab/Bitbucket)
+    ├── 2. Categorizar arquivos em 6 categorias de conhecimento
+    ├── 3. Baixar conteúdo dos arquivos relevantes (limite 30/categoria, max 50KB/arquivo)
+    ├── 4. Enviar para IA (provider escolhido pelo GP do projeto)
+    ├── 5. Extrair métricas estruturadas do resultado
+    ├── 6. Salvar resultados no banco (tabela repo_analysis_results)
+    └── 7. Injetar documentos .md na Ingestão com source_type="external_repo"
+ExternalReposPage (frontend)
+    └── Painel de resultados ao clicar no repo com status "completed"
+```
+
+### Decisões de design
+
+- **Híbrido Python + n8n**: Engine de análise no backend Python (robusto, testável). n8n apenas como orquestrador de trigger.
+- **Provider de IA configurável pelo GP**: Cada projeto define qual provider usar. Neste caso de teste: DeepSeek.
+- **Foco em extração de conhecimento**: Não é scanner técnico genérico — extrai documentação, regras de negócio e processos úteis para o projeto principal.
+- **Documentos de ingestão com rastreabilidade**: Todo documento gerado é marcado como externo, com URL de origem e repo_id.
+
+---
+
+## Backend — Componentes
+
+### 1. `RepoAnalysisService` (`services/repo_analysis_service.py`)
+
+Métodos:
+- `analyze_repository(project_id, repo_id)` — orquestra o fluxo completo
+- `_list_files(provider, repo_url, branch, token)` — lista árvore via API do provider
+- `_categorize_files(tree)` — categoriza em 6 categorias de conhecimento
+- `_fetch_file_contents(provider, repo_path, files, branch, token)` — baixa conteúdo via API
+- `_analyze_category(category, files_content, ai_provider)` — envia para IA e recebe análise
+- `_extract_metrics(analysis_results)` — extrai métricas estruturadas
+- `_inject_into_ingestion(project_id, repo_id, repo_url, documents)` — cria documentos na ingestão
+- `_update_status(repo_id, status, files_total, files_processed, error)` — atualiza status do repo
+
+### 2. Categorias de extração (6)
+
+| Categoria | O que busca | Arquivos-alvo |
+|-----------|-------------|---------------|
+| `business_rules` | Validações, constantes, enums, lógica de domínio | *.py, *.ts, *.java, *.go (excluindo testes) |
+| `technical_docs` | Arquitetura, setup, APIs, decisões técnicas | README*, docs/*, CONTRIBUTING*, ARCHITECTURE* |
+| `api_contracts` | Endpoints, schemas, interfaces, tipos | openapi.*, *.proto, schemas/, types/, interfaces/ |
+| `processes` | CI/CD, deploy, migrations, infra | .github/, Dockerfile, docker-compose*, alembic/, Makefile |
+| `test_patterns` | Estratégia de testes, cobertura, fixtures | tests/, *test*, *spec*, conftest*, jest.config* |
+| `dependencies` | Stack, versões, compatibilidade | package.json, requirements.txt, pyproject.toml, go.mod, Cargo.toml |
+
+### 3. Tabela `repo_analysis_results`
+
+```sql
+CREATE TABLE repo_analysis_results (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    repo_id UUID NOT NULL REFERENCES project_external_repos(id) ON DELETE CASCADE,
+    project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    category VARCHAR(50) NOT NULL,  -- business_rules, technical_docs, etc.
+    summary TEXT NOT NULL,          -- resumo gerado pela IA
+    metrics JSONB DEFAULT '{}',     -- linguagens, frameworks, contagens, etc.
+    files_analyzed INTEGER DEFAULT 0,
+    ai_provider VARCHAR(50),        -- deepseek, anthropic, openai, etc.
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+```
+
+### 4. Campos novos em `IngestedDocument`
+
+- `source_type VARCHAR(20) DEFAULT 'upload'` — `'upload'` ou `'external_repo'`
+- `source_url TEXT` — URL do repositório de origem
+- `source_repo_id UUID` — FK para `project_external_repos(id)`, nullable
+
+### 5. Novos endpoints
+
+- `POST /projects/{project_id}/external-repos/{repo_id}/analyze` — chamado pelo n8n, executa o engine
+- `GET /projects/{project_id}/external-repos/{repo_id}/analysis` — retorna resultados para o frontend
+
+### 6. Config de IA por projeto
+
+Novo campo em `ProjectExternalRepo` ou em settings do projeto:
+- `ai_provider VARCHAR(50) DEFAULT 'deepseek'` — provider escolhido pelo GP
+
+---
+
+## n8n — Workflow corrigido
+
+### Problemas atuais
+1. Webhook path não funciona no n8n 2.x (path prefixado com workflow ID)
+2. Nodes `n8n-nodes-base.function` deprecated (v1) — usar `n8n-nodes-base.code` (v2)
+3. Lógica de negócio no n8n (análise, categorização) — mover para Python
+
+### Novo workflow simplificado
+- **Nó 1 — Webhook**: Recebe trigger do backend
+- **Nó 2 — HTTP Request**: Chama `POST /external-repos/{repo_id}/analyze` no backend
+- **Nó 3 — Respond**: Retorna status
+
+O n8n vira apenas um "dispatcher" — toda lógica fica no Python.
+
+### Correção da URL no backend
+O `external_repos_router.py` deve usar o path completo do webhook:
+```python
+n8n_url = "http://n8n:5678/webhook/{workflow_id}/webhook/{path}"
+```
+
+---
+
+## Frontend — ExternalReposPage expandido
+
+### Painel de resultados
+Ao clicar em repo com status `completed`, abre painel/modal com:
+
+1. **Header**: Nome do repo, URL, branch, data da análise, provider IA
+2. **Métricas gerais**: Linguagens detectadas, frameworks, total de arquivos analisados
+3. **Resumo por categoria**: Tabs ou accordion com as 6 categorias
+4. **Documentos injetados**: Lista com links para os docs na Ingestão, marcados como `[EXTERNO]`
+
+### Formato dos documentos injetados
+
+```markdown
+# [EXTERNO] {repo-name} — {Categoria}
+**Origem:** {repo_url} (branch: {branch})
+**Analisado em:** {timestamp}
+**Provider IA:** {ai_provider}
+
+## Conteúdo
+{análise gerada pela IA}
+```
+
+Filename pattern: `external_{repo_name}_{category}.md`
+
+---
+
+## Providers suportados
+
+| Provider | Listar arquivos | Baixar conteúdo | Auth |
+|----------|----------------|-----------------|------|
+| GitHub | `GET /repos/{owner}/{repo}/git/trees/{branch}?recursive=1` | `GET /repos/{owner}/{repo}/contents/{path}?ref={branch}` | Bearer token |
+| GitLab | `GET /projects/{id}/repository/tree?recursive=true&ref={branch}` | `GET /projects/{id}/repository/files/{path}/raw?ref={branch}` | Private-Token |
+| Bitbucket | `GET /repositories/{workspace}/{repo}/src/{branch}/?pagelen=100` | `GET /repositories/{workspace}/{repo}/src/{branch}/{path}` | Bearer token |
+
+---
+
+## Filtros de arquivos
+
+### Diretórios ignorados
+`node_modules`, `.git`, `dist`, `build`, `__pycache__`, `.next`, `vendor`, `.venv`, `venv`, `.idea`, `.vscode`
+
+### Extensões ignoradas
+`png`, `jpg`, `jpeg`, `gif`, `svg`, `ico`, `woff`, `woff2`, `ttf`, `eot`, `map`, `lock`, `min.js`, `min.css`
+
+### Limites
+- Max 30 arquivos por categoria
+- Max 50KB por arquivo
+- Max 500KB total por análise de categoria (para não estourar contexto da IA)
+
+---
+
+## Fluxo E2E — Teste com samplemod
+
+1. GP adiciona `https://github.com/navdeep-G/samplemod` (✅ já feito)
+2. GP clica "Ler Dados" → backend envia trigger ao n8n
+3. n8n chama `POST /external-repos/{repo_id}/analyze`
+4. Engine lista 21 arquivos via GitHub API
+5. Categoriza: code (2), docs (5+), config (3+), tests (2)
+6. Baixa conteúdo dos arquivos relevantes
+7. Envia cada categoria para DeepSeek com prompt focado em extração de conhecimento
+8. Gera 4-6 documentos `.md`, injeta na Ingestão como `source_type="external_repo"`
+9. Salva métricas estruturadas em `repo_analysis_results`
+10. Status → `completed`, GP vê análise no painel
+
+---
+
+## Prompts de IA por categoria
+
+Cada categoria recebe um prompt específico que orienta a IA a extrair o tipo certo de conhecimento:
+
+- **business_rules**: "Identifique validações, constantes de domínio, enums, regras de negócio implícitas no código. Documente cada regra com contexto e impacto."
+- **technical_docs**: "Extraia decisões de arquitetura, padrões utilizados, setup necessário, requisitos de ambiente. Organize como documentação técnica."
+- **api_contracts**: "Mapeie todos os endpoints, schemas, tipos, interfaces. Documente contratos de entrada/saída."
+- **processes**: "Descreva o pipeline de CI/CD, processo de deploy, migrations, scripts de automação. Identifique dependências de infra."
+- **test_patterns**: "Analise a estratégia de testes, cobertura, fixtures, padrões de mock. Identifique gaps."
+- **dependencies**: "Liste todas as dependências com versões, identifique potenciais conflitos, vulnerabilidades conhecidas, compatibilidade."
