@@ -211,6 +211,25 @@ export function IngestionPage() {
                       <FileText className="w-4 h-4 text-slate-400" />
                     </div>
                     <span className="text-slate-200 text-sm font-medium truncate">{doc.original_filename}</span>
+                    {doc.source_type === 'external_repo' && (
+                      <span className="flex items-center gap-1 flex-shrink-0">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300" title="Documento gerado a partir de Repositório Externo">
+                          📦 Repo Externo
+                        </span>
+                        {doc.source_url && (
+                          <a
+                            href={doc.source_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-violet-300 hover:text-violet-200 text-xs"
+                            title={doc.source_url}
+                            onClick={e => e.stopPropagation()}
+                          >
+                            ↗
+                          </a>
+                        )}
+                      </span>
+                    )}
                   </div>
                   <span className="text-slate-400 text-xs">{fileTypeLabel(doc.file_type)}</span>
                   <span className="text-slate-400 text-xs">{formatFileSize(doc.file_size_bytes)}</span>

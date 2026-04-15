@@ -177,9 +177,9 @@ class IngestionService:
         try:
             from app.db.database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
-                # Resolver chave IA do projeto (camada projeto, não GCA admin)
+                # Resolver chave Anthropic do projeto (Arguidor usa Claude)
                 from app.services.ai_key_resolver import AIKeyResolver
-                project_api_key = await AIKeyResolver.get_project_key(db, project_id)
+                project_api_key = await AIKeyResolver.get_project_key(db, project_id, provider="anthropic")
 
                 extractor = DocumentExtractor()
                 arguider = ArguiderService(db, project_api_key=project_api_key)
@@ -308,6 +308,9 @@ class IngestionService:
                 "ocg_updated": d.ocg_updated,
                 "file_size_bytes": d.file_size_bytes,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
+                "source_type": getattr(d, "source_type", None),
+                "source_url": getattr(d, "source_url", None),
+                "source_repo_id": str(d.source_repo_id) if getattr(d, "source_repo_id", None) else None,
             }
             for d in docs
         ]

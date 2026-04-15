@@ -11,6 +11,9 @@ export interface IngestedDocument {
   ocg_updated: boolean
   file_size_bytes: number
   created_at: string
+  source_type?: string | null
+  source_url?: string | null
+  source_repo_id?: string | null
 }
 
 export interface DocumentDetail extends IngestedDocument {

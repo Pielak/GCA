@@ -412,23 +412,23 @@ export function ExternalReposPage() {
 
       {/* Painel de análise */}
       {showAnalysis && (
-        <div className="bg-dark-200/50 border border-dark-100/20 rounded-xl overflow-hidden">
+        <div className="bg-dark-200/50 border border-slate-700/50 rounded-xl overflow-hidden">
           {/* Header do painel */}
-          <div className="flex items-center justify-between px-5 py-3 border-b border-dark-100/20">
+          <div className="flex items-center justify-between px-5 py-3 border-b border-slate-700/50">
             <h3 className="text-white text-sm font-semibold flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-violet-400" />
               Resultado da Análise
             </h3>
             <button
               onClick={() => { setShowAnalysis(null); setAnalysisData(null) }}
-              className="p-1 rounded-lg text-dark-100/60 hover:text-white hover:bg-dark-200 transition-colors"
+              className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-dark-200 transition-colors"
             >
               <X className="w-4 h-4" />
             </button>
           </div>
 
           {/* Tabs */}
-          <div className="flex border-b border-dark-100/20 px-2">
+          <div className="flex border-b border-slate-700/50 px-2">
             {[
               { key: 'stack', label: 'Stack Detectado', icon: Layers },
               { key: 'security', label: 'Segurança', icon: Shield },
@@ -442,7 +442,7 @@ export function ExternalReposPage() {
                 className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-medium transition-colors border-b-2 ${
                   activeTab === tab.key
                     ? 'border-violet-500 text-violet-300'
-                    : 'border-transparent text-dark-100/60 hover:text-dark-100/80'
+                    : 'border-transparent text-slate-400 hover:text-slate-300'
                 }`}
               >
                 <tab.icon className="w-3.5 h-3.5" />
@@ -458,51 +458,72 @@ export function ExternalReposPage() {
                 <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
               </div>
             ) : !analysisData ? (
-              <p className="text-dark-100/60 text-sm text-center py-8">Nenhum dado de análise disponível.</p>
+              <p className="text-slate-400 text-sm text-center py-8">Nenhum dado de análise disponível.</p>
             ) : (
               <>
                 {/* Tab 1: Stack Detectado */}
-                {activeTab === 'stack' && (
-                  <div className="space-y-4">
-                    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                      {[
-                        { label: 'Linguagem', value: analysisData.stack?.language || '-' },
-                        { label: 'Arquivos Total', value: analysisData.stack?.files_total ?? '-' },
-                        { label: 'Docker', value: analysisData.stack?.has_docker ? 'Sim' : 'Não' },
-                        { label: 'Testes', value: analysisData.stack?.has_tests ? 'Sim' : 'Não' },
-                        { label: 'CI/CD', value: analysisData.stack?.has_ci_cd ? 'Sim' : 'Não' },
-                      ].map(item => (
-                        <div key={item.label} className="bg-dark-200 rounded-lg p-3">
-                          <p className="text-dark-100/60 text-xs">{item.label}</p>
-                          <p className="text-white text-sm font-medium mt-0.5">{String(item.value)}</p>
-                        </div>
-                      ))}
-                    </div>
-                    {analysisData.stack?.frameworks && Array.isArray(analysisData.stack.frameworks) && analysisData.stack.frameworks.length > 0 && (
-                      <div>
-                        <p className="text-dark-100/60 text-xs mb-2">Frameworks Detectados</p>
-                        <div className="flex flex-wrap gap-2">
-                          {analysisData.stack.frameworks.map((fw: string, i: number) => (
-                            <span key={i} className="px-2.5 py-1 bg-violet-500/20 text-violet-300 text-xs rounded-full">
-                              {fw}
-                            </span>
-                          ))}
-                        </div>
+                {activeTab === 'stack' && (() => {
+                  const stack: any = analysisData.stack || {}
+                  const language =
+                    typeof stack.language === 'string'
+                      ? stack.language
+                      : stack.language?.primary || stack.primary_language || '-'
+                  const filesTotal =
+                    stack.files_total ?? stack.repository?.files_total ?? '-'
+                  const hasDocker = stack.has_docker ?? stack.has_dockerfile ?? false
+                  const hasTests = stack.has_tests ?? false
+                  const hasCi = stack.has_ci_cd ?? stack.has_cicd ?? false
+                  const frameworks: Array<string> = Array.isArray(stack.frameworks)
+                    ? stack.frameworks.map((fw: any) =>
+                        typeof fw === 'string'
+                          ? fw
+                          : fw?.version
+                            ? `${fw.name} ${fw.version}`
+                            : fw?.name || JSON.stringify(fw)
+                      )
+                    : []
+                  return (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                        {[
+                          { label: 'Linguagem', value: language },
+                          { label: 'Arquivos Total', value: filesTotal },
+                          { label: 'Docker', value: hasDocker ? 'Sim' : 'Não' },
+                          { label: 'Testes', value: hasTests ? 'Sim' : 'Não' },
+                          { label: 'CI/CD', value: hasCi ? 'Sim' : 'Não' },
+                        ].map(item => (
+                          <div key={item.label} className="bg-dark-200 rounded-lg p-3">
+                            <p className="text-slate-400 text-xs">{item.label}</p>
+                            <p className="text-white text-sm font-medium mt-0.5">{String(item.value)}</p>
+                          </div>
+                        ))}
                       </div>
-                    )}
-                  </div>
-                )}
+                      {frameworks.length > 0 && (
+                        <div>
+                          <p className="text-slate-400 text-xs mb-2">Frameworks Detectados</p>
+                          <div className="flex flex-wrap gap-2">
+                            {frameworks.map((fw, i) => (
+                              <span key={i} className="px-2.5 py-1 bg-violet-500/20 text-violet-300 text-xs rounded-full">
+                                {fw}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })()}
 
                 {/* Tab 2: Segurança */}
                 {activeTab === 'security' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <span className="text-dark-100/60 text-xs">Nível de Risco:</span>
+                      <span className="text-slate-400 text-xs">Nível de Risco:</span>
                       <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
                         analysisData.risk_level === 'low' ? 'bg-emerald-500/20 text-emerald-400'
                         : analysisData.risk_level === 'medium' ? 'bg-amber-500/20 text-amber-400'
                         : analysisData.risk_level === 'high' ? 'bg-red-500/20 text-red-400'
-                        : 'bg-dark-200 text-dark-100/60'
+                        : 'bg-dark-200 text-slate-400'
                       }`}>
                         {analysisData.risk_level === 'low' ? 'Baixo'
                          : analysisData.risk_level === 'medium' ? 'Médio'
@@ -518,21 +539,21 @@ export function ExternalReposPage() {
                               vuln.severity === 'critical' ? 'bg-red-500/20 text-red-400'
                               : vuln.severity === 'high' ? 'bg-amber-500/20 text-amber-400'
                               : vuln.severity === 'medium' ? 'bg-amber-500/20 text-amber-400'
-                              : 'bg-dark-200 text-dark-100/60'
+                              : 'bg-dark-200 text-slate-400'
                             }`}>
                               {vuln.severity || 'info'}
                             </span>
                             <div className="flex-1 min-w-0">
                               <p className="text-white text-sm">{vuln.description || vuln.name || 'Vulnerabilidade detectada'}</p>
                               {vuln.recommended_version && (
-                                <p className="text-dark-100/60 text-xs mt-1">Versão recomendada: {vuln.recommended_version}</p>
+                                <p className="text-slate-400 text-xs mt-1">Versão recomendada: {vuln.recommended_version}</p>
                               )}
                             </div>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-dark-100/60 text-sm">Nenhuma vulnerabilidade identificada.</p>
+                      <p className="text-slate-400 text-sm">Nenhuma vulnerabilidade identificada.</p>
                     )}
                   </div>
                 )}
@@ -541,12 +562,12 @@ export function ExternalReposPage() {
                 {activeTab === 'compatibility' && (
                   <div className="space-y-4">
                     <div className="flex items-center gap-3">
-                      <span className="text-dark-100/60 text-xs">Status Geral:</span>
+                      <span className="text-slate-400 text-xs">Status Geral:</span>
                       <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${
                         analysisData.gca_overall_status === 'compativel' ? 'bg-emerald-500/20 text-emerald-400'
                         : analysisData.gca_overall_status === 'requer_adaptacao' ? 'bg-amber-500/20 text-amber-400'
                         : analysisData.gca_overall_status === 'incompativel' ? 'bg-red-500/20 text-red-400'
-                        : 'bg-dark-200 text-dark-100/60'
+                        : 'bg-dark-200 text-slate-400'
                       }`}>
                         {analysisData.gca_overall_status === 'compativel' ? 'Compatível'
                          : analysisData.gca_overall_status === 'requer_adaptacao' ? 'Requer Adaptação'
@@ -557,20 +578,30 @@ export function ExternalReposPage() {
 
                     {analysisData.compatibility?.effort_estimate && (
                       <div className="bg-dark-200 rounded-lg p-3">
-                        <p className="text-dark-100/60 text-xs">Estimativa de Esforço</p>
+                        <p className="text-slate-400 text-xs">Estimativa de Esforço</p>
                         <p className="text-white text-sm font-medium mt-0.5">{analysisData.compatibility.effort_estimate}</p>
                       </div>
                     )}
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       {['backend', 'frontend', 'database'].map(area => {
-                        const data = analysisData.compatibility?.[area]
+                        const comp: any = analysisData.compatibility || {}
+                        const data = comp[area] || comp[`gca_${area}_compatibility`]
                         if (!data) return null
+                        const statusText =
+                          typeof data.status === 'string'
+                            ? data.status
+                            : data.compatible === true
+                              ? 'Compatível'
+                              : data.compatible === false
+                                ? 'Incompatível'
+                                : 'N/A'
+                        const note = data.reason || data.notes
                         return (
                           <div key={area} className="bg-dark-200 rounded-lg p-4">
                             <p className="text-violet-400 text-xs font-semibold uppercase mb-2">{area}</p>
-                            <p className="text-white text-sm">{data.status || data.compatible ? 'Compatível' : 'N/A'}</p>
-                            {data.notes && <p className="text-dark-100/60 text-xs mt-1">{data.notes}</p>}
+                            <p className="text-white text-sm">{statusText}</p>
+                            {note && <p className="text-slate-400 text-xs mt-1">{note}</p>}
                           </div>
                         )
                       })}
@@ -578,7 +609,7 @@ export function ExternalReposPage() {
 
                     {analysisData.roadmap && analysisData.roadmap.length > 0 && (
                       <div>
-                        <p className="text-dark-100/80 text-xs font-semibold mb-2">Roadmap de Adaptação</p>
+                        <p className="text-slate-300 text-xs font-semibold mb-2">Roadmap de Adaptação</p>
                         <div className="space-y-2">
                           {analysisData.roadmap.map(step => (
                             <div key={step.step_number} className="bg-dark-200 rounded-lg p-3 flex items-start gap-3">
@@ -587,13 +618,13 @@ export function ExternalReposPage() {
                               </span>
                               <div className="flex-1 min-w-0">
                                 <p className="text-white text-sm font-medium">{step.title}</p>
-                                <p className="text-dark-100/60 text-xs mt-0.5">{step.description}</p>
+                                <p className="text-slate-400 text-xs mt-0.5">{step.description}</p>
                                 <div className="flex items-center gap-3 mt-1.5">
-                                  <span className="text-dark-100/60 text-[10px]">{step.effort_hours}h estimadas</span>
+                                  <span className="text-slate-400 text-[10px]">{step.effort_hours}h estimadas</span>
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded ${
                                     step.status === 'done' ? 'bg-emerald-500/20 text-emerald-400'
                                     : step.status === 'in_progress' ? 'bg-blue-500/20 text-blue-300'
-                                    : 'bg-dark-200 text-dark-100/60 border border-dark-100/20'
+                                    : 'bg-dark-200 text-slate-400 border border-slate-700/50'
                                   }`}>
                                     {step.status === 'done' ? 'Concluído' : step.status === 'in_progress' ? 'Em andamento' : 'Pendente'}
                                   </span>
@@ -614,19 +645,19 @@ export function ExternalReposPage() {
                       analysisData.categories.map((cat, i) => (
                         <details key={i} className="bg-dark-200 rounded-lg group">
                           <summary className="flex items-center gap-2 px-4 py-3 cursor-pointer text-white text-sm font-medium hover:bg-dark-200/80 rounded-lg transition-colors list-none">
-                            <ChevronRight className="w-4 h-4 text-dark-100/60 group-open:rotate-90 transition-transform" />
+                            <ChevronRight className="w-4 h-4 text-slate-400 group-open:rotate-90 transition-transform" />
                             <span className="flex-1">{cat.category}</span>
-                            <span className="text-dark-100/60 text-xs">{cat.files_analyzed} arquivos</span>
+                            <span className="text-slate-400 text-xs">{cat.files_analyzed} arquivos</span>
                             {cat.ai_provider && (
                               <span className="text-xs px-2 py-0.5 rounded bg-violet-500/20 text-violet-300">{cat.ai_provider}</span>
                             )}
                           </summary>
                           <div className="px-4 pb-3 pt-0">
-                            <p className="text-dark-100/80 text-sm leading-relaxed">{cat.summary}</p>
+                            <p className="text-slate-300 text-sm leading-relaxed">{cat.summary}</p>
                             {cat.metrics && Object.keys(cat.metrics).length > 0 && (
                               <div className="flex flex-wrap gap-2 mt-2">
                                 {Object.entries(cat.metrics).map(([k, v]) => (
-                                  <span key={k} className="text-xs px-2 py-0.5 bg-dark-200/50 border border-dark-100/20 rounded text-dark-100/60">
+                                  <span key={k} className="text-xs px-2 py-0.5 bg-dark-200/50 border border-slate-700/50 rounded text-slate-400">
                                     {k}: {String(v)}
                                   </span>
                                 ))}
@@ -636,7 +667,7 @@ export function ExternalReposPage() {
                         </details>
                       ))
                     ) : (
-                      <p className="text-dark-100/60 text-sm text-center py-4">Nenhuma categoria analisada.</p>
+                      <p className="text-slate-400 text-sm text-center py-4">Nenhuma categoria analisada.</p>
                     )}
                   </div>
                 )}
@@ -653,16 +684,26 @@ export function ExternalReposPage() {
                               <p className="text-white text-sm truncate">{doc.filename}</p>
                               <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300 flex-shrink-0">EXTERNO</span>
                             </div>
-                            <div className="flex items-center gap-3 mt-0.5 text-dark-100/60 text-xs">
+                            <div className="flex items-center gap-3 mt-0.5 text-slate-400 text-xs">
                               <span>{doc.file_type}</span>
-                              {doc.source_url && <span className="truncate max-w-xs">{doc.source_url}</span>}
+                              {doc.source_url && (
+                                <a
+                                  href={doc.source_url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="truncate max-w-xs text-violet-300 hover:text-violet-200 underline underline-offset-2"
+                                  title={doc.source_url}
+                                >
+                                  Abrir no repositório ↗
+                                </a>
+                              )}
                               <span>{new Date(doc.created_at).toLocaleString('pt-BR')}</span>
                             </div>
                           </div>
                         </div>
                       ))
                     ) : (
-                      <p className="text-dark-100/60 text-sm text-center py-4">Nenhum documento injetado.</p>
+                      <p className="text-slate-400 text-sm text-center py-4">Nenhum documento injetado.</p>
                     )}
                   </div>
                 )}

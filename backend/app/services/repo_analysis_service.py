@@ -11,6 +11,7 @@ Docstrings:
     - Fase 5: Decisão de integração (compatível / requer_adaptação / incompatível)
     - Fase 6: Injeção de documentos na Ingestão + relatório executivo
 """
+import asyncio
 import hashlib
 import json
 import re
@@ -1523,6 +1524,27 @@ Gere um documento de análise completo e estruturado em Markdown."""
         )
         self.db.add(doc)
         await self.db.commit()
+        await self.db.refresh(doc)
+
+        # Disparar Arguidor → OCG automaticamente (mesmo fluxo do upload manual)
+        try:
+            from app.services.ingestion_service import IngestionService
+            service = IngestionService(self.db)
+            asyncio.create_task(
+                service._analyze_async(doc.id, project_id, file_bytes, "markdown")
+            )
+            logger.info(
+                "external_repo.arguider_triggered",
+                document_id=str(doc.id),
+                project_id=str(project_id),
+                repo_id=str(repo_id),
+            )
+        except Exception as e:
+            logger.warning(
+                "external_repo.arguider_trigger_error",
+                document_id=str(doc.id),
+                error=str(e),
+            )
 
     def _generate_executive_report(
         self,
