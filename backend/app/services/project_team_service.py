@@ -121,6 +121,24 @@ class ProjectTeamService:
                 project_url=project_url,
             )
 
+            # Notificação in-app para o convidado (se já for usuário existente)
+            try:
+                from app.services.notification_inapp_service import InAppNotificationService
+                notif = InAppNotificationService(db)
+                await notif.notify(
+                    user_id=user.id,
+                    event_type="invite_received",
+                    title="Você foi convidado para um projeto",
+                    message=f"{gp_name} convidou você para participar de \"{project.name}\" como {role.replace('_', ' ').title()}.",
+                    project_id=project_id,
+                    resource_type="project_invite",
+                    resource_id=project_member.id,
+                    link=project_url,
+                    severity="info",
+                )
+            except Exception as notif_err:
+                logger.warning("project_team.notify_failed", error=str(notif_err))
+
             logger.info("project_team.member_invited", project_id=str(project_id), email=email)
             return True, invite_token, None
 

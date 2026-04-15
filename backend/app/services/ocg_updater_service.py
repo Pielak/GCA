@@ -160,6 +160,33 @@ class OCGUpdaterService:
 
         await self.db.commit()
 
+        # Notificar GPs do projeto sobre atualização do OCG
+        try:
+            from app.services.notification_inapp_service import InAppNotificationService
+            from app.models.base import ProjectMember
+            gps_result = await self.db.execute(
+                select(ProjectMember).where(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.role == "gp",
+                    ProjectMember.is_active == True,
+                )
+            )
+            notif = InAppNotificationService(self.db)
+            for gp in gps_result.scalars().all():
+                await notif.notify(
+                    user_id=gp.user_id,
+                    event_type="ocg_updated",
+                    title=f"OCG atualizado (v{version_from} → v{version_to})",
+                    message=f"{len(changes)} mudança(s) aplicada(s). Trigger: {change_type}.",
+                    project_id=project_id,
+                    resource_type="ocg",
+                    resource_id=ocg.id,
+                    link=f"/projects/{project_id}/ocg",
+                    severity="info",
+                )
+        except Exception as notif_err:
+            logger.warning("ocg_updater.notify_failed", error=str(notif_err))
+
         logger.info(
             "ocg_updater.success",
             project_id=str(project_id),

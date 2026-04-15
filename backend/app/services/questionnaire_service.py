@@ -340,6 +340,25 @@ class QuestionnaireService:
                     project_link=f"https://gca.code-auditor.com.br/projects/{project_id}" if project_id else "",
                 )
 
+                # Notificação in-app para o GP
+                try:
+                    from app.models.base import User as _User
+                    from app.services.notification_inapp_service import InAppNotificationService
+                    user_row = (await self.db.execute(select(_User).where(_User.email == gp_email))).scalar_one_or_none()
+                    if user_row and project_id:
+                        await InAppNotificationService(self.db).notify(
+                            user_id=user_row.id,
+                            event_type="questionnaire_approved",
+                            title="Questionário aprovado",
+                            message=f"O questionário de \"{project_name}\" foi aprovado. Você pode avançar para a ingestão.",
+                            project_id=project_id,
+                            resource_type="questionnaire",
+                            link=f"/projects/{project_id}/ocg",
+                            severity="success",
+                        )
+                except Exception as notif_err:
+                    logger.warning("questionnaire.notify_failed", error=str(notif_err))
+
             elif notification_type == "revision_needed":
                 logger.info(
                     "questionnaire.sending_revision_email",

@@ -560,6 +560,35 @@ Status possíveis:
             failed=failed,
         )
 
+        # Notificar GPs do projeto: sucesso ou falha parcial
+        try:
+            from app.services.notification_inapp_service import InAppNotificationService
+            from app.models.base import ProjectMember
+            gps_result = await db.execute(
+                select(ProjectMember).where(
+                    ProjectMember.project_id == project_id,
+                    ProjectMember.role == "gp",
+                    ProjectMember.is_active == True,
+                )
+            )
+            notif_svc = InAppNotificationService(db)
+            severity = "warning" if failed > 0 else "success"
+            title = "Geração de código concluída" + (f" com {failed} falha(s)" if failed > 0 else "")
+            message = f"{committed} arquivo(s) commitado(s) em {project.name}."
+            for gp in gps_result.scalars().all():
+                await notif_svc.notify(
+                    user_id=gp.user_id,
+                    event_type="codegen_completed",
+                    title=title,
+                    message=message,
+                    project_id=project_id,
+                    resource_type="scaffold",
+                    link=f"/projects/{project_id}/code-generator",
+                    severity=severity,
+                )
+        except Exception as notif_err:
+            logger.warning("scaffold.notify_failed", error=str(notif_err))
+
         response = ScaffoldResponse(
             files=[ScaffoldFileItem(**f) for f in files],
             summary=summary,
