@@ -990,6 +990,30 @@ class ModuleCandidate(Base):
     )
 
 
+class UserNotification(Base):
+    """Notificação in-app entregue a um usuário específico."""
+    __tablename__ = "user_notifications"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=True)
+    event_type = Column(String(80), nullable=False)
+    title = Column(String(255), nullable=False)
+    message = Column(Text, nullable=False)
+    resource_type = Column(String(50), nullable=True)
+    resource_id = Column(UUID(as_uuid=True), nullable=True)
+    link = Column(String(500), nullable=True)
+    severity = Column(String(20), nullable=False, default="info")
+    read_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_user_notif_user_unread", user_id, read_at),
+        Index("idx_user_notif_user_created", user_id, created_at.desc()),
+        Index("idx_user_notif_project", project_id),
+    )
+
+
 class OCGDeltaLog(Base):
     """Histórico de mudanças no OCG — auditoria + rollback"""
     __tablename__ = "ocg_delta_log"
