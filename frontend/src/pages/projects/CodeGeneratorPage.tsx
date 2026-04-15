@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import Editor, { type OnMount } from '@monaco-editor/react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
   Code2, Play, Save, GitBranch, Loader2, CheckCircle2, AlertTriangle,
@@ -176,6 +177,14 @@ export function CodeGeneratorPage() {
   const [reviewing, setReviewing] = useState(false)
   const [aiReview, setAiReview] = useState<AIReviewResult | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
+
+  // Validation state
+  type ValIssue = { line: number; column: number; message: string; severity: string }
+  const [validationErrors, setValidationErrors] = useState<ValIssue[]>([])
+  const [validationBlocked, setValidationBlocked] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+  const monacoRef = useRef<Parameters<OnMount>[1] | null>(null)
 
   // Run tests
   const [runningTests, setRunningTests] = useState(false)
@@ -387,7 +396,7 @@ export function CodeGeneratorPage() {
   // AI Review before save
   // ================================================================
 
-  const handleReviewAndSave = async () => {
+  const handleAIReviewAndSave = async () => {
     if (!fileContent.trim()) return
     setReviewing(true)
     setAiReview(null)
@@ -424,22 +433,15 @@ export function CodeGeneratorPage() {
   const commitFile = async (path: string, content: string) => {
     setSaving(true)
     try {
-      await apiClient.post(`/projects/${projectId}/git/connect`, {
-        // Usar endpoint de commit — se não existir, simular
-      })
-    } catch {
-      // Ignora erro de connect — já pode estar conectado
-    }
-
-    try {
-      // Commit via API
       const commitMsg = hasChanges
         ? `[GCA] Atualiza ${path.split('/').pop()}`
         : `[GCA] Cria ${path.split('/').pop()}`
 
-      await apiClient.post(`/projects/${projectId}/ingestion`, {
-        // Fallback: salvar como artefato
-      }).catch(() => {})
+      await apiClient.post(`/projects/${projectId}/git/commit`, {
+        file_path: path,
+        content,
+        message: commitMsg,
+      })
 
       setOriginalContent(content)
       setHasChanges(false)
@@ -452,10 +454,82 @@ export function CodeGeneratorPage() {
         loadTree()
       }
     } catch (err: any) {
-      alert(err?.message || 'Erro ao salvar arquivo')
+      alert(err?.response?.data?.detail || err?.message || 'Erro ao salvar arquivo')
     } finally {
       setSaving(false)
     }
+  }
+
+  // ================================================================
+  // Validation + Save
+  // ================================================================
+
+  const applyMarkers = (errors: ValIssue[]) => {
+    const editor = editorRef.current
+    const monaco = monacoRef.current
+    if (!editor || !monaco) return
+    const model = editor.getModel()
+    if (!model) return
+    const markers = errors.map(e => ({
+      startLineNumber: e.line,
+      startColumn: e.column,
+      endLineNumber: e.line,
+      endColumn: e.column + 10,
+      message: e.message,
+      severity: e.severity === 'error' ? monaco.MarkerSeverity.Error : monaco.MarkerSeverity.Warning,
+    }))
+    monaco.editor.setModelMarkers(model, 'gca-validator', markers)
+  }
+
+  const handleReviewAndSave = async () => {
+    const path = selectedFile || newFilePath
+    if (!path) return
+    setValidating(true)
+    setValidationBlocked(false)
+    try {
+      const res = await apiClient.post('/code-generation/validate', {
+        code: fileContent,
+        path,
+      })
+      const issues = (res.data?.issues || []) as ValIssue[]
+      setValidationErrors(issues)
+      applyMarkers(issues)
+      const hasError = issues.some(i => i.severity === 'error')
+      if (hasError) {
+        setValidationBlocked(true)
+        alert(`Código com ${issues.length} problema(s). Corrija os erros sublinhados em vermelho antes de salvar.`)
+        return
+      }
+      await commitFile(path, fileContent)
+      // Limpar markers após save
+      applyMarkers([])
+      setValidationErrors([])
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Falha ao validar código')
+    } finally {
+      setValidating(false)
+    }
+  }
+
+  const detectLanguageForMonaco = (path: string): string => {
+    if (!path) return 'plaintext'
+    const lower = path.toLowerCase()
+    if (lower.endsWith('.py')) return 'python'
+    if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return 'typescript'
+    if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.mjs')) return 'javascript'
+    if (lower.endsWith('.json')) return 'json'
+    if (lower.endsWith('.yaml') || lower.endsWith('.yml')) return 'yaml'
+    if (lower.endsWith('.toml') || lower.endsWith('.ini')) return 'ini'
+    if (lower.endsWith('.md')) return 'markdown'
+    if (lower.endsWith('.go')) return 'go'
+    if (lower.endsWith('.java')) return 'java'
+    if (lower.endsWith('.sql')) return 'sql'
+    if (lower.endsWith('.sh')) return 'shell'
+    if (lower.endsWith('.html')) return 'html'
+    if (lower.endsWith('.css') || lower.endsWith('.scss')) return 'css'
+    if (lower.endsWith('.xml')) return 'xml'
+    if (lower.endsWith('dockerfile')) return 'dockerfile'
+    return 'plaintext'
   }
 
   // ================================================================
@@ -622,11 +696,11 @@ export function CodeGeneratorPage() {
               <>
                 <button
                   onClick={handleReviewAndSave}
-                  disabled={reviewing || saving || !hasChanges}
+                  disabled={validating || saving || !hasChanges}
                   className="flex items-center gap-1 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                 >
-                  {reviewing ? (
-                    <><Loader2 className="w-3.5 h-3.5 animate-spin" />Revisando IA...</>
+                  {validating ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" />Validando...</>
                   ) : saving ? (
                     <><Loader2 className="w-3.5 h-3.5 animate-spin" />Salvando...</>
                   ) : saveSuccess ? (
@@ -775,20 +849,37 @@ export function CodeGeneratorPage() {
                   )}
                 </div>
               ) : (
-                <textarea
-                  value={fileContent}
-                  onChange={e => {
-                    if (!canEdit) return
-                    setFileContent(e.target.value)
-                    setHasChanges(e.target.value !== originalContent)
-                  }}
-                  readOnly={!canEdit}
-                  spellCheck={false}
-                  className={`flex-1 w-full bg-[#0d1117] text-slate-200 font-mono text-sm p-4 resize-none focus:outline-none leading-relaxed ${
-                    !canEdit ? 'cursor-default opacity-80' : ''
-                  }`}
-                  placeholder="// Escreva seu codigo aqui..."
-                />
+                <div className="flex-1 w-full">
+                  <Editor
+                    height="60vh"
+                    language={detectLanguageForMonaco(selectedFile || newFilePath)}
+                    value={fileContent}
+                    theme="vs-dark"
+                    onChange={(v) => {
+                      if (!canEdit) return
+                      const next = v ?? ''
+                      setFileContent(next)
+                      setHasChanges(next !== originalContent)
+                    }}
+                    onMount={(editor, monaco) => {
+                      editorRef.current = editor
+                      monacoRef.current = monaco
+                    }}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 13,
+                      wordWrap: 'on',
+                      readOnly: !canEdit,
+                      scrollBeyondLastLine: false,
+                      automaticLayout: true,
+                    }}
+                  />
+                  {validationBlocked && (
+                    <div className="px-4 py-2 bg-red-900/20 border-t border-red-800/40 text-red-300 text-xs">
+                      {validationErrors.length} problema(s) de sintaxe — corrija os sublinhados em vermelho antes de salvar.
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           ) : (
