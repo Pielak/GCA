@@ -27,6 +27,7 @@ from app.models.base import OCG, OCGDeltaLog
 from app.services.ai_billing_service import AIBillingService
 from app.services.ai_key_resolver import AIKeyResolver
 from app.services.audit_service import AuditService
+from app.services.ocg_compactor import compact_ocg_for_prompt
 from app.services.ocg_delta_applier import apply_deltas
 
 logger = structlog.get_logger(__name__)
@@ -426,15 +427,19 @@ class OCGUpdaterService:
         current_ocg: Dict[str, Any],
         arguider_analysis: Dict[str, Any],
     ) -> str:
-        ocg_str = json.dumps(current_ocg, ensure_ascii=False, indent=2)
+        # Compactar OCG para prompts longos: trima textos verbosos (rationale,
+        # description, mitigation, etc.) sem mexer em scores/listas/items.
+        # Compactor é no-op se o OCG for pequeno o suficiente.
+        compact_ocg = compact_ocg_for_prompt(current_ocg)
+        ocg_str = json.dumps(compact_ocg, ensure_ascii=False, indent=2)
         arguider_str = json.dumps(arguider_analysis, ensure_ascii=False, indent=2)
         return (
-            "## OCG ATUAL DO PROJETO\n\n"
+            "## OCG ATUAL DO PROJETO (textos longos compactados; valores/scores intactos)\n\n"
             f"{ocg_str}\n\n"
             "## ANÁLISE DO ARGUIDOR\n\n"
             f"{arguider_str}\n\n"
-            "Com base na análise do Arguidor, atualize o OCG conforme as instruções do sistema. "
-            "Retorne apenas o JSON no formato especificado."
+            "Com base na análise do Arguidor, gere o **delta** (lista de operações replace/append) "
+            "que reflete as mudanças necessárias no OCG. Retorne apenas o JSON no formato especificado pelo system prompt."
         )
 
     def _parse_llm_response(
