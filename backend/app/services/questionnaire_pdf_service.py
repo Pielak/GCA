@@ -1,45 +1,28 @@
 """
 Serviço de geração + leitura de PDF editável (AcroForm) do questionário técnico GCA.
 
-Fase 1: generate_pdf(project_name, deliverable_type) → bytes do PDF com campos editáveis.
-Fase 3: extract_answers(pdf_bytes) → Dict[str, Any] mapeado no formato do questionário.
+generate_pdf() → PDF com checkboxes reais, dropdowns, campo "Outros" por pergunta.
+extract_answers_from_pdf() → lê campos AcroForm preenchidos e devolve Dict.
 
-O PDF usa AcroForm (campos editáveis nativos do PDF — user preenche no Adobe/Foxit/Preview
-sem precisar de software especial). Cada campo tem nome = question_id (ex: "q1", "q3").
-
-Estrutura: 9 blocos (A.1 – A.8 + instruções), 49 campos editáveis.
-Perguntas de seleção única → combo dropdown.
-Perguntas de seleção múltipla → checkboxes (representados como campo de texto com instrução).
-Perguntas de texto → campo de texto livre.
+Layout:
+  - Single select → dropdown (combo AcroForm)
+  - Multi select → checkboxes individuais + checkbox "Outros" + campo texto
+  - Text → textfield
+  - Nome/slug do projeto pré-preenchidos (vieram do wizard de solicitação)
 """
 from __future__ import annotations
 
 import io
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT, TA_CENTER
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
-from reportlab.lib.units import cm, mm
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
-from reportlab.platypus import (
-    BaseDocTemplate,
-    Frame,
-    NextPageTemplate,
-    PageBreak,
-    PageTemplate,
-    Paragraph,
-    Spacer,
-    Table,
-    TableStyle,
-)
+from reportlab.lib.units import cm
 from reportlab.pdfgen.canvas import Canvas
 
 
 # ──────────────────────────────────────────────────────────────────
-# Dados das perguntas (espelho do frontend questionnaireBlocks.ts)
+# Dados das perguntas
 # ──────────────────────────────────────────────────────────────────
 
 BLOCKS: List[Dict] = [
@@ -136,236 +119,345 @@ BLOCKS: List[Dict] = [
 
 
 # ──────────────────────────────────────────────────────────────────
-# Fase 1: Geração do PDF editável (AcroForm)
+# Cores e layout
 # ──────────────────────────────────────────────────────────────────
 
-VIOLET_HEX = "#7C3AED"
-VIOLET_RGB = (0x7C / 255, 0x3A / 255, 0xED / 255)
-SLATE_RGB = (0.12, 0.16, 0.22)
-LIGHT_GRAY = (0.95, 0.95, 0.97)
+VIOLET = colors.HexColor("#7C3AED")
+VIOLET_LIGHT = colors.HexColor("#DDD6FE")
+SLATE_DARK = colors.HexColor("#1E293B")
+SLATE_MID = colors.HexColor("#64748B")
+SLATE_BORDER = colors.HexColor("#CBD5E1")
+FIELD_BG = colors.HexColor("#F8FAFC")
+WHITE = colors.HexColor("#FFFFFF")
 
 PAGE_W, PAGE_H = A4
-MARGIN_L = 2.0 * cm
-MARGIN_R = 2.0 * cm
-MARGIN_T = 2.0 * cm
-MARGIN_B = 2.0 * cm
-FIELD_W = PAGE_W - MARGIN_L - MARGIN_R
+ML = 2.0 * cm   # margin left
+MR = 2.0 * cm   # margin right
+MT = 2.0 * cm   # margin top
+MB = 2.5 * cm   # margin bottom
+USABLE_W = PAGE_W - ML - MR
+
+CB_SIZE = 10     # checkbox size
+CB_GAP = 3       # gap between checkbox and label
+COL_GAP = 8      # gap between columns of checkboxes
+ROW_H = 16       # row height for checkbox rows
+FIELD_H = 18     # textfield height
+Q_GAP = 14       # gap between questions
+BLOCK_GAP = 18   # gap between blocks
 
 
-def generate_pdf(project_name: str, deliverable_type: str = "", project_slug: str = "") -> bytes:
-    """Gera PDF editável (AcroForm) com as 49 perguntas do questionário.
+def _new_page(c: Canvas) -> float:
+    c.showPage()
+    return PAGE_H - MT
 
-    Returns:
-        bytes: conteúdo do PDF pronto para download ou envio por email.
-    """
+
+def _need_space(c: Canvas, y: float, needed: float) -> float:
+    if y - needed < MB:
+        return _new_page(c)
+    return y
+
+
+# ──────────────────────────────────────────────────────────────────
+# Geração do PDF
+# ──────────────────────────────────────────────────────────────────
+
+def generate_pdf(
+    project_name: str,
+    deliverable_type: str = "",
+    project_slug: str = "",
+) -> bytes:
     buf = io.BytesIO()
     c = Canvas(buf, pagesize=A4)
-
-    # Habilita AcroForm
     c.setTitle(f"Questionário Técnico GCA — {project_name}")
     c.setAuthor("GCA — Gerenciador Central de Arquiteturas")
-    c.setSubject("Questionário técnico para seed do OCG")
-
     form = c.acroForm
+    y = PAGE_H - MT
 
-    y = PAGE_H - MARGIN_T
+    # ── Cabeçalho ──
+    c.setFillColor(VIOLET)
+    c.setFont("Helvetica-Bold", 26)
+    c.drawString(ML, y, "GCA")
+    c.setFont("Helvetica", 10)
+    c.setFillColor(SLATE_MID)
+    c.drawString(ML + 55, y + 2, "Gerenciador Central de Arquiteturas")
+    y -= 28
 
-    # ── Capa simplificada ──
-    c.setFillColor(colors.HexColor(VIOLET_HEX))
-    c.setFont("Helvetica-Bold", 28)
-    c.drawString(MARGIN_L, y, "GCA")
-    y -= 14
-    c.setFont("Helvetica", 11)
-    c.setFillColor(colors.HexColor("#475569"))
-    c.drawString(MARGIN_L, y, "Gerenciador Central de Arquiteturas")
-    y -= 30
-
-    c.setFillColor(colors.HexColor("#1E293B"))
-    c.setFont("Helvetica-Bold", 16)
-    c.drawString(MARGIN_L, y, "Questionário Técnico do Projeto")
+    c.setFillColor(SLATE_DARK)
+    c.setFont("Helvetica-Bold", 15)
+    c.drawString(ML, y, "Questionário Técnico do Projeto")
     y -= 20
 
     if project_name:
-        c.setFont("Helvetica-Bold", 13)
-        c.setFillColor(colors.HexColor(VIOLET_HEX))
-        c.drawString(MARGIN_L, y, project_name)
+        c.setFont("Helvetica-Bold", 12)
+        c.setFillColor(VIOLET)
+        c.drawString(ML, y, project_name)
+        y -= 16
+    if deliverable_type:
+        c.setFont("Helvetica", 9)
+        c.setFillColor(SLATE_MID)
+        c.drawString(ML, y, f"Tipo: {deliverable_type}    |    Slug: {project_slug}")
         y -= 18
 
-    if deliverable_type:
-        c.setFont("Helvetica", 10)
-        c.setFillColor(colors.HexColor("#475569"))
-        c.drawString(MARGIN_L, y, f"Tipo: {deliverable_type}")
-        y -= 14
+    # Linha separadora
+    c.setStrokeColor(VIOLET)
+    c.setLineWidth(1.5)
+    c.line(ML, y, PAGE_W - MR, y)
+    y -= 16
 
-    if project_slug:
-        c.drawString(MARGIN_L, y, f"Slug: {project_slug}")
-        y -= 14
-
-    y -= 10
-    c.setFont("Helvetica", 9)
-    c.setFillColor(colors.HexColor("#64748B"))
-    instructions = [
-        "INSTRUÇÕES DE PREENCHIMENTO:",
-        "",
-        "1. Preencha os campos diretamente neste PDF (Adobe Reader, Foxit ou Preview).",
-        "2. Para perguntas de seleção múltipla, separe as opções por vírgula.",
-        "3. Campos marcados (N/A) podem ser deixados em branco se não se aplicam.",
-        "4. Após preencher, salve o PDF e faça upload na tela do projeto no GCA.",
-        "5. O GCA analisará suas respostas e gerará o OCG inicial automaticamente.",
-        "",
-        "Mínimo de 80% de perguntas respondidas para aprovação automática.",
-        "Perguntas do bloco A.2 só se aplicam se Q3 = 'Sim'.",
+    # Instruções
+    c.setFont("Helvetica-Bold", 9)
+    c.setFillColor(SLATE_DARK)
+    c.drawString(ML, y, "INSTRUÇÕES DE PREENCHIMENTO")
+    y -= 13
+    c.setFont("Helvetica", 8)
+    c.setFillColor(SLATE_MID)
+    instrucoes = [
+        "1. Abra no Adobe Reader, Foxit ou Preview. Preencha os campos diretamente.",
+        "2. Perguntas de seleção única: use o dropdown (combo). Múltipla: marque os checkboxes.",
+        '3. Se marcar "Outros", preencha o campo de texto ao lado com sua descrição.',
+        "4. Mínimo 80% de perguntas respondidas para aprovação automática.",
+        "5. Bloco A.2 só se aplica se Q3 = 'Sim'. Salve e faça upload no GCA.",
     ]
-    for line in instructions:
-        c.drawString(MARGIN_L, y, line)
-        y -= 12
+    for line in instrucoes:
+        c.drawString(ML, y, line)
+        y -= 11
+    y -= 8
 
-    y -= 10
-    c.setStrokeColor(colors.HexColor("#E2E8F0"))
-    c.line(MARGIN_L, y, PAGE_W - MARGIN_R, y)
-    y -= 20
+    c.setStrokeColor(SLATE_BORDER)
+    c.setLineWidth(0.5)
+    c.line(ML, y, PAGE_W - MR, y)
+    y -= BLOCK_GAP
 
-    # ── Perguntas por bloco ──
+    # ── Blocos de perguntas ──
     for block in BLOCKS:
-        if y < 120:
-            c.showPage()
-            y = PAGE_H - MARGIN_T
+        y = _need_space(c, y, 60)
 
-        # Título do bloco
-        c.setFillColor(colors.HexColor(VIOLET_HEX))
-        c.setFont("Helvetica-Bold", 12)
-        c.drawString(MARGIN_L, y, block["title"])
-        y -= 6
-        c.setStrokeColor(colors.HexColor(VIOLET_HEX))
-        c.line(MARGIN_L, y, PAGE_W - MARGIN_R, y)
-        y -= 16
+        # Título do bloco (faixa violeta)
+        c.setFillColor(VIOLET)
+        c.rect(ML, y - 4, USABLE_W, 18, fill=True, stroke=False)
+        c.setFillColor(WHITE)
+        c.setFont("Helvetica-Bold", 10)
+        c.drawString(ML + 6, y, block["title"])
+        y -= 22
 
         for q in block["questions"]:
-            if y < 80:
-                c.showPage()
-                y = PAGE_H - MARGIN_T
+            q_type = q["type"]
+            options = q.get("options", [])
+
+            # Calcular espaço necessário
+            if q_type == "text":
+                needed = 30 + Q_GAP
+            elif q_type == "single":
+                needed = 30 + Q_GAP
+            else:
+                cols = 2 if len(options) <= 12 else 3
+                rows = -(-len(options) // cols)  # ceil division
+                # +1 row para "Outros" + campo texto
+                needed = 18 + (rows + 1) * ROW_H + FIELD_H + Q_GAP + 6
+
+            y = _need_space(c, y, needed)
 
             # Label da pergunta
-            c.setFillColor(colors.HexColor("#1E293B"))
             c.setFont("Helvetica-Bold", 9)
-            c.drawString(MARGIN_L, y, f"Q{q['id']}. {q['label']}")
-            y -= 4
+            c.setFillColor(SLATE_DARK)
+            c.drawString(ML, y, f"Q{q['id']}. {q['label']}")
+            y -= 14
 
-            # Hint de opções para multi/single
-            if q["type"] in ("single", "multi") and q.get("options"):
-                c.setFont("Helvetica", 7)
-                c.setFillColor(colors.HexColor("#94A3B8"))
-                opts_hint = f"Opções: {' | '.join(q['options'])}"
-                if q["type"] == "multi":
-                    opts_hint += "  (separe por vírgula)"
-                # Quebra se muito longo
-                if len(opts_hint) > 120:
-                    c.drawString(MARGIN_L + 4, y, opts_hint[:120])
-                    y -= 10
-                    c.drawString(MARGIN_L + 4, y, opts_hint[120:240])
-                else:
-                    c.drawString(MARGIN_L + 4, y, opts_hint)
-                y -= 4
+            if q_type == "text":
+                # Pré-preencher nome e slug
+                prefill = ""
+                if q["id"] == "1":
+                    prefill = project_name
+                elif q["id"] == "2":
+                    prefill = project_slug
 
-            y -= 2
+                form.textfield(
+                    name=f"q{q['id']}",
+                    x=ML, y=y - FIELD_H, width=USABLE_W, height=FIELD_H,
+                    fontSize=9,
+                    value=prefill,
+                    borderColor=SLATE_BORDER, fillColor=FIELD_BG,
+                    textColor=SLATE_DARK,
+                )
+                y -= FIELD_H + Q_GAP
 
-            # Campo editável (AcroForm)
-            field_name = f"q{q['id']}"
-            field_height = 18 if q["type"] == "text" else 16
+            elif q_type == "single":
+                # Dropdown (combo)
+                form.choice(
+                    name=f"q{q['id']}",
+                    x=ML, y=y - FIELD_H, width=min(USABLE_W, 280), height=FIELD_H,
+                    fontSize=9,
+                    options=["Selecione..."] + options,
+                    value="Selecione...",
+                    borderColor=SLATE_BORDER, fillColor=FIELD_BG,
+                    textColor=SLATE_DARK,
+                )
+                y -= FIELD_H + Q_GAP
 
-            form.textfield(
-                name=field_name,
-                x=MARGIN_L,
-                y=y - field_height,
-                width=FIELD_W,
-                height=field_height,
-                fontSize=9,
-                borderColor=colors.HexColor("#CBD5E1"),
-                fillColor=colors.HexColor("#F8FAFC"),
-                textColor=colors.HexColor("#1E293B"),
-                fieldFlags="",
-            )
-            y -= field_height + 10
+            elif q_type == "multi":
+                # Checkboxes em grid
+                cols = 2 if len(options) <= 12 else 3
+                col_w = USABLE_W / cols
 
-        y -= 6  # espaço entre blocos
+                for idx, opt in enumerate(options):
+                    col = idx % cols
+                    row = idx // cols
+                    cx = ML + col * col_w
+                    cy = y - row * ROW_H
 
-    # Rodapé final
-    if y < 80:
-        c.showPage()
-        y = PAGE_H - MARGIN_T
+                    if cy < MB + 40:
+                        y = _new_page(c)
+                        cy = y
 
-    y -= 20
+                    cb_name = f"q{q['id']}_cb_{idx}"
+                    form.checkbox(
+                        name=cb_name,
+                        x=cx, y=cy - CB_SIZE,
+                        size=CB_SIZE,
+                        borderColor=SLATE_BORDER,
+                        fillColor=FIELD_BG,
+                        buttonStyle="check",
+                        checked=False,
+                    )
+                    c.setFont("Helvetica", 8)
+                    c.setFillColor(SLATE_DARK)
+                    c.drawString(cx + CB_SIZE + CB_GAP, cy - 8, opt[:35])
+
+                rows_used = -(-len(options) // cols)
+                y -= rows_used * ROW_H + 4
+
+                y = _need_space(c, y, ROW_H + FIELD_H + 8)
+
+                # Checkbox "Outros"
+                form.checkbox(
+                    name=f"q{q['id']}_cb_outros",
+                    x=ML, y=y - CB_SIZE,
+                    size=CB_SIZE,
+                    borderColor=colors.HexColor("#F59E0B"),
+                    fillColor=colors.HexColor("#FFFBEB"),
+                    buttonStyle="check",
+                    checked=False,
+                )
+                c.setFont("Helvetica-Oblique", 8)
+                c.setFillColor(colors.HexColor("#D97706"))
+                c.drawString(ML + CB_SIZE + CB_GAP, y - 8, "Outros (descreva abaixo se marcar esta opção):")
+                y -= ROW_H
+
+                # Campo de texto para "Outros"
+                form.textfield(
+                    name=f"q{q['id']}_outros",
+                    x=ML, y=y - FIELD_H, width=USABLE_W, height=FIELD_H,
+                    fontSize=8,
+                    borderColor=colors.HexColor("#FDE68A"),
+                    fillColor=colors.HexColor("#FFFBEB"),
+                    textColor=SLATE_DARK,
+                )
+                y -= FIELD_H + Q_GAP
+
+    # Rodapé
+    y = _need_space(c, y, 40)
+    y -= 12
+    c.setStrokeColor(SLATE_BORDER)
+    c.line(ML, y, PAGE_W - MR, y)
+    y -= 14
     c.setFont("Helvetica-Oblique", 8)
-    c.setFillColor(colors.HexColor("#94A3B8"))
-    c.drawString(MARGIN_L, y, "GCA — Gerenciador Central de Arquiteturas • Questionário gerado automaticamente")
-    c.drawString(MARGIN_L, y - 12, "Após preencher, faça upload do PDF no GCA → tela do questionário do projeto.")
+    c.setFillColor(SLATE_MID)
+    c.drawString(ML, y, "GCA — Gerenciador Central de Arquiteturas • Questionário técnico gerado automaticamente")
+    y -= 11
+    c.drawString(ML, y, "Após preencher, salve e faça upload na tela Questionário do seu projeto no GCA.")
 
     c.save()
     return buf.getvalue()
 
 
 # ──────────────────────────────────────────────────────────────────
-# Fase 3: Extração de respostas do PDF preenchido
+# Extração de respostas do PDF preenchido
 # ──────────────────────────────────────────────────────────────────
 
 def extract_answers_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
     """Extrai respostas dos campos AcroForm de um PDF preenchido.
 
-    Campos são nomeados 'q1', 'q2', ..., 'q49'. Respostas de seleção
-    múltipla vêm separadas por vírgula — split para lista.
-
-    Returns:
-        Dict com chaves numéricas ('1', '2', ...) e valores string ou list.
+    Mapeia:
+      - q{N} (textfield/choice) → resposta direta
+      - q{N}_cb_{idx} (checkbox) → coleta checked, monta lista
+      - q{N}_cb_outros + q{N}_outros → adiciona "Outros: ..." à lista
     """
     import pypdf
 
     reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
-    fields = reader.get_form_text_fields() or {}
+    raw_fields = reader.get_fields() or {}
 
-    # Também tenta campos de formulário interativos
-    if not fields and reader.get_fields():
-        raw_fields = reader.get_fields()
-        for name, field_obj in raw_fields.items():
-            if hasattr(field_obj, "value") and field_obj.value:
-                fields[name] = str(field_obj.value)
-            elif isinstance(field_obj, dict) and field_obj.get("/V"):
-                fields[name] = str(field_obj["/V"])
+    # Normaliza campos: nome → valor
+    flat: Dict[str, str] = {}
+    for name, field_obj in raw_fields.items():
+        val = None
+        if hasattr(field_obj, "value"):
+            val = field_obj.value
+        elif isinstance(field_obj, dict):
+            val = field_obj.get("/V")
+        if val is not None:
+            flat[name] = str(val).strip()
 
+    # Também tenta text fields
+    text_fields = reader.get_form_text_fields() or {}
+    for name, val in text_fields.items():
+        if val and val.strip():
+            flat[name] = val.strip()
+
+    # Montar respostas
     answers: Dict[str, Any] = {}
-    # Mapear question_id → opções válidas para detectar multi-select
-    q_types: Dict[str, str] = {}
+
+    # q_types pra saber tipo de cada pergunta
+    q_meta: Dict[str, Dict] = {}
     for block in BLOCKS:
         for q in block["questions"]:
-            q_types[q["id"]] = q["type"]
+            q_meta[q["id"]] = q
 
-    for field_name, value in fields.items():
-        if not field_name.startswith("q"):
-            continue
-        q_id = field_name[1:]  # Remove 'q' prefix
-        if not q_id.isdigit():
-            continue
+    # Processar text e single (diretos)
+    for q_id, meta in q_meta.items():
+        field_name = f"q{q_id}"
+        if meta["type"] in ("text", "single"):
+            val = flat.get(field_name, "")
+            if val and val != "Selecione...":
+                answers[q_id] = val
 
-        value = (value or "").strip()
-        if not value:
+    # Processar multi (checkboxes)
+    for q_id, meta in q_meta.items():
+        if meta["type"] != "multi":
             continue
+        options = meta.get("options", [])
+        selected = []
+        for idx, opt in enumerate(options):
+            cb_name = f"q{q_id}_cb_{idx}"
+            val = flat.get(cb_name, "")
+            # Checkbox checked values: /Yes, Yes, true, /1, On
+            if val and val.lower().replace("/", "") in ("yes", "true", "1", "on"):
+                selected.append(opt)
 
-        q_type = q_types.get(q_id, "text")
-        if q_type == "multi" and "," in value:
-            answers[q_id] = [v.strip() for v in value.split(",") if v.strip()]
-        else:
-            answers[q_id] = value
+        # "Outros"
+        outros_cb = flat.get(f"q{q_id}_cb_outros", "")
+        outros_text = flat.get(f"q{q_id}_outros", "")
+        if outros_cb and outros_cb.lower().replace("/", "") in ("yes", "true", "1", "on"):
+            if outros_text:
+                selected.append(f"Outros: {outros_text}")
+            else:
+                selected.append("Outros")
+
+        if selected:
+            answers[q_id] = selected
 
     return answers
 
 
 def extract_answers_from_text(text: str) -> Dict[str, Any]:
-    """Fallback: extrai respostas de texto plano (caso o PDF não tenha AcroForm).
+    """Fallback: extrai respostas de texto plano do PDF.
 
     Procura padrões como:
         Q1. Nome do projeto: Minha Aplicação
         Q15. Entregável: API, Microserviço
     """
     import re
+
     answers: Dict[str, Any] = {}
     pattern = re.compile(r"Q(\d+)[.\s:]+(.+)", re.IGNORECASE)
 

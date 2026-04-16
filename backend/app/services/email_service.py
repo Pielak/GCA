@@ -23,6 +23,7 @@ class EmailService:
         bcc: Optional[List[str]] = None,
         from_name_override: Optional[str] = None,
         reply_to: Optional[str] = None,
+        attachments: Optional[List[tuple]] = None,
     ) -> tuple[bool, Optional[str]]:
         """
         Send email via SMTP.
@@ -45,8 +46,8 @@ class EmailService:
             return False, "SMTP is disabled"
 
         try:
-            # Create message
-            msg = MIMEMultipart("alternative")
+            # Create message — use "mixed" when attachments are present
+            msg = MIMEMultipart("mixed" if attachments else "alternative")
             msg["Subject"] = subject
             from_name = from_name_override or settings.SMTP_FROM_NAME
             msg["From"] = f"{from_name} <{settings.SMTP_FROM_EMAIL}>"
@@ -60,9 +61,21 @@ class EmailService:
                 msg["Bcc"] = ", ".join(bcc)
 
             # Attach text and HTML versions
-            if text_content:
-                msg.attach(MIMEText(text_content, "plain"))
-            msg.attach(MIMEText(html_content, "html"))
+            if attachments:
+                body_part = MIMEMultipart("alternative")
+                if text_content:
+                    body_part.attach(MIMEText(text_content, "plain"))
+                body_part.attach(MIMEText(html_content, "html"))
+                msg.attach(body_part)
+                for filename, data, mime_type in attachments:
+                    from email.mime.application import MIMEApplication
+                    part = MIMEApplication(data, Name=filename)
+                    part["Content-Disposition"] = f'attachment; filename="{filename}"'
+                    msg.attach(part)
+            else:
+                if text_content:
+                    msg.attach(MIMEText(text_content, "plain"))
+                msg.attach(MIMEText(html_content, "html"))
 
             # Send email
             with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
