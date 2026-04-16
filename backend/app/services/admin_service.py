@@ -347,7 +347,7 @@ class AdminService:
         admin_id: UUID,
         reason: str
     ) -> ProjectRequest:
-        """Admin rejects a project request"""
+        """Admin rejects a project request e notifica o solicitante por email."""
 
         request = await self.db.get(ProjectRequest, request_id)
         if not request:
@@ -368,6 +368,46 @@ class AdminService:
                    project_slug=request.project_slug,
                    rejected_by=str(admin_id),
                    reason=reason)
+
+        # Notificação ao solicitante (best-effort) — mesmo email/nome do User
+        # criado no momento da solicitação pública.
+        try:
+            from sqlalchemy import select
+            from app.models.base import User
+            from app.services.email_service import EmailService
+
+            gp_res = await self.db.execute(select(User).where(User.id == request.gp_id))
+            gp = gp_res.scalar_one_or_none()
+            if gp and gp.email:
+                EmailService.send_email(
+                    to_email=gp.email,
+                    subject=f"GCA — Solicitação de projeto '{request.project_name}' não aprovada",
+                    html_content=f"""
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                        <div style="background: #1e1b4b; padding: 20px; border-radius: 12px 12px 0 0;">
+                            <h2 style="color: #fca5a5; margin: 0;">Solicitação não aprovada</h2>
+                        </div>
+                        <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
+                            <p>Olá <strong>{gp.full_name or gp.email}</strong>,</p>
+                            <p>Sua solicitação para o projeto <strong style="color: #fca5a5;">{request.project_name}</strong>
+                               foi analisada pelo administrador e <strong>não foi aprovada</strong> neste momento.</p>
+                            <p><strong>Motivo informado pelo administrador:</strong></p>
+                            <div style="background: #0f172a; padding: 16px; border-radius: 8px; border-left: 4px solid #ef4444; margin: 16px 0;">
+                                <p style="margin: 0; white-space: pre-wrap;">{reason or '— sem motivo informado —'}</p>
+                            </div>
+                            <p>Se desejar, você pode entrar em contato com o administrador para esclarecer ou
+                               submeter uma nova solicitação ajustada à orientação acima.</p>
+                            <hr style="border-color: #334155; margin: 20px 0;" />
+                            <p style="color: #64748b; font-size: 12px;">GCA — Gestão de Codificação Assistida</p>
+                        </div>
+                    </div>
+                    """,
+                )
+                logger.info("project.rejection_email_sent",
+                            to=gp.email, project=request.project_name)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("project.rejection_email_failed",
+                           error=str(exc), request_id=str(request.id))
 
         return request
 

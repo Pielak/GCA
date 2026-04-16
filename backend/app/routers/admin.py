@@ -162,6 +162,13 @@ async def get_pending_projects(
             gp_result = await db.execute(select(User).where(User.id == p.gp_id))
             gp = gp_result.scalar_one_or_none()
 
+            # Parse requirements_json (vem como string do wizard) p/ admin ver Q&A
+            import json as _json
+            try:
+                requirements = _json.loads(p.requirements_json) if p.requirements_json else {}
+            except (ValueError, TypeError):
+                requirements = {}
+
             result.append({
                 "id": str(p.id),
                 "gp_id": str(p.gp_id),
@@ -169,6 +176,8 @@ async def get_pending_projects(
                 "project_slug": p.project_slug,
                 "description": p.description or "",
                 "deliverable_type": p.deliverable_type.value if hasattr(p.deliverable_type, 'value') else (p.deliverable_type or "new_system"),
+                "custom_deliverable_type": p.custom_deliverable_type or "",
+                "requirements": requirements,
                 "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
                 "gp_name": gp.full_name if gp else "",
                 "gp_email": gp.email if gp else "",
