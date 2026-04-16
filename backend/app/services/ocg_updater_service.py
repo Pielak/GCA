@@ -27,6 +27,7 @@ from app.models.base import OCG, OCGDeltaLog
 from app.services.ai_billing_service import AIBillingService
 from app.services.ai_key_resolver import AIKeyResolver
 from app.services.audit_service import AuditService
+from app.services.ocg_delta_applier import apply_deltas
 
 logger = structlog.get_logger(__name__)
 
@@ -144,10 +145,54 @@ class OCGUpdaterService:
                 "error": str(exc),
             }
 
-        # 3. Parse da resposta
-        updated_ocg, changes, change_type, context_health = self._parse_llm_response(llm_result)
+        # 3. Parse da resposta (formato delta)
+        deltas, change_type, context_health = self._parse_llm_response(llm_result)
 
-        # 4. Atualizar o registro OCG
+        # 4. Aplicar deltas localmente (deterministic, sem LLM, com optimistic concurrency)
+        updated_ocg, applied, rejected = apply_deltas(current_ocg_data, deltas)
+
+        if rejected:
+            logger.warning(
+                "ocg_updater.deltas_rejected",
+                project_id=str(project_id),
+                rejected_count=len(rejected),
+                applied_count=len(applied),
+                samples=[
+                    {"path": r.get("path"), "op": r.get("op"), "reason": r.get("_reason")}
+                    for r in rejected[:5]
+                ],
+            )
+
+        # Se LLM não propôs nenhum delta válido → não criar nova versão
+        if not applied:
+            logger.info(
+                "ocg_updater.no_changes",
+                project_id=str(project_id),
+                rejected_count=len(rejected),
+            )
+            return {
+                "ocg_id": str(ocg.id),
+                "version_from": version_from,
+                "version_to": version_from,
+                "change_type": change_type,
+                "context_health": context_health,
+                "changes": [],
+                "rejected_count": len(rejected),
+                "status": "no_changes",
+            }
+
+        # changes no formato legado (para _log_delta + audit/notif)
+        changes = [
+            {
+                "field": d.get("path", ""),
+                "old_value": d.get("old_value"),
+                "new_value": d.get("new_value") if d.get("op") == "replace" else d.get("value"),
+                "reasoning": d.get("reasoning", ""),
+            }
+            for d in applied
+        ]
+
+        # 5. Atualizar o registro OCG
         version_to = version_from + 1
         await self._update_ocg_record(
             ocg=ocg,
@@ -157,7 +202,7 @@ class OCGUpdaterService:
             version_to=version_to,
         )
 
-        # 5. Registrar delta
+        # 6. Registrar delta no audit log
         await self._log_delta(
             project_id=project_id,
             document_id=document_id,
@@ -169,7 +214,7 @@ class OCGUpdaterService:
             ocg_snapshot=updated_ocg,
         )
 
-        # 6. Registrar billing
+        # 7. Registrar billing
         tokens_in = llm_result.get("tokens_input", 0)
         tokens_out = llm_result.get("tokens_output", 0)
         provider = llm_result.get("provider", settings.DEFAULT_AI_PROVIDER)
@@ -185,7 +230,7 @@ class OCGUpdaterService:
             metadata={"version_from": version_from, "version_to": version_to},
         )
 
-        # 7. Evento de auditoria
+        # 8. Evento de auditoria
         await self.audit_service.log_event(
             event_type=OCG_UPDATED,
             resource_type="ocg",
@@ -342,24 +387,37 @@ class OCGUpdaterService:
 
     def _build_system_prompt(self) -> str:
         return (
-            "Você é o motor de atualização do OCG (Objeto de Contexto Global) do sistema GCA. "
-            "Seu papel é analisar o OCG atual de um projeto e a análise mais recente do Arguidor "
-            "(que valida e questiona os requisitos), e então produzir uma versão atualizada do OCG.\n\n"
-            "REGRAS OBRIGATÓRIAS:\n"
-            "1. Nunca remova informação consolidada sem justificativa explícita.\n"
-            "2. Se o Arguidor identificou GAPs ou inconsistências, reflita isso nos scores dos pilares afetados.\n"
-            "3. O campo change_type deve ser: EXPAND (nova informação positiva), CONTRACT (informação removida "
-            "ou score reduzido), ou UPDATE (ajuste neutro sem expansão/contração significativa).\n"
-            "4. O campo context_health deve ter: depth (0-1), confidence (0-1), quality (0-1).\n"
-            "5. Retorne APENAS o JSON, sem nenhum texto adicional antes ou depois.\n\n"
-            "FORMATO DE SAÍDA (JSON obrigatório):\n"
+            "Você é o motor de atualização do OCG (Objeto de Contexto Global) do GCA.\n"
+            "Recebe o OCG atual e a análise do Arguidor; retorna **apenas um delta** "
+            "descrevendo o que mudar — NÃO reescreve o OCG inteiro.\n\n"
+            "## REGRAS\n"
+            "1. Use APENAS as operações 'replace' e 'append'.\n"
+            "2. Cada delta tem o formato:\n"
+            "   - replace: {op:'replace', path, old_value, new_value, reasoning}\n"
+            "     * 'old_value' é OBRIGATÓRIO — se divergir do atual, o delta é rejeitado (optimistic concurrency).\n"
+            "     * 'path' em dot-notation: 'PILLAR_SCORES.P3_Scope_Management', 'STACK_RECOMMENDATION.backend.framework'.\n"
+            "     * Para item de lista por índice: 'RISK_ANALYSIS.high_risks.0.mitigation'.\n"
+            "   - append: {op:'append', path, value, reasoning}\n"
+            "     * path deve apontar para uma lista existente (DELIVERABLES, COMPLIANCE_CHECKLIST, RISK_ANALYSIS.high_risks, etc.).\n"
+            "3. Top-level keys permitidos: PROJECT_PROFILE, PILLAR_SCORES, COMPOSITE_SCORE, STACK_RECOMMENDATION, "
+            "CRITICAL_FINDINGS, TESTING_REQUIREMENTS, COMPLIANCE_CHECKLIST, DELIVERABLES, ARCHITECTURE_OVERVIEW, "
+            "RISK_ANALYSIS, APPROVAL_STATUS. Qualquer outra é rejeitada.\n"
+            "4. Se a análise não justifica nenhuma mudança real, devolva 'deltas': [] (vazio).\n"
+            "5. change_type:\n"
+            "   - EXPAND: informação nova positiva sendo adicionada (novo entregável, novo módulo).\n"
+            "   - CONTRACT: score reduzido ou informação descartada por GAP do Arguidor.\n"
+            "   - UPDATE: ajuste neutro (refinamento de descrição, etc.). Use UPDATE se deltas=[].\n"
+            "6. context_health: {depth, confidence, quality} valores entre 0.0 e 1.0.\n"
+            "7. Nunca remova informação consolidada sem justificativa explícita no 'reasoning'.\n"
+            "8. Retorne APENAS o JSON. Sem markdown, sem comentários, sem preamble.\n\n"
+            "## FORMATO DE SAÍDA (JSON obrigatório)\n"
             "{\n"
-            '  "updated_ocg": { ... objeto OCG completo atualizado ... },\n'
-            '  "changes": [\n'
-            '    { "field": "nome_do_campo", "old_value": "...", "new_value": "...", "reasoning": "..." }\n'
-            "  ],\n"
+            '  "deltas": [\n'
+            '    {"op":"replace", "path":"PILLAR_SCORES.P3_Scope_Management", "old_value":75, "new_value":65, "reasoning":"GAP G003: requisitos não-implementáveis"},\n'
+            '    {"op":"append", "path":"DELIVERABLES", "value":"SBOM inicial do projeto", "reasoning":"resposta ao GAP G002"}\n'
+            '  ],\n'
             '  "change_type": "EXPAND" | "CONTRACT" | "UPDATE",\n'
-            '  "context_health": { "depth": 0.0-1.0, "confidence": 0.0-1.0, "quality": 0.0-1.0 }\n'
+            '  "context_health": {"depth": 0.0, "confidence": 0.0, "quality": 0.0}\n'
             "}"
         )
 
@@ -381,12 +439,13 @@ class OCGUpdaterService:
 
     def _parse_llm_response(
         self, llm_result: Dict[str, Any]
-    ) -> tuple[Dict[str, Any], List[Dict[str, Any]], str, Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
         """
-        Faz parse da resposta do LLM.
+        Faz parse da resposta do LLM no formato delta.
 
-        Retorna: (updated_ocg, changes, change_type, context_health)
-        Em caso de erro de parse, retorna valores seguros para não corromper o OCG.
+        Retorna: (deltas, change_type, context_health)
+        Em caso de erro de parse, levanta ValueError — caller marca OCG como
+        ocg_pending e preserva versão atual.
         """
         raw_text = llm_result.get("raw_text", "")
 
@@ -403,8 +462,11 @@ class OCGUpdaterService:
             )
             raise ValueError(f"Resposta do LLM não é JSON válido: {exc}") from exc
 
-        updated_ocg = parsed.get("updated_ocg", {})
-        changes: List[Dict[str, Any]] = parsed.get("changes", [])
+        deltas: List[Dict[str, Any]] = parsed.get("deltas", [])
+        if not isinstance(deltas, list):
+            logger.warning("ocg_updater.deltas_not_list", got_type=type(deltas).__name__)
+            deltas = []
+
         change_type: str = parsed.get("change_type", "UPDATE")
         context_health: Dict[str, Any] = parsed.get("context_health", {
             "depth": 0.5,
@@ -416,7 +478,7 @@ class OCGUpdaterService:
         if change_type not in ("EXPAND", "CONTRACT", "UPDATE"):
             change_type = "UPDATE"
 
-        return updated_ocg, changes, change_type, context_health
+        return deltas, change_type, context_health
 
     def _extract_json(self, text: str) -> str:
         """Extrai o JSON de uma resposta que pode conter markdown code fences."""
