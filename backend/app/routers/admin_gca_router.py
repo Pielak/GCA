@@ -10,6 +10,7 @@ import structlog
 
 from app.db.database import get_db
 from app.middleware.auth import get_current_user_from_token, require_admin
+from app.core.config import settings
 from uuid import UUID
 
 logger = structlog.get_logger(__name__)
@@ -522,11 +523,10 @@ async def set_default_provider(
             _ai_providers[req.provider]["model"] = req.model
         await _save_ai_provider_to_db(db, req.provider, _ai_providers[req.provider], current_user_id)
 
-    # Atualizar settings em runtime
-    from app.core.config import settings as s
-    object.__setattr__(s, "DEFAULT_AI_PROVIDER", req.provider)
+    # Atualizar settings em runtime (já importado no topo)
+    object.__setattr__(settings, "DEFAULT_AI_PROVIDER", req.provider)
     if req.model:
-        object.__setattr__(s, "DEFAULT_AI_MODEL", req.model)
+        object.__setattr__(settings, "DEFAULT_AI_MODEL", req.model)
 
     logger.info("admin_gca.default_ai_provider_set", provider=req.provider, actor=str(current_user_id))
 
