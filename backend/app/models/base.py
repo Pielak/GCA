@@ -922,6 +922,11 @@ class IngestedDocument(Base):
     source_url = Column(Text, nullable=True)
     source_repo_id = Column(UUID(as_uuid=True), ForeignKey("project_external_repos.id", ondelete="SET NULL"), nullable=True)
 
+    # --- Disponibilidade dos bytes em disco ---
+    # 'available': bytes em /app/storage ou recuperáveis via backfill
+    # 'lost': perdidos permanentemente (uploads sem persistência prévia, etc.)
+    content_status = Column(String(20), nullable=False, default="available")
+
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])
 

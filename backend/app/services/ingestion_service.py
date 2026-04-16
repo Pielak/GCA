@@ -321,6 +321,7 @@ class IngestionService:
                 "source_type": getattr(d, "source_type", None),
                 "source_url": getattr(d, "source_url", None),
                 "source_repo_id": str(d.source_repo_id) if getattr(d, "source_repo_id", None) else None,
+                "content_status": getattr(d, "content_status", "available"),
             }
             for d in docs
         ]

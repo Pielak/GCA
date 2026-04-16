@@ -210,15 +210,24 @@ export function IngestionPage() {
                     <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-4 h-4 text-slate-400" />
                     </div>
-                    <a
-                      href={`/api/v1/projects/${projectId}/ingestion/${doc.id}/content`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-slate-200 text-sm font-medium truncate hover:text-violet-300 hover:underline"
-                      title="Abrir documento (read-only)"
-                    >
-                      {doc.original_filename}
-                    </a>
+                    {doc.content_status === 'lost' ? (
+                      <span
+                        className="text-slate-500 text-sm font-medium truncate line-through cursor-not-allowed"
+                        title="Conteúdo perdido — bytes não disponíveis para visualização"
+                      >
+                        {doc.original_filename}
+                      </span>
+                    ) : (
+                      <a
+                        href={`/api/v1/projects/${projectId}/ingestion/${doc.id}/content`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-slate-200 text-sm font-medium truncate hover:text-violet-300 hover:underline"
+                        title="Abrir documento (read-only)"
+                      >
+                        {doc.original_filename}
+                      </a>
+                    )}
                     {doc.source_type === 'external_repo' && (
                       <span className="flex items-center gap-1 flex-shrink-0">
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-300" title="Documento gerado a partir de Repositório Externo">

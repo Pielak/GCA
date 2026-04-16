@@ -136,6 +136,18 @@ async def get_document_content(
     if not doc or doc.project_id != project_id:
         raise HTTPException(status_code=404, detail="Documento não encontrado")
 
+    # Soft-delete: doc marcado como bytes perdidos (script de inventário).
+    # 410 Gone é o status semanticamente correto — recurso existiu, foi perdido.
+    if doc.content_status == "lost":
+        raise HTTPException(
+            status_code=410,
+            detail=(
+                "Conteúdo perdido permanentemente. O arquivo foi ingerido antes "
+                "da feature de persistência e não é recuperável automaticamente. "
+                "Re-faça o upload se ainda tiver o original."
+            ),
+        )
+
     content = read_ingested(project_id, doc.filename)
     if content is None:
         raise HTTPException(

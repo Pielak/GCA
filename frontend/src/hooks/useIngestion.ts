@@ -14,6 +14,7 @@ export interface IngestedDocument {
   source_type?: string | null
   source_url?: string | null
   source_repo_id?: string | null
+  content_status?: 'available' | 'lost'
 }
 
 export interface DocumentDetail extends IngestedDocument {
