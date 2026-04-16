@@ -7,14 +7,22 @@ Responsabilidades:
     - attest_manual(project_id, deliverable_id, user_id, note, evidence_ref):
       atestação humana (para business_case, etc).
     - export_status(project_id): payload para Readiness page.
+
+**Contrato de transação**: nenhum método aqui dá `commit()`. Todos usam
+`flush()` para tornar mudanças visíveis dentro da sessão. O CALLER é
+responsável por commitar (ou rollback em caso de erro). Isso preserva
+atomicidade — sync + outras operações do caller terminam juntas ou
+rollback juntas.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -43,26 +51,49 @@ class DeliverableRegistry:
     async def sync_from_ocg(
         self,
         project_id: UUID,
-        ocg_data: Dict[str, Any],
+        ocg_data: Any,
     ) -> Dict[str, int]:
         """Sincroniza project_deliverables com OCG.DELIVERABLES.
 
         Estratégia:
-            1. Lê DELIVERABLES do OCG (lista de strings).
-            2. Carrega rows existentes do projeto, indexa por normalized_name.
-            3. Para cada string do OCG:
-                - Se normalized_name não existe: INSERT novo, status='declared'.
-                - Se existe e está 'waived': reativa para 'declared'.
+            1. Aceita ``ocg_data`` como dict OU string JSON (parseia).
+            2. Lê DELIVERABLES do OCG (lista de strings).
+            3. Carrega rows existentes do projeto, indexa por normalized_name.
+            4. Para cada string do OCG:
+                - Se normalized_name não existe: INSERT (com ON CONFLICT
+                  DO NOTHING para tolerar race condition entre 2 syncs
+                  concorrentes do mesmo projeto). Status='declared'.
+                - Se existe e está 'waived': reativa para 'declared' E
+                  re-classifica kind/category (LLM pode ter renomeado
+                  semanticamente; reativação é boa hora pra atualizar).
                 - Caso contrário: mantém (não toca status).
-            4. Para cada row existente cujo normalized_name NÃO está no OCG:
+            5. Para cada row existente cujo normalized_name NÃO está no OCG:
                 - Marca status='waived' (preserva histórico).
 
+        Truncagem: name e normalized_name são limitados a 500 chars (limite
+        da coluna). Truncamento de normalized_name pode causar colisão
+        entre nomes longos quase iguais — ON CONFLICT DO NOTHING evita
+        IntegrityError nesses casos (item duplicado é ignorado).
+
+        Não dá commit — caller controla a transação.
+
         Returns:
-            Contadores: ``{"inserted": N, "reactivated": N, "waived": N, "kept": N}``
+            Contadores: ``{"inserted": N, "reactivated": N, "waived": N,
+                          "kept": N, "skipped": N}``
         """
+        # Normalizar input: aceitar string JSON também
+        if isinstance(ocg_data, str):
+            try:
+                ocg_data = json.loads(ocg_data)
+            except (json.JSONDecodeError, ValueError):
+                logger.warning("deliverable_registry.invalid_ocg_string", project_id=str(project_id))
+                return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
+        if not isinstance(ocg_data, dict):
+            return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
+
         deliverables_list = ocg_data.get("DELIVERABLES", []) or []
         if not isinstance(deliverables_list, list):
-            return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0}
+            return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
 
         # Existing rows
         result = await self.db.execute(
@@ -71,35 +102,60 @@ class DeliverableRegistry:
         existing = {row.normalized_name: row for row in result.scalars().all()}
         ocg_normalized = set()
 
-        counters = {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0}
+        counters = {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
 
         for raw in deliverables_list:
             if not isinstance(raw, str) or not raw.strip():
+                counters["skipped"] += 1
                 continue
-            norm = normalize_name(raw)
+            norm = normalize_name(raw)[:500]  # truncate consistente com coluna
+            if not norm:
+                counters["skipped"] += 1
+                continue
             ocg_normalized.add(norm)
 
             if norm in existing:
                 row = existing[norm]
                 if row.status == "waived":
+                    # Reativar + re-classificar (kind pode ter mudado se LLM
+                    # ressignificou o item; reaproveitamos a oportunidade)
+                    new_kind, new_category = classify_deliverable(raw)
                     row.status = "declared"
+                    row.kind = new_kind
+                    row.category = new_category
                     row.notes = (row.notes or "") + " | reativado: voltou ao OCG"
                     counters["reactivated"] += 1
                 else:
                     counters["kept"] += 1
                 continue
 
+            # INSERT com ON CONFLICT DO NOTHING — tolera race condition
+            # (2 syncs concorrentes do mesmo projeto). Se conflito, conta
+            # como skipped, não inserted.
             kind, category = classify_deliverable(raw)
-            new_row = ProjectDeliverable(
-                project_id=project_id,
-                name=raw[:500],
-                normalized_name=norm[:500],
-                category=category,
-                kind=kind,
-                status="declared",
+            stmt = (
+                pg_insert(ProjectDeliverable)
+                .values(
+                    project_id=project_id,
+                    name=raw[:500],
+                    normalized_name=norm,
+                    category=category,
+                    kind=kind,
+                    status="declared",
+                )
+                .on_conflict_do_nothing(
+                    index_elements=["project_id", "normalized_name"]
+                )
+                .returning(ProjectDeliverable.id)
             )
-            self.db.add(new_row)
-            counters["inserted"] += 1
+            res = await self.db.execute(stmt)
+            inserted_id = res.scalar_one_or_none()
+            if inserted_id:
+                counters["inserted"] += 1
+            else:
+                # Conflict — outra task inseriu primeiro (ou colisão por
+                # truncamento). Skipped, mas não-fatal.
+                counters["skipped"] += 1
 
         # Waive os que sumiram do OCG
         for norm, row in existing.items():
@@ -108,7 +164,7 @@ class DeliverableRegistry:
                 row.notes = (row.notes or "") + " | waived: removido do OCG"
                 counters["waived"] += 1
 
-        await self.db.commit()
+        await self.db.flush()
         logger.info(
             "deliverable_registry.sync_from_ocg",
             project_id=str(project_id),
@@ -122,6 +178,12 @@ class DeliverableRegistry:
         """Roda verify_kind() em todos deliverables não-waived do projeto.
 
         Atualiza status, evidence_*, last_verified_at por linha.
+
+        Em caso de status='error' (verifier levantou exception), preserva
+        evidência anterior (não apaga last_verified_at/evidence_ref) — o
+        registro fica com last_verified_at antigo + nota de erro nova.
+
+        Não dá commit — caller controla a transação.
 
         Returns:
             ``{"verified": N, "present": N, "missing": N, "manual_only": N, "error": N}``
@@ -139,16 +201,26 @@ class DeliverableRegistry:
 
         for d in deliverables:
             res: VerificationResult = await verify_kind(d.kind, project_id, self.db)
-            d.status = res.status if res.status in counters else "error"
-            d.evidence_type = res.evidence_type
-            d.evidence_ref = res.evidence_ref
-            d.verification_method = res.method
-            d.last_verified_at = now
-            if res.notes:
-                d.notes = res.notes
+            new_status = res.status if res.status in counters else "error"
+
+            if new_status == "error":
+                # Preservar evidência anterior; só atualizar nota.
+                d.status = "error"
+                if res.notes:
+                    d.notes = res.notes
+                # NÃO apaga evidence_*, verification_method, last_verified_at
+            else:
+                d.status = new_status
+                d.evidence_type = res.evidence_type
+                d.evidence_ref = res.evidence_ref
+                d.verification_method = res.method
+                d.last_verified_at = now
+                if res.notes:
+                    d.notes = res.notes
+
             counters[d.status] = counters.get(d.status, 0) + 1
 
-        await self.db.commit()
+        await self.db.flush()
         logger.info(
             "deliverable_registry.verify_all",
             project_id=str(project_id),
@@ -170,6 +242,8 @@ class DeliverableRegistry:
 
         Marca status='verified', evidence_type='manual', registra usuário.
         Note obrigatório.
+
+        Não dá commit — caller controla a transação.
         """
         if not note or not note.strip():
             return None
@@ -191,7 +265,7 @@ class DeliverableRegistry:
         d.last_verified_at = datetime.now(timezone.utc)
         d.verified_by = user_id
         d.notes = note.strip()[:2000]
-        await self.db.commit()
+        await self.db.flush()
 
         logger.info(
             "deliverable_registry.manual_attest",

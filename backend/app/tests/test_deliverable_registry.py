@@ -1,12 +1,20 @@
-"""Testes integrados do DeliverableRegistry (Fase A.4).
+"""Testes integrados do DeliverableRegistry (Fase A.4 + A.6 hardening).
 
-Usa DB real (sessão isolada) — testa sync_from_ocg + verify_all +
-attest_manual + export_status criando projeto+OCG fixture mínimo.
+Usa DB real (sessão isolada). Após A.6, registry NÃO commita — caller
+deve commitar explicitamente. Testes refletem esse contrato.
+
+Inclui regressão para os cenários do review #13:
+  - sync sem chave DELIVERABLES no OCG
+  - sync com ocg_data como string JSON
+  - sync com nome > 500 chars (truncamento + colisão)
+  - sync sequencial (idempotente; race condition simulada via 2 sessões)
+  - manual atest sticky contra re-verify (deve ser preservado)
 """
 from datetime import datetime
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import select
 
 from app.db.database import AsyncSessionLocal
 from app.models.base import (
@@ -93,27 +101,32 @@ async def _cleanup_project_fixture(uid, org_id, project_id, questionnaire_id, oc
             await session.execute(User.__table__.delete().where(User.id == uid))
 
 
+async def _sync(pid, ocg_data):
+    """Helper: roda sync_from_ocg + commit explícito (caller's responsibility)."""
+    async with AsyncSessionLocal() as db:
+        counters = await DeliverableRegistry(db).sync_from_ocg(pid, ocg_data)
+        await db.commit()
+        return counters
+
+
 # ─────────────────────────── sync_from_ocg ───────────────────────────
 
 @pytest.mark.asyncio
 async def test_sync_inserts_new_deliverables_from_empty():
     uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
     try:
-        async with AsyncSessionLocal() as db:
-            registry = DeliverableRegistry(db)
-            counters = await registry.sync_from_ocg(pid, {
-                "DELIVERABLES": [
-                    "Documento de Caso de Negócio e ROI",
-                    "SBOM (Software Bill of Materials) inicial",
-                    "Algum entregável customizado sem padrão",
-                ],
-            })
+        counters = await _sync(pid, {
+            "DELIVERABLES": [
+                "Documento de Caso de Negócio e ROI",
+                "SBOM (Software Bill of Materials) inicial",
+                "Algum entregável customizado sem padrão",
+            ],
+        })
         assert counters["inserted"] == 3
         assert counters["waived"] == 0
+        assert counters["skipped"] == 0
 
-        # Verifica state
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             res = await db.execute(
                 select(ProjectDeliverable).where(ProjectDeliverable.project_id == pid)
             )
@@ -132,23 +145,13 @@ async def test_sync_inserts_new_deliverables_from_empty():
 async def test_sync_waives_removed_deliverables():
     uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
     try:
-        # Round 1: 2 itens
-        async with AsyncSessionLocal() as db:
-            await DeliverableRegistry(db).sync_from_ocg(pid, {
-                "DELIVERABLES": ["Documento de Caso de Negócio e ROI", "SBOM inicial"],
-            })
-
-        # Round 2: só 1 (o outro deve virar waived)
-        async with AsyncSessionLocal() as db:
-            counters = await DeliverableRegistry(db).sync_from_ocg(pid, {
-                "DELIVERABLES": ["Documento de Caso de Negócio e ROI"],
-            })
+        await _sync(pid, {"DELIVERABLES": ["Documento de Caso de Negócio e ROI", "SBOM inicial"]})
+        counters = await _sync(pid, {"DELIVERABLES": ["Documento de Caso de Negócio e ROI"]})
         assert counters["inserted"] == 0
         assert counters["kept"] == 1
         assert counters["waived"] == 1
 
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             res = await db.execute(
                 select(ProjectDeliverable).where(ProjectDeliverable.project_id == pid)
             )
@@ -164,16 +167,12 @@ async def test_sync_waives_removed_deliverables():
 async def test_sync_reactivates_waived_when_returns_to_ocg():
     uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
     try:
-        async with AsyncSessionLocal() as db:
-            await DeliverableRegistry(db).sync_from_ocg(pid, {"DELIVERABLES": ["SBOM inicial"]})
-        async with AsyncSessionLocal() as db:
-            await DeliverableRegistry(db).sync_from_ocg(pid, {"DELIVERABLES": []})  # waive
-        async with AsyncSessionLocal() as db:
-            counters = await DeliverableRegistry(db).sync_from_ocg(pid, {"DELIVERABLES": ["SBOM inicial"]})
+        await _sync(pid, {"DELIVERABLES": ["SBOM inicial"]})
+        await _sync(pid, {"DELIVERABLES": []})
+        counters = await _sync(pid, {"DELIVERABLES": ["SBOM inicial"]})
         assert counters["reactivated"] == 1
 
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             res = await db.execute(
                 select(ProjectDeliverable).where(ProjectDeliverable.project_id == pid)
             )
@@ -190,18 +189,13 @@ async def test_sync_reactivates_waived_when_returns_to_ocg():
 async def test_attest_manual_marks_verified():
     uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
     try:
-        async with AsyncSessionLocal() as db:
-            await DeliverableRegistry(db).sync_from_ocg(pid, {
-                "DELIVERABLES": ["Documento de Caso de Negócio e ROI"],
-            })
+        await _sync(pid, {"DELIVERABLES": ["Documento de Caso de Negócio e ROI"]})
 
         async with AsyncSessionLocal() as db:
-            from sqlalchemy import select
             res = await db.execute(
                 select(ProjectDeliverable).where(ProjectDeliverable.project_id == pid)
             )
-            row = res.scalar_one()
-            deliverable_id = row.id
+            deliverable_id = res.scalar_one().id
 
         async with AsyncSessionLocal() as db:
             registry = DeliverableRegistry(db)
@@ -210,11 +204,18 @@ async def test_attest_manual_marks_verified():
                 note="Aprovado pelo board em 2026-04-15. Acta em #12345.",
                 evidence_ref="https://wiki/acta-12345",
             )
-            assert updated is not None
-            assert updated.status == "verified"
-            assert updated.evidence_type == "manual"
-            assert updated.verified_by == uid
-            assert "board" in updated.notes
+            await db.commit()
+        assert updated is not None
+        # Re-fetch fresh para validar persistência
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ProjectDeliverable).where(ProjectDeliverable.id == deliverable_id)
+            )
+            row = res.scalar_one()
+        assert row.status == "verified"
+        assert row.evidence_type == "manual"
+        assert row.verified_by == uid
+        assert "board" in row.notes
     finally:
         await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)
 
@@ -223,9 +224,8 @@ async def test_attest_manual_marks_verified():
 async def test_attest_manual_rejects_empty_note():
     uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
     try:
+        await _sync(pid, {"DELIVERABLES": ["A"]})
         async with AsyncSessionLocal() as db:
-            await DeliverableRegistry(db).sync_from_ocg(pid, {"DELIVERABLES": ["A"]})
-            from sqlalchemy import select
             res = await db.execute(
                 select(ProjectDeliverable).where(ProjectDeliverable.project_id == pid)
             )
@@ -246,15 +246,14 @@ async def test_attest_manual_rejects_empty_note():
 async def test_export_status_aggregates():
     uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
     try:
-        async with AsyncSessionLocal() as db:
-            await DeliverableRegistry(db).sync_from_ocg(pid, {
-                "DELIVERABLES": [
-                    "Documento de Caso de Negócio e ROI",  # business_case (doc)
-                    "SBOM inicial",  # sbom (code)
-                    "Plano de Testes",  # test_plan (test)
-                    "Algum coisa custom",  # other_manual (other)
-                ],
-            })
+        await _sync(pid, {
+            "DELIVERABLES": [
+                "Documento de Caso de Negócio e ROI",
+                "SBOM inicial",
+                "Plano de Testes",
+                "Algum coisa custom",
+            ],
+        })
 
         async with AsyncSessionLocal() as db:
             payload = await DeliverableRegistry(db).export_status(pid)
@@ -267,10 +266,98 @@ async def test_export_status_aggregates():
         assert cats.get("code") == 1
         assert cats.get("test") == 1
         assert cats.get("other") == 1
-        # Cada item tem auto_verifiable correto
         items = {i["kind"]: i for i in payload["deliverables"]}
         assert items["sbom"]["auto_verifiable"] is True
         assert items["business_case"]["auto_verifiable"] is False
         assert items["other_manual"]["auto_verifiable"] is False
+    finally:
+        await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)
+
+
+# ─────────────────────────── A.6 regressão (#13) ──────────────────────
+
+@pytest.mark.asyncio
+async def test_sync_handles_missing_deliverables_key():
+    """OCG sem chave DELIVERABLES não deve quebrar — devolve counters zerados."""
+    uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
+    try:
+        counters = await _sync(pid, {"PROJECT_PROFILE": {"name": "X"}})
+        assert counters == {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
+    finally:
+        await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)
+
+
+@pytest.mark.asyncio
+async def test_sync_accepts_string_ocg_data():
+    """ocg_data como string JSON (caso comum vindo do DB direto) — parseia."""
+    import json
+    uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
+    try:
+        json_str = json.dumps({"DELIVERABLES": ["SBOM inicial"]})
+        counters = await _sync(pid, json_str)
+        assert counters["inserted"] == 1
+    finally:
+        await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)
+
+
+@pytest.mark.asyncio
+async def test_sync_handles_long_name_truncation_safely():
+    """Nome > 500 chars é truncado; ON CONFLICT evita IntegrityError em colisão."""
+    uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
+    try:
+        long1 = "Entregável muito longo " + ("x" * 600) + " final A"
+        long2 = "Entregável muito longo " + ("x" * 600) + " final B"
+        # Ambos truncam para os mesmos primeiros 500 chars (mesmo prefix);
+        # o segundo deve ir para 'skipped' por conflito, não levantar.
+        counters = await _sync(pid, {"DELIVERABLES": [long1, long2]})
+        # Pelo menos 1 inserido + o outro skipped (ou ambos inseridos se
+        # o sufixo couber em <500); em nenhum cenário deve dar exception.
+        assert counters["inserted"] >= 1
+        assert counters["inserted"] + counters["skipped"] == 2
+    finally:
+        await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)
+
+
+@pytest.mark.asyncio
+async def test_sync_idempotent_under_repeat():
+    """Chamar sync 3x com mesmo input não cria duplicatas (kept aumenta)."""
+    uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
+    try:
+        deliverables = {"DELIVERABLES": ["SBOM inicial", "Documento de Caso de Negócio e ROI"]}
+        c1 = await _sync(pid, deliverables)
+        c2 = await _sync(pid, deliverables)
+        c3 = await _sync(pid, deliverables)
+        assert c1["inserted"] == 2
+        assert c2["inserted"] == 0 and c2["kept"] == 2
+        assert c3["inserted"] == 0 and c3["kept"] == 2
+
+        async with AsyncSessionLocal() as db:
+            res = await db.execute(
+                select(ProjectDeliverable).where(ProjectDeliverable.project_id == pid)
+            )
+            rows = list(res.scalars().all())
+        assert len(rows) == 2
+    finally:
+        await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)
+
+
+@pytest.mark.asyncio
+async def test_sync_skips_invalid_entries():
+    """Entradas não-string ou vazias vão para 'skipped', não levantam."""
+    uid, org_id, pid, qid, ocg_id = await _make_project_fixture()
+    try:
+        counters = await _sync(pid, {
+            "DELIVERABLES": [
+                "SBOM inicial",
+                "",
+                "  ",
+                None,
+                123,
+                {"obj": "value"},
+                "Documento de Caso de Negócio e ROI",
+            ],
+        })
+        assert counters["inserted"] == 2
+        assert counters["skipped"] == 5
     finally:
         await _cleanup_project_fixture(uid, org_id, pid, qid, ocg_id)

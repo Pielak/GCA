@@ -249,19 +249,38 @@ class OCGUpdaterService:
         await self.db.commit()
 
         # Sincroniza Definition of Done: o OCG pode ter adicionado/removido
-        # entregáveis em DELIVERABLES (delta tipo append em DELIVERABLES,
-        # por exemplo). Mantém project_deliverables coerente.
-        # Best-effort: falha não derruba o flow do OCG (já commitado).
+        # entregáveis em DELIVERABLES. Mantém project_deliverables coerente.
+        #
+        # Tratamento de erro granular:
+        #   - SQLAlchemyError (schema desatualizado, FK violation, etc):
+        #     log ERROR + rollback + propaga? Não — o OCG já está commitado;
+        #     fazemos rollback APENAS das escritas pendentes do registry e
+        #     logamos ERROR (não warning) para observabilidade.
+        #   - Outros (bug Python, etc): log ERROR com exc_info=True para
+        #     diagnóstico — isso NÃO é "best-effort silencioso", é erro real.
+        from sqlalchemy.exc import SQLAlchemyError
         try:
             from app.services.deliverable_registry import DeliverableRegistry
             registry = DeliverableRegistry(self.db)
             await registry.sync_from_ocg(project_id, updated_ocg)
+            await self.db.commit()  # registry usa flush(); caller commita
+        except SQLAlchemyError as exc:
+            await self.db.rollback()
+            logger.error(
+                "ocg_updater.deliverable_sync_db_error",
+                project_id=str(project_id),
+                error=str(exc),
+                error_type=type(exc).__name__,
+                exc_info=True,
+            )
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "ocg_updater.deliverable_sync_failed",
+            await self.db.rollback()
+            logger.error(
+                "ocg_updater.deliverable_sync_unexpected_error",
                 project_id=str(project_id),
                 error=str(exc) or repr(exc),
                 error_type=type(exc).__name__,
+                exc_info=True,
             )
 
         # Notificar GPs do projeto sobre atualização do OCG
