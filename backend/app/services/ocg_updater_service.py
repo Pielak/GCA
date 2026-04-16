@@ -11,6 +11,7 @@ Fluxo:
   7. Emite evento de auditoria OCG_UPDATED
   8. Em caso de falha do LLM: marca status como ocg_pending (nunca corrompe o OCG)
 """
+import asyncio
 import json
 import re
 from datetime import datetime, timezone
@@ -31,6 +32,25 @@ logger = structlog.get_logger(__name__)
 
 # Evento de auditoria dedicado ao updater
 OCG_UPDATED = "OCG_UPDATED"
+
+# Lock por project_id para serializar updates concorrentes do OCG.
+# Sem isto, N tasks paralelas leem version=V, todas escrevem version=V+1,
+# causando lost updates (a última commit vence). Com lock asyncio, cada
+# task aguarda a anterior antes de ler o OCG, então cada uma vê a versão
+# mais recente e incrementa corretamente (V → V+1 → V+2 → ...).
+# Limitação: lock é per-process. Em deployment multi-worker (gunicorn N
+# workers), conflitos entre workers ainda são possíveis — para isso
+# precisaria de lock distribuído (Redis SETNX) ou version_id_col do SA.
+_PROJECT_LOCKS: Dict[UUID, asyncio.Lock] = {}
+
+
+def _get_project_lock(project_id: UUID) -> asyncio.Lock:
+    """Lock dedicado por project_id, criado on-demand."""
+    lock = _PROJECT_LOCKS.get(project_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _PROJECT_LOCKS[project_id] = lock
+    return lock
 
 
 class OCGUpdaterService:
@@ -59,6 +79,10 @@ class OCGUpdaterService:
         """
         Atualiza o OCG do projeto com base na análise do Arguidor.
 
+        Serializado por project_id via asyncio.Lock para evitar lost updates
+        quando múltiplos documentos do mesmo projeto disparam updates em paralelo
+        (cenário típico: ingestão de N markdowns de um repo externo).
+
         Args:
             project_id: UUID do projeto
             arguider_analysis: Dict com a análise completa do Arguidor
@@ -68,6 +92,24 @@ class OCGUpdaterService:
         Returns:
             Dict com: ocg_id, version_from, version_to, change_type, context_health, changes
         """
+        async with _get_project_lock(project_id):
+            return await self._update_ocg_from_arguider_locked(
+                project_id=project_id,
+                arguider_analysis=arguider_analysis,
+                document_id=document_id,
+                actor_id=actor_id,
+                trigger_source=trigger_source,
+            )
+
+    async def _update_ocg_from_arguider_locked(
+        self,
+        project_id: UUID,
+        arguider_analysis: Dict[str, Any],
+        document_id: Optional[UUID],
+        actor_id: Optional[UUID],
+        trigger_source: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Implementação real — sempre executada sob _get_project_lock(project_id)."""
         logger.info(
             "ocg_updater.start",
             project_id=str(project_id),
@@ -210,7 +252,13 @@ class OCGUpdaterService:
     # ------------------------------------------------------------------ #
 
     async def _load_current_ocg(self, project_id: UUID) -> Optional[OCG]:
-        """Carrega o OCG ativo do projeto."""
+        """Carrega o OCG ativo do projeto.
+
+        Concorrência é serializada em camada superior (asyncio.Lock por
+        project_id em update_ocg_from_arguider). Não usar with_for_update
+        aqui porque a transação fica viva durante a chamada LLM (~30-60s)
+        e bloqueia outras conexões do pool.
+        """
         stmt = (
             select(OCG)
             .where(OCG.project_id == project_id)

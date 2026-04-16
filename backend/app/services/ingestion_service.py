@@ -294,8 +294,14 @@ class IngestionService:
                                    ocg_updated=bool(update_result))
 
                     except Exception as e:
-                        logger.warning("ingestion.ocg_reactive_error",
-                                      document_id=str(document_id), error=str(e))
+                        import traceback
+                        logger.warning(
+                            "ingestion.ocg_reactive_error",
+                            document_id=str(document_id),
+                            error=str(e) or repr(e),
+                            error_type=type(e).__name__,
+                            traceback=traceback.format_exc(),
+                        )
 
         except Exception as e:
             logger.error("ingestion.analysis_async_error", document_id=str(document_id), error=str(e))

@@ -20,7 +20,7 @@ import structlog
 from app.core.config import settings
 from app.models.base import (
     IngestedDocument, ArguiderAnalysis, ModuleCandidate,
-    OCG, OCGDeltaLog,
+    OCG,
 )
 
 logger = structlog.get_logger(__name__)
@@ -251,11 +251,11 @@ class ArguiderService:
                 )
                 self.db.add(candidate)
 
-            # Atualizar OCG se necessário
-            ocg_updated = False
+            # OCG é atualizado em seguida pelo OCGUpdaterService (chamado por
+            # ingestion_service). Aqui só sinalizamos a intenção do Arguidor de
+            # atualizar — o flag final ocg_updated reflete proposta, não persistência.
             ocg_fields = result_json.get("ocg_fields_to_update", [])
-            if ocg_fields:
-                ocg_updated = await self._evolve_ocg(project_id, document_id, ocg_fields)
+            ocg_updated = bool(ocg_fields)
 
             # Atualizar categoria do documento
             classification = result_json.get("document_classification", {})
@@ -321,57 +321,6 @@ class ArguiderService:
 Analise o documento acima em relação ao OCG do projeto.
 Retorne SOMENTE JSON válido com as chaves: document_classification, gaps, show_stoppers,
 poor_definitions, improvement_suggestions, module_candidates, ocg_fields_to_update."""
-
-    async def _evolve_ocg(self, project_id: UUID, document_id: UUID, fields: list) -> bool:
-        """Atualiza OCG evolutivamente e registra delta."""
-        try:
-            result = await self.db.execute(
-                select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
-            )
-            ocg = result.scalar_one_or_none()
-            if not ocg or not ocg.ocg_data:
-                return False
-
-            ocg_data = json.loads(ocg.ocg_data) if isinstance(ocg.ocg_data, str) else ocg.ocg_data
-            changes = {}
-
-            for field_update in fields:
-                field = field_update.get("field", "")
-                new_val = field_update.get("suggested_value")
-                old_val = ocg_data.get(field)
-                if field and new_val is not None:
-                    changes[field] = {
-                        "old_value": old_val,
-                        "new_value": new_val,
-                        "reasoning": field_update.get("reasoning", ""),
-                    }
-                    ocg_data[field] = new_val
-
-            if not changes:
-                return False
-
-            # Salvar delta
-            delta = OCGDeltaLog(
-                project_id=project_id,
-                document_id=document_id,
-                ocg_version_from=1,
-                ocg_version_to=2,
-                fields_changed=json.dumps(changes, ensure_ascii=False),
-                change_summary=f"Atualização via Arguidor: {len(changes)} campo(s) alterado(s)",
-            )
-            self.db.add(delta)
-
-            # Atualizar OCG
-            ocg.ocg_data = json.dumps(ocg_data, ensure_ascii=False)
-            ocg.updated_at = datetime.now(timezone.utc)
-            await self.db.commit()
-
-            logger.info("arguider.ocg_evolved", project_id=str(project_id), fields_changed=len(changes))
-            return True
-
-        except Exception as e:
-            logger.error("arguider.ocg_evolve_error", error=str(e))
-            return False
 
     @staticmethod
     def _extract_json(text: str) -> dict:
