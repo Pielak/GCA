@@ -347,11 +347,11 @@ export function ProjectDashPage() {
                 <div className="w-7 h-7 rounded-full bg-violet-700/50 flex items-center justify-center text-white text-xs font-semibold flex-shrink-0">
                   {(member.full_name || member.email || '?').charAt(0).toUpperCase()}
                 </div>
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 overflow-hidden">
                   <p className="text-slate-200 text-xs truncate">{member.full_name || member.email}</p>
-                  <p className="text-slate-500 text-[10px]">{member.email}</p>
+                  <p className="text-slate-500 text-[10px] truncate">{member.email}</p>
                 </div>
-                <span className={`text-xs px-2 py-0.5 rounded ${ROLE_COLORS[member.role] || 'bg-slate-700 text-slate-400'}`}>
+                <span className={`text-xs px-2 py-0.5 rounded flex-shrink-0 whitespace-nowrap ${ROLE_COLORS[member.role] || 'bg-slate-700 text-slate-400'}`}>
                   {ROLE_LABELS[member.role] || member.role}
                 </span>
               </div>
