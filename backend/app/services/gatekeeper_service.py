@@ -10,6 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
 from app.models.base import GatekeeperItem, ModuleCandidate, ArguiderAnalysis
+from app.services.pillar_threshold_evaluator import (
+    derive_project_status,
+    evaluate_blocking_pillars,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -130,6 +134,16 @@ class GatekeeperService:
                 except json.JSONDecodeError:
                     pass
 
+        # === Avaliação determinística de thresholds ===
+        # Aplica os thresholds configurados no Admin (per-pilar + bandas
+        # de composite). Resultado fica disponível no payload do Gatekeeper
+        # como `blocking_pillars` (lista) e `derived_status` (string).
+        from app.routers.admin_gca_router import _current_settings
+        thresholds_cfg = _current_settings.get("score_thresholds", {})
+        blocking_pillars = evaluate_blocking_pillars(ocg_scores, thresholds_cfg)
+        overall = (ocg_status or {}).get("overall_score", 0) if ocg_status else 0
+        derived_status = derive_project_status(overall, blocking_pillars, thresholds_cfg)
+
         return {
             "summary": {
                 "total_gaps": len(gaps),
@@ -148,6 +162,9 @@ class GatekeeperService:
                 "pillar_scores": ocg_scores,
                 "status": ocg_status,
                 "health": ocg_health,
+                "blocking_pillars": blocking_pillars,
+                "derived_status": derived_status,
+                "thresholds_applied": thresholds_cfg,
             },
             "gaps": [item_to_dict(g) for g in gaps],
             "show_stoppers": [item_to_dict(s) for s in show_stoppers],

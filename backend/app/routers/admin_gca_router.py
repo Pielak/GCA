@@ -21,7 +21,17 @@ DEFAULT_PILLAR_WEIGHTS = {
     "P1": 10, "P2": 15, "P3": 20, "P4": 20, "P5": 15, "P6": 10, "P7": 10,
 }
 DEFAULT_THRESHOLDS = {
+    # Per-pilar: score abaixo deste valor marca o pilar como BLOQUEANTE.
+    # 0 = pilar não bloqueia individualmente (depende só de composite).
+    # Convenção histórica: P7 (Segurança) já bloqueava em 70.
+    "p1_blocking_threshold": 0,
+    "p2_blocking_threshold": 0,
+    "p3_blocking_threshold": 0,
+    "p4_blocking_threshold": 0,
+    "p5_blocking_threshold": 0,
+    "p6_blocking_threshold": 0,
     "p7_blocking_threshold": 70,
+    # Composite (overall): bandas de status do projeto inteiro.
     "ready_threshold": 90,
     "needs_review_threshold": 70,
     "at_risk_threshold": 50,
@@ -58,10 +68,33 @@ class PillarWeightsRequest(BaseModel):
 
 
 class ThresholdsRequest(BaseModel):
+    """Thresholds completos por pilar + bandas de composite.
+
+    Cada p{N}_blocking_threshold (0-100): se o score do pilar P{N} ficar
+    ABAIXO desse valor, o pilar é marcado como BLOQUEANTE no Gatekeeper.
+    Use 0 para "não bloqueia individualmente" (pilar entra só na média).
+    """
+    p1_blocking_threshold: int = 0
+    p2_blocking_threshold: int = 0
+    p3_blocking_threshold: int = 0
+    p4_blocking_threshold: int = 0
+    p5_blocking_threshold: int = 0
+    p6_blocking_threshold: int = 0
     p7_blocking_threshold: int = 70
     ready_threshold: int = 90
     needs_review_threshold: int = 70
     at_risk_threshold: int = 50
+
+    @validator(
+        "p1_blocking_threshold", "p2_blocking_threshold", "p3_blocking_threshold",
+        "p4_blocking_threshold", "p5_blocking_threshold", "p6_blocking_threshold",
+        "p7_blocking_threshold", "ready_threshold", "needs_review_threshold",
+        "at_risk_threshold",
+    )
+    def in_range(cls, v):
+        if v < 0 or v > 100:
+            raise ValueError(f"threshold deve estar em [0, 100], recebido {v}")
+        return v
 
 
 @router.get("/admin/gca/settings")
@@ -98,8 +131,14 @@ async def update_thresholds(
     current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Atualiza thresholds de score."""
+    """Atualiza thresholds de score (todos os 7 pilares + bandas de composite)."""
     _current_settings["score_thresholds"] = {
+        "p1_blocking_threshold": req.p1_blocking_threshold,
+        "p2_blocking_threshold": req.p2_blocking_threshold,
+        "p3_blocking_threshold": req.p3_blocking_threshold,
+        "p4_blocking_threshold": req.p4_blocking_threshold,
+        "p5_blocking_threshold": req.p5_blocking_threshold,
+        "p6_blocking_threshold": req.p6_blocking_threshold,
         "p7_blocking_threshold": req.p7_blocking_threshold,
         "ready_threshold": req.ready_threshold,
         "needs_review_threshold": req.needs_review_threshold,
