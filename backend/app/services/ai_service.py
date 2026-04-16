@@ -179,12 +179,12 @@ class AIService:
         temperature: float,
         max_tokens: Optional[int],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Query Anthropic Claude"""
+        """Query Anthropic Claude (AsyncAnthropic — não bloqueia event loop)."""
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=api_key)
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=api_key)
 
-            response = client.messages.create(
+            response = await client.messages.create(
                 model=model,
                 max_tokens=max_tokens or 2048,
                 system=system_prompt or "",
@@ -205,17 +205,17 @@ class AIService:
         temperature: float,
         max_tokens: Optional[int],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Query OpenAI GPT"""
+        """Query OpenAI GPT (AsyncOpenAI — não bloqueia event loop)."""
         try:
-            import openai
-            client = openai.OpenAI(api_key=api_key)
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=api_key)
 
             messages = []
             if system_prompt:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -235,8 +235,14 @@ class AIService:
         temperature: float,
         max_tokens: Optional[int],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Query Google Gemini"""
+        """Query Google Gemini.
+
+        google-generativeai SDK é síncrono — envolvemos em asyncio.to_thread
+        para que a chamada (que bloqueia ~30s) rode em pool de threads e não
+        congele o event loop.
+        """
         try:
+            import asyncio
             import google.generativeai as genai
             genai.configure(api_key=api_key)
 
@@ -250,7 +256,7 @@ class AIService:
                 }
             )
 
-            response = model_obj.generate_content(full_prompt)
+            response = await asyncio.to_thread(model_obj.generate_content, full_prompt)
             return True, response.text, None
         except Exception as e:
             return False, None, str(e)
@@ -264,10 +270,10 @@ class AIService:
         temperature: float,
         max_tokens: Optional[int],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Query DeepSeek"""
+        """Query DeepSeek (AsyncOpenAI — não bloqueia event loop)."""
         try:
-            import openai
-            client = openai.OpenAI(
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
                 api_key=api_key,
                 base_url="https://api.deepseek.com",
             )
@@ -277,7 +283,7 @@ class AIService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -297,10 +303,10 @@ class AIService:
         temperature: float,
         max_tokens: Optional[int],
     ) -> tuple[bool, Optional[str], Optional[str]]:
-        """Query Xai Grok"""
+        """Query Xai Grok (AsyncOpenAI — não bloqueia event loop)."""
         try:
-            import openai
-            client = openai.OpenAI(
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
                 api_key=api_key,
                 base_url="https://api.x.ai",
             )
@@ -310,7 +316,7 @@ class AIService:
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=model,
                 messages=messages,
                 temperature=temperature,

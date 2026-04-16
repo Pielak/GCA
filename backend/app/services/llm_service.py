@@ -51,14 +51,13 @@ class AnthropicClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.7
     ) -> str:
-        """Generate code using Claude"""
+        """Generate code using Claude (AsyncAnthropic — não bloqueia event loop)."""
         try:
-            # Import here to avoid dependency if not used
-            import anthropic
+            from anthropic import AsyncAnthropic
 
-            client = anthropic.Anthropic(api_key=self.api_key)
+            client = AsyncAnthropic(api_key=self.api_key)
 
-            message = client.messages.create(
+            message = await client.messages.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -86,10 +85,9 @@ class AnthropicClient(BaseLLMClient):
     async def validate_credentials(self) -> bool:
         """Validate Anthropic API credentials"""
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.api_key)
-            # Try to call a simple API to validate
-            response = client.messages.create(
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=self.api_key)
+            response = await client.messages.create(
                 model=self.model,
                 max_tokens=10,
                 messages=[{"role": "user", "content": "ping"}]
@@ -112,13 +110,13 @@ class OpenAIClient(BaseLLMClient):
         max_tokens: int = 4000,
         temperature: float = 0.7
     ) -> str:
-        """Generate code using GPT-4"""
+        """Generate code using GPT-4 (AsyncOpenAI — não bloqueia event loop)."""
         try:
-            from openai import OpenAI
+            from openai import AsyncOpenAI
 
-            client = OpenAI(api_key=self.api_key)
+            client = AsyncOpenAI(api_key=self.api_key)
 
-            response = client.chat.completions.create(
+            response = await client.chat.completions.create(
                 model=self.model,
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -146,10 +144,9 @@ class OpenAIClient(BaseLLMClient):
     async def validate_credentials(self) -> bool:
         """Validate OpenAI API credentials"""
         try:
-            from openai import OpenAI
-            client = OpenAI(api_key=self.api_key)
-            # Try to list models to validate
-            models = client.models.list()
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(api_key=self.api_key)
+            models = await client.models.list()
             return len(models.data) > 0
         except Exception:
             return False
