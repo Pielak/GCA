@@ -9,7 +9,7 @@ import { useParams } from 'react-router-dom'
 import {
   CheckCircle2, XCircle, Clock, Loader2, RefreshCw, FilePen,
   AlertCircle, FileCheck2, Hand, Code, FileText, FlaskConical,
-  Settings, MoreHorizontal,
+  Settings, MoreHorizontal, Package, Download,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
@@ -56,6 +56,20 @@ const categoryIcon: Record<string, any> = {
   doc: FileText, code: Code, test: FlaskConical, process: Settings, config: Settings, other: MoreHorizontal,
 }
 
+interface Release {
+  id: string
+  version: number
+  status: 'generating' | 'ready' | 'failed'
+  readiness_pct: number | null
+  size_bytes: number | null
+  sha256: string | null
+  created_at: string | null
+  completed_at: string | null
+  error_message: string | null
+}
+
+const RELEASE_THRESHOLD = 90  // %
+
 export function ReadinessPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const [data, setData] = useState<ReadinessPayload | null>(null)
@@ -64,12 +78,19 @@ export function ReadinessPage() {
   const [verifyingOne, setVerifyingOne] = useState<string | null>(null)
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [attestModal, setAttestModal] = useState<Deliverable | null>(null)
+  const [releases, setReleases] = useState<Release[]>([])
+  const [creatingRelease, setCreatingRelease] = useState(false)
+  const [releaseError, setReleaseError] = useState<string | null>(null)
 
   const load = async () => {
     if (!projectId) return
     try {
-      const res = await apiClient.get(`/projects/${projectId}/deliverables`)
-      setData(res.data)
+      const [statusRes, releasesRes] = await Promise.all([
+        apiClient.get(`/projects/${projectId}/deliverables`),
+        apiClient.get(`/projects/${projectId}/releases`).catch(() => ({ data: { releases: [] } })),
+      ])
+      setData(statusRes.data)
+      setReleases(releasesRes.data?.releases || [])
     } catch (e) {
       console.error('readiness.load_error', e)
     } finally {
@@ -78,6 +99,38 @@ export function ReadinessPage() {
   }
 
   useEffect(() => { load() }, [projectId])
+
+  const createRelease = async () => {
+    if (!projectId || creatingRelease) return
+    setCreatingRelease(true)
+    setReleaseError(null)
+    try {
+      const res = await apiClient.post(`/projects/${projectId}/releases`, null, {
+        params: { threshold: RELEASE_THRESHOLD },
+      })
+      // Sucesso: re-fetch lista de releases
+      await load()
+      // Auto-download do bundle recém-criado
+      if (res.data?.version) {
+        const dl = `/api/v1/projects/${projectId}/releases/${res.data.version}/download`
+        window.open(dl, '_blank')
+      }
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail
+      if (typeof detail === 'object' && detail?.message) {
+        setReleaseError(detail.message)
+      } else {
+        setReleaseError(e?.message || 'Falha ao criar release')
+      }
+    } finally {
+      setCreatingRelease(false)
+    }
+  }
+
+  const downloadRelease = (version: number) => {
+    if (!projectId) return
+    window.open(`/api/v1/projects/${projectId}/releases/${version}/download`, '_blank')
+  }
 
   const verifyAll = async () => {
     if (!projectId || verifying) return
@@ -146,7 +199,25 @@ export function ReadinessPage() {
                   {verifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
                   {verifying ? 'Verificando…' : 'Verificar tudo'}
                 </button>
+                {data && (
+                  <button
+                    onClick={createRelease}
+                    disabled={creatingRelease || data.summary.readiness_pct < RELEASE_THRESHOLD}
+                    title={data.summary.readiness_pct < RELEASE_THRESHOLD
+                      ? `Readiness ${data.summary.readiness_pct}% < ${RELEASE_THRESHOLD}% — atinja o threshold para liberar`
+                      : 'Gerar Release Bundle (zip + manifest + release notes)'}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
+                  >
+                    {creatingRelease ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Package className="w-3.5 h-3.5" />}
+                    {creatingRelease ? 'Gerando bundle…' : 'Gerar Release Bundle'}
+                  </button>
+                )}
               </div>
+              {releaseError && (
+                <div className="mt-3 px-3 py-2 bg-red-900/30 border border-red-700 rounded text-xs text-red-300">
+                  ⚠ {releaseError}
+                </div>
+              )}
             </div>
 
             {/* Gauge SVG */}
@@ -278,6 +349,70 @@ export function ReadinessPage() {
             </ul>
           )}
         </div>
+
+        {/* Releases anteriores */}
+        {releases.length > 0 && (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="px-5 py-3 border-b border-slate-800 flex items-center gap-2">
+              <Package className="w-4 h-4 text-emerald-400" />
+              <h2 className="text-sm font-semibold text-slate-200">Releases anteriores ({releases.length})</h2>
+            </div>
+            <ul className="divide-y divide-slate-800">
+              {releases.map(r => (
+                <li key={r.id} className="px-5 py-3 flex items-center gap-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 flex-wrap">
+                      <span className="text-slate-200 text-sm font-mono font-semibold">v{r.version}</span>
+                      {r.status === 'ready' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/30 border border-emerald-700 text-emerald-300">
+                          ✓ ready
+                        </span>
+                      )}
+                      {r.status === 'generating' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/30 border border-violet-700 text-violet-300 flex items-center gap-1">
+                          <Loader2 className="w-2.5 h-2.5 animate-spin" /> gerando
+                        </span>
+                      )}
+                      {r.status === 'failed' && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-900/30 border border-red-700 text-red-300">
+                          ✗ failed
+                        </span>
+                      )}
+                      {r.readiness_pct !== null && (
+                        <span className="text-[11px] text-slate-500">
+                          readiness: <span className="text-slate-300 font-semibold">{r.readiness_pct}%</span>
+                        </span>
+                      )}
+                      {r.size_bytes && (
+                        <span className="text-[11px] text-slate-500">
+                          {(r.size_bytes / 1024).toFixed(1)} KB
+                        </span>
+                      )}
+                    </div>
+                    {r.created_at && (
+                      <div className="text-[10px] text-slate-600 mt-1">
+                        {new Date(r.created_at).toLocaleString('pt-BR')}
+                        {r.sha256 && <span className="ml-3 font-mono">sha256: {r.sha256.slice(0, 12)}…</span>}
+                      </div>
+                    )}
+                    {r.error_message && (
+                      <div className="text-[11px] text-red-400 mt-1">⚠ {r.error_message}</div>
+                    )}
+                  </div>
+                  {r.status === 'ready' && (
+                    <button
+                      onClick={() => downloadRelease(r.version)}
+                      className="p-2 rounded text-slate-500 hover:text-emerald-400 hover:bg-emerald-900/20"
+                      title="Baixar zip"
+                    >
+                      <Download className="w-4 h-4" />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         {/* Modal de atestação */}
         {attestModal && (
