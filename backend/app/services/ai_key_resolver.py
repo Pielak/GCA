@@ -65,7 +65,7 @@ class AIKeyResolver:
                             source="vault")
                 return key
 
-            # Tentar provider alternativo configurado no projeto
+            # Tentar provider alternativo APENAS se compatível com o solicitado
             from sqlalchemy import select, text
             result = await db.execute(
                 text("""
@@ -79,7 +79,8 @@ class AIKeyResolver:
                 import json
                 llm_config = json.loads(row[0])
                 alt_provider = llm_config.get("provider")
-                if alt_provider and alt_provider != provider:
+                # Só retorna key alternativa se for do MESMO provider solicitado
+                if alt_provider and alt_provider == provider:
                     key = await vault.get_secret(db, project_id, "llm_api_key", alt_provider)
                     if key:
                         logger.debug("ai_key.project_resolved_alt",
