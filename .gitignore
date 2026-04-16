@@ -59,6 +59,7 @@ build/
 /tmp/
 /storage/
 gca-storage/
+backend/storage/
 
 # Logs
 *.log
