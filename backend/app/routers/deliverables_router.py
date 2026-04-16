@@ -186,3 +186,79 @@ async def resync_from_ocg(
     counters = await registry.sync_from_ocg(project_id, ocg.ocg_data)
     await db.commit()
     return {"counters": counters, "ocg_version": ocg.version}
+
+
+# ────────────────────────── Release Bundle (Fase D) ──────────────────
+
+from fastapi.responses import FileResponse
+
+
+@router.post("/projects/{project_id}/releases")
+async def create_release_bundle(
+    project_id: UUID,
+    threshold: float = 90.0,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cria um Release Bundle (zip + MANIFEST + RELEASE_NOTES + docs).
+
+    Pré-condição: readiness do projeto >= ``threshold`` (default 90%).
+    Falha o pré-check → 412 Precondition Failed com diagnóstico.
+    """
+    from app.services.release_bundle_service import ReleaseBundleService
+    svc = ReleaseBundleService(db)
+    result = await svc.create_bundle(project_id, actor_id=current_user_id, threshold=threshold)
+    if result.get("error") == "readiness_below_threshold":
+        raise HTTPException(
+            status_code=status.HTTP_412_PRECONDITION_FAILED,
+            detail={
+                "message": f"Readiness {result['readiness_pct']}% abaixo do threshold {result['threshold']}%.",
+                "readiness_pct": result["readiness_pct"],
+                "threshold": result["threshold"],
+                "missing": result.get("missing_count"),
+                "manual_only": result.get("manual_only_count"),
+            },
+        )
+    if result.get("error"):
+        raise HTTPException(status_code=500, detail=result.get("message") or result["error"])
+    return result
+
+
+@router.get("/projects/{project_id}/releases")
+async def list_releases(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista todas as releases do projeto (mais recentes primeiro)."""
+    from app.services.release_bundle_service import ReleaseBundleService
+    svc = ReleaseBundleService(db)
+    releases = await svc.list_releases(project_id)
+    return {"releases": releases, "count": len(releases)}
+
+
+@router.get("/projects/{project_id}/releases/{version}/download")
+async def download_release(
+    project_id: UUID,
+    version: int,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Baixa o zip de um release específico.
+
+    Retorna 404 se release não existe, status != 'ready', ou arquivo
+    sumiu do filesystem.
+    """
+    from app.services.release_bundle_service import ReleaseBundleService
+    svc = ReleaseBundleService(db)
+    file_path = await svc.get_release_path(project_id, version)
+    if not file_path:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Release v{version} não encontrada ou indisponível",
+        )
+    return FileResponse(
+        path=file_path,
+        media_type="application/zip",
+        filename=f"release-v{version}.zip",
+    )

@@ -1204,6 +1204,42 @@ class TestExecutionLog(Base):
     )
 
 
+class ProjectRelease(Base):
+    """Release Bundle versionado de um projeto.
+
+    Cada row é um zip gerado em /app/storage/releases/<project_id>/v<N>.zip
+    com manifest, release notes, snapshot dos deliverables e docs versionados.
+    Imutável após status='ready'.
+    """
+    __tablename__ = "project_releases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    version = Column(Integer, nullable=False)  # incremental por projeto
+    status = Column(String(20), nullable=False, default="generating")  # generating|ready|failed
+
+    file_path = Column(Text, nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    sha256 = Column(String(64), nullable=True)
+
+    readiness_pct = Column(Float, nullable=True)
+    readiness_threshold = Column(Float, nullable=False, default=90.0)
+
+    manifest_json = Column(Text, nullable=True)
+    error_message = Column(Text, nullable=True)
+
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "version", name="uq_release_per_project_version"),
+        CheckConstraint("status IN ('generating', 'ready', 'failed')", name="ck_release_status"),
+        Index("idx_releases_project_status", project_id, status),
+        Index("idx_releases_project_created", project_id, created_at.desc()),
+    )
+
+
 class ProjectDeliverable(Base):
     """Item de OCG.DELIVERABLES materializado como linha rastreável.
 
