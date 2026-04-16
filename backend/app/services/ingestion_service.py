@@ -30,6 +30,41 @@ EXTENSION_MAP = {
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
 
+async def _propagate_async(
+    project_id: UUID,
+    changes: list[dict],
+    ocg_version: Optional[int],
+) -> None:
+    """Roda PropagationService em sessão própria, fire-and-forget.
+
+    Isolamento: se a propagação falhar (ex: backlog regen quebra), o erro
+    NÃO afeta a transação do OCG (já commitada). Apenas loga.
+
+    Sessão dedicada: não compartilha com a sessão da ingestão (que pode
+    estar fechando). Cada propagation tem seu próprio ciclo de vida.
+    """
+    try:
+        from app.db.database import AsyncSessionLocal
+        from app.services.propagation_service import PropagationService
+
+        async with AsyncSessionLocal() as db:
+            propagator = PropagationService(db)
+            await propagator.propagate(
+                project_id=project_id,
+                changes=changes,
+                ocg_version=ocg_version,
+            )
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        logger.warning(
+            "ingestion.propagate_async_failed",
+            project_id=str(project_id),
+            error=str(exc) or repr(exc),
+            error_type=type(exc).__name__,
+            traceback=traceback.format_exc(),
+        )
+
+
 class IngestionService:
     """Serviço de ingestão de documentos por projeto."""
 
@@ -251,7 +286,6 @@ class IngestionService:
                     # === OCG REATIVO: Atualizar OCG via IA ===
                     try:
                         from app.services.ocg_updater_service import OCGUpdaterService
-                        from app.services.propagation_service import PropagationService
                         import json as _json
 
                         # Carregar análise do Arguidor
@@ -280,13 +314,17 @@ class IngestionService:
                             trigger_source="document_ingestion",
                         )
 
-                        # Propagar se houve mudanças
+                        # Propagar se houve mudanças — fire-and-forget em
+                        # task separada com SUA PRÓPRIA sessão. Isola falhas
+                        # de propagação do commit do OCG (que já aconteceu)
+                        # e libera o caller para retornar imediatamente.
                         if update_result and update_result.get("changes"):
-                            propagator = PropagationService(db)
-                            await propagator.propagate(
-                                project_id=project_id,
-                                changes=update_result["changes"],
-                                ocg_version=update_result.get("version_to"),
+                            asyncio.create_task(
+                                _propagate_async(
+                                    project_id=project_id,
+                                    changes=update_result["changes"],
+                                    ocg_version=update_result.get("version_to"),
+                                )
                             )
 
                         logger.info("ingestion.ocg_reactive_complete",
