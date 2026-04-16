@@ -1,0 +1,370 @@
+/**
+ * ReadinessPage — Definition of Done por projeto.
+ *
+ * Mostra cada entregável declarado em OCG.DELIVERABLES com status,
+ * evidência e ações: re-verificar, atestar manualmente.
+ */
+import { useEffect, useState, useMemo } from 'react'
+import { useParams } from 'react-router-dom'
+import {
+  CheckCircle2, XCircle, Clock, Loader2, RefreshCw, FilePen,
+  AlertCircle, FileCheck2, Hand, Code, FileText, FlaskConical,
+  Settings, MoreHorizontal,
+} from 'lucide-react'
+import { apiClient } from '@/lib/api'
+import { PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
+
+interface Deliverable {
+  id: string
+  name: string
+  category: string
+  kind: string
+  status: 'declared' | 'generating' | 'present' | 'verified' | 'waived' | 'missing' | 'manual_only' | 'error'
+  evidence_type: string | null
+  evidence_ref: string | null
+  verification_method: string | null
+  last_verified_at: string | null
+  verified_by: string | null
+  notes: string | null
+  auto_verifiable: boolean
+}
+
+interface ReadinessPayload {
+  deliverables: Deliverable[]
+  summary: {
+    total_active: number
+    total_with_waived: number
+    verified: number
+    by_status: Record<string, number>
+    by_category: Record<string, number>
+    readiness_pct: number
+  }
+}
+
+const statusMeta: Record<Deliverable['status'], { label: string; color: string; icon: any }> = {
+  verified:    { label: 'Verificado',     color: 'bg-emerald-900/30 border-emerald-700 text-emerald-300', icon: CheckCircle2 },
+  present:     { label: 'Presente',       color: 'bg-blue-900/30 border-blue-700 text-blue-300',         icon: FileCheck2 },
+  declared:    { label: 'Declarado',      color: 'bg-slate-800 border-slate-700 text-slate-400',          icon: Clock },
+  generating:  { label: 'Gerando',        color: 'bg-violet-900/30 border-violet-700 text-violet-300',   icon: Loader2 },
+  manual_only: { label: 'Manual',          color: 'bg-amber-900/30 border-amber-700 text-amber-300',     icon: Hand },
+  missing:     { label: 'Faltando',       color: 'bg-red-900/30 border-red-700 text-red-300',            icon: XCircle },
+  waived:      { label: 'Waived',         color: 'bg-slate-800/50 border-slate-700 text-slate-500',      icon: AlertCircle },
+  error:       { label: 'Erro',           color: 'bg-orange-900/30 border-orange-700 text-orange-300',   icon: AlertCircle },
+}
+
+const categoryIcon: Record<string, any> = {
+  doc: FileText, code: Code, test: FlaskConical, process: Settings, config: Settings, other: MoreHorizontal,
+}
+
+export function ReadinessPage() {
+  const { id: projectId } = useParams<{ id: string }>()
+  const [data, setData] = useState<ReadinessPayload | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyingOne, setVerifyingOne] = useState<string | null>(null)
+  const [filterStatus, setFilterStatus] = useState<string>('all')
+  const [attestModal, setAttestModal] = useState<Deliverable | null>(null)
+
+  const load = async () => {
+    if (!projectId) return
+    try {
+      const res = await apiClient.get(`/projects/${projectId}/deliverables`)
+      setData(res.data)
+    } catch (e) {
+      console.error('readiness.load_error', e)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { load() }, [projectId])
+
+  const verifyAll = async () => {
+    if (!projectId || verifying) return
+    setVerifying(true)
+    try {
+      await apiClient.post(`/projects/${projectId}/deliverables/verify-all`)
+      await load()
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  const verifyOne = async (deliverableId: string) => {
+    if (!projectId) return
+    setVerifyingOne(deliverableId)
+    try {
+      await apiClient.post(`/projects/${projectId}/deliverables/${deliverableId}/verify`)
+      await load()
+    } finally {
+      setVerifyingOne(null)
+    }
+  }
+
+  const filtered = useMemo(() => {
+    if (!data) return []
+    if (filterStatus === 'all') return data.deliverables
+    return data.deliverables.filter(d => d.status === filterStatus)
+  }, [data, filterStatus])
+
+  if (loading) {
+    return (
+      <div className="p-6 space-y-6">
+        <SkeletonPulse className="h-8 w-64" />
+        <SkeletonPulse className="h-32 w-full rounded-xl" />
+        <SkeletonPulse className="h-16 w-full" />
+      </div>
+    )
+  }
+
+  if (!data) {
+    return <div className="p-6 text-slate-400">Falha ao carregar dados de readiness.</div>
+  }
+
+  const pct = data.summary.readiness_pct
+  const pctColor = pct >= 90 ? 'text-emerald-400' : pct >= 70 ? 'text-blue-400' : pct >= 50 ? 'text-amber-400' : 'text-red-400'
+  const ringColor = pct >= 90 ? 'stroke-emerald-400' : pct >= 70 ? 'stroke-blue-400' : pct >= 50 ? 'stroke-amber-400' : 'stroke-red-400'
+
+  return (
+    <PageTransition>
+      <div className="p-6 space-y-6">
+        {/* Header + gauge */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-6">
+          <div className="flex items-start justify-between gap-6">
+            <div className="flex-1">
+              <h1 className="text-xl font-semibold text-slate-100">Definition of Done</h1>
+              <p className="text-slate-500 text-sm mt-1">
+                Entregáveis declarados em OCG.DELIVERABLES e seu status atual.
+                Threshold para Release Bundle: <span className="text-slate-300">90%</span>.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  onClick={verifyAll}
+                  disabled={verifying}
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg transition-colors"
+                >
+                  {verifying ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {verifying ? 'Verificando…' : 'Verificar tudo'}
+                </button>
+              </div>
+            </div>
+
+            {/* Gauge SVG */}
+            <div className="relative flex items-center justify-center w-32 h-32 flex-shrink-0">
+              <svg className="w-32 h-32 -rotate-90">
+                <circle cx="64" cy="64" r="54" stroke="currentColor" strokeWidth="10" fill="none" className="text-slate-800" />
+                <circle
+                  cx="64" cy="64" r="54"
+                  stroke="currentColor" strokeWidth="10" fill="none"
+                  className={ringColor}
+                  strokeDasharray={`${(pct / 100) * 339} 339`}
+                  strokeLinecap="round"
+                />
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className={`text-2xl font-bold ${pctColor}`}>{pct.toFixed(0)}%</span>
+                <span className="text-[10px] text-slate-500 uppercase tracking-wider">Readiness</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Mini-summary */}
+          <div className="mt-4 pt-4 border-t border-slate-800 flex flex-wrap gap-x-6 gap-y-2 text-xs">
+            <span className="text-slate-400">
+              Total: <span className="text-slate-200 font-semibold">{data.summary.total_active}</span>
+            </span>
+            <span className="text-emerald-400">
+              ✓ Verified: <span className="font-semibold">{data.summary.by_status.verified || 0}</span>
+            </span>
+            <span className="text-blue-400">
+              Present: <span className="font-semibold">{data.summary.by_status.present || 0}</span>
+            </span>
+            <span className="text-amber-400">
+              Manual: <span className="font-semibold">{data.summary.by_status.manual_only || 0}</span>
+            </span>
+            <span className="text-red-400">
+              ✗ Missing: <span className="font-semibold">{data.summary.by_status.missing || 0}</span>
+            </span>
+            {(data.summary.by_status.error || 0) > 0 && (
+              <span className="text-orange-400">
+                ⚠ Erro: <span className="font-semibold">{data.summary.by_status.error}</span>
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Filtros */}
+        <div className="flex gap-2 flex-wrap">
+          {(['all', 'verified', 'present', 'missing', 'manual_only', 'error', 'declared', 'waived'] as const).map(s => {
+            const count = s === 'all' ? data.summary.total_with_waived : (data.summary.by_status[s] || 0)
+            const active = filterStatus === s
+            return (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                className={`px-3 py-1 text-xs rounded-md border transition-colors ${
+                  active ? 'bg-violet-600 border-violet-500 text-white' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-600'
+                }`}
+              >
+                {s === 'all' ? 'Todos' : statusMeta[s as Deliverable['status']].label} ({count})
+              </button>
+            )
+          })}
+        </div>
+
+        {/* Lista */}
+        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+          {filtered.length === 0 ? (
+            <div className="p-8 text-center text-slate-500 text-sm">
+              {filterStatus === 'all' ? 'Nenhum entregável registrado. Sincronize do OCG.' : 'Nenhum entregável neste filtro.'}
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-800">
+              {filtered.map(d => {
+                const meta = statusMeta[d.status]
+                const Icon = meta.icon
+                const CatIcon = categoryIcon[d.category] || MoreHorizontal
+                return (
+                  <li key={d.id} className="px-5 py-3 flex items-start gap-3 hover:bg-slate-800/30">
+                    <CatIcon className="w-4 h-4 text-slate-500 mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-slate-200 text-sm font-medium">{d.name}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-500 font-mono">{d.kind}</span>
+                      </div>
+                      {d.evidence_ref && (
+                        <div className="text-[11px] text-slate-500 mt-1 truncate">
+                          📎 <span className="font-mono">{d.evidence_ref}</span>
+                          {d.verification_method && <span className="ml-2 text-slate-600">({d.verification_method})</span>}
+                        </div>
+                      )}
+                      {d.notes && (
+                        <div className="text-[11px] text-slate-500 italic mt-1">{d.notes}</div>
+                      )}
+                      {d.last_verified_at && (
+                        <div className="text-[10px] text-slate-600 mt-1">
+                          Verificado em {new Date(d.last_verified_at).toLocaleString('pt-BR')}
+                        </div>
+                      )}
+                    </div>
+                    <div className={`flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] ${meta.color} flex-shrink-0`}>
+                      <Icon className={`w-3 h-3 ${d.status === 'generating' ? 'animate-spin' : ''}`} />
+                      {meta.label}
+                    </div>
+                    <div className="flex gap-1 flex-shrink-0">
+                      {d.status !== 'waived' && d.auto_verifiable && (
+                        <button
+                          onClick={() => verifyOne(d.id)}
+                          disabled={verifyingOne === d.id}
+                          className="p-1.5 rounded text-slate-500 hover:text-violet-400 hover:bg-violet-900/20 disabled:opacity-50"
+                          title="Verificar agora"
+                        >
+                          {verifyingOne === d.id ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                        </button>
+                      )}
+                      {d.status !== 'waived' && d.status !== 'verified' && (
+                        <button
+                          onClick={() => setAttestModal(d)}
+                          className="p-1.5 rounded text-slate-500 hover:text-amber-400 hover:bg-amber-900/20"
+                          title="Atestar manualmente"
+                        >
+                          <FilePen className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </li>
+                )
+              })}
+            </ul>
+          )}
+        </div>
+
+        {/* Modal de atestação */}
+        {attestModal && (
+          <AttestModal
+            projectId={projectId!}
+            deliverable={attestModal}
+            onClose={() => setAttestModal(null)}
+            onSuccess={async () => { setAttestModal(null); await load() }}
+          />
+        )}
+      </div>
+    </PageTransition>
+  )
+}
+
+
+function AttestModal({ projectId, deliverable, onClose, onSuccess }: {
+  projectId: string
+  deliverable: Deliverable
+  onClose: () => void
+  onSuccess: () => void
+}) {
+  const [note, setNote] = useState('')
+  const [evidenceRef, setEvidenceRef] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const submit = async () => {
+    if (!note.trim()) {
+      setError('Note é obrigatório')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      await apiClient.post(`/projects/${projectId}/deliverables/${deliverable.id}/attest`, {
+        note: note.trim(),
+        evidence_ref: evidenceRef.trim() || null,
+      })
+      onSuccess()
+    } catch (e: any) {
+      setError(e?.message || 'Erro ao atestar')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
+        <h3 className="text-slate-100 font-semibold text-base mb-1">Atestar entregável</h3>
+        <p className="text-slate-500 text-xs mb-4">{deliverable.name}</p>
+
+        <label className="block text-xs text-slate-400 mb-1">Note (obrigatória)</label>
+        <textarea
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          rows={4}
+          placeholder="Ex: Aprovado pelo board em 2026-04-15. Acta em #12345."
+          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600 mb-3"
+        />
+
+        <label className="block text-xs text-slate-400 mb-1">Referência de evidência (opcional)</label>
+        <input
+          type="text"
+          value={evidenceRef}
+          onChange={e => setEvidenceRef(e.target.value)}
+          placeholder="https://wiki/acta-12345 ou caminho/local"
+          className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600 mb-4"
+        />
+
+        {error && <div className="text-red-400 text-xs mb-3">{error}</div>}
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-3 py-1.5 text-xs text-slate-400 hover:text-slate-200">
+            Cancelar
+          </button>
+          <button
+            onClick={submit}
+            disabled={submitting || !note.trim()}
+            className="px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white rounded-lg flex items-center gap-2"
+          >
+            {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+            Atestar
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}

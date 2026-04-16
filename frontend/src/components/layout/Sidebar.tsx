@@ -3,7 +3,8 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, FolderOpen, Users, Shield, ChevronDown, ChevronRight,
   LogOut, Settings, Code2, FileText, GitBranch, Zap, TestTube2,
-  History, BookOpen, Activity, ScrollText, Menu, X, Clock, ClipboardList
+  History, BookOpen, Activity, ScrollText, Menu, X, Clock, ClipboardList,
+  CheckCircle2
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -206,6 +207,7 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/qa`} label="Testes" icon={<TestTube2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Revisão de Testes" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/readiness`} label="Definition of Done" icon={<CheckCircle2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
                       </div>
                     )}

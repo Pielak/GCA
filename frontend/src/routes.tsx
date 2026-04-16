@@ -27,6 +27,7 @@ import { CodeGeneratorPage } from './pages/projects/CodeGeneratorPage';
 import { QAReadinessPage } from './pages/projects/QAReadinessPage';
 import { RoadmapPage } from './pages/projects/RoadmapPage';
 import { LiveDocsPage } from './pages/projects/LiveDocsPage';
+import { ReadinessPage } from './pages/projects/ReadinessPage';
 import { QuestionnairePage } from './pages/projects/QuestionnairePage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { NovoProjetoPage } from './pages/NovoProjetoPage';
@@ -111,6 +112,7 @@ export const router = createBrowserRouter([
           { path: 'backlog', element: <RequireRepository><BacklogPage /></RequireRepository> },
           { path: 'roadmap', element: <RequireRepository><RoadmapPage /></RequireRepository> },
           { path: 'docs', element: <RequireRepository><LiveDocsPage /></RequireRepository> },
+          { path: 'readiness', element: <RequireRepository><ReadinessPage /></RequireRepository> },
           { path: 'settings', Component: ProjectSettingsPage },
           { path: 'audit', Component: PipelineAuditPage },
         ],
