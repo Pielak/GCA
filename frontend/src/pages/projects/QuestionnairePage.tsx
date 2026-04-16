@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import {
   ClipboardList, ChevronLeft, ChevronRight, Send, Loader2, CheckCircle2,
   Info, HelpCircle, X, Download, AlertTriangle, AlertCircle, RefreshCw,
+  FileUp, FileDown,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
@@ -330,6 +331,56 @@ export function QuestionnairePage() {
             />
           </div>
         </div>
+      </div>
+
+      {/* Ações PDF */}
+      <div className="flex items-center gap-3 bg-slate-800/50 border border-slate-700 rounded-xl p-3">
+        <FileDown className="w-5 h-5 text-violet-400 flex-shrink-0" />
+        <div className="flex-1">
+          <p className="text-xs text-slate-300 font-medium">PDF Editável</p>
+          <p className="text-[10px] text-slate-500">Baixe o questionário, preencha offline e faça upload quando pronto.</p>
+        </div>
+        <button
+          onClick={async () => {
+            try {
+              const res = await apiClient.get(`/projects/${id}/questionnaire/pdf`, { responseType: 'blob' })
+              const url = URL.createObjectURL(new Blob([res.data as BlobPart]))
+              const a = document.createElement('a')
+              a.href = url
+              a.download = `Questionario_GCA.pdf`
+              a.click()
+              URL.revokeObjectURL(url)
+            } catch { alert('Erro ao baixar PDF') }
+          }}
+          className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5"
+        >
+          <FileDown className="w-3.5 h-3.5" />
+          Baixar PDF
+        </button>
+        <label className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer">
+          <FileUp className="w-3.5 h-3.5" />
+          Upload PDF
+          <input
+            type="file"
+            accept=".pdf"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0]
+              if (!file) return
+              const form = new FormData()
+              form.append('file', file)
+              try {
+                const res = await apiClient.post(`/projects/${id}/questionnaire/upload-pdf`, form, {
+                  headers: { 'Content-Type': 'multipart/form-data' },
+                })
+                alert(res.data?.message || 'PDF processado com sucesso!')
+                window.location.reload()
+              } catch (err: any) {
+                alert(err?.message || 'Erro ao processar PDF')
+              }
+            }}
+          />
+        </label>
       </div>
 
       {/* Tabs */}

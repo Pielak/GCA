@@ -275,6 +275,10 @@ class AdminService:
                                 </p>
                                 {'<p><strong>Primeiro acesso:</strong> Ao entrar, você deverá definir uma nova senha.</p>' if is_first_access else ''}
                                 <p>Ao entrar, você verá apenas os projetos dos quais é membro. Selecione o projeto para acessar Ingestão, Dashboard, Team Invite e acompanhar o backlog.</p>
+                                <div style="background: #0f172a; padding: 16px; border-radius: 8px; border-left: 4px solid #7c3aed; margin: 16px 0;">
+                                    <p style="margin: 0; color: #a78bfa; font-weight: bold; font-size: 13px;">Questionário Técnico em PDF</p>
+                                    <p style="margin: 8px 0 0 0; font-size: 12px;">Na aba <strong>Questionário</strong> do seu projeto, você pode baixar o <strong>PDF editável</strong> com as 49 perguntas técnicas. Preencha offline, no seu tempo, consultando colegas — depois faça upload do PDF preenchido. O GCA analisará as respostas e gerará o contexto inicial (OCG) automaticamente.</p>
+                                </div>
                                 <hr style="border-color: #334155; margin: 20px 0;" />
                                 <p style="color: #64748b; font-size: 12px;">Este acesso é limitado ao projeto e ao papel concedidos. — GCA</p>
                             </div>
