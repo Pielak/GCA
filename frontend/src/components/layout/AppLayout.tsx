@@ -4,6 +4,7 @@ import { Bell, Search, LogOut, Command, Check, CheckCheck } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
+import { useNotificationsWS } from '@/hooks/useNotificationsWS'
 import { apiClient } from '@/lib/api'
 
 type Notification = {
@@ -36,11 +37,38 @@ export function AppLayout() {
     } catch { /* silencioso */ }
   }, [isLoggedIn])
 
+  // WebSocket em tempo real: nova notif chega em ms, otimisticamente
+  // bumpa o contador e prepende na lista local. O contador real é
+  // re-sincronizado no próximo abrir do dropdown / fetch.
+  const { connected: wsConnected } = useNotificationsWS({
+    enabled: isLoggedIn,
+    onNotification: (n) => {
+      setUnreadCount(c => c + 1)
+      setNotifications(prev => {
+        // Evita duplicação se a mesma chegou duas vezes
+        if (prev.some(p => p.id === n.id)) return prev
+        return [{
+          id: n.id,
+          event_type: n.event_type,
+          title: n.title,
+          message: n.message,
+          link: n.link,
+          severity: n.severity,
+          read_at: null,
+          created_at: n.created_at,
+        }, ...prev].slice(0, 50)
+      })
+    },
+  })
+
+  // Fetch inicial + fallback de poll (5min) só quando WS está OFFLINE.
+  // Quando WS conecta, push real-time substitui o poll.
   useEffect(() => {
     refreshCount()
-    const interval = setInterval(refreshCount, 60_000) // poll a cada 60s
+    if (wsConnected) return  // WS ativo: sem poll
+    const interval = setInterval(refreshCount, 300_000)  // 5min fallback
     return () => clearInterval(interval)
-  }, [refreshCount])
+  }, [refreshCount, wsConnected])
 
   const loadNotifications = async () => {
     setNotifLoading(true)

@@ -1,12 +1,13 @@
 """Router de notificações in-app por usuário."""
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.middleware.auth import get_current_user_from_token
 from app.services.notification_inapp_service import InAppNotificationService
+from app.services.notification_ws_manager import manager as ws_manager
 
 router = APIRouter(tags=["notifications"])
 
@@ -73,3 +74,45 @@ async def mark_all_notifications_read(
     svc = InAppNotificationService(db)
     affected = await svc.mark_all_read(current_user_id)
     return {"success": True, "marked": affected}
+
+
+@router.websocket("/notifications/ws")
+async def notifications_ws(websocket: WebSocket, token: str):
+    """WebSocket de notificações em tempo real (substitui poll de 60s).
+
+    Cliente conecta com ?token=<JWT>. Após autenticar, recebe payloads
+    JSON sempre que InAppNotificationService.notify cria uma notificação
+    para esse usuário. Mensagens têm formato:
+        {"type": "notification.created", "id", "title", "message", ...}
+
+    Frontend deve manter o poll como fallback caso a conexão caia (com
+    backoff de reconexão). Mensagens criadas enquanto desconectado são
+    obtidas via GET /notifications no próximo fetch.
+    """
+    # Auth via query param: WebSocket não suporta header Authorization
+    # padronizado em todos browsers. Token é validado antes do accept().
+    from app.core.security import verify_token
+    try:
+        payload = verify_token(token, token_type="access")
+        if not payload:
+            raise ValueError("token inválido")
+        user_id = UUID(payload.get("sub"))
+    except Exception:
+        # 1008 = Policy Violation; nunca chamamos accept() antes
+        await websocket.close(code=1008)
+        return
+
+    await ws_manager.connect(user_id, websocket)
+    try:
+        while True:
+            # Mantém a conexão viva. Cliente pode mandar pings ('{"type":"ping"}')
+            # para manter sticky session pass-through em proxies.
+            msg = await websocket.receive_text()
+            if msg and '"ping"' in msg:
+                await websocket.send_text('{"type":"pong"}')
+    except WebSocketDisconnect:
+        pass
+    except Exception:  # noqa: BLE001
+        pass
+    finally:
+        await ws_manager.disconnect(user_id, websocket)

@@ -41,7 +41,8 @@ class InAppNotificationService:
         link: Optional[str] = None,
         severity: str = "info",
     ) -> UserNotification:
-        """Cria notificação in-app. Retorna a entidade persistida."""
+        """Cria notificação in-app. Persiste no DB e faz broadcast WebSocket
+        para todas as conexões ativas do usuário (best-effort)."""
         n = UserNotification(
             user_id=user_id,
             project_id=project_id,
@@ -56,6 +57,30 @@ class InAppNotificationService:
         self.db.add(n)
         await self.db.commit()
         await self.db.refresh(n)
+
+        # Broadcast WebSocket — best-effort, não bloqueia em falha.
+        # Se o usuário não tiver conexão ativa, payload é descartado;
+        # frontend faz fetch inicial via REST ao abrir.
+        try:
+            from app.services.notification_ws_manager import manager
+            await manager.broadcast_to_user(
+                user_id,
+                {
+                    "type": "notification.created",
+                    "id": str(n.id),
+                    "event_type": n.event_type,
+                    "title": n.title,
+                    "message": n.message,
+                    "severity": n.severity,
+                    "link": n.link,
+                    "project_id": str(n.project_id) if n.project_id else None,
+                    "created_at": n.created_at.isoformat() if n.created_at else None,
+                },
+            )
+        except Exception:  # noqa: BLE001
+            # broadcast falhar nunca derruba o flow principal
+            pass
+
         return n
 
     async def list_for_user(
