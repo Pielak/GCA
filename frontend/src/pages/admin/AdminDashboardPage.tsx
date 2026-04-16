@@ -429,7 +429,7 @@ function AIProvidersTab() {
         <div className="text-xs text-slate-400 space-y-1">
           <p><strong className="text-slate-300">Por que configurar?</strong> O questionário preenchido pelo GP precisa de um agente de IA para ser avaliado. Sem provedor configurado, o pipeline OCG não funciona.</p>
           <p><strong className="text-slate-300">Recomendação:</strong> Configure pelo menos Anthropic (Claude) ou OpenAI (GPT-4). O provedor padrão será usado para todas as análises automáticas.</p>
-          <p><strong className="text-slate-300">Seguranca:</strong> API keys sao armazenadas com mascaramento. Apenas os ultimos 6 caracteres sao exibidos.</p>
+          <p><strong className="text-slate-300">Segurança:</strong> API keys são armazenadas com mascaramento. Apenas os últimos 6 caracteres são exibidos.</p>
         </div>
       </div>
     </div>

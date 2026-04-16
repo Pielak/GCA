@@ -16,12 +16,12 @@ interface AuditEntry {
 
 const PHASE_LABELS: Record<string, { label: string; color: string }> = {
   pipeline_start: { label: 'Pipeline Iniciado', color: 'text-violet-400' },
-  code_generation: { label: 'Geracao de Codigo', color: 'text-blue-400' },
-  test_generation: { label: 'Geracao de Testes', color: 'text-cyan-400' },
-  test_execution: { label: 'Execucao de Testes', color: 'text-emerald-400' },
-  security_review: { label: 'Analise de Seguranca', color: 'text-orange-400' },
-  compliance_check: { label: 'Validacao de Compliance', color: 'text-amber-400' },
-  qa_approval: { label: 'Aprovacao QA', color: 'text-emerald-300' },
+  code_generation: { label: 'Geração de Código', color: 'text-blue-400' },
+  test_generation: { label: 'Geração de Testes', color: 'text-cyan-400' },
+  test_execution: { label: 'Execução de Testes', color: 'text-emerald-400' },
+  security_review: { label: 'Análise de Segurança', color: 'text-orange-400' },
+  compliance_check: { label: 'Validação de Compliance', color: 'text-amber-400' },
+  qa_approval: { label: 'Aprovação QA', color: 'text-emerald-300' },
   commit: { label: 'Commit', color: 'text-green-400' },
 }
 

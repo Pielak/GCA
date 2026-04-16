@@ -12,9 +12,9 @@ interface PasswordRule {
 }
 
 const PASSWORD_RULES: PasswordRule[] = [
-  { id: 'length', test: pw => pw.length >= 10, label: 'Minimo 10 caracteres' },
-  { id: 'upper', test: pw => /[A-Z]/.test(pw), label: 'Pelo menos 1 letra maiuscula' },
-  { id: 'digit', test: pw => /[0-9]/.test(pw), label: 'Pelo menos 1 numero' },
+  { id: 'length', test: pw => pw.length >= 10, label: 'Mínimo 10 caracteres' },
+  { id: 'upper', test: pw => /[A-Z]/.test(pw), label: 'Pelo menos 1 letra maiúscula' },
+  { id: 'digit', test: pw => /[0-9]/.test(pw), label: 'Pelo menos 1 número' },
   { id: 'special', test: pw => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw), label: 'Pelo menos 1 caractere especial' },
 ]
 
@@ -161,7 +161,7 @@ export function ResetPasswordPage() {
                 {loading ? (
                   <><Loader2 className="w-4 h-4 animate-spin" />Enviando...</>
                 ) : (
-                  <><Mail className="w-4 h-4" />Enviar Link de Recuperacao</>
+                  <><Mail className="w-4 h-4" />Enviar Link de Recuperação</>
                 )}
               </button>
             </form>
@@ -187,7 +187,7 @@ export function ResetPasswordPage() {
                     value={newPassword}
                     onChange={e => setNewPassword(e.target.value)}
                     className="w-full bg-dark-200 border border-slate-700 rounded-lg pl-9 pr-10 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
-                    placeholder="Minimo 10 caracteres"
+                    placeholder="Mínimo 10 caracteres"
                     disabled={loading}
                     autoFocus
                   />

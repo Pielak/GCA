@@ -180,7 +180,7 @@ async def handle_questionnaire_n8n_result(payload: N8nAnalysisPayload) -> dict:
 
         return {
             "status": "updated" if updated else "received",
-            "message": "Questionnaire result processed",
+            "message": "Resultado do questionário processado",
             "projectId": payload.projectId,
         }
 
@@ -283,7 +283,7 @@ async def ocg_result_callback(payload: Dict[str, Any]) -> dict:
 
         return {
             "status": "processed",
-            "message": "OCG result received, questionnaire updated, GP notified",
+            "message": "Resultado OCG recebido, questionário atualizado, GP notificado",
             "ocg_id": ocg_id,
         }
 

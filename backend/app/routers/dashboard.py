@@ -143,7 +143,7 @@ async def get_dashboard_summary(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get dashboard summary: {str(e)}"
+            detail=f"Falha ao obter resumo do painel: {str(e)}"
         )
 
 
@@ -171,7 +171,7 @@ async def get_project_metrics(
         if metrics.get("status") == "not_found":
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Project {project_id} not found"
+                detail="Projeto não encontrado"
             )
 
         return ProjectMetricsResponse(**metrics)
@@ -181,7 +181,7 @@ async def get_project_metrics(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get project metrics: {str(e)}"
+            detail=f"Falha ao obter métricas do projeto: {str(e)}"
         )
 
 
@@ -209,7 +209,7 @@ async def get_provider_statistics(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get provider statistics: {str(e)}"
+            detail=f"Falha ao obter estatísticas dos provedores: {str(e)}"
         )
 
 
@@ -233,7 +233,7 @@ async def get_generation_timeline(
     if days < 1 or days > 365:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Days must be between 1 and 365"
+            detail="Dias devem estar entre 1 e 365"
         )
 
     try:
@@ -244,7 +244,7 @@ async def get_generation_timeline(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get generation timeline: {str(e)}"
+            detail=f"Falha ao obter cronograma de geração: {str(e)}"
         )
 
 
@@ -272,7 +272,7 @@ async def get_quality_metrics(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get quality metrics: {str(e)}"
+            detail=f"Falha ao obter métricas de qualidade: {str(e)}"
         )
 
 
@@ -313,7 +313,7 @@ async def get_system_health(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Health check failed: {str(e)}"
+            detail=f"Verificação de saúde falhou: {str(e)}"
         )
 
 
@@ -345,5 +345,5 @@ async def export_summary(db: AsyncSession = Depends(get_db)):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Export failed: {str(e)}"
+            detail=f"Exportação falhou: {str(e)}"
         )

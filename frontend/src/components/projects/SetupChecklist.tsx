@@ -49,7 +49,7 @@ export function SetupChecklist() {
     },
     {
       label: 'Configurar Chaves de IA',
-      description: 'Selecione o provider de IA e insira a API key para geracao de codigo.',
+      description: 'Selecione o provider de IA e insira a API key para geração de código.',
       done: status.llm_configured,
       icon: Cpu,
       path: `/projects/${projectId}/settings`,

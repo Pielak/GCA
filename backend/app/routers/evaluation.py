@@ -137,7 +137,7 @@ async def evaluate_artifact(
         logger.error("evaluation.error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error evaluating artifact"
+            detail="Erro ao avaliar artefato"
         )
 
 
@@ -158,7 +158,7 @@ async def get_artifact_evaluation(
         if not evaluation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="No evaluation found for artifact"
+                detail="Nenhuma avaliação encontrada para o artefato"
             )
 
         return evaluation
@@ -169,7 +169,7 @@ async def get_artifact_evaluation(
         logger.error("evaluation.get_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving evaluation"
+            detail="Erro ao recuperar avaliação"
         )
 
 
@@ -218,7 +218,7 @@ async def get_project_evaluations(
         logger.error("evaluation.list_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving evaluations"
+            detail="Erro ao recuperar avaliações"
         )
 
 
@@ -279,5 +279,5 @@ async def evaluate_all_artifacts(
         logger.error("evaluation.all_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error evaluating artifacts"
+            detail="Erro ao avaliar artefatos"
         )

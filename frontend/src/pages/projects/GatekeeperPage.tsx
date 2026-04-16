@@ -168,16 +168,16 @@ export function GatekeeperPage() {
               onClick={() => navigate(`/projects/${id}/codegen`)}
               className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-medium transition-colors"
             >
-              Gerar Codigo
+              Gerar Código
             </button>
           )}
           {isBlocked && (
-            <p className="mt-4 text-red-400 text-xs text-center">Seguranca insuficiente. Corrija os findings de P7 antes de gerar codigo.</p>
+            <p className="mt-4 text-red-400 text-xs text-center">Segurança insuficiente. Corrija os findings de P7 antes de gerar código.</p>
           )}
         </div>
 
         <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-slate-200 text-sm font-semibold mb-3">Visao Radar -- 7 Pilares</h3>
+          <h3 className="text-slate-200 text-sm font-semibold mb-3">Visão Radar -- 7 Pilares</h3>
           <ResponsiveContainer width="100%" height={220}>
             <RadarChart data={radarData} margin={{ top: 10, right: 30, bottom: 10, left: 30 }}>
               <PolarGrid stroke="#334155" />
@@ -246,7 +246,7 @@ export function GatekeeperPage() {
       {/* Critical Findings */}
       {data.criticalFindings && data.criticalFindings.length > 0 && (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
-          <h3 className="text-slate-200 text-sm font-semibold mb-3">Findings Criticos</h3>
+          <h3 className="text-slate-200 text-sm font-semibold mb-3">Findings Críticos</h3>
           <div className="space-y-2">
             {data.criticalFindings.map((f, i) => (
               <div key={i} className="p-3 rounded-lg bg-red-950/20 border border-red-900/30">
@@ -255,7 +255,7 @@ export function GatekeeperPage() {
                   <span className="text-xs text-slate-500">{f.severity}</span>
                 </div>
                 <p className="text-slate-300 text-sm">{f.finding}</p>
-                <p className="text-slate-500 text-xs mt-1">Acao: {f.action}</p>
+                <p className="text-slate-500 text-xs mt-1">Ação: {f.action}</p>
               </div>
             ))}
           </div>
@@ -281,7 +281,7 @@ export function GatekeeperPage() {
             </div>
             <textarea
               value={overrideReason} onChange={e => setOverrideReason(e.target.value)}
-              rows={4} placeholder="Justificativa tecnica obrigatória..."
+              rows={4} placeholder="Justificativa técnica obrigatória..."
               className="w-full bg-dark-200 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 resize-none focus:outline-none focus:border-amber-500"
             />
             <div className="flex gap-3 mt-4">

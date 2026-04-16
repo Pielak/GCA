@@ -91,7 +91,7 @@ export function AdminAuditPage() {
           <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
           <input
             value={search} onChange={e => setSearch(e.target.value)}
-            placeholder="Buscar por acao, detalhe ou ator..."
+            placeholder="Buscar por ação, detalhe ou ator..."
             className="w-full bg-slate-800 border border-slate-700 rounded-lg pl-9 pr-4 py-2 text-sm text-slate-300 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
           />
         </div>

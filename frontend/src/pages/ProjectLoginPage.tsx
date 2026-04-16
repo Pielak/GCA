@@ -122,9 +122,9 @@ interface PasswordRule {
 }
 
 const PASSWORD_RULES: PasswordRule[] = [
-  { id: 'length', test: pw => pw.length >= 10, label: 'Minimo 10 caracteres' },
-  { id: 'upper', test: pw => /[A-Z]/.test(pw), label: 'Pelo menos 1 letra maiuscula' },
-  { id: 'digit', test: pw => /[0-9]/.test(pw), label: 'Pelo menos 1 numero' },
+  { id: 'length', test: pw => pw.length >= 10, label: 'Mínimo 10 caracteres' },
+  { id: 'upper', test: pw => /[A-Z]/.test(pw), label: 'Pelo menos 1 letra maiúscula' },
+  { id: 'digit', test: pw => /[0-9]/.test(pw), label: 'Pelo menos 1 número' },
   { id: 'special', test: pw => /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(pw), label: 'Pelo menos 1 caractere especial' },
 ]
 
@@ -244,9 +244,9 @@ export function ProjectLoginPage() {
       }
     } catch (err: any) {
       if (err?.status === 404) {
-        setError('Projeto nao encontrado.')
+        setError('Projeto não encontrado.')
       } else if (err?.status === 403) {
-        setError('Voce nao e membro deste projeto.')
+        setError('Você não é membro deste projeto.')
       } else if (err?.status === 401) {
         setError('Email ou senha incorretos.')
       } else {
@@ -320,9 +320,9 @@ export function ProjectLoginPage() {
             <div className="w-16 h-16 mx-auto rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-5">
               <X className="w-8 h-8 text-red-400" />
             </div>
-            <h2 className="font-display text-2xl font-bold text-white mb-2">Projeto nao encontrado</h2>
+            <h2 className="font-display text-2xl font-bold text-white mb-2">Projeto não encontrado</h2>
             <p className="text-slate-400 text-sm mb-6">
-              O link <span className="text-violet-400 font-mono text-xs">/p/{slug}</span> nao corresponde a nenhum projeto ativo.
+              O link <span className="text-violet-400 font-mono text-xs">/p/{slug}</span> não corresponde a nenhum projeto ativo.
             </p>
             <Link
               to="/login"
@@ -384,7 +384,7 @@ export function ProjectLoginPage() {
               <div>
                 <p className="text-amber-300 text-xs font-semibold">Importante</p>
                 <p className="text-amber-200/80 text-xs mt-0.5">
-                  Crie uma nova senha para continuar. Sua senha temporaria sera invalidada.
+                  Crie uma nova senha para continuar. Sua senha temporária será invalidada.
                 </p>
               </div>
             </div>
@@ -418,7 +418,7 @@ export function ProjectLoginPage() {
                       focus:shadow-[0_0_0_3px_rgba(112,56,224,0.1),inset_0_0_20px_rgba(112,56,224,0.03)]
                       transition-all duration-300
                     "
-                    placeholder="Minimo 10 caracteres"
+                    placeholder="Mínimo 10 caracteres"
                     disabled={changingPassword}
                     autoFocus
                   />
@@ -497,7 +497,7 @@ export function ProjectLoginPage() {
                     ) : (
                       <>
                         <AlertCircle className="w-3.5 h-3.5 text-red-400" />
-                        <span className="text-xs text-red-400">Senhas nao conferem</span>
+                        <span className="text-xs text-red-400">Senhas não conferem</span>
                       </>
                     )}
                   </div>
@@ -573,7 +573,7 @@ export function ProjectLoginPage() {
               </div>
               <h2 className="text-lg font-bold text-white mb-2">Email enviado</h2>
               <p className="text-slate-400 text-sm mb-6">
-                Se o email informado estiver cadastrado neste projeto, voce recebera instrucoes para redefinir sua senha.
+                Se o email informado estiver cadastrado neste projeto, você receberá instruções para redefinir sua senha.
               </p>
               <button
                 onClick={() => setPageState('login')}
@@ -603,7 +603,7 @@ export function ProjectLoginPage() {
                   Projeto: <span className="text-violet-400 font-medium">{projectName}</span>
                 </p>
                 <p className="text-slate-500 text-xs mt-1">
-                  Informe seu email para receber o link de redefinicao.
+                  Informe seu email para receber o link de redefinição.
                 </p>
               </div>
 
@@ -637,7 +637,7 @@ export function ProjectLoginPage() {
                   {resetLoading ? (
                     <><Loader2 className="w-4 h-4 animate-spin" /> Enviando...</>
                   ) : (
-                    <>Enviar link de redefinicao</>
+                    <>Enviar link de redefinição</>
                   )}
                 </button>
               </form>

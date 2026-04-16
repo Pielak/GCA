@@ -7,15 +7,15 @@ import { useGatekeeperData, useResolveItem, useIgnoreItem, type GatekeeperItem }
 type ItemFilter = 'all' | 'pending' | 'resolved' | 'ignored';
 
 const PRIORITY_MAP: Record<string, { label: string; bg: string; text: string }> = {
-  BLOCKER:  { label: 'Blocker',  bg: 'bg-red-900/40',    text: 'text-red-400' },
-  CRITICAL: { label: 'Critical', bg: 'bg-orange-900/40', text: 'text-orange-400' },
-  WARNING:  { label: 'Warning',  bg: 'bg-amber-900/40',  text: 'text-amber-400' },
-  INFO:     { label: 'Info',     bg: 'bg-blue-900/40',    text: 'text-blue-400' },
+  BLOCKER:  { label: 'Bloqueante',  bg: 'bg-red-900/40',    text: 'text-red-400' },
+  CRITICAL: { label: 'Crítico', bg: 'bg-orange-900/40', text: 'text-orange-400' },
+  WARNING:  { label: 'Aviso',  bg: 'bg-amber-900/40',  text: 'text-amber-400' },
+  INFO:     { label: 'Informação',     bg: 'bg-blue-900/40',    text: 'text-blue-400' },
 };
 
 const TYPE_LABELS: Record<string, string> = {
-  gap: 'Gap',
-  show_stopper: 'Show-Stopper',
+  gap: 'Lacuna',
+  show_stopper: 'Impeditivo',
   poor_definition: 'Má Definição',
   improvement: 'Sugestão',
 };

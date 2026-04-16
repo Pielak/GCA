@@ -196,7 +196,7 @@ export function TesterReviewPage() {
       <div>
         <div className="flex items-center gap-1.5">
           <h2 className="text-lg font-semibold text-slate-100">Tester Review</h2>
-          <HelpTooltip text="O Tester Review permite que testadores revisem, editem e aprovem os testes gerados automaticamente pelo GCA antes da execucao. Cada teste passa por revisao obrigatória: o codigo gerado pela IA pode ser ajustado pelo tester para cobrir cenarios especificos do projeto. Somente testes aprovados ou editados sao executados no QA Readiness." />
+          <HelpTooltip text="O Tester Review permite que testadores revisem, editem e aprovem os testes gerados automaticamente pelo GCA antes da execução. Cada teste passa por revisão obrigatória: o código gerado pela IA pode ser ajustado pelo tester para cobrir cenários específicos do projeto. Somente testes aprovados ou editados são executados no QA Readiness." />
         </div>
         <p className="text-slate-500 text-sm mt-0.5">Revisão e aprovação de artefatos de teste por categoria</p>
       </div>
@@ -228,7 +228,7 @@ export function TesterReviewPage() {
           <div className="text-center">
             <FlaskConical className="w-8 h-8 text-slate-700 mx-auto mb-2" />
             <p className="text-slate-500 text-sm">Nenhum teste {activeTab} encontrado</p>
-            <p className="text-slate-600 text-xs mt-1">Os testes serao gerados automaticamente após a fase de codificacao</p>
+            <p className="text-slate-600 text-xs mt-1">Os testes serão gerados automaticamente após a fase de codificação</p>
           </div>
         </div>
       ) : (
@@ -249,7 +249,7 @@ export function TesterReviewPage() {
                   onClick={() => toggleLogs(test.id)}
                   className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
                 >
-                  {logsOpen[test.id] ? 'Ocultar logs' : 'Ver logs de execucao'}
+                  {logsOpen[test.id] ? 'Ocultar logs' : 'Ver logs de execução'}
                 </button>
                 {logsOpen[test.id] && (
                   <div className="mt-2 bg-slate-900 border border-slate-800 rounded-lg overflow-hidden">
@@ -258,7 +258,7 @@ export function TesterReviewPage() {
                         <Loader2 className="w-4 h-4 text-violet-400 animate-spin" />
                       </div>
                     ) : !logsData[test.id] || logsData[test.id].length === 0 ? (
-                      <p className="text-slate-600 text-xs p-3">Nenhum log de execucao encontrado</p>
+                      <p className="text-slate-600 text-xs p-3">Nenhum log de execução encontrado</p>
                     ) : (
                       <table className="w-full text-xs">
                         <thead>
@@ -266,7 +266,7 @@ export function TesterReviewPage() {
                             <th className="text-left p-2 font-medium">Status</th>
                             <th className="text-left p-2 font-medium">Executado por</th>
                             <th className="text-left p-2 font-medium">Data</th>
-                            <th className="text-left p-2 font-medium">Duracao</th>
+                            <th className="text-left p-2 font-medium">Duração</th>
                             <th className="text-left p-2 font-medium">Output</th>
                           </tr>
                         </thead>
@@ -337,7 +337,7 @@ export function TesterReviewPage() {
                 className="flex-1 px-4 py-2 rounded-lg bg-violet-600 text-white text-sm hover:bg-violet-500 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
               >
                 {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-                Salvar Alteracoes
+                Salvar Alterações
               </button>
             </div>
           </div>
@@ -361,11 +361,11 @@ export function TesterReviewPage() {
               value={rejectReason}
               onChange={e => setRejectReason(e.target.value)}
               rows={4}
-              placeholder="Descreva o motivo da rejeicao..."
+              placeholder="Descreva o motivo da rejeição..."
               className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-sm text-slate-200 resize-none focus:outline-none focus:border-red-500"
             />
             {rejectReason.length > 0 && rejectReason.trim().length < 10 && (
-              <p className="text-red-400 text-xs mt-1">Minimo 10 caracteres ({rejectReason.trim().length}/10)</p>
+              <p className="text-red-400 text-xs mt-1">Mínimo 10 caracteres ({rejectReason.trim().length}/10)</p>
             )}
             <div className="flex gap-3 mt-4">
               <button
@@ -380,7 +380,7 @@ export function TesterReviewPage() {
                 className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm hover:bg-red-500 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
               >
                 {rejecting && <Loader2 className="w-4 h-4 animate-spin" />}
-                Confirmar Rejeicao
+                Confirmar Rejeição
               </button>
             </div>
           </div>

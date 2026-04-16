@@ -663,7 +663,7 @@ async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSe
         provider = LLMProvider(request.llm_provider.lower())
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid LLM provider: {request.llm_provider}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Provedor LLM inválido: {request.llm_provider}"
         )
 
     # Validate OCG if provided
@@ -673,9 +673,9 @@ async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSe
 
         ocg = await db.get(OCG, request.ocg_id)
         if not ocg:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OCG not found")
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OCG não encontrado")
         if ocg.project_id and ocg.project_id != request.project_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OCG project mismatch")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Inconsistência de projeto no OCG")
 
     try:
         # Resolver chave: request > vault do projeto > env
@@ -701,7 +701,7 @@ async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSe
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Code generation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Falha na geração de código: {str(e)}"
         )
 
 
@@ -727,7 +727,7 @@ async def generate_module_code(request: GenerateModuleCodeRequest, db: AsyncSess
         provider = LLMProvider(request.llm_provider.lower())
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid LLM provider: {request.llm_provider}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Provedor LLM inválido: {request.llm_provider}"
         )
 
     try:
@@ -746,7 +746,7 @@ async def generate_module_code(request: GenerateModuleCodeRequest, db: AsyncSess
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Module generation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Falha na geração do módulo: {str(e)}"
         )
 
 
@@ -767,7 +767,7 @@ async def validate_provider(provider: str, api_key: Optional[str] = None, db: As
     try:
         provider_enum = LLMProvider(provider.lower())
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid LLM provider: {provider}")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Provedor LLM inválido: {provider}")
 
     try:
         service = CodeGenerationService(db, llm_provider=provider_enum)
@@ -776,14 +776,14 @@ async def validate_provider(provider: str, api_key: Optional[str] = None, db: As
         return ProviderValidationResponse(
             provider=provider,
             valid=valid,
-            message="Provider credentials validated successfully" if valid else "Provider validation failed",
+            message="Credenciais do provedor validadas com sucesso" if valid else "Validação do provedor falhou",
         )
 
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Provider validation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Validação do provedor falhou: {str(e)}"
         )
 
 
@@ -809,7 +809,7 @@ async def get_generation_history(project_id: UUID, limit: int = 10, db: AsyncSes
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve history: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Falha ao recuperar histórico: {str(e)}"
         )
 
 

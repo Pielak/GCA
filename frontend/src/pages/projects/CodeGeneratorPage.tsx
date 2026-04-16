@@ -254,7 +254,7 @@ export function CodeGeneratorPage() {
       const cs = data.commit_summary as { committed?: number; failed?: number } | undefined
       const baseSummary = data.summary || `Gerados ${files.length} arquivos`
       const commitPart = cs
-        ? ` — Commitados ${cs.committed || 0} no repositório${cs.failed ? `, ${cs.failed} falharam` : ''}`
+        ? ` — Consolidados ${cs.committed || 0} no repositório${cs.failed ? `, ${cs.failed} falharam` : ''}`
         : ''
       setScaffoldSummary(baseSummary + commitPart)
 
@@ -296,7 +296,7 @@ export function CodeGeneratorPage() {
         setGeneratedFromBacklog(true)
         setHasChanges(true)
       } catch (err: any) {
-        console.error('Erro ao gerar codigo:', err)
+        console.error('Erro ao gerar código:', err)
       } finally {
         setGenerating(false)
       }
@@ -653,7 +653,7 @@ export function CodeGeneratorPage() {
         <div className="px-4 py-3 border-b border-emerald-700/40">
           <OperationBar
             message="Gerando scaffold do projeto"
-            detail="Analisando OCG, documentos e regras de negocio para gerar codigo real..."
+            detail="Analisando OCG, documentos e regras de negócio para gerar código real..."
             status="running"
           />
         </div>
@@ -708,7 +708,7 @@ export function CodeGeneratorPage() {
               {scaffoldGenerating ? (
                 <><Loader2 className="w-3.5 h-3.5 animate-spin" />Gerando...</>
               ) : (
-                <><Code2 className="w-3.5 h-3.5" />Gerar Codigo</>
+                <><Code2 className="w-3.5 h-3.5" />Gerar Código</>
               )}
             </button>
 
@@ -721,14 +721,14 @@ export function CodeGeneratorPage() {
               <Plus className="w-3.5 h-3.5" /> Novo
             </button>
 
-            {/* Editar Codigo — alterna de visualizacao para edicao */}
+            {/* Editar Código — alterna de visualização para edição */}
             {selectedFile && scaffoldFiles.has(selectedFile) && !hasChanges && (
               <button
                 onClick={() => setHasChanges(true)}
                 className="flex items-center gap-1 px-2.5 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
-                title="Alternar para modo de edicao"
+                title="Alternar para modo de edição"
               >
-                <FileCode className="w-3.5 h-3.5" /> Editar Codigo
+                <FileCode className="w-3.5 h-3.5" /> Editar Código
               </button>
             )}
 
@@ -961,8 +961,8 @@ export function CodeGeneratorPage() {
                 <p className="text-slate-500 text-sm font-medium">Nenhum arquivo selecionado</p>
                 <p className="text-slate-600 text-xs mt-1">
                   {scaffoldFiles.size > 0
-                    ? 'Selecione um arquivo na arvore a direita para visualizar o codigo gerado'
-                    : <>Clique em <strong className="text-emerald-400">"Gerar Codigo"</strong> para criar o scaffold do projeto<br />ou selecione um arquivo na arvore do repositorio</>
+                    ? 'Selecione um arquivo na árvore à direita para visualizar o código gerado'
+                    : <>Clique em <strong className="text-emerald-400">"Gerar Código"</strong> para criar o scaffold do projeto<br />ou selecione um arquivo na árvore do repositório</>
                   }
                 </p>
                 {scaffoldFiles.size === 0 && (
@@ -972,7 +972,7 @@ export function CodeGeneratorPage() {
                     className="mt-4 px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg transition-colors inline-flex items-center gap-2"
                   >
                     {scaffoldGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Code2 className="w-4 h-4" />}
-                    Gerar Codigo do Projeto
+                    Gerar Código do Projeto
                   </button>
                 )}
               </div>
@@ -1156,7 +1156,7 @@ function getDefaultTree(): GitFile[] {
 }
 
 /**
- * Constroi arvore de arquivos com status (complete/todo/nmi) propagado
+ * Constrói árvore de arquivos com status (complete/todo/nmi) propagado
  */
 function buildTreeWithStatus(files: { path: string; content: string; status: string }[]): GitFile[] {
   const root: GitFile[] = []

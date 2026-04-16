@@ -107,7 +107,7 @@ export function ProjectDetailLayout() {
               }`}>{project.status}</span>
               {(project.pendingIssues || 0) > 0 && (
                 <span className="flex items-center gap-1 text-amber-400 text-xs">
-                  <AlertTriangle className="w-3 h-3" />{project.pendingIssues} pendencias
+                  <AlertTriangle className="w-3 h-3" />{project.pendingIssues} pendências
                 </span>
               )}
             </div>
@@ -147,7 +147,7 @@ export function ProjectDetailLayout() {
             return (
               <span
                 key={mod.path || 'dashboard'}
-                title="Complete a configuracao obrigatoria para acessar"
+                title="Complete a configuração obrigatória para acessar"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium whitespace-nowrap text-slate-600 cursor-not-allowed opacity-50"
               >
                 <Icon className="w-3.5 h-3.5" />

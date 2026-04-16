@@ -48,7 +48,7 @@ const statusMeta: Record<Deliverable['status'], { label: string; color: string; 
   generating:  { label: 'Gerando',        color: 'bg-violet-900/30 border-violet-700 text-violet-300',   icon: Loader2 },
   manual_only: { label: 'Manual',          color: 'bg-amber-900/30 border-amber-700 text-amber-300',     icon: Hand },
   missing:     { label: 'Faltando',       color: 'bg-red-900/30 border-red-700 text-red-300',            icon: XCircle },
-  waived:      { label: 'Waived',         color: 'bg-slate-800/50 border-slate-700 text-slate-500',      icon: AlertCircle },
+  waived:      { label: 'Dispensado',      color: 'bg-slate-800/50 border-slate-700 text-slate-500',      icon: AlertCircle },
   error:       { label: 'Erro',           color: 'bg-orange-900/30 border-orange-700 text-orange-300',   icon: AlertCircle },
 }
 

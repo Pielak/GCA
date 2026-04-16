@@ -151,7 +151,7 @@ async def login(
         # Generic error message for security
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password",
+            detail="Email ou senha inválidos",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -311,7 +311,7 @@ async def refresh_token(
     if not success:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid refresh token",
+            detail="Token de atualização inválido",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -472,7 +472,7 @@ async def get_current_user(
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
+            detail="Usuário não encontrado",
         )
 
     return user

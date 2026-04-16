@@ -96,7 +96,7 @@ async def create_project(
             "project_slug": project.project_slug,
             "deliverable_type": project.deliverable_type.value if hasattr(project.deliverable_type, 'value') else (project.deliverable_type or "new_system"),
             "schema_name": project.schema_name,
-            "message": "Project request created. Waiting for admin approval.",
+            "message": "Solicitação de projeto criada. Aguardando aprovação do administrador.",
             "next_step": "admin_approval"
         }
 
@@ -110,7 +110,7 @@ async def create_project(
         logger.error("admin.create_project_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating project"
+            detail="Erro ao criar projeto"
         )
 
 
@@ -219,7 +219,7 @@ async def approve_project(
             "project_slug": project.project_slug,
             "schema_name": project.schema_name,
             "approved_at": project.approved_at.isoformat(),
-            "message": "Project approved and tenant provisioned",
+            "message": "Projeto aprovado e ambiente provisionado",
             "next_step": "gp_onboarding",
             "gp_onboarding_url": f"/projects/{project.project_slug}/onboarding"
         }
@@ -234,7 +234,7 @@ async def approve_project(
         logger.error("admin.approve_project_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error approving project"
+            detail="Erro ao aprovar projeto"
         )
 
 
@@ -263,7 +263,7 @@ async def reject_project(
             "project_slug": project.project_slug,
             "rejection_reason": project.rejection_reason,
             "rejected_at": project.approved_at.isoformat(),
-            "message": "Project request rejected"
+            "message": "Solicitação de projeto rejeitada"
         }
 
     except ValueError as e:
@@ -276,7 +276,7 @@ async def reject_project(
         logger.error("admin.reject_project_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error rejecting project"
+            detail="Erro ao rejeitar projeto"
         )
 
 
@@ -446,7 +446,7 @@ async def list_users(
         logger.error("admin.list_users_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error listing users"
+            detail="Erro ao listar usuários"
         )
 
 
@@ -479,8 +479,8 @@ async def reset_user_password(
             "reset_at": result["reset_at"],
             "email_sent": email_success,
             "email_error": email_error,
-            "message": "Password reset successful. Email sent to user.",
-            "instructions": "User must change password on first login"
+            "message": "Senha redefinida com sucesso. Email enviado ao usuário.",
+            "instructions": "Usuário deve alterar a senha no primeiro login"
         }
 
     except ValueError as e:
@@ -493,7 +493,7 @@ async def reset_user_password(
         logger.error("admin.reset_password_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error resetting password"
+            detail="Erro ao redefinir senha"
         )
 
 
@@ -517,7 +517,7 @@ async def lock_user(
             "email": result["email"],
             "is_active": result["is_active"],
             "locked_at": result["locked_at"],
-            "message": "User account has been locked. They cannot login until unlocked."
+            "message": "Conta do usuário bloqueada. Não poderá fazer login até ser desbloqueada."
         }
 
     except ValueError as e:
@@ -530,7 +530,7 @@ async def lock_user(
         logger.error("admin.lock_user_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error locking user"
+            detail="Erro ao bloquear usuário"
         )
 
 
@@ -554,7 +554,7 @@ async def unlock_user(
             "email": result["email"],
             "is_active": result["is_active"],
             "unlocked_at": result["unlocked_at"],
-            "message": "User account has been unlocked. They can now login."
+            "message": "Conta do usuário desbloqueada. Pode fazer login novamente."
         }
 
     except ValueError as e:
@@ -567,7 +567,7 @@ async def unlock_user(
         logger.error("admin.unlock_user_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error unlocking user"
+            detail="Erro ao desbloquear usuário"
         )
 
 
@@ -603,14 +603,14 @@ async def get_suspicious_access(
                 for a in attempts
             ],
             "count": len(attempts),
-            "message": "List of users blocked due to suspicious access attempts"
+            "message": "Lista de usuários bloqueados por tentativas de acesso suspeitas"
         }
 
     except Exception as e:
         logger.error("admin.get_suspicious_access_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching suspicious access attempts"
+            detail="Erro ao buscar tentativas de acesso suspeitas"
         )
 
 
@@ -635,7 +635,7 @@ async def unblock_suspicious_access(
             "project_id": result["project_id"],
             "blocked": result["blocked"],
             "unblocked_at": result["unblocked_at"],
-            "message": "User has been unblocked and can now login again."
+            "message": "Usuário desbloqueado e pode fazer login novamente."
         }
 
     except ValueError as e:
@@ -648,7 +648,7 @@ async def unblock_suspicious_access(
         logger.error("admin.unblock_suspicious_access_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error unblocking suspicious access"
+            detail="Erro ao desbloquear acesso suspeito"
         )
 
 
@@ -700,7 +700,7 @@ async def list_tickets(
         logger.error("admin.list_tickets_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error listing tickets"
+            detail="Erro ao listar tickets"
         )
 
 
@@ -759,7 +759,7 @@ async def get_ticket_details(
         logger.error("admin.get_ticket_details_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching ticket details"
+            detail="Erro ao buscar detalhes do ticket"
         )
 
 
@@ -791,7 +791,7 @@ async def respond_to_ticket(
             "message": result["message"],
             "is_resolution": result["is_resolution"],
             "responded_at": result["responded_at"],
-            "notification": "User will be notified of this response via email" if not req.resolve else "Ticket marked as resolved"
+            "notification": "Usuário será notificado desta resposta por email" if not req.resolve else "Ticket marcado como resolvido"
         }
 
     except ValueError as e:
@@ -804,7 +804,7 @@ async def respond_to_ticket(
         logger.error("admin.respond_to_ticket_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error responding to ticket"
+            detail="Erro ao responder ticket"
         )
 
 
@@ -826,14 +826,14 @@ async def get_dashboard_metrics(
         return {
             "status": "success",
             "data": metrics,
-            "message": "Executive dashboard metrics retrieved successfully"
+            "message": "Métricas do painel executivo obtidas com sucesso"
         }
 
     except Exception as e:
         logger.error("admin.dashboard_metrics_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching dashboard metrics"
+            detail="Erro ao buscar métricas do painel"
         )
 
 
@@ -866,7 +866,7 @@ async def test_webhook(
         logger.error("admin.webhook_test_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error testing webhook"
+            detail="Erro ao testar webhook"
         )
 
 
@@ -926,7 +926,7 @@ async def get_alerts_history(
         logger.error("admin.alerts_history_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching alerts history"
+            detail="Erro ao buscar histórico de alertas"
         )
 
 
@@ -948,7 +948,7 @@ async def acknowledge_alert(
             "alert_id": result["alert_id"],
             "alert_status": result["status"],
             "acknowledged_at": result["acknowledged_at"],
-            "message": "Alert marked as acknowledged"
+            "message": "Alerta marcado como confirmado"
         }
 
     except ValueError as e:
@@ -961,7 +961,7 @@ async def acknowledge_alert(
         logger.error("admin.acknowledge_alert_error", error=str(e))
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error acknowledging alert"
+            detail="Erro ao confirmar alerta"
         )
 
 
@@ -1020,7 +1020,7 @@ async def invite_admin_user(
         stmt = select(User).where(User.email == request.email)
         result = await db.execute(stmt)
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User with this email already exists")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Usuário com este email já existe")
 
         # Check if active invitation already exists
         stmt = select(InvitationToken).where(
@@ -1030,7 +1030,7 @@ async def invite_admin_user(
         )
         result = await db.execute(stmt)
         if result.scalar_one_or_none():
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Active invitation already exists for this email")
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Já existe convite ativo para este email")
 
         # Generate token and temporary password
         invite_token = secrets.token_urlsafe(32)
@@ -1065,7 +1065,7 @@ async def invite_admin_user(
             logger.warning("admin.invite_email_failed", email=request.email, error=error)
             return InviteAdminResponse(
                 success=True,
-                message=f"Invitation created but email failed: {error}. Token: {invite_token}",
+                message=f"Convite criado mas envio de email falhou: {error}. Token: {invite_token}",
                 user_id=str(invitation.id)
             )
 
@@ -1073,7 +1073,7 @@ async def invite_admin_user(
 
         return InviteAdminResponse(
             success=True,
-            message=f"Invitation sent to {request.email}. Temporary password expires in 2 hours.",
+            message=f"Convite enviado para {request.email}. Senha temporária expira em 2 horas.",
             user_id=str(invitation.id)
         )
 
@@ -1081,7 +1081,7 @@ async def invite_admin_user(
         raise
     except Exception as e:
         logger.error("admin.invite_admin_error", error=str(e), email=request.email)
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Error inviting admin user")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Erro ao convidar usuário admin")
 
 
 # ============================================================================

@@ -307,8 +307,8 @@ export function QuestionnairePage() {
         <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-xl p-4 flex items-center gap-3">
           <CheckCircle2 className="w-6 h-6 text-emerald-400 flex-shrink-0" />
           <div>
-            <p className="text-emerald-300 font-semibold text-sm">Questionario Enviado</p>
-            <p className="text-slate-400 text-xs">Submetido para analise. As respostas abaixo sao exibidas como referencia para a equipe do projeto.</p>
+            <p className="text-emerald-300 font-semibold text-sm">Questionário Enviado</p>
+            <p className="text-slate-400 text-xs">Submetido para análise. As respostas abaixo são exibidas como referência para a equipe do projeto.</p>
           </div>
         </div>
       )}
@@ -437,7 +437,7 @@ export function QuestionnairePage() {
 
             {analysisResult.status === 'pendente_ajustes' && (
               <p className="text-slate-300 text-sm">
-                O questionário contem gaps ou ressalvas que devem ser revisados antes do envio.
+                O questionário contém gaps ou ressalvas que devem ser revisados antes do envio.
               </p>
             )}
 
@@ -453,7 +453,7 @@ export function QuestionnairePage() {
           {/* Failed rules detail */}
           {analysisResult.failedRules.length > 0 && (
             <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
-              <h4 className="text-slate-200 text-sm font-semibold">Resultados da Validacao</h4>
+              <h4 className="text-slate-200 text-sm font-semibold">Resultados da Validação</h4>
 
               {/* Blockers */}
               {analysisResult.failedRules.filter(r => r.rule.severity === 'blocker').length > 0 && (
@@ -472,7 +472,7 @@ export function QuestionnairePage() {
               {/* Gaps */}
               {analysisResult.failedRules.filter(r => r.rule.severity === 'gap').length > 0 && (
                 <div>
-                  <p className="text-amber-400 text-xs font-semibold mb-1.5">Gaps (pendencias obrigatórias)</p>
+                  <p className="text-amber-400 text-xs font-semibold mb-1.5">Gaps (pendências obrigatórias)</p>
                   {analysisResult.failedRules.filter(r => r.rule.severity === 'gap').map(({ rule }) => (
                     <button key={rule.id} onClick={() => navigateToQuestion(rule.affectedQuestions)}
                       className="w-full text-left flex items-start gap-2 py-1.5 px-2 rounded hover:bg-slate-800/50 transition-colors">
@@ -486,7 +486,7 @@ export function QuestionnairePage() {
               {/* Caveats */}
               {analysisResult.failedRules.filter(r => r.rule.severity === 'caveat').length > 0 && (
                 <div>
-                  <p className="text-blue-400 text-xs font-semibold mb-1.5">Ressalvas (recomendacoes)</p>
+                  <p className="text-blue-400 text-xs font-semibold mb-1.5">Ressalvas (recomendações)</p>
                   {analysisResult.failedRules.filter(r => r.rule.severity === 'caveat').map(({ rule }) => (
                     <button key={rule.id} onClick={() => navigateToQuestion(rule.affectedQuestions)}
                       className="w-full text-left flex items-start gap-2 py-1.5 px-2 rounded hover:bg-slate-800/50 transition-colors">
@@ -501,7 +501,7 @@ export function QuestionnairePage() {
 
           {/* Campos A.12 — Resultado da Análise */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-            <h4 className="text-slate-200 text-sm font-semibold">Dados da Analise (A.12)</h4>
+            <h4 className="text-slate-200 text-sm font-semibold">Dados da Análise (A.12)</h4>
 
             <div>
               <p className="text-slate-400 text-xs font-medium mb-1">{ANALYSIS_RESULT_FIELDS.percentage.label}</p>
@@ -548,7 +548,7 @@ export function QuestionnairePage() {
             </button>
             <button onClick={() => { setShowResult(false); setCurrentBlock(0) }}
               className="flex items-center gap-2 px-4 py-2 text-sm bg-slate-800 border border-slate-700 text-slate-300 rounded-lg hover:bg-slate-700 transition-colors">
-              <RefreshCw className="w-4 h-4" /> Corrigir pendencias
+              <RefreshCw className="w-4 h-4" /> Corrigir pendências
             </button>
             {analysisResult.status === 'pronto_para_ingestão' && (
               <button onClick={handleSubmit} disabled={submitting}

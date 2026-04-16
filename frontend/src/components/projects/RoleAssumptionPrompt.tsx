@@ -48,11 +48,11 @@ export function RoleAssumptionPrompt({ action, onRoleAssumed, onCancel }: Props)
           <h3 className="text-lg font-semibold text-white">Papel necessario</h3>
         </div>
         <p className="text-sm text-slate-400 mb-4">
-          Esta acao requer o papel de <strong className="text-violet-300">{roleInfo.label}</strong>.
+          Esta ação requer o papel de <strong className="text-violet-300">{roleInfo.label}</strong>.
           Deseja assumir este papel e continuar?
         </p>
         <p className="text-xs text-slate-500 mb-6">
-          Esta acao sera registrada na trilha de auditoria do projeto.
+          Esta ação será registrada na trilha de auditoria do projeto.
         </p>
         <div className="flex gap-3 justify-end">
           <button

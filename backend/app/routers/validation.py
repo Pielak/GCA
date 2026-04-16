@@ -183,12 +183,12 @@ async def validate_code(request: ValidateCodeRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid language or parameters: {str(e)}"
+            detail=f"Linguagem ou parâmetros inválidos: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Code validation failed: {str(e)}"
+            detail=f"Validação de código falhou: {str(e)}"
         )
 
 
@@ -215,12 +215,12 @@ async def validate_syntax(request: ValidateCodeRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid language: {str(e)}"
+            detail=f"Linguagem inválida: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Syntax validation failed: {str(e)}"
+            detail=f"Validação de sintaxe falhou: {str(e)}"
         )
 
 
@@ -251,12 +251,12 @@ async def analyze_quality(request: ValidateCodeRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid language: {str(e)}"
+            detail=f"Linguagem inválida: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Quality analysis failed: {str(e)}"
+            detail=f"Análise de qualidade falhou: {str(e)}"
         )
 
 
@@ -288,12 +288,12 @@ async def security_scan(request: ValidateCodeRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid language: {str(e)}"
+            detail=f"Linguagem inválida: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Security scan failed: {str(e)}"
+            detail=f"Varredura de segurança falhou: {str(e)}"
         )
 
 
@@ -323,12 +323,12 @@ async def analyze_dependencies(request: ValidateCodeRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid language: {str(e)}"
+            detail=f"Linguagem inválida: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Dependency analysis failed: {str(e)}"
+            detail=f"Análise de dependências falhou: {str(e)}"
         )
 
 
@@ -429,10 +429,10 @@ async def quick_check(request: ValidateCodeRequest):
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid language: {str(e)}"
+            detail=f"Linguagem inválida: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Quick check failed: {str(e)}"
+            detail=f"Verificação rápida falhou: {str(e)}"
         )

@@ -147,18 +147,18 @@ async def validate_github_token(request: GitHubTokenRequest):
         if valid:
             return {
                 "valid": True,
-                "message": "GitHub token is valid"
+                "message": "Token GitHub válido"
             }
         else:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="GitHub token is invalid or expired"
+                detail="Token GitHub inválido ou expirado"
             )
 
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Token validation failed: {str(e)}"
+            detail=f"Validação do token falhou: {str(e)}"
         )
 
 
@@ -181,7 +181,7 @@ async def get_github_user(request: GitHubTokenRequest):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get user info: {str(e)}"
+            detail=f"Falha ao obter informações do usuário: {str(e)}"
         )
 
 
@@ -214,7 +214,7 @@ async def list_repositories(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list repositories: {str(e)}"
+            detail=f"Falha ao listar repositórios: {str(e)}"
         )
 
 
@@ -242,7 +242,7 @@ async def create_branch(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="GitHub token required"
+            detail="Token GitHub obrigatório"
         )
 
     try:
@@ -259,7 +259,7 @@ async def create_branch(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create branch: {str(e)}"
+            detail=f"Falha ao criar branch: {str(e)}"
         )
 
 
@@ -289,7 +289,7 @@ async def create_commit(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="GitHub token required"
+            detail="Token GitHub obrigatório"
         )
 
     try:
@@ -310,7 +310,7 @@ async def create_commit(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create commit: {str(e)}"
+            detail=f"Falha ao criar commit: {str(e)}"
         )
 
 
@@ -340,7 +340,7 @@ async def create_pull_request(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="GitHub token required"
+            detail="Token GitHub obrigatório"
         )
 
     try:
@@ -359,7 +359,7 @@ async def create_pull_request(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create pull request: {str(e)}"
+            detail=f"Falha ao criar pull request: {str(e)}"
         )
 
 
@@ -393,7 +393,7 @@ async def deploy_generated_code(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="GitHub token required"
+            detail="Token GitHub obrigatório"
         )
 
     try:
@@ -411,7 +411,7 @@ async def deploy_generated_code(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Deployment failed: {str(e)}"
+            detail=f"Deploy falhou: {str(e)}"
         )
 
 
@@ -441,7 +441,7 @@ async def get_pull_requests(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="GitHub token required"
+            detail="Token GitHub obrigatório"
         )
 
     try:
@@ -461,7 +461,7 @@ async def get_pull_requests(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get pull requests: {str(e)}"
+            detail=f"Falha ao obter pull requests: {str(e)}"
         )
 
 
@@ -491,7 +491,7 @@ async def add_comment_to_pr(
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="GitHub token required"
+            detail="Token GitHub obrigatório"
         )
 
     try:
@@ -508,5 +508,5 @@ async def add_comment_to_pr(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to add comment: {str(e)}"
+            detail=f"Falha ao adicionar comentário: {str(e)}"
         )

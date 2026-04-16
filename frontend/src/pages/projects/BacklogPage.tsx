@@ -48,15 +48,15 @@ const STATUS_CONFIG: Record<string, { label: string; bg: string; text: string }>
   ready: { label: 'Pronto', bg: 'bg-emerald-900/40', text: 'text-emerald-400' },
   generating: { label: 'Gerando', bg: 'bg-violet-900/40', text: 'text-violet-400' },
   tests_running: { label: 'Testes', bg: 'bg-blue-900/40', text: 'text-blue-400' },
-  security_review: { label: 'Seguranca', bg: 'bg-orange-900/40', text: 'text-orange-400' },
+  security_review: { label: 'Segurança', bg: 'bg-orange-900/40', text: 'text-orange-400' },
   compliance_review: { label: 'Compliance', bg: 'bg-amber-900/40', text: 'text-amber-400' },
   awaiting_qa: { label: 'Aguardando QA', bg: 'bg-cyan-900/40', text: 'text-cyan-400' },
   ready_to_merge: { label: 'Pronto p/ Merge', bg: 'bg-emerald-900/40', text: 'text-emerald-300' },
-  committed: { label: 'Commitado', bg: 'bg-emerald-800/40', text: 'text-emerald-300' },
+  committed: { label: 'Consolidado', bg: 'bg-emerald-800/40', text: 'text-emerald-300' },
   published: { label: 'Publicado', bg: 'bg-emerald-700/40', text: 'text-emerald-200' },
   blocked: { label: 'Bloqueado', bg: 'bg-red-900/40', text: 'text-red-400' },
   in_progress: { label: 'Em andamento', bg: 'bg-blue-900/40', text: 'text-blue-400' },
-  done: { label: 'Concluido', bg: 'bg-emerald-900/40', text: 'text-emerald-400' },
+  done: { label: 'Concluído', bg: 'bg-emerald-900/40', text: 'text-emerald-400' },
 }
 
 export function BacklogPage() {
@@ -285,7 +285,7 @@ export function BacklogPage() {
                           className="flex items-center gap-1 px-2 py-1 text-xs bg-violet-600/20 border border-violet-600/30 text-violet-400 rounded-lg hover:bg-violet-600/30 transition-colors"
                         >
                           <Code2 className="w-3 h-3" />
-                          Gerar Codigo
+                          Gerar Código
                         </button>
                       )}
                       {item.status === 'generating' && (
