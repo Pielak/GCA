@@ -31,6 +31,7 @@ import { ReadinessPage } from './pages/projects/ReadinessPage';
 import { QuestionnairePage } from './pages/projects/QuestionnairePage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { NovoProjetoPage } from './pages/NovoProjetoPage';
+import { SolicitarProjetoPage } from './pages/SolicitarProjetoPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { TesterReviewPage } from './pages/projects/TesterReviewPage';
 import { PipelineAuditPage } from './pages/projects/PipelineAuditPage';
@@ -56,6 +57,10 @@ export const router = createBrowserRouter([
   {
     path: '/novo-projeto',
     Component: NovoProjetoPage,
+  },
+  {
+    path: '/solicitar-projeto',
+    Component: SolicitarProjetoPage,
   },
   {
     path: '/setup',

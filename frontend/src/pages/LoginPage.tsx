@@ -455,16 +455,23 @@ export function LoginPage() {
           </form>
 
           {/* Links */}
-          <div className="mt-5 text-center">
+          <div className="mt-5 text-center space-y-2">
             <Link
               to="/reset-password"
-              className="text-sm text-slate-500 hover:text-violet-400 transition-colors duration-300"
+              className="block text-sm text-slate-500 hover:text-violet-400 transition-colors duration-300"
             >
               Esqueci minha senha
             </Link>
+            <div className="text-xs text-slate-600">
+              Não tem projeto?{" "}
+              <Link
+                to="/solicitar-projeto"
+                className="text-violet-400 hover:text-violet-300 underline-offset-2 hover:underline transition-colors"
+              >
+                Solicitar novo projeto
+              </Link>
+            </div>
           </div>
-
-          {/* Botão "Criar Novo Projeto" removido — projetos são criados pelo Admin */}
         </div>
 
         {/* Security badge */}

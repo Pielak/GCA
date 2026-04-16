@@ -61,13 +61,12 @@ class ProjectRequest(Base):
     description = Column(Text)
 
     # Gate bloqueante: tipo de entregável (obrigatório)
-    # values_callable: armazena/lê pelo .value (lowercase) ao invés do member
-    # name (UPPERCASE) — evita "'new_system' is not among defined enum values"
-    # quando a coluna no Postgres é VARCHAR (não tipo enum nativo).
-    deliverable_type = Column(
-        SQLEnum(DeliverableType, values_callable=lambda obj: [e.value for e in obj]),
-        nullable=False,
-    )
+    # NOTA: coluna no DB é VARCHAR(50), não enum nativo (verificado em \d).
+    # SQLAlchemy SQLEnum estava tentando fazer cast `$1::deliverabletype`
+    # ao escrever, falhando porque o tipo enum legado tem member names
+    # UPPERCASE mas usamos values lowercase. String puro resolve sem
+    # perder validação (Pydantic do input layer cobre).
+    deliverable_type = Column(String(50), nullable=False, default="new_system")
 
     # Schema PostgreSQL
     schema_name = Column(String(100), unique=True)
