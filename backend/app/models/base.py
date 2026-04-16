@@ -1202,3 +1202,40 @@ class TestExecutionLog(Base):
         Index("idx_test_exec_logs_project", project_id),
         Index("idx_test_exec_logs_status", status),
     )
+
+
+class ProjectDeliverable(Base):
+    """Item de OCG.DELIVERABLES materializado como linha rastreável.
+
+    Sincronizado pelo DeliverableRegistry após cada update do OCG. Permite
+    casar promessa (declared no OCG) com entrega (status=verified + evidência).
+    """
+    __tablename__ = "project_deliverables"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+
+    name = Column(String(500), nullable=False)
+    normalized_name = Column(String(500), nullable=False)
+    category = Column(String(40), nullable=False, default="other")  # doc|code|test|config|process|other
+    kind = Column(String(60), nullable=False, default="other_manual")
+
+    # declared|generating|present|verified|waived|missing
+    status = Column(String(20), nullable=False, default="declared")
+
+    evidence_type = Column(String(30), nullable=True)
+    evidence_ref = Column(String(500), nullable=True)
+    verification_method = Column(String(60), nullable=True)
+
+    last_verified_at = Column(DateTime(timezone=True), nullable=True)
+    verified_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    notes = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "normalized_name", name="uq_deliverable_per_project"),
+        Index("idx_deliverables_project_status", project_id, status),
+        Index("idx_deliverables_kind", kind),
+    )
