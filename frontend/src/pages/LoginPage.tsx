@@ -232,11 +232,14 @@ export function LoginPage() {
       // Sem projeto selecionado → login (só funciona pra admin)
       if (selectedSlug) {
         const result = await projectLogin(email, password, selectedSlug)
+        // Sucesso = backend devolveu access_token + project.id. projectLogin
+        // joga em caso de 4xx — então cair aqui sem project_id é bug,
+        // não credencial inválida.
         if (result?.project_id) {
           localStorage.setItem(LAST_PROJECT_KEY, selectedSlug)
           navigate('/')
         } else {
-          setError('Email ou senha incorretos, ou você não é membro deste projeto')
+          setError('Resposta inesperada do servidor — tente novamente em instantes.')
         }
       } else {
         const ok = await login(email, password)
@@ -247,19 +250,28 @@ export function LoginPage() {
         }
       }
     } catch (err: any) {
-      if (err?.status === 403) {
-        // Backend devolve 403 com code='project_required' quando não-admin
-        // tenta entrar sem selecionar projeto.
-        const detail = err?.response?.data?.detail
+      // O api.ts interceptor já achata o erro em { status, message, data }.
+      // err.data é o body da resposta (com .detail).
+      const detail = err?.data?.detail
+      const detailStr = typeof detail === 'string' ? detail : ''
+
+      if (err?.status === 401) {
+        setError('Email ou senha inválidos.')
+      } else if (err?.status === 403) {
+        // 403 com code='project_required' = não-admin tentou entrar sem projeto.
         if (typeof detail === 'object' && detail?.code === 'project_required') {
           setError('Selecione seu projeto no combo acima — apenas administradores podem entrar sem projeto.')
+        } else if (detailStr.toLowerCase().includes('membro')) {
+          setError('Você não é membro deste projeto. Verifique com o GP do projeto se foi adicionado à equipe.')
         } else {
-          setError('Conta bloqueada ou sem acesso. Contate o administrador.')
+          setError(detailStr || 'Acesso negado. Contate o administrador.')
         }
       } else if (err?.status === 404) {
         setError('Projeto não encontrado.')
+      } else if (err?.status === 410) {
+        setError('Projeto arquivado.')
       } else {
-        setError(err?.message || 'Erro ao fazer login')
+        setError(detailStr || err?.message || 'Erro ao fazer login.')
       }
     } finally {
       setLoading(false)

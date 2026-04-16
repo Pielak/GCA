@@ -32,6 +32,10 @@ export const useAuth = () => {
    * Login via slug do projeto — chama POST /auth/project-login
    * Retorna { project_id, first_access_completed } em caso de sucesso.
    * Lança erro com status e message em caso de falha.
+   *
+   * NOTA: backend retorna { project: { id, name, ... } } (objeto aninhado),
+   * NÃO project_id no topo. Extrair de project.id é obrigatório — caso
+   * contrário LoginPage interpreta como falha mesmo com token válido.
    */
   const projectLogin = useCallback(
     async (email: string, password: string, projectSlug: string) => {
@@ -40,13 +44,16 @@ export const useAuth = () => {
         password,
         project_slug: projectSlug,
       })
-      const { access_token, user: userData, project_id } = response.data
+      const { access_token, user: userData, project } = response.data
 
       setToken(access_token)
       if (userData) {
         setUser(userData)
       }
-      return { project_id, first_access_completed: userData?.first_access_completed ?? true }
+      return {
+        project_id: project?.id,
+        first_access_completed: userData?.first_access_completed ?? true,
+      }
     },
     [setToken, setUser]
   )
