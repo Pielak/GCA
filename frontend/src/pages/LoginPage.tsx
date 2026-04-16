@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
+import { apiClient as api } from '@/lib/api'
 
 // ═══════════════════════════════════════════════════════════════════════
 // Particle Network — canvas animado de fundo
@@ -160,9 +161,17 @@ const FEATURES = [
 // LoginPage
 // ═══════════════════════════════════════════════════════════════════════
 
+interface ProjectOption {
+  id: string
+  name: string
+  slug: string
+}
+
+const LAST_PROJECT_KEY = 'gca:last_project_slug'
+
 export function LoginPage() {
   const navigate = useNavigate()
-  const { login } = useAuth()
+  const { login, projectLogin } = useAuth()
   const { user } = useAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -172,10 +181,37 @@ export function LoginPage() {
   const [toast, setToast] = useState<string | null>(null)
   const [mounted, setMounted] = useState(false)
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
+  const [projects, setProjects] = useState<ProjectOption[]>([])
+  const [selectedSlug, setSelectedSlug] = useState<string>('')
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 50)
     return () => clearTimeout(t)
+  }, [])
+
+  // Carrega lista de projetos ativos para o combo + auto-seleciona o último
+  // acessado (gravado em localStorage no login anterior bem-sucedido).
+  useEffect(() => {
+    let cancelled = false
+    api.get('/auth/projects').then(res => {
+      if (cancelled) return
+      const list: ProjectOption[] = res.data?.projects || []
+      // Ordena com o último acessado (localStorage) primeiro
+      const lastSlug = localStorage.getItem(LAST_PROJECT_KEY) || ''
+      list.sort((a, b) => {
+        if (a.slug === lastSlug) return -1
+        if (b.slug === lastSlug) return 1
+        return a.name.localeCompare(b.name)
+      })
+      setProjects(list)
+      // Pré-seleciona o último (mas user pode escolher "—" para entrar como admin)
+      if (lastSlug && list.some(p => p.slug === lastSlug)) {
+        setSelectedSlug(lastSlug)
+      }
+    }).catch(() => {
+      // Sem combo (rota indisponível) — login só admin via /auth/login
+    })
+    return () => { cancelled = true }
   }, [])
 
   const handleNewProject = () => {
@@ -192,15 +228,36 @@ export function LoginPage() {
     setLoading(true)
 
     try {
-      const success = await login(email, password)
-      if (success) {
-        navigate('/')
+      // Branch principal: projeto selecionado → projectLogin (valida membership)
+      // Sem projeto selecionado → login (só funciona pra admin)
+      if (selectedSlug) {
+        const result = await projectLogin(email, password, selectedSlug)
+        if (result?.project_id) {
+          localStorage.setItem(LAST_PROJECT_KEY, selectedSlug)
+          navigate('/')
+        } else {
+          setError('Email ou senha incorretos, ou você não é membro deste projeto')
+        }
       } else {
-        setError('Email ou senha incorretos')
+        const ok = await login(email, password)
+        if (ok) {
+          navigate('/')
+        } else {
+          setError('Email ou senha incorretos')
+        }
       }
     } catch (err: any) {
       if (err?.status === 403) {
-        setError('Conta bloqueada. Contate o administrador.')
+        // Backend devolve 403 com code='project_required' quando não-admin
+        // tenta entrar sem selecionar projeto.
+        const detail = err?.response?.data?.detail
+        if (typeof detail === 'object' && detail?.code === 'project_required') {
+          setError('Selecione seu projeto no combo acima — apenas administradores podem entrar sem projeto.')
+        } else {
+          setError('Conta bloqueada ou sem acesso. Contate o administrador.')
+        }
+      } else if (err?.status === 404) {
+        setError('Projeto não encontrado.')
       } else {
         setError(err?.message || 'Erro ao fazer login')
       }
@@ -361,6 +418,37 @@ export function LoginPage() {
 
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-5">
+            {/* Projeto (combo) — opcional para admin, obrigatório para membros */}
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                <FolderPlus className="w-3.5 h-3.5" />
+                PROJETO
+              </label>
+              <select
+                value={selectedSlug}
+                onChange={e => setSelectedSlug(e.target.value)}
+                disabled={loading}
+                className="
+                  w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-3.5
+                  text-sm text-white
+                  focus:outline-none focus:border-violet-500/50 focus:bg-white/[0.08]
+                  transition-all duration-300 appearance-none cursor-pointer
+                "
+              >
+                <option value="" className="bg-[#1c1c34]">— sem projeto (acesso administrativo) —</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.slug} className="bg-[#1c1c34]">
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[10px] text-slate-600">
+                {selectedSlug
+                  ? 'Suas credenciais serão validadas neste projeto.'
+                  : 'Sem projeto selecionado: apenas administradores conseguem entrar.'}
+              </p>
+            </div>
+
             {/* Email */}
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">

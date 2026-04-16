@@ -99,14 +99,47 @@ async def bootstrap_admin(
     )
 
 
+@router.get("/projects")
+async def list_active_projects_for_login(
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista pública de projetos ativos para popular o combo da página de login.
+
+    Não exige autenticação — usuário ainda nem entrou. Devolve apenas dados
+    mínimos (id, name, slug) para o seletor. Projetos arquivados/inativos
+    não aparecem.
+    """
+    from app.models.base import Project
+    result = await db.execute(
+        select(Project)
+        .where(Project.status == "active")
+        .order_by(Project.name)
+    )
+    projects = result.scalars().all()
+    return {
+        "projects": [
+            {
+                "id": str(p.id),
+                "name": p.name,
+                "slug": p.short_slug or p.slug,
+            }
+            for p in projects
+        ],
+        "count": len(projects),
+    }
+
+
 @router.post("/login", response_model=LoginResponse)
 async def login(
     req: LoginRequest,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    User login with email and password.
-    Returns access token and refresh token.
+    Login SEM contexto de projeto — exclusivo para administradores.
+
+    Para login de membros de projeto, usar /auth/project-login (com slug do
+    projeto). Esta rota rejeita não-admins com 403, redirecionando o caller
+    para o fluxo correto.
     """
     success, user, error = await AuthService.login(
         db=db,
@@ -122,10 +155,21 @@ async def login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Não-admin sem projeto selecionado: bloqueia + sinaliza ao frontend
+    # mostrar combo de projetos.
+    if not user.is_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "project_required",
+                "message": "Selecione um projeto para entrar (apenas administradores podem entrar sem projeto).",
+            },
+        )
+
     # Create tokens
     access_token, refresh_token, expires_in = AuthService.create_tokens(user)
 
-    # Buscar projetos e papéis do usuário
+    # Buscar projetos e papéis do usuário (admin pode ter projetos também)
     project_roles = await _get_user_project_roles(db, user.id)
 
     return LoginResponse(
