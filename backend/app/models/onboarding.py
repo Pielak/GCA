@@ -61,7 +61,13 @@ class ProjectRequest(Base):
     description = Column(Text)
 
     # Gate bloqueante: tipo de entregável (obrigatório)
-    deliverable_type = Column(SQLEnum(DeliverableType), nullable=False)
+    # values_callable: armazena/lê pelo .value (lowercase) ao invés do member
+    # name (UPPERCASE) — evita "'new_system' is not among defined enum values"
+    # quando a coluna no Postgres é VARCHAR (não tipo enum nativo).
+    deliverable_type = Column(
+        SQLEnum(DeliverableType, values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+    )
 
     # Schema PostgreSQL
     schema_name = Column(String(100), unique=True)
