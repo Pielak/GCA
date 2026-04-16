@@ -3,7 +3,8 @@
 Responsabilidades:
     - sync_from_ocg(project_id, ocg_data): materializa OCG.DELIVERABLES
       em rows da tabela project_deliverables (insert novos, waive removidos).
-    - verify_all(project_id): roda todos verifiers, atualiza status.
+    - verify_all(project_id): roda todos verifiers em paralelo (semáforo
+      de 5 in flight para não saturar GitHub API), atualiza status.
     - attest_manual(project_id, deliverable_id, user_id, note, evidence_ref):
       atestação humana (para business_case, etc).
     - export_status(project_id): payload para Readiness page.
@@ -16,6 +17,7 @@ rollback juntas.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -174,8 +176,18 @@ class DeliverableRegistry:
 
     # ──────────────────────────── verify ────────────────────────────
 
+    # Concorrência máxima de verifiers em paralelo. Cada verifier tipicamente
+    # faz 1 HTTP call ao GitHub API. Limite é conservador para não estourar
+    # rate-limit (GitHub: 5000 req/h autenticado = 1.4/s sustentado).
+    _VERIFY_CONCURRENCY = 5
+
     async def verify_all(self, project_id: UUID) -> Dict[str, int]:
         """Roda verify_kind() em todos deliverables não-waived do projeto.
+
+        Paraleliza com semáforo (até ``_VERIFY_CONCURRENCY`` verifiers em
+        flight simultâneos). Para 30 deliverables × 1s/verifier:
+            - serial:   ~30s
+            - paralelo: ~6s
 
         Atualiza status, evidence_*, last_verified_at por linha.
 
@@ -196,11 +208,22 @@ class DeliverableRegistry:
         )
         deliverables = list(result.scalars().all())
 
+        if not deliverables:
+            return {"verified": 0, "present": 0, "missing": 0, "manual_only": 0, "error": 0}
+
+        # Paralelizar verifiers com semáforo
+        sem = asyncio.Semaphore(self._VERIFY_CONCURRENCY)
+
+        async def _run(d: ProjectDeliverable):
+            async with sem:
+                return d, await verify_kind(d.kind, project_id, self.db)
+
+        results = await asyncio.gather(*[_run(d) for d in deliverables])
+
+        # Aplicar resultados (sequencial para não conflitar com sessão SQLA)
         counters = {"verified": 0, "present": 0, "missing": 0, "manual_only": 0, "error": 0}
         now = datetime.now(timezone.utc)
-
-        for d in deliverables:
-            res: VerificationResult = await verify_kind(d.kind, project_id, self.db)
+        for d, res in results:
             new_status = res.status if res.status in counters else "error"
 
             if new_status == "error":
@@ -224,6 +247,7 @@ class DeliverableRegistry:
         logger.info(
             "deliverable_registry.verify_all",
             project_id=str(project_id),
+            concurrency=self._VERIFY_CONCURRENCY,
             **counters,
         )
         return counters
