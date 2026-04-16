@@ -68,6 +68,14 @@ class ProjectRequest(Base):
     # perder validação (Pydantic do input layer cobre).
     deliverable_type = Column(String(50), nullable=False, default="new_system")
 
+    # Tipo livre do wizard quando usuário escolheu "Outro" (ex: "Browser
+    # Extension"). Adicionado em migration 017. NULL = usa deliverable_type.
+    custom_deliverable_type = Column(String(100))
+
+    # Respostas das perguntas obrigatórias do passo 2 do wizard (JSON serializado).
+    # Adicionado em migration 017. Alimenta o seed inicial do OCG.
+    requirements_json = Column(Text)
+
     # Schema PostgreSQL
     schema_name = Column(String(100), unique=True)
 
