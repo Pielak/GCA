@@ -38,6 +38,11 @@ from app.services.deliverable_verifiers import (
     VerificationResult,
     verify_kind,
 )
+from app.services.deliverable_generators import (
+    GeneratorResult,
+    generate_kind,
+    has_generator,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -251,6 +256,133 @@ class DeliverableRegistry:
             **counters,
         )
         return counters
+
+    # ──────────────────────────── auto-generate ──────────────────────
+
+    async def auto_generate_pending(
+        self,
+        project_id: UUID,
+        ocg_data: Any,
+        re_verify: bool = True,
+    ) -> Dict[str, Any]:
+        """Roda generators para deliverables 'declared' ou 'missing' que têm
+        generator registrado. Após gerar, opcionalmente re-verifica o kind
+        (que detecta o arquivo no Git e marca 'verified').
+
+        Idempotente: deliverables 'verified', 'present', 'manual_only',
+        'waived' são pulados. Generator não-existente para o kind = pulado.
+
+        Args:
+            project_id: id do projeto.
+            ocg_data: dict OCG (ou string JSON; é normalizado).
+            re_verify: se True, roda verify_kind no kind logo após gerar.
+
+        Returns:
+            ``{"generated": [{kind, path, bytes}], "skipped": [{kind, reason}],
+               "errors": [{kind, error}], "re_verified": [{kind, status}]}``
+        """
+        # Normaliza ocg_data
+        if isinstance(ocg_data, str):
+            try:
+                ocg_data = json.loads(ocg_data)
+            except (json.JSONDecodeError, ValueError):
+                ocg_data = {}
+        if not isinstance(ocg_data, dict):
+            ocg_data = {}
+
+        # Carrega deliverables candidatos a geração
+        result = await self.db.execute(
+            select(ProjectDeliverable).where(
+                ProjectDeliverable.project_id == project_id,
+                ProjectDeliverable.status.in_(["declared", "missing"]),
+            )
+        )
+        deliverables = list(result.scalars().all())
+
+        # Dedup: cada KIND roda só 1x mesmo se tem múltiplos deliverables
+        # do mesmo kind (raro mas possível).
+        seen_kinds: set[str] = set()
+        generated: list[dict] = []
+        skipped: list[dict] = []
+        errors: list[dict] = []
+        re_verified: list[dict] = []
+
+        for d in deliverables:
+            if d.kind in seen_kinds:
+                skipped.append({"kind": d.kind, "reason": "dedup (já processado neste batch)"})
+                continue
+            seen_kinds.add(d.kind)
+
+            if not has_generator(d.kind):
+                skipped.append({"kind": d.kind, "reason": "sem generator registrado"})
+                continue
+
+            try:
+                # Marca como 'generating' enquanto roda (UI pode mostrar spinner)
+                d.status = "generating"
+                await self.db.flush()
+
+                res: GeneratorResult = await generate_kind(d.kind, project_id, self.db, ocg_data)
+
+                if res.committed:
+                    generated.append({
+                        "kind": d.kind,
+                        "path": res.path,
+                        "bytes": res.bytes_written,
+                        "notes": res.notes,
+                    })
+                    if re_verify:
+                        v = await verify_kind(d.kind, project_id, self.db)
+                        new_status = v.status if v.status in {"verified", "present", "missing", "manual_only", "error"} else "error"
+                        d.status = new_status
+                        d.evidence_type = v.evidence_type
+                        d.evidence_ref = v.evidence_ref
+                        d.verification_method = v.method
+                        d.last_verified_at = datetime.now(timezone.utc)
+                        if v.notes:
+                            d.notes = v.notes
+                        re_verified.append({"kind": d.kind, "status": new_status})
+                    else:
+                        # Sem re-verify: marca como 'present' (arquivo gerado mas
+                        # status final será atualizado no próximo verify_all).
+                        d.status = "present"
+                        d.evidence_type = "file"
+                        d.evidence_ref = res.path
+                        d.verification_method = "auto_generator"
+                        d.last_verified_at = datetime.now(timezone.utc)
+                else:
+                    # Generator decidiu pular (OCG sem dados, etc.) — volta
+                    # para 'declared' e registra motivo na nota.
+                    d.status = "declared"
+                    d.notes = f"auto_generator skipped: {res.skipped_reason}"
+                    skipped.append({"kind": d.kind, "reason": res.skipped_reason})
+            except Exception as exc:  # noqa: BLE001
+                # Volta para status anterior e registra erro
+                d.status = "declared"
+                d.notes = f"auto_generator error: {type(exc).__name__}: {exc}"
+                errors.append({"kind": d.kind, "error": str(exc)})
+                logger.warning(
+                    "deliverable_registry.auto_generate_failed",
+                    project_id=str(project_id),
+                    kind=d.kind,
+                    error=str(exc),
+                    error_type=type(exc).__name__,
+                )
+
+        await self.db.flush()
+        logger.info(
+            "deliverable_registry.auto_generate_pending",
+            project_id=str(project_id),
+            generated=len(generated),
+            skipped=len(skipped),
+            errors=len(errors),
+        )
+        return {
+            "generated": generated,
+            "skipped": skipped,
+            "errors": errors,
+            "re_verified": re_verified,
+        }
 
     # ──────────────────────────── attest manual ─────────────────────
 

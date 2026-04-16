@@ -35,6 +35,35 @@ logger = structlog.get_logger(__name__)
 # Evento de auditoria dedicado ao updater
 OCG_UPDATED = "OCG_UPDATED"
 
+
+async def _auto_generate_in_background(project_id: UUID, ocg_data: Dict[str, Any]) -> None:
+    """Roda DeliverableRegistry.auto_generate_pending em sessão própria,
+    fire-and-forget. Falha não derruba o flow do OCG."""
+    try:
+        from app.db.database import AsyncSessionLocal
+        from app.services.deliverable_registry import DeliverableRegistry
+
+        async with AsyncSessionLocal() as db:
+            registry = DeliverableRegistry(db)
+            result = await registry.auto_generate_pending(project_id, ocg_data, re_verify=True)
+            await db.commit()
+            logger.info(
+                "ocg_updater.auto_generate_done",
+                project_id=str(project_id),
+                generated=len(result.get("generated", [])),
+                skipped=len(result.get("skipped", [])),
+                errors=len(result.get("errors", [])),
+            )
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        logger.warning(
+            "ocg_updater.auto_generate_background_failed",
+            project_id=str(project_id),
+            error=str(exc) or repr(exc),
+            error_type=type(exc).__name__,
+            traceback=traceback.format_exc(),
+        )
+
 # Lock por project_id para serializar updates concorrentes do OCG.
 # Sem isto, N tasks paralelas leem version=V, todas escrevem version=V+1,
 # causando lost updates (a última commit vence). Com lock asyncio, cada
@@ -282,6 +311,15 @@ class OCGUpdaterService:
                 error_type=type(exc).__name__,
                 exc_info=True,
             )
+
+        # Auto-trigger generators em BACKGROUND (asyncio.create_task com
+        # sessão própria). Roda generators para deliverables 'declared'
+        # ou 'missing' que tenham generator registrado. Re-verifica após.
+        # Fire-and-forget — falha aqui NÃO derruba o flow do OCG.
+        import asyncio as _asyncio
+        _asyncio.create_task(
+            _auto_generate_in_background(project_id, updated_ocg)
+        )
 
         # Notificar GPs do projeto sobre atualização do OCG
         try:
