@@ -383,11 +383,46 @@ async def list_users(
     db: AsyncSession = Depends(get_db)
 ):
     """
-    Admin lists all users in the system
+    Admin lista todos os usuários do sistema com seus papéis por projeto.
+
+    Para cada não-admin, retorna `project_roles: [{project_id, project_name,
+    project_slug, role}]` para a UI exibir pills "papel @ projeto". Admins
+    são da camada administrativa e não têm projetos (regra de negócio do
+    GCA — Admin nunca atua em projetos, ver memória RBAC_RULES).
     """
     try:
+        from app.models.base import Project, ProjectMember
+
         service = AdminService(db)
         users = await service.list_users()
+
+        # Uma única query lateral para todos os memberships ativos —
+        # evita N+1. Inclui só projetos não arquivados.
+        memberships_res = await db.execute(
+            select(
+                ProjectMember.user_id,
+                ProjectMember.role,
+                Project.id,
+                Project.name,
+                Project.slug,
+                Project.short_slug,
+            )
+            .join(Project, Project.id == ProjectMember.project_id)
+            .where(
+                ProjectMember.is_active == True,  # noqa: E712
+                Project.status != "archived",
+            )
+        )
+        # Agrupa por user_id
+        memberships_by_user: dict = {}
+        for row in memberships_res.all():
+            user_id, role, p_id, p_name, p_slug, p_short_slug = row
+            memberships_by_user.setdefault(str(user_id), []).append({
+                "project_id": str(p_id),
+                "project_name": p_name,
+                "project_slug": p_short_slug or p_slug,
+                "role": role,
+            })
 
         return {
             "users": [
@@ -398,7 +433,9 @@ async def list_users(
                     "is_active": u.is_active,
                     "is_admin": u.is_admin,
                     "created_at": u.created_at.isoformat(),
-                    "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None
+                    "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+                    # Admin → vazio (sistema, não projetos). Demais → lista por projeto.
+                    "project_roles": [] if u.is_admin else memberships_by_user.get(str(u.id), []),
                 }
                 for u in users
             ],

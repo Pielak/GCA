@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, Loader2, Zap, Trash2 } from 'lucide-react'
+import { Search, Loader2, Zap, Trash2, Shield, FolderOpen } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+
+interface ProjectRole {
+  project_id: string
+  project_name: string
+  project_slug: string
+  role: string
+}
 
 interface UserItem {
   id: string
@@ -10,8 +17,22 @@ interface UserItem {
   is_admin?: boolean
   is_active?: boolean
   role?: string
+  project_roles?: ProjectRole[]
   created_at?: string
   last_login_at?: string
+}
+
+// Cores e labels por papel — alinha com RBAC do GCA (7 papéis em projeto).
+const ROLE_LABELS: Record<string, { label: string; color: string }> = {
+  gp:         { label: 'GP',         color: 'bg-violet-500/20 text-violet-300 border-violet-500/30' },
+  tech_lead:  { label: 'Tech Lead',  color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
+  dev_sr:     { label: 'Dev Sr',     color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  dev_pl:     { label: 'Dev Pl',     color: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/20' },
+  dev:        { label: 'Dev',        color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  qa:         { label: 'QA',         color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
+  compliance: { label: 'Compliance', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
+  viewer:     { label: 'Viewer',     color: 'bg-slate-500/20 text-slate-300 border-slate-500/30' },
+  stakeholder:{ label: 'Stakeholder',color: 'bg-slate-500/20 text-slate-300 border-slate-500/30' },
 }
 
 export function AdminUsersPage() {
@@ -128,7 +149,8 @@ export function AdminUsersPage() {
           <thead>
             <tr className="border-b border-slate-800 bg-slate-800/50">
               <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">USUÁRIO</th>
-              <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PERFIL</th>
+              <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium" title="Admin = camada administrativa (não atua em projetos). Demais = papel(is) por projeto.">PERFIL</th>
+              <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PROJETOS / PAPEL</th>
               <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">STATUS</th>
               <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">ÚLTIMO ACESSO</th>
               <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">CADASTRADO EM</th>
@@ -139,11 +161,12 @@ export function AdminUsersPage() {
             {filtered.length > 0 ? filtered.map((u, i) => {
               const isActive = u.is_active !== false
               const displayName = u.full_name || u.email
+              const projectRoles = u.project_roles || []
               return (
                 <tr key={u.id} className={`border-b border-slate-800/50 hover:bg-slate-800/30 transition-colors ${i === filtered.length - 1 ? 'border-b-0' : ''}`}>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-violet-700/60 flex items-center justify-center text-white text-sm font-semibold flex-shrink-0">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-semibold flex-shrink-0 ${u.is_admin ? 'bg-purple-700/70' : 'bg-violet-700/60'}`}>
                         {displayName.charAt(0).toUpperCase()}
                       </div>
                       <div>
@@ -152,14 +175,46 @@ export function AdminUsersPage() {
                       </div>
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <span className={`text-xs px-2 py-0.5 rounded ${
-                      u.is_admin ? 'bg-violet-600/20 text-violet-300' : 'bg-emerald-500/20 text-emerald-300'
-                    }`}>
-                      {u.is_admin ? 'Admin' : u.role || 'Usuário'}
-                    </span>
+                  <td className="px-4 py-3 align-top">
+                    {u.is_admin ? (
+                      <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border bg-purple-500/20 text-purple-200 border-purple-500/30" title="Administrador do sistema — não atua em projetos">
+                        <Shield className="w-3 h-3" />
+                        Admin (sistema)
+                      </span>
+                    ) : projectRoles.length === 0 ? (
+                      <span className="text-xs text-slate-600 italic">— sem projeto —</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">
+                        {Array.from(new Set(projectRoles.map(pr => ROLE_LABELS[pr.role]?.label || pr.role))).join(' · ')}
+                      </span>
+                    )}
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 align-top">
+                    {u.is_admin ? (
+                      <span className="text-xs text-slate-600">— camada administrativa —</span>
+                    ) : projectRoles.length === 0 ? (
+                      <span className="text-xs text-slate-600">—</span>
+                    ) : (
+                      <div className="flex flex-wrap gap-1.5 max-w-md">
+                        {projectRoles.map((pr, idx) => {
+                          const r = ROLE_LABELS[pr.role] || { label: pr.role, color: 'bg-slate-500/20 text-slate-300 border-slate-500/30' }
+                          return (
+                            <span
+                              key={`${pr.project_id}-${idx}`}
+                              className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded border ${r.color}`}
+                              title={`${r.label} em ${pr.project_name}`}
+                            >
+                              <FolderOpen className="w-3 h-3 opacity-70" />
+                              <span className="font-medium">{r.label}</span>
+                              <span className="opacity-70">·</span>
+                              <span className="truncate max-w-[140px]">{pr.project_name}</span>
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 align-top">
                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
                       isActive
                         ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
@@ -169,10 +224,10 @@ export function AdminUsersPage() {
                       {isActive ? 'Ativo' : 'Inativo'}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 align-top">
                     <span className="text-slate-400 text-xs">{formatDate(u.last_login_at)}</span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 align-top">
                     <span className="text-slate-400 text-xs">{formatDate(u.created_at)}</span>
                   </td>
                   <td className="px-4 py-3 text-right">
@@ -208,7 +263,7 @@ export function AdminUsersPage() {
                 </tr>
               )
             }) : (
-              <tr><td colSpan={6} className="px-4 py-8 text-center text-slate-500 text-sm">Nenhum usuário encontrado</td></tr>
+              <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-sm">Nenhum usuário encontrado</td></tr>
             )}
           </tbody>
         </table>
