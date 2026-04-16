@@ -16,7 +16,7 @@ from app.db.database import get_db
 from app.services.code_generation_service import CodeGenerationService
 from app.services.llm_service import LLMProvider, LLMServiceFactory
 from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
-from app.models.base import Project
+from app.models.base import Project, ProjectGitConfig
 from app.core.config import settings as app_settings
 
 logger = structlog.get_logger(__name__)
@@ -56,13 +56,15 @@ def _missing_required_docstring(path: str, content: str) -> bool:
             return True
         # Toda `def`/`class` precisa ter aspas triplas na próxima linha não-vazia
         import re as _re
+
         for m in _re.finditer(r"^(\s*)(?:async\s+)?(?:def|class)\s+\w+[^\n]*:\s*$", content, _re.MULTILINE):
-            tail = content[m.end():].lstrip()
+            tail = content[m.end() :].lstrip()
             if not (tail.startswith('"""') or tail.startswith("'''")):
                 return True
         return False
     if any(lowered.endswith(ext) for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs")):
         import re as _re
+
         for m in _re.finditer(
             r"^(\s*)export\s+(?:default\s+)?(?:async\s+)?(?:function|class)\s+\w+",
             content,
@@ -75,6 +77,7 @@ def _missing_required_docstring(path: str, content: str) -> bool:
         return False
     if lowered.endswith(".go") or lowered.endswith(".java"):
         import re as _re
+
         pattern = r"^(\s*)(?:public\s+|private\s+|protected\s+)?(?:func|class)\s+\w+"
         for m in _re.finditer(pattern, content, _re.MULTILINE):
             preceding = content[: m.start()].rstrip().splitlines()[-4:]
@@ -88,8 +91,10 @@ def _missing_required_docstring(path: str, content: str) -> bool:
 # Pydantic Models
 # ============================================================================
 
+
 class GenerateProjectCodeRequest(BaseModel):
     """Request to generate complete project code"""
+
     project_id: UUID = Field(..., description="Project to generate code for")
     gp_id: UUID = Field(..., description="Gestão de Projeto user ID")
     language: str = Field(default="python", description="Programming language")
@@ -101,6 +106,7 @@ class GenerateProjectCodeRequest(BaseModel):
 
 class GenerateModuleCodeRequest(BaseModel):
     """Request to generate specific module code"""
+
     project_id: UUID
     module_name: str = Field(..., description="Name of module to generate")
     module_type: str = Field(..., description="Type: backend, frontend, database, api, etc")
@@ -112,6 +118,7 @@ class GenerateModuleCodeRequest(BaseModel):
 
 class CodeGenerationResponse(BaseModel):
     """Response from code generation"""
+
     success: bool
     project_id: str
     provider: str
@@ -123,6 +130,7 @@ class CodeGenerationResponse(BaseModel):
 
 class ModuleCodeResponse(BaseModel):
     """Response from module generation"""
+
     success: bool
     module_name: str
     module_type: str
@@ -132,6 +140,7 @@ class ModuleCodeResponse(BaseModel):
 
 class ProviderValidationResponse(BaseModel):
     """Response from provider validation"""
+
     provider: str
     valid: bool
     message: str
@@ -139,6 +148,7 @@ class ProviderValidationResponse(BaseModel):
 
 class GenerationHistoryItem(BaseModel):
     """Item in generation history"""
+
     artifact_id: str
     name: str
     generated_at: str
@@ -147,11 +157,13 @@ class GenerationHistoryItem(BaseModel):
 
 class ScaffoldRequest(BaseModel):
     """Request para gerar scaffold completo do projeto"""
+
     project_id: UUID = Field(..., description="ID do projeto")
 
 
 class ScaffoldFileItem(BaseModel):
     """Arquivo individual do scaffold gerado"""
+
     path: str
     content: str
     status: str  # "complete", "todo", "nmi"
@@ -159,12 +171,14 @@ class ScaffoldFileItem(BaseModel):
 
 class ScaffoldResponse(BaseModel):
     """Response do scaffold gerado"""
+
     files: List[ScaffoldFileItem]
     summary: str
 
 
 class ValidateCodeRequest(BaseModel):
     """Payload para validar código antes de salvar."""
+
     code: str = Field(..., description="Conteúdo do arquivo a validar")
     path: Optional[str] = Field(None, description="Caminho do arquivo (infere linguagem)")
     language: Optional[str] = Field(None, description="Override explícito da linguagem")
@@ -172,6 +186,7 @@ class ValidateCodeRequest(BaseModel):
 
 class RegenerateFileRequest(BaseModel):
     """Payload para regenerar UM arquivo específico via LLM."""
+
     project_id: UUID = Field(..., description="ID do projeto")
     path: str = Field(..., description="Caminho do arquivo no repo")
     current_content: Optional[str] = Field(None, description="Conteúdo atual (para contexto de 'melhorar')")
@@ -201,19 +216,58 @@ class ValidateCodeResponse(BaseModel):
 
 
 # ============================================================================
+# Helpers compartilhados entre /scaffold e /regenerate-file
+# ============================================================================
+
+
+async def _require_git_config(db: AsyncSession, project_id: UUID) -> ProjectGitConfig:
+    """Retorna o ProjectGitConfig do projeto ou levanta 400 se ausente.
+
+    Guard usado por endpoints que persistem código no Git do projeto —
+    sem repositório configurado, scaffold/regenerate não tem onde commitar.
+    """
+    git_config = (
+        await db.execute(select(ProjectGitConfig).where(ProjectGitConfig.project_id == project_id))
+    ).scalar_one_or_none()
+    if not git_config or not git_config.repository_url:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Repositório Git do projeto não configurado. " "Configure em Admin → Projetos antes de gerar código."
+            ),
+        )
+    return git_config
+
+
+async def _load_ocg_context(db: AsyncSession, project_id: UUID) -> Dict[str, Any]:
+    """Carrega o OCG mais recente do projeto e parseia ocg_data como dict.
+
+    Retorna sempre um dict — vazio se não houver OCG ou se o parse falhar —
+    para que o chamador possa fazer .get(\"STACK_RECOMMENDATION\", {}) etc.
+    sem se preocupar com None.
+    """
+    ocg_result = await db.execute(select(OCG).where(OCG.project_id == project_id).order_by(desc(OCG.version)).limit(1))
+    ocg = ocg_result.scalar_one_or_none()
+    if not ocg or not ocg.ocg_data:
+        return {}
+    try:
+        return json.loads(ocg.ocg_data) if isinstance(ocg.ocg_data, str) else ocg.ocg_data
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+# ============================================================================
 # Endpoints
 # ============================================================================
+
 
 @router.post(
     "/scaffold",
     response_model=ScaffoldResponse,
     summary="Gerar scaffold completo do projeto",
-    description="Gera estrutura de código real baseada no OCG, documentos ingeridos e análises do Arguidor"
+    description="Gera estrutura de código real baseada no OCG, documentos ingeridos e análises do Arguidor",
 )
-async def generate_scaffold(
-    request: ScaffoldRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def generate_scaffold(request: ScaffoldRequest, db: AsyncSession = Depends(get_db)):
     """
     Gera scaffold completo do projeto com código fonte real.
 
@@ -229,43 +283,13 @@ async def generate_scaffold(
     # 1. Buscar projeto
     project = await db.get(Project, project_id)
     if not project:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Projeto não encontrado"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
 
     # Guard: projeto precisa ter Git configurado para receber os commits
-    from sqlalchemy import select as _select
-    from app.models.base import ProjectGitConfig
-    git_config = (
-        await db.execute(
-            _select(ProjectGitConfig).where(ProjectGitConfig.project_id == project_id)
-        )
-    ).scalar_one_or_none()
-    if not git_config or not git_config.repository_url:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Repositório Git do projeto não configurado. "
-                "Configure em Admin → Projetos antes de gerar código."
-            ),
-        )
+    await _require_git_config(db, project_id)
 
     # 2. Buscar OCG mais recente do projeto
-    ocg_result = await db.execute(
-        select(OCG)
-        .where(OCG.project_id == project_id)
-        .order_by(desc(OCG.version))
-        .limit(1)
-    )
-    ocg = ocg_result.scalar_one_or_none()
-
-    ocg_data = {}
-    if ocg and ocg.ocg_data:
-        try:
-            ocg_data = json.loads(ocg.ocg_data) if isinstance(ocg.ocg_data, str) else ocg.ocg_data
-        except (json.JSONDecodeError, TypeError):
-            ocg_data = {}
+    ocg_data = await _load_ocg_context(db, project_id)
 
     # 3. Buscar documentos ingeridos e análises do Arguidor
     docs_result = await db.execute(
@@ -279,10 +303,7 @@ async def generate_scaffold(
     doc_ids = [d.id for d in ingested_docs]
     arguider_analyses = []
     if doc_ids:
-        analyses_result = await db.execute(
-            select(ArguiderAnalysis)
-            .where(ArguiderAnalysis.document_id.in_(doc_ids))
-        )
+        analyses_result = await db.execute(select(ArguiderAnalysis).where(ArguiderAnalysis.document_id.in_(doc_ids)))
         arguider_analyses = analyses_result.scalars().all()
 
     # 4. Construir prompt abrangente
@@ -299,7 +320,11 @@ async def generate_scaffold(
     arguider_gaps = []
     for analysis in arguider_analyses:
         try:
-            mc = json.loads(analysis.module_candidates) if isinstance(analysis.module_candidates, str) else analysis.module_candidates
+            mc = (
+                json.loads(analysis.module_candidates)
+                if isinstance(analysis.module_candidates, str)
+                else analysis.module_candidates
+            )
             arguider_modules.extend(mc if isinstance(mc, list) else [])
         except (json.JSONDecodeError, TypeError):
             pass
@@ -409,7 +434,7 @@ Status possíveis:
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API key do Anthropic não configurada. Configure em Admin > Configurações."
+            detail="API key do Anthropic não configurada. Configure em Admin > Configurações.",
         )
 
     try:
@@ -420,7 +445,7 @@ Status possíveis:
             model=app_settings.ANTHROPIC_MODEL,
             max_tokens=8192,
             temperature=0.3,
-            messages=[{"role": "user", "content": prompt}]
+            messages=[{"role": "user", "content": prompt}],
         )
 
         raw_text = response.content[0].text
@@ -439,7 +464,7 @@ Status possíveis:
         ]
 
         # Extrair de bloco markdown
-        json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*\})\s*```', raw_text)
+        json_match = re.search(r"```(?:json)?\s*(\{[\s\S]*\})\s*```", raw_text)
         if json_match:
             parse_attempts.append(lambda m=json_match: json.loads(m.group(1)))
 
@@ -465,9 +490,13 @@ Status possíveis:
                 if files_match:
                     files_text = files_match.group(1)
                     # Extrair objetos individuais do array
-                    file_objects = re.findall(r'\{[^{}]*"path"\s*:\s*"[^"]*"[^{}]*"content"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}', files_text)
+                    file_objects = re.findall(
+                        r'\{[^{}]*"path"\s*:\s*"[^"]*"[^{}]*"content"\s*:\s*"(?:[^"\\]|\\.)*"[^{}]*\}', files_text
+                    )
                     if file_objects:
-                        repaired = '{"files": [' + ','.join(file_objects) + '], "summary": "Scaffold gerado (JSON reparado)"}'
+                        repaired = (
+                            '{"files": [' + ",".join(file_objects) + '], "summary": "Scaffold gerado (JSON reparado)"}'
+                        )
                         result = json.loads(repaired)
             except Exception:
                 pass
@@ -475,7 +504,7 @@ Status possíveis:
         if not result or "files" not in result:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Resposta da IA não contém JSON válido. Tente novamente."
+                detail="Resposta da IA não contém JSON válido. Tente novamente.",
             )
 
         files = result.get("files", [])
@@ -528,6 +557,7 @@ Status possíveis:
         # Persistir cada arquivo no repositório Git do projeto
         from app.services.git_service import GitService
         from fastapi.responses import JSONResponse
+
         git_service = GitService(db)
 
         commit_results = []
@@ -564,6 +594,7 @@ Status possíveis:
         try:
             from app.services.notification_inapp_service import InAppNotificationService
             from app.models.base import ProjectMember
+
             gps_result = await db.execute(
                 select(ProjectMember).where(
                     ProjectMember.project_id == project_id,
@@ -606,8 +637,7 @@ Status possíveis:
     except Exception as e:
         logger.error("scaffold.generation_failed", project_id=str(project_id), error=str(e))
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Falha na geração do scaffold: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Falha na geração do scaffold: {str(e)}"
         )
 
 
@@ -615,12 +645,9 @@ Status possíveis:
     "/project",
     response_model=CodeGenerationResponse,
     summary="Generate complete project code",
-    description="Generate full project codebase using evaluated artifacts and stack recommendations"
+    description="Generate full project codebase using evaluated artifacts and stack recommendations",
 )
-async def generate_project_code(
-    request: GenerateProjectCodeRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSession = Depends(get_db)):
     """
     Generate complete project code
 
@@ -636,31 +663,26 @@ async def generate_project_code(
         provider = LLMProvider(request.llm_provider.lower())
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid LLM provider: {request.llm_provider}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid LLM provider: {request.llm_provider}"
         )
 
     # Validate OCG if provided
     ocg_data = None
     if request.ocg_id:
         from app.models.base import OCG
+
         ocg = await db.get(OCG, request.ocg_id)
         if not ocg:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="OCG not found"
-            )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="OCG not found")
         if ocg.project_id and ocg.project_id != request.project_id:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="OCG project mismatch"
-            )
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OCG project mismatch")
 
     try:
         # Resolver chave: request > vault do projeto > env
         project_api_key = request.api_key
         if not project_api_key and request.project_id:
             from app.services.ai_key_resolver import AIKeyResolver
+
             project_api_key = await AIKeyResolver.get_project_key(db, request.project_id, provider.value)
 
         service = CodeGenerationService(db, llm_provider=provider, project_api_key=project_api_key)
@@ -670,20 +692,16 @@ async def generate_project_code(
             language=request.language,
             architecture=request.architecture,
             api_key=project_api_key,
-            ocg_id=request.ocg_id  # ← PASS OCG
+            ocg_id=request.ocg_id,  # ← PASS OCG
         )
 
         return CodeGenerationResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Code generation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Code generation failed: {str(e)}"
         )
 
 
@@ -691,12 +709,9 @@ async def generate_project_code(
     "/module",
     response_model=ModuleCodeResponse,
     summary="Generate specific module code",
-    description="Generate code for a specific module or component"
+    description="Generate code for a specific module or component",
 )
-async def generate_module_code(
-    request: GenerateModuleCodeRequest,
-    db: AsyncSession = Depends(get_db)
-):
+async def generate_module_code(request: GenerateModuleCodeRequest, db: AsyncSession = Depends(get_db)):
     """
     Generate code for a specific module
 
@@ -712,8 +727,7 @@ async def generate_module_code(
         provider = LLMProvider(request.llm_provider.lower())
     except ValueError:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid LLM provider: {request.llm_provider}"
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid LLM provider: {request.llm_provider}"
         )
 
     try:
@@ -723,20 +737,16 @@ async def generate_module_code(
             module_name=request.module_name,
             module_type=request.module_type,
             requirements=request.requirements,
-            api_key=request.api_key
+            api_key=request.api_key,
         )
 
         return ModuleCodeResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Module generation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Module generation failed: {str(e)}"
         )
 
 
@@ -744,13 +754,9 @@ async def generate_module_code(
     "/validate-provider",
     response_model=ProviderValidationResponse,
     summary="Validate LLM provider credentials",
-    description="Test connection and validate API credentials for specified LLM provider"
+    description="Test connection and validate API credentials for specified LLM provider",
 )
-async def validate_provider(
-    provider: str,
-    api_key: Optional[str] = None,
-    db: AsyncSession = Depends(get_db)
-):
+async def validate_provider(provider: str, api_key: Optional[str] = None, db: AsyncSession = Depends(get_db)):
     """
     Validate LLM provider credentials
 
@@ -761,10 +767,7 @@ async def validate_provider(
     try:
         provider_enum = LLMProvider(provider.lower())
     except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid LLM provider: {provider}"
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid LLM provider: {provider}")
 
     try:
         service = CodeGenerationService(db, llm_provider=provider_enum)
@@ -773,18 +776,14 @@ async def validate_provider(
         return ProviderValidationResponse(
             provider=provider,
             valid=valid,
-            message="Provider credentials validated successfully" if valid else "Provider validation failed"
+            message="Provider credentials validated successfully" if valid else "Provider validation failed",
         )
 
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Provider validation failed: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Provider validation failed: {str(e)}"
         )
 
 
@@ -792,13 +791,9 @@ async def validate_provider(
     "/history/{project_id}",
     response_model=list[GenerationHistoryItem],
     summary="Get code generation history",
-    description="Get list of previous code generations for a project"
+    description="Get list of previous code generations for a project",
 )
-async def get_generation_history(
-    project_id: UUID,
-    limit: int = 10,
-    db: AsyncSession = Depends(get_db)
-):
+async def get_generation_history(project_id: UUID, limit: int = 10, db: AsyncSession = Depends(get_db)):
     """
     Get code generation history for a project
 
@@ -808,25 +803,17 @@ async def get_generation_history(
 
     try:
         service = CodeGenerationService(db)
-        history = await service.get_generation_history(
-            project_id=project_id,
-            limit=limit
-        )
+        history = await service.get_generation_history(project_id=project_id, limit=limit)
 
         return [GenerationHistoryItem(**item) for item in history]
 
     except Exception as e:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve history: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to retrieve history: {str(e)}"
         )
 
 
-@router.get(
-    "/providers",
-    summary="List available LLM providers",
-    description="Get list of available LLM providers"
-)
+@router.get("/providers", summary="List available LLM providers", description="Get list of available LLM providers")
 async def list_providers():
     """Get list of available LLM providers"""
 
@@ -835,23 +822,11 @@ async def list_providers():
             {
                 "name": "anthropic",
                 "model": "claude-opus-4-1",
-                "description": "Anthropic Claude - Recommended for code generation"
+                "description": "Anthropic Claude - Recommended for code generation",
             },
-            {
-                "name": "openai",
-                "model": "gpt-4-turbo-preview",
-                "description": "OpenAI GPT-4 - Advanced reasoning"
-            },
-            {
-                "name": "grok",
-                "model": "grok-1",
-                "description": "xAI Grok - Real-time knowledge"
-            },
-            {
-                "name": "deepseek",
-                "model": "deepseek-coder",
-                "description": "DeepSeek - Specialized for coding"
-            }
+            {"name": "openai", "model": "gpt-4-turbo-preview", "description": "OpenAI GPT-4 - Advanced reasoning"},
+            {"name": "grok", "model": "grok-1", "description": "xAI Grok - Real-time knowledge"},
+            {"name": "deepseek", "model": "deepseek-coder", "description": "DeepSeek - Specialized for coding"},
         ]
     }
 
@@ -859,6 +834,7 @@ async def list_providers():
 # ============================================================================
 # Code Review by AI (pre-save validation)
 # ============================================================================
+
 
 class CodeReviewRequest(BaseModel):
     project_id: UUID
@@ -917,21 +893,26 @@ Responda SOMENTE com JSON válido:
   "warnings": ["..."],
   "suggestions": ["..."]
 }""",
-            messages=[{
-                "role": "user",
-                "content": f"Arquivo: {req.file_path}\n\nCódigo:\n```\n{req.code[:8000]}\n```",
-            }],
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"Arquivo: {req.file_path}\n\nCódigo:\n```\n{req.code[:8000]}\n```",
+                }
+            ],
         )
 
         import json, re
+
         text = response.content[0].text
         try:
             review = json.loads(text)
         except json.JSONDecodeError:
             match = re.search(r"\{.*\}", text, re.DOTALL)
-            review = json.loads(match.group()) if match else {
-                "approved": True, "errors": [], "gaps": [], "warnings": [], "suggestions": []
-            }
+            review = (
+                json.loads(match.group())
+                if match
+                else {"approved": True, "errors": [], "gaps": [], "warnings": [], "suggestions": []}
+            )
 
         return {"review": review}
 
@@ -978,36 +959,18 @@ async def regenerate_single_file(
         raise HTTPException(status_code=404, detail="Projeto não encontrado")
 
     # Guard de Git
-    from app.models.base import ProjectGitConfig
-    git_config = (
-        await db.execute(
-            select(ProjectGitConfig).where(ProjectGitConfig.project_id == project_id)
-        )
-    ).scalar_one_or_none()
-    if not git_config or not git_config.repository_url:
-        raise HTTPException(
-            status_code=400,
-            detail="Repositório Git do projeto não configurado. Configure em Admin → Projetos antes de gerar código.",
-        )
+    await _require_git_config(db, project_id)
 
     # Contexto enxuto do OCG
-    ocg_result = await db.execute(
-        select(OCG).where(OCG.project_id == project_id).order_by(desc(OCG.version)).limit(1)
-    )
-    ocg = ocg_result.scalar_one_or_none()
-    ocg_data = {}
-    if ocg and ocg.ocg_data:
-        try:
-            ocg_data = json.loads(ocg.ocg_data) if isinstance(ocg.ocg_data, str) else ocg.ocg_data
-        except (json.JSONDecodeError, TypeError):
-            pass
+    ocg_data = await _load_ocg_context(db, project_id)
     stack = ocg_data.get("STACK_RECOMMENDATION", {})
     architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
 
     extra = request.instructions or "Reescreva completamente o arquivo mantendo o propósito detectado pelo path."
     current_block = (
         f"\n## Conteúdo Atual (referência — pode ser inteiramente substituído)\n```\n{request.current_content[:6000]}\n```\n"
-        if request.current_content else ""
+        if request.current_content
+        else ""
     )
 
     prompt = f"""Você é um engenheiro de software sênior. Gere o CONTEÚDO COMPLETO de um único arquivo de código.
@@ -1051,6 +1014,7 @@ Status possíveis:
 
     try:
         from anthropic import AsyncAnthropic
+
         client = AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model=app_settings.ANTHROPIC_MODEL,
@@ -1080,12 +1044,11 @@ Status possíveis:
         # Validação de docstring (reaproveitada)
         if status_value == "complete" and _missing_required_docstring(request.path, content):
             status_value = "todo"
-            content = (
-                "# [DOCSTRING MISSING] Regerar este arquivo com docstrings completas.\n\n" + content
-            )
+            content = "# [DOCSTRING MISSING] Regerar este arquivo com docstrings completas.\n\n" + content
 
         # Commit no Git
         from app.services.git_service import GitService
+
         git_service = GitService(db)
         commit_result = await git_service.commit_file(
             project_id=project_id,
