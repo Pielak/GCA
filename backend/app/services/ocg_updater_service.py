@@ -248,6 +248,22 @@ class OCGUpdaterService:
 
         await self.db.commit()
 
+        # Sincroniza Definition of Done: o OCG pode ter adicionado/removido
+        # entregáveis em DELIVERABLES (delta tipo append em DELIVERABLES,
+        # por exemplo). Mantém project_deliverables coerente.
+        # Best-effort: falha não derruba o flow do OCG (já commitado).
+        try:
+            from app.services.deliverable_registry import DeliverableRegistry
+            registry = DeliverableRegistry(self.db)
+            await registry.sync_from_ocg(project_id, updated_ocg)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "ocg_updater.deliverable_sync_failed",
+                project_id=str(project_id),
+                error=str(exc) or repr(exc),
+                error_type=type(exc).__name__,
+            )
+
         # Notificar GPs do projeto sobre atualização do OCG
         try:
             from app.services.notification_inapp_service import InAppNotificationService
