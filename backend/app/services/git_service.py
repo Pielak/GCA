@@ -15,6 +15,7 @@ import structlog
 
 from app.models.base import ProjectGitConfig, Project
 from app.core.config import settings
+from app.core.crypto import decrypt_pat, encrypt_pat
 
 logger = structlog.get_logger(__name__)
 
@@ -95,11 +96,12 @@ class GitService:
         config = existing.scalar_one_or_none()
 
         now = datetime.now(timezone.utc)
+        encrypted_pat = encrypt_pat(pat)
         if config:
             config.provider = provider
             config.repository_url = repository_url
             config.default_branch = default_branch
-            config.pat_encrypted = pat  # Fase 0.2 criptografará
+            config.pat_encrypted = encrypted_pat
             config.connection_verified = True
             config.connection_verified_at = now
             config.updated_at = now
@@ -109,7 +111,7 @@ class GitService:
                 provider=provider,
                 repository_url=repository_url,
                 default_branch=default_branch,
-                pat_encrypted=pat,  # Fase 0.2 criptografará
+                pat_encrypted=encrypted_pat,
                 connection_verified=True,
                 connection_verified_at=now,
             )
@@ -138,7 +140,7 @@ class GitService:
             return {"connected": False}
 
         test_result = await self._test_connection(
-            config.provider, config.repository_url, config.pat_encrypted
+            config.provider, config.repository_url, decrypt_pat(config.pat_encrypted)
         )
 
         if test_result["connected"]:
@@ -247,7 +249,7 @@ class GitService:
                 resp = await client.get(
                     f"https://api.github.com/repos/{owner}/{repo}/git/trees/{config.default_branch}",
                     headers={
-                        "Authorization": f"Bearer {config.pat_encrypted}",
+                        "Authorization": f"Bearer {decrypt_pat(config.pat_encrypted)}",
                         "Accept": "application/vnd.github.v3+json",
                     },
                     params={"recursive": "1"},
@@ -415,7 +417,7 @@ class GitService:
         try:
             async with httpx.AsyncClient(timeout=GIT_API_TIMEOUT) as client:
                 headers = {
-                    "Authorization": f"Bearer {config.pat_encrypted}",
+                    "Authorization": f"Bearer {decrypt_pat(config.pat_encrypted)}",
                     "Accept": "application/vnd.github.v3+json",
                 }
 
@@ -473,7 +475,7 @@ class GitService:
                 resp = await client.get(
                     f"https://api.github.com/repos/{owner}/{repo}/contents/{file_path}",
                     headers={
-                        "Authorization": f"Bearer {config.pat_encrypted}",
+                        "Authorization": f"Bearer {decrypt_pat(config.pat_encrypted)}",
                         "Accept": "application/vnd.github.v3+json",
                     },
                     params={"ref": config.default_branch},
@@ -499,7 +501,7 @@ class GitService:
                 resp = await client.get(
                     f"https://api.github.com/repos/{owner}/{repo}/contents/{path}",
                     headers={
-                        "Authorization": f"Bearer {config.pat_encrypted}",
+                        "Authorization": f"Bearer {decrypt_pat(config.pat_encrypted)}",
                         "Accept": "application/vnd.github.v3+json",
                     },
                     params={"ref": config.default_branch},
@@ -537,7 +539,7 @@ class GitService:
 
         try:
             async with httpx.AsyncClient(timeout=GIT_API_TIMEOUT) as client:
-                headers = {"PRIVATE-TOKEN": config.pat_encrypted}
+                headers = {"PRIVATE-TOKEN": decrypt_pat(config.pat_encrypted)}
 
                 # Verificar se arquivo existe
                 existing = await client.get(
@@ -588,7 +590,7 @@ class GitService:
             async with httpx.AsyncClient(timeout=GIT_API_TIMEOUT) as client:
                 resp = await client.get(
                     f"https://gitlab.com/api/v4/projects/{project_encoded}/repository/files/{file_path.replace('/', '%2F')}/raw",
-                    headers={"PRIVATE-TOKEN": config.pat_encrypted},
+                    headers={"PRIVATE-TOKEN": decrypt_pat(config.pat_encrypted)},
                     params={"ref": config.default_branch},
                 )
                 if resp.status_code == 200:
