@@ -185,7 +185,9 @@ class AdminService:
                 slug=request.project_slug,
                 short_slug=short_slug,
                 description=request.description,
-                deliverable_type=request.deliverable_type.value if request.deliverable_type else "new_system",
+                # request.deliverable_type é String puro (migration mudou de enum
+                # nativo PG para VARCHAR — ver onboarding.py). Sem .value.
+                deliverable_type=request.deliverable_type or "new_system",
                 status="active",
                 provisioning_status="completed",
             )

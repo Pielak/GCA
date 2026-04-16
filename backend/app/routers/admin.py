@@ -94,7 +94,7 @@ async def create_project(
             "project_id": str(project.id),
             "project_name": project.project_name,
             "project_slug": project.project_slug,
-            "deliverable_type": project.deliverable_type.value,
+            "deliverable_type": project.deliverable_type.value if hasattr(project.deliverable_type, 'value') else (project.deliverable_type or "new_system"),
             "schema_name": project.schema_name,
             "message": "Project request created. Waiting for admin approval.",
             "next_step": "admin_approval"
