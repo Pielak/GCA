@@ -315,6 +315,169 @@ async def test_openapi_stub_has_health_endpoint():
 
 # ────────────────────────── observability (C.6) ──────────────────────
 
+# ────────────────────────── test_plan (C.7) ──────────────────────────
+
+@pytest.mark.asyncio
+async def test_test_plan_generates_sections_per_modality():
+    db = AsyncMock()
+    ocg = {
+        "PROJECT_PROFILE": {"project_name": "P Test"},
+        "TESTING_REQUIREMENTS": {
+            "unit_testing": {"scope": "Lógica", "tools": "pytest", "coverage_target": ">80%", "rationale": "qualidade"},
+            "integration_testing": {"scope": "APIs", "tools": "pytest+Testcontainers", "rationale": "fluxos"},
+            "security_testing": {"tools": "Snyk", "frequency": "CI/CD"},
+        },
+    }
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["path"] = path
+        captured["content"] = content
+        return True
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit):
+        res = await generate_kind("test_plan", PROJECT_ID, db, ocg)
+    assert res.committed is True
+    assert captured["path"] == "docs/test_plan.md"
+    assert "Plano de Testes — P Test" in captured["content"]
+    # Sumário tabular
+    assert "| Modalidade | Tools | Coverage / Frequency |" in captured["content"]
+    assert "Unit Testing" in captured["content"]
+    assert "Integration Testing" in captured["content"]
+    assert "Security Testing" in captured["content"]
+    # Seções detalhadas com fields
+    assert "**Scope:**" in captured["content"]
+    assert "pytest" in captured["content"]
+    assert ">80%" in captured["content"]
+
+
+@pytest.mark.asyncio
+async def test_test_plan_skips_when_testing_requirements_empty():
+    db = AsyncMock()
+    res = await generate_kind("test_plan", PROJECT_ID, db, {"PROJECT_PROFILE": {"project_name": "X"}})
+    assert res.committed is False
+    assert "vazio" in (res.skipped_reason or "")
+
+
+@pytest.mark.asyncio
+async def test_test_plan_handles_list_and_dict_fields():
+    """Campos como list (scenarios) ou dict (sub-config) renderizados como bullets."""
+    db = AsyncMock()
+    ocg = {
+        "TESTING_REQUIREMENTS": {
+            "performance_testing": {
+                "tools": "k6",
+                "scenarios": ["login burst", "report generation"],
+                "thresholds": {"p95": "500ms", "p99": "1s"},
+            },
+        },
+    }
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["content"] = content
+        return True
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit):
+        await generate_kind("test_plan", PROJECT_ID, db, ocg)
+    # List vira bullets
+    assert "- login burst" in captured["content"]
+    assert "- report generation" in captured["content"]
+    # Dict vira sub-bullets
+    assert "`p95`: 500ms" in captured["content"]
+
+
+# ────────────────────────── sbom (C.7) ───────────────────────────────
+
+@pytest.mark.asyncio
+async def test_sbom_parses_pyproject_poetry():
+    db = AsyncMock()
+    ocg = {"PROJECT_PROFILE": {"project_name": "P"}}
+    pyproject_content = '''
+[tool.poetry]
+name = "test-project"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+fastapi = "^0.110.0"
+sqlalchemy = "^2.0.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^7.4.4"
+'''
+
+    async def fake_get_file(self, project_id, path):
+        if path == "pyproject.toml":
+            return pyproject_content
+        return None
+
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["path"] = path
+        captured["content"] = content
+        return True
+
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit), \
+         patch("app.services.git_service.GitService.get_file_content", new=fake_get_file):
+        res = await generate_kind("sbom", PROJECT_ID, db, ocg)
+
+    assert res.committed is True
+    assert captured["path"] == "sbom.json"
+    bom = json.loads(captured["content"])
+    assert bom["bomFormat"] == "CycloneDX"
+    assert bom["specVersion"] == "1.5"
+    names = {c["name"] for c in bom["components"]}
+    assert "fastapi" in names
+    assert "sqlalchemy" in names
+    assert "pytest" in names
+    assert "python" not in names  # python é skipado (não é package)
+
+
+@pytest.mark.asyncio
+async def test_sbom_parses_package_json():
+    db = AsyncMock()
+    ocg = {"PROJECT_PROFILE": {"project_name": "P"}}
+    pkg = json.dumps({
+        "name": "front",
+        "dependencies": {"react": "^18.0.0", "axios": "1.6.0"},
+        "devDependencies": {"vitest": "^1.0.0"},
+    })
+
+    async def fake_get_file(self, project_id, path):
+        if path in ("pyproject.toml", "backend/pyproject.toml"):
+            return None
+        if path == "package.json":
+            return pkg
+        return None
+
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["content"] = content
+        return True
+
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit), \
+         patch("app.services.git_service.GitService.get_file_content", new=fake_get_file):
+        res = await generate_kind("sbom", PROJECT_ID, db, ocg)
+
+    assert res.committed is True
+    bom = json.loads(captured["content"])
+    names = {c["name"] for c in bom["components"]}
+    assert "react" in names
+    assert "axios" in names
+    assert "vitest" in names
+    # Versões limpas (sem ^/~)
+    react = next(c for c in bom["components"] if c["name"] == "react")
+    assert react["version"] == "18.0.0"
+    assert react["purl"] == "pkg:npm/react@18.0.0"
+
+
+@pytest.mark.asyncio
+async def test_sbom_skips_when_no_manifests():
+    db = AsyncMock()
+    async def fake_get_file(self, project_id, path):
+        return None
+    with patch("app.services.git_service.GitService.get_file_content", new=fake_get_file):
+        res = await generate_kind("sbom", PROJECT_ID, db, {"PROJECT_PROFILE": {"project_name": "P"}})
+    assert res.committed is False
+    assert "manifest" in (res.skipped_reason or "")
+
+
 @pytest.mark.asyncio
 async def test_observability_generates_prometheus_and_grafana():
     db = AsyncMock()

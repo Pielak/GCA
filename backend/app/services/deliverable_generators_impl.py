@@ -20,7 +20,7 @@ import json
 import re
 import unicodedata
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -228,6 +228,292 @@ async def _gen_adr(
 
 
 # ────────────────────── architecture_diagram (mermaid C4) ──────────────
+
+@register_generator("sbom")
+async def _gen_sbom(
+    project_id: UUID,
+    db: AsyncSession,
+    ocg_data: Dict[str, Any],
+) -> GeneratorResult:
+    """Gera ``sbom.json`` (CycloneDX 1.5) a partir de pyproject.toml e/ou
+    package.json lidos do repo Git.
+
+    Não roda ferramentas externas — parseia os manifests diretamente.
+    Cobre Python (poetry/pep621) + Node (package.json deps + devDeps).
+
+    Para projetos com requirements.txt ou outros formatos, retorna skipped.
+    """
+    from app.services.git_service import GitService
+    gs = GitService(db)
+
+    components: List[Dict[str, Any]] = []
+    sources_found: List[str] = []
+
+    # Python: pyproject.toml (Poetry ou PEP 621)
+    pyproject_paths = ["pyproject.toml", "backend/pyproject.toml"]
+    py_content: Optional[str] = None
+    py_path: Optional[str] = None
+    for p in pyproject_paths:
+        try:
+            content = await gs.get_file_content(project_id, p)
+            if content:
+                py_content = content
+                py_path = p
+                break
+        except Exception:  # noqa: BLE001
+            continue
+
+    if py_content:
+        try:
+            import tomllib
+            parsed = tomllib.loads(py_content)
+            # Poetry: tool.poetry.dependencies / tool.poetry.group.dev.dependencies
+            poetry_deps = (
+                parsed.get("tool", {}).get("poetry", {}).get("dependencies", {})
+            )
+            poetry_dev = (
+                parsed.get("tool", {}).get("poetry", {}).get("group", {})
+                .get("dev", {}).get("dependencies", {})
+            )
+            for name, spec in {**poetry_deps, **poetry_dev}.items():
+                if name.lower() == "python":
+                    continue
+                version = spec if isinstance(spec, str) else (spec.get("version", "*") if isinstance(spec, dict) else "*")
+                components.append({
+                    "type": "library",
+                    "bom-ref": f"pkg:pypi/{name}@{version}",
+                    "name": name,
+                    "version": str(version).lstrip("^~>=<"),
+                    "purl": f"pkg:pypi/{name}@{str(version).lstrip('^~>=<')}",
+                })
+            # PEP 621: project.dependencies (lista de strings 'name>=version')
+            for dep_str in parsed.get("project", {}).get("dependencies", []) or []:
+                if not isinstance(dep_str, str):
+                    continue
+                # Parser muito simples: 'name>=1.0' → ('name', '1.0')
+                m = re.match(r"^([A-Za-z0-9_.\-]+)[\s]*[>=<~!]*[\s]*([0-9].*)?", dep_str)
+                if m:
+                    name = m.group(1)
+                    version = m.group(2) or "*"
+                    components.append({
+                        "type": "library",
+                        "bom-ref": f"pkg:pypi/{name}@{version}",
+                        "name": name,
+                        "version": version,
+                        "purl": f"pkg:pypi/{name}@{version}",
+                    })
+            sources_found.append(py_path or "pyproject.toml")
+        except Exception as exc:  # noqa: BLE001
+            # Parse falhou — pula sem derrubar generator inteiro
+            pass
+
+    # Node: package.json
+    pkg_paths = ["package.json", "frontend/package.json"]
+    pkg_content: Optional[str] = None
+    pkg_path: Optional[str] = None
+    for p in pkg_paths:
+        try:
+            content = await gs.get_file_content(project_id, p)
+            if content:
+                pkg_content = content
+                pkg_path = p
+                break
+        except Exception:  # noqa: BLE001
+            continue
+
+    if pkg_content:
+        try:
+            pkg_parsed = json.loads(pkg_content)
+            for name, version in {
+                **(pkg_parsed.get("dependencies", {}) or {}),
+                **(pkg_parsed.get("devDependencies", {}) or {}),
+            }.items():
+                ver_clean = str(version).lstrip("^~>=<")
+                components.append({
+                    "type": "library",
+                    "bom-ref": f"pkg:npm/{name}@{ver_clean}",
+                    "name": name,
+                    "version": ver_clean,
+                    "purl": f"pkg:npm/{name}@{ver_clean}",
+                })
+            sources_found.append(pkg_path or "package.json")
+        except Exception:  # noqa: BLE001
+            pass
+
+    if not components:
+        return GeneratorResult(
+            kind="sbom",
+            committed=False,
+            skipped_reason="nenhum manifest encontrado no repo (pyproject.toml/package.json) ou parse falhou",
+        )
+
+    project_name = ocg_data.get("PROJECT_PROFILE", {}).get("project_name", "(projeto)")
+    bom = {
+        "bomFormat": "CycloneDX",
+        "specVersion": "1.5",
+        "serialNumber": f"urn:uuid:{project_id}",
+        "version": 1,
+        "metadata": {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "tools": [{"vendor": "GCA", "name": "deliverable_generator_sbom", "version": "1.0"}],
+            "component": {
+                "type": "application",
+                "name": project_name,
+                "bom-ref": f"app:{project_id}",
+            },
+        },
+        "components": components,
+        "_metadata": {
+            "sources": sources_found,
+            "note": "Gerado pelo GCA via parse direto de manifests (sem cyclonedx-cli). Para SBOM completo com transitive deps, rodar cyclonedx-bom no CI.",
+        },
+    }
+
+    content = json.dumps(bom, ensure_ascii=False, indent=2) + "\n"
+    path = "sbom.json"
+
+    ok = await _commit_via_git(
+        project_id, db, path, content,
+        commit_message=f"chore(sbom): CycloneDX 1.5 ({len(components)} componentes de {len(sources_found)} manifests) [gca:auto]",
+    )
+    if not ok:
+        return GeneratorResult(kind="sbom", committed=False, skipped_reason="commit Git falhou")
+    return GeneratorResult(
+        kind="sbom", committed=True, path=path,
+        bytes_written=len(content.encode("utf-8")),
+        notes=f"{len(components)} componentes de {sources_found}",
+    )
+
+
+@register_generator("test_plan")
+async def _gen_test_plan(
+    project_id: UUID,
+    db: AsyncSession,
+    ocg_data: Dict[str, Any],
+) -> GeneratorResult:
+    """Gera ``docs/test_plan.md`` a partir de OCG.TESTING_REQUIREMENTS.
+
+    O OCG já estrutura testes em modalidades (unit, integration, security,
+    performance, compliance, end_to_end). Cada modalidade tem campos
+    variáveis (scope, tools, coverage_target, frequency, scenarios, method,
+    rationale). Geramos uma seção MD por modalidade, listando todos os
+    campos presentes.
+
+    Sem LLM — todo dado vem do OCG.
+    """
+    testing = ocg_data.get("TESTING_REQUIREMENTS", {}) or {}
+    if not testing or not isinstance(testing, dict):
+        return GeneratorResult(
+            kind="test_plan",
+            committed=False,
+            skipped_reason="OCG.TESTING_REQUIREMENTS vazio ou inválido",
+        )
+
+    project_name = ocg_data.get("PROJECT_PROFILE", {}).get("project_name", "(projeto)")
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    # Ordem de exibição (mais comuns primeiro), com fallback alfabético para outros
+    ordered_keys = [
+        "unit_testing", "integration_testing", "end_to_end_testing",
+        "performance_testing", "security_testing", "compliance_testing",
+    ]
+    seen = set()
+    sections_keys: list[str] = []
+    for k in ordered_keys:
+        if k in testing:
+            sections_keys.append(k)
+            seen.add(k)
+    for k in sorted(testing.keys()):
+        if k not in seen:
+            sections_keys.append(k)
+
+    lines: List[str] = [
+        "<!-- gca:auto generator=test_plan -->",
+        f"# Plano de Testes — {project_name}",
+        "",
+        f"_Gerado automaticamente em {now_iso} a partir de OCG.TESTING_REQUIREMENTS._",
+        "",
+        f"**{len(sections_keys)} modalidade(s) de teste definida(s).**",
+        "",
+        "## Sumário executivo",
+        "",
+        "| Modalidade | Tools | Coverage / Frequency |",
+        "|------------|-------|----------------------|",
+    ]
+    for k in sections_keys:
+        cfg = testing.get(k) if isinstance(testing.get(k), dict) else {}
+        title = k.replace("_", " ").title()
+        tools = (cfg.get("tools") or "—").replace("|", "\\|").replace("\n", " ")[:80]
+        meta = (
+            cfg.get("coverage_target")
+            or cfg.get("frequency")
+            or cfg.get("method")
+            or "—"
+        ).replace("|", "\\|").replace("\n", " ")[:80]
+        lines.append(f"| {title} | {tools} | {meta} |")
+    lines.append("")
+    lines.append("---")
+    lines.append("")
+
+    # Seções detalhadas
+    for k in sections_keys:
+        cfg = testing.get(k)
+        if not isinstance(cfg, dict):
+            lines.append(f"## {k.replace('_', ' ').title()}")
+            lines.append("")
+            lines.append(f"_Configuração inválida no OCG: {type(cfg).__name__}_")
+            lines.append("")
+            continue
+        title = k.replace("_", " ").title()
+        lines.append(f"## {title}")
+        lines.append("")
+        # Campos conhecidos primeiro, em ordem que faz sentido para leitura
+        field_order = ["scope", "tools", "coverage_target", "frequency", "method", "scenarios", "rationale"]
+        seen_fields = set()
+        for field in field_order:
+            if field in cfg:
+                _format_field_md(lines, field, cfg[field])
+                seen_fields.add(field)
+        # Campos extras (futuros do OCG) ainda renderizados
+        for field, val in cfg.items():
+            if field not in seen_fields:
+                _format_field_md(lines, field, val)
+        lines.append("")
+
+    content = "\n".join(lines) + "\n"
+    path = "docs/test_plan.md"
+
+    ok = await _commit_via_git(
+        project_id, db, path, content,
+        commit_message=f"docs(test): plano de testes ({len(sections_keys)} modalidades) [gca:auto]",
+    )
+    if not ok:
+        return GeneratorResult(kind="test_plan", committed=False, skipped_reason="commit Git falhou")
+    return GeneratorResult(
+        kind="test_plan", committed=True, path=path,
+        bytes_written=len(content.encode("utf-8")),
+        notes=f"{len(sections_keys)} modalidades de teste",
+    )
+
+
+def _format_field_md(lines: List[str], field: str, value: Any) -> None:
+    """Helper: formata um campo (scope/tools/etc.) como bloco MD legível."""
+    label = field.replace("_", " ").title()
+    if isinstance(value, str) and value.strip():
+        lines.append(f"**{label}:** {value}")
+        lines.append("")
+    elif isinstance(value, list):
+        lines.append(f"**{label}:**")
+        for item in value:
+            lines.append(f"- {item}")
+        lines.append("")
+    elif isinstance(value, dict):
+        lines.append(f"**{label}:**")
+        lines.append("")
+        for sk, sv in value.items():
+            lines.append(f"  - `{sk}`: {sv}")
+        lines.append("")
+
 
 @register_generator("dockerfile")
 async def _gen_dockerfile(

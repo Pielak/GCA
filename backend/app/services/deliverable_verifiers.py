@@ -244,7 +244,23 @@ async def _verify_compliance_checklist(project_id: UUID, db: AsyncSession) -> Ve
 
 
 async def _verify_test_plan(project_id: UUID, db: AsyncSession) -> VerificationResult:
-    """Existência de pelo menos 1 TestArtifact."""
+    """Plano de testes: prioriza doc no Git, fallback em TestArtifact rows.
+
+    O generator de test_plan produz docs/test_plan.md a partir de
+    OCG.TESTING_REQUIREMENTS. Verifier deve detectar tanto o doc quanto
+    a existência de execução real (TestArtifact)."""
+    # Primeiro: doc gerado automaticamente
+    found = await _git_file_exists(
+        project_id, db,
+        "docs/test_plan.md", "docs/TEST_PLAN.md", "TEST_PLAN.md", "test_plan.md",
+    )
+    if found:
+        return VerificationResult(
+            status="verified", method="git_file_exists",
+            evidence_type="file", evidence_ref=found,
+        )
+
+    # Fallback: TestArtifact rows (execução real existente)
     from app.models.base import TestArtifact
     result = await db.execute(
         select(func.count(TestArtifact.id)).where(TestArtifact.project_id == project_id)
@@ -256,7 +272,7 @@ async def _verify_test_plan(project_id: UUID, db: AsyncSession) -> VerificationR
             evidence_type="db_query",
             evidence_ref=f"test_artifacts: {count} rows",
         )
-    return VerificationResult(status="missing", method="qa_artifacts_count")
+    return VerificationResult(status="missing", method="git_file_exists+qa_artifacts_count")
 
 
 async def _verify_backlog(project_id: UUID, db: AsyncSession) -> VerificationResult:
