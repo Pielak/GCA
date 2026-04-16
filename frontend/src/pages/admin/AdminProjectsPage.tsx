@@ -312,7 +312,7 @@ export function AdminProjectsPage() {
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PROJETO</th>
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">TIPO</th>
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">STATUS</th>
-                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">GERENTE DE PROJETO</th>
+                <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium" title="Solicitante do projeto — vira Gerente de Projeto (GP) ao aprovar">SOLICITANTE / GP</th>
                 <th className="text-left px-4 py-3 text-xs text-slate-500 font-medium">PENDÊNCIAS</th>
                 <th className="text-right px-4 py-3 text-xs text-slate-500 font-medium">AÇÕES</th>
               </tr>
