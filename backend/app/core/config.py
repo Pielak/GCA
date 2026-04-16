@@ -95,7 +95,10 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: Optional[str] = None
     DEEPSEEK_API_KEY: Optional[str] = None
     GROK_API_KEY: Optional[str] = None
-    DEFAULT_AI_PROVIDER: str = "grok"  # grok, anthropic, openai, gemini, deepseek
+    OPENROUTER_API_KEY: Optional[str] = None
+    QWEN_API_KEY: Optional[str] = None  # Alibaba DashScope (alias: DASHSCOPE_API_KEY)
+    DASHSCOPE_API_KEY: Optional[str] = None  # alternativo ao QWEN_API_KEY
+    DEFAULT_AI_PROVIDER: str = "grok"  # grok, anthropic, openai, gemini, deepseek, qwen
     DEFAULT_AI_MODEL: str = "grok-3-mini"
 
     # Slack

@@ -187,6 +187,18 @@ AVAILABLE_PROVIDERS = {
         "default_model": "grok-3-mini",
         "api_url": "https://api.x.ai",
     },
+    "qwen": {
+        "name": "Alibaba Qwen (DashScope)",
+        "models": [
+            "qwen-turbo",
+            "qwen-plus",
+            "qwen-max",
+            "qwen-long",
+            "qwen2.5-coder-32b-instruct",
+        ],
+        "default_model": "qwen-plus",
+        "api_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    },
 }
 
 # Cache em memória (populado do banco na primeira leitura)

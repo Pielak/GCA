@@ -1,6 +1,7 @@
 """
 AI Service — Multi-provider support
-Supports: Anthropic (Claude), OpenAI, Google Gemini, DeepSeek, Xai Grok
+Supports: Anthropic (Claude), OpenAI, Google Gemini, DeepSeek, Xai Grok,
+OpenRouter, Alibaba Qwen (DashScope).
 """
 from typing import Optional, Dict, Any
 from enum import Enum
@@ -20,6 +21,7 @@ class AIProvider(str, Enum):
     DEEPSEEK = "deepseek"
     GROK = "grok"
     OPENROUTER = "openrouter"
+    QWEN = "qwen"  # Alibaba DashScope (OpenAI-compatible API)
 
 
 class AIModel:
@@ -62,6 +64,15 @@ AVAILABLE_MODELS = {
         AIModel("gemini-2.0-pro", AIProvider.OPENROUTER, 1000000),
         AIModel("deepseek-chat", AIProvider.OPENROUTER, 128000),
     ],
+    AIProvider.QWEN: [
+        # DashScope models — OpenAI-compatible endpoint.
+        # Tamanhos de contexto baseados em DashScope docs (abr/2026).
+        AIModel("qwen-turbo", AIProvider.QWEN, 8000),       # rápido, barato
+        AIModel("qwen-plus", AIProvider.QWEN, 131072),      # balanceado, default sugerido
+        AIModel("qwen-max", AIProvider.QWEN, 32768),        # máxima qualidade de raciocínio
+        AIModel("qwen-long", AIProvider.QWEN, 1000000),     # contexto extra-longo (10M docs)
+        AIModel("qwen2.5-coder-32b-instruct", AIProvider.QWEN, 131072),  # especializado em código
+    ],
 }
 
 
@@ -92,6 +103,7 @@ class AIService:
             AIProvider.DEEPSEEK: settings.DEEPSEEK_API_KEY,
             AIProvider.GROK: settings.GROK_API_KEY,
             AIProvider.OPENROUTER: settings.OPENROUTER_API_KEY,
+            AIProvider.QWEN: getattr(settings, "QWEN_API_KEY", None) or getattr(settings, "DASHSCOPE_API_KEY", None),
         }
         return keys.get(provider)
 
@@ -161,6 +173,10 @@ class AIService:
                 )
             elif provider == AIProvider.OPENROUTER:
                 return await AIService._query_openrouter(
+                    api_key, prompt, model, system_prompt, temperature, max_tokens
+                )
+            elif provider == AIProvider.QWEN:
+                return await AIService._query_qwen(
                     api_key, prompt, model, system_prompt, temperature, max_tokens
                 )
             else:
@@ -342,6 +358,44 @@ class AIService:
             client = AsyncOpenAI(
                 api_key=api_key,
                 base_url="https://openrouter.ai/api/v1",
+            )
+
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens or 2048,
+            )
+
+            return True, response.choices[0].message.content, None
+        except Exception as e:
+            return False, None, str(e)
+
+    @staticmethod
+    async def _query_qwen(
+        api_key: str,
+        prompt: str,
+        model: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: Optional[int],
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Query Alibaba Qwen via DashScope (modo OpenAI-compatible).
+
+        DashScope expõe um endpoint compatível OpenAI em
+        https://dashscope.aliyuncs.com/compatible-mode/v1 — usamos
+        AsyncOpenAI com base_url custom (mesmo padrão de Deepseek/Grok).
+        """
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
             )
 
             messages = []

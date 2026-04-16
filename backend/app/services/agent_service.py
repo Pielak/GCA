@@ -91,6 +91,8 @@ class AgentService:
                 "deepseek": "https://api.deepseek.com/chat/completions",
                 "openai": "https://api.openai.com/v1/chat/completions",
                 "grok": "https://api.x.ai/v1/chat/completions",
+                "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+                "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
             }
             url = provider_urls.get(self.provider)
             if not url:

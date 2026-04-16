@@ -298,18 +298,26 @@ class OCGUpdaterService:
     # ------------------------------------------------------------------ #
 
     async def _load_current_ocg(self, project_id: UUID) -> Optional[OCG]:
-        """Carrega o OCG ativo do projeto.
+        """Carrega o OCG ativo do projeto, **forçando refresh do DB**.
 
         Concorrência é serializada em camada superior (asyncio.Lock por
-        project_id em update_ocg_from_arguider). Não usar with_for_update
-        aqui porque a transação fica viva durante a chamada LLM (~30-60s)
-        e bloqueia outras conexões do pool.
+        project_id em update_ocg_from_arguider).
+
+        ``populate_existing=True`` é crítico: com ``expire_on_commit=False``
+        no AsyncSessionLocal e sessão compartilhada com Arguidor (que já
+        carregou o OCG anteriormente), a identity map cacheia a entidade.
+        Sem populate_existing, o ORM devolve o OCG STALE (versão antiga),
+        causando lost-update mesmo com asyncio.Lock funcionando.
+
+        with_for_update() não pode ser usado aqui — a txn fica viva durante
+        a chamada LLM (30s+) e drena o pool de conexões.
         """
         stmt = (
             select(OCG)
             .where(OCG.project_id == project_id)
             .order_by(OCG.version.desc())
             .limit(1)
+            .execution_options(populate_existing=True)
         )
         result = await self.db.execute(stmt)
         return result.scalar_one_or_none()
@@ -357,6 +365,8 @@ class OCGUpdaterService:
             "deepseek": "https://api.deepseek.com/chat/completions",
             "openai": "https://api.openai.com/v1/chat/completions",
             "grok": "https://api.x.ai/v1/chat/completions",
+            "openrouter": "https://openrouter.ai/api/v1/chat/completions",
+            "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         }
         url = provider_urls.get(provider, "https://api.deepseek.com/chat/completions")
 
