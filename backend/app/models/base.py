@@ -900,7 +900,7 @@ class IngestedDocument(Base):
     filename = Column(String(500), nullable=False)  # nome gerado (uuid + ext)
     original_filename = Column(String(500), nullable=False)
     file_type = Column(String(20), nullable=False)  # pdf, docx, markdown, image, wireframe, spreadsheet, code, other
-    document_category = Column(String(30), nullable=True)  # preenchido pelo Arguidor
+    document_category = Column(String(120), nullable=True)  # preenchido pelo Arguidor (texto livre do LLM)
     git_file_path = Column(String(500), nullable=True)
     git_analysis_path = Column(String(500), nullable=True)
     file_hash = Column(String(64), nullable=False)  # SHA256
