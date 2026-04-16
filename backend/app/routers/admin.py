@@ -1227,27 +1227,130 @@ async def delete_user(
     current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Excluir usuário (apenas admin). Não pode excluir a si mesmo."""
+    """Excluir usuário (apenas admin).
+
+    Política:
+      - Não pode excluir a si mesmo.
+      - BLOQUEIA (409) se o user é GP de project_request APPROVED/ACTIVE
+        OU membro ativo de projeto não-arquivado. Admin precisa primeiro
+        substituir/transferir o GP antes de excluir.
+      - Limpa proativamente o que dá: project_requests pendentes/rejeitadas,
+        memberships, invites, tokens. Campos de auditoria (approved_by,
+        created_by, etc) viram NULL para preservar histórico.
+    """
     if user_id == current_user_id:
         raise HTTPException(status_code=400, detail="Você não pode excluir sua própria conta")
+
+    from sqlalchemy import text
+    from app.models.onboarding import ProjectRequest, ProjectRequestStatus
+    from app.models.base import Project, ProjectMember
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     email = user.email
 
-    # Limpar referências FK antes de excluir
-    from sqlalchemy import text
+    # === BLOQUEIO 1: GP de project_request APPROVED ou ACTIVE ===
+    blocking_reqs = (await db.execute(
+        select(ProjectRequest.project_name, ProjectRequest.project_slug, ProjectRequest.status).where(
+            ProjectRequest.gp_id == user_id,
+            ProjectRequest.status.in_([
+                ProjectRequestStatus.APPROVED,
+                ProjectRequestStatus.ACTIVE,
+            ]),
+        )
+    )).all()
+    if blocking_reqs:
+        names = [f"{r[0]} ({r[1]})" for r in blocking_reqs]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Usuário '{email}' não pode ser excluído — é GP do(s) projeto(s) ativo(s): "
+                f"{', '.join(names)}. Substitua o GP em Gestão de Projetos primeiro."
+            ),
+        )
+
+    # === BLOQUEIO 2: membership ativo em projeto não-arquivado ===
+    blocking_members = (await db.execute(
+        select(Project.name, Project.short_slug, ProjectMember.role)
+        .join(ProjectMember, ProjectMember.project_id == Project.id)
+        .where(
+            ProjectMember.user_id == user_id,
+            ProjectMember.is_active == True,  # noqa: E712
+            Project.status != "archived",
+        )
+    )).all()
+    if blocking_members:
+        names = [f"{m[0]} ({m[1] or '?'} como {m[2]})" for m in blocking_members]
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Usuário '{email}' não pode ser excluído — é membro ativo de: "
+                f"{', '.join(names)}. Remova-o do(s) projeto(s) primeiro."
+            ),
+        )
+
+    # === LIMPEZA: tudo que tem FK pra users e é seguro deletar/nullificar ===
+    # Cada operação é defensiva (IF EXISTS / WHERE) — algumas tabelas podem
+    # nem existir em ambientes mais antigos.
+    cleanup_sql = [
+        # DELETE — registros que só fazem sentido com o user vivo
+        ("DELETE FROM project_requests WHERE gp_id = :uid", "project_requests pendentes/rejeitadas"),
+        ("DELETE FROM project_members WHERE user_id = :uid", "memberships"),
+        ("DELETE FROM invitation_tokens WHERE invited_by_id = :uid", "invitation_tokens"),
+        ("DELETE FROM team_invites WHERE user_id = :uid", "team_invites"),
+        ("DELETE FROM project_invites WHERE invited_by_user_id = :uid OR accepted_by_user_id = :uid", "project_invites"),
+        ("DELETE FROM onboarding_progress WHERE gp_id = :uid", "onboarding_progress"),
+        ("DELETE FROM user_notifications WHERE user_id = :uid", "user_notifications"),
+        ("DELETE FROM user_project_context WHERE user_id = :uid", "user_project_context"),
+        ("DELETE FROM reset_tokens WHERE user_id = :uid", "reset_tokens"),
+        ("DELETE FROM access_attempts WHERE user_id = :uid", "access_attempts"),
+        # SET NULL — preserva histórico/auditoria
+        ("UPDATE project_requests SET approved_by = NULL WHERE approved_by = :uid", "project_requests.approved_by"),
+        ("UPDATE gatekeeper_items SET resolved_by = NULL WHERE resolved_by = :uid", "gatekeeper_items"),
+        ("UPDATE ingested_documents SET uploaded_by = NULL WHERE uploaded_by = :uid", "ingested_documents"),
+        ("UPDATE module_candidates SET approved_by = NULL WHERE approved_by = :uid", "module_candidates.approved_by"),
+        ("UPDATE module_candidates SET rejected_by = NULL WHERE rejected_by = :uid", "module_candidates.rejected_by"),
+        ("UPDATE project_external_repos SET added_by = NULL WHERE added_by = :uid", "project_external_repos.added_by"),
+        ("UPDATE project_external_repos SET approved_by_gp = NULL WHERE approved_by_gp = :uid", "project_external_repos.approved_by_gp"),
+        ("UPDATE project_member_roles SET assigned_by = NULL WHERE assigned_by = :uid", "project_member_roles"),
+        ("UPDATE project_secrets SET created_by = NULL WHERE created_by = :uid", "project_secrets"),
+        ("UPDATE project_settings SET updated_by = NULL WHERE updated_by = :uid", "project_settings"),
+        ("UPDATE pipeline_audit_entries SET user_id = NULL WHERE user_id = :uid", "pipeline_audit_entries"),
+        ("UPDATE test_artifacts SET created_by = NULL WHERE created_by = :uid", "test_artifacts.created_by"),
+        ("UPDATE test_artifacts SET last_edited_by = NULL WHERE last_edited_by = :uid", "test_artifacts.last_edited_by"),
+        ("UPDATE test_execution_logs SET executed_by = NULL WHERE executed_by = :uid", "test_execution_logs.executed_by"),
+        ("UPDATE test_execution_logs SET test_created_by = NULL WHERE test_created_by = :uid", "test_execution_logs.test_created_by"),
+        ("UPDATE test_execution_logs SET test_edited_by = NULL WHERE test_edited_by = :uid", "test_execution_logs.test_edited_by"),
+        # FKs com ON DELETE CASCADE/SET NULL nativo (organization_members, support_tickets,
+        # ai_usage_log, audit_log_global, ocg, ocg_delta_log, system_alerts,
+        # system_settings, ticket_responses, project_releases, project_deliverables,
+        # project_members.invited_by) já tratam sozinhas — não precisa SQL aqui.
+    ]
+
     try:
-        await db.execute(text("DELETE FROM invitation_tokens WHERE invited_by_id = :uid"), {"uid": user_id})
-        await db.execute(text("UPDATE project_requests SET approved_by = NULL WHERE approved_by = :uid"), {"uid": user_id})
-        await db.execute(text("DELETE FROM project_members WHERE user_id = :uid"), {"uid": user_id})
+        for sql, _ in cleanup_sql:
+            await db.execute(text(sql), {"uid": user_id})
         await db.delete(user)
         await db.commit()
     except Exception as e:
         await db.rollback()
         logger.error("admin.user_delete_failed", user_id=str(user_id), error=str(e))
-        raise HTTPException(status_code=409, detail=f"Não foi possível excluir: {str(e)[:200]}")
+        # Mensagem mais útil: pegar o nome da constraint que falhou
+        msg = str(e)
+        if "violates foreign key constraint" in msg:
+            import re
+            match = re.search(r'constraint "([^"]+)"', msg)
+            cname = match.group(1) if match else "desconhecida"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Não foi possível excluir '{email}' — restou referência em "
+                    f"'{cname}'. Avise o time de backend para tratar essa FK."
+                ),
+            )
+        raise HTTPException(status_code=409, detail=f"Não foi possível excluir: {msg[:200]}")
 
     logger.info("admin.user_deleted", user_id=str(user_id), email=email)
     return {"success": True, "message": f"Usuário {email} excluído"}
