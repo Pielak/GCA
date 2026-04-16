@@ -292,26 +292,25 @@ export function QuestionnairePage() {
 
   // ─── Submitted screen ─────────────────────────────────────────────
 
-  if (submitted && result) {
-    return (
-      <div className="max-w-3xl mx-auto p-6 space-y-6">
-        <div className="bg-slate-900 border border-slate-700 rounded-xl p-8 text-center">
-          <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-4" />
-          <h2 className="text-2xl font-bold text-white mb-2">Questionário Enviado!</h2>
-          <p className="text-slate-400 mb-4">Seu questionário foi submetido para análise.</p>
-          <p className="text-slate-300 text-sm">
-            Em até 48 horas você receberá as informações referentes ao seu projeto, incluindo convite de acesso ao GCA e lista de instruções para parametrizar seu projeto.
-          </p>
-        </div>
-      </div>
-    )
-  }
+  // Questionário enviado: NÃO bloqueia a tela — mostra banner + perguntas read-only
+  const isReadOnly = submitted && !!result
 
   // ─── Main render ───────────────────────────────────────────────────
 
   return (
     <div className="max-w-3xl mx-auto p-6 space-y-6">
       <AnalysisOverlay isVisible={isAnalyzing} onComplete={handleAnalysisComplete} />
+
+      {/* Banner de status enviado */}
+      {isReadOnly && (
+        <div className="bg-emerald-950/30 border border-emerald-700/30 rounded-xl p-4 flex items-center gap-3">
+          <CheckCircle2 className="w-6 h-6 text-emerald-400 flex-shrink-0" />
+          <div>
+            <p className="text-emerald-300 font-semibold text-sm">Questionario Enviado</p>
+            <p className="text-slate-400 text-xs">Submetido para analise. As respostas abaixo sao exibidas como referencia para a equipe do projeto.</p>
+          </div>
+        </div>
+      )}
 
       {/* Header */}
       <div className="flex items-center justify-between">
@@ -528,6 +527,7 @@ export function QuestionnairePage() {
                 const disabled = isQuestionDisabled(q)
                 const linked = isQuestionLinked(q)
                 const inactive = disabled || linked
+                const fieldDisabled = inactive || isReadOnly
 
                 return (
                   <div key={q.id} className={`transition-opacity ${inactive ? 'opacity-40' : ''}`}>
@@ -552,15 +552,17 @@ export function QuestionnairePage() {
                     )}
 
                     {q.type === 'text' && !inactive && (
-                      <input type="text" value={(responses[q.id] as string) || ''} onChange={e => handleTextChange(q.id, e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors"
+                      <input type="text" value={(responses[q.id] as string) || ''} onChange={e => !isReadOnly && handleTextChange(q.id, e.target.value)}
+                        readOnly={isReadOnly}
+                        className={`w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors ${isReadOnly ? 'cursor-default opacity-80' : ''}`}
                         placeholder={q.placeholder || ''} />
                     )}
 
                     {q.type === 'textarea' && !inactive && (
-                      <textarea value={(responses[q.id] as string) || ''} onChange={e => handleTextChange(q.id, e.target.value)}
+                      <textarea value={(responses[q.id] as string) || ''} onChange={e => !isReadOnly && handleTextChange(q.id, e.target.value)}
+                        readOnly={isReadOnly}
                         rows={4}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors resize-none"
+                        className={`w-full bg-slate-800 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-violet-600 focus:ring-1 focus:ring-violet-600/30 transition-colors resize-none ${isReadOnly ? 'cursor-default opacity-80' : ''}`}
                         placeholder={q.placeholder || ''} />
                     )}
 
@@ -569,8 +571,9 @@ export function QuestionnairePage() {
                         {q.options.map(opt => {
                           const isNA = opt === NA_VALUE
                           return (
-                            <button key={opt} type="button" onClick={() => handleSingleSelect(q.id, opt)}
-                              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${responses[q.id] === opt ? (isNA ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-violet-600/30 border-violet-500 text-violet-300') : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${isNA ? 'italic' : ''}`}
+                            <button key={opt} type="button" onClick={() => !isReadOnly && handleSingleSelect(q.id, opt)}
+                              disabled={isReadOnly}
+                              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${responses[q.id] === opt ? (isNA ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-violet-600/30 border-violet-500 text-violet-300') : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${isNA ? 'italic' : ''} ${isReadOnly ? 'cursor-default' : ''}`}
                             >{opt}</button>
                           )
                         })}
@@ -584,14 +587,16 @@ export function QuestionnairePage() {
                           const selected = currentVals.includes(opt)
                           const isNA = opt === NA_VALUE
                           return (
-                            <button key={opt} type="button" onClick={() => handleMultiSelect(q.id, opt)}
-                              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selected ? (isNA ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-violet-600/30 border-violet-500 text-violet-300') : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${isNA ? 'italic' : ''}`}
+                            <button key={opt} type="button" onClick={() => !isReadOnly && handleMultiSelect(q.id, opt)}
+                              disabled={isReadOnly}
+                              className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${selected ? (isNA ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-violet-600/30 border-violet-500 text-violet-300') : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${isNA ? 'italic' : ''} ${isReadOnly ? 'cursor-default' : ''}`}
                             >{selected && !isNA && <CheckCircle2 className="w-3 h-3 inline mr-1" />}{opt}</button>
                           )
                         })}
                         {q.allowNA && !q.options.includes(NA_VALUE) && (
-                          <button type="button" onClick={() => handleMultiSelect(q.id, NA_VALUE)}
-                            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors italic ${((responses[q.id] as string[]) || []).includes(NA_VALUE) ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'}`}
+                          <button type="button" onClick={() => !isReadOnly && handleMultiSelect(q.id, NA_VALUE)}
+                            disabled={isReadOnly}
+                            className={`px-3 py-1.5 text-sm rounded-lg border transition-colors italic ${((responses[q.id] as string[]) || []).includes(NA_VALUE) ? 'bg-slate-600/40 border-slate-500 text-slate-300' : 'bg-slate-800 border-slate-700 text-slate-400 hover:border-slate-500'} ${isReadOnly ? 'cursor-default' : ''}`}
                           >Não se aplica</button>
                         )}
                       </div>
@@ -623,11 +628,13 @@ export function QuestionnairePage() {
                 className="flex items-center gap-1 px-4 py-2 text-sm bg-violet-600 hover:bg-violet-500 text-white rounded-lg transition-colors">
                 Proximo <ChevronRight className="w-4 h-4" />
               </button>
-            ) : (
+            ) : !isReadOnly ? (
               <button onClick={handleAnalyze}
                 className="flex items-center gap-2 px-5 py-2 text-sm bg-emerald-500 hover:bg-emerald-400 text-white rounded-lg transition-colors">
                 <ClipboardList className="w-4 h-4" /> Analisar Consistencia
               </button>
+            ) : (
+              <span className="text-xs text-slate-500">Fim do questionario</span>
             )}
           </div>
         </>
