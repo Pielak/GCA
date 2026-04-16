@@ -6,6 +6,7 @@ Mocka commit Git (não exige projeto real conectado a GitHub) e foca em:
   - skipped_reason quando OCG está vazio
   - path correto (compliance.md, adr/000N-*.md, architecture.mmd)
 """
+import json
 import re
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -228,3 +229,107 @@ async def test_architecture_diagram_skips_when_components_empty():
     res = await generate_kind("architecture_diagram", PROJECT_ID, db, ocg)
     assert res.committed is False
     assert "vazio" in (res.skipped_reason or "")
+
+
+# ────────────────────────── dockerfile (C.6) ─────────────────────────
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("language,framework,expected_in", [
+    ("Python", "FastAPI", "uvicorn"),
+    ("Python", "Django", "gunicorn"),
+    ("TypeScript", "Express", 'CMD ["npm", "start"]'),
+    ("Go", "Gin", "golang:1.22"),
+    ("Java", "Spring", "eclipse-temurin"),
+])
+async def test_dockerfile_generates_per_stack(language, framework, expected_in):
+    db = AsyncMock()
+    ocg = {"STACK_RECOMMENDATION": {"backend": {"language": language, "framework": framework}}}
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["path"] = path
+        captured["content"] = content
+        return True
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit):
+        res = await generate_kind("dockerfile", PROJECT_ID, db, ocg)
+    assert res.committed is True
+    assert captured["path"] == "Dockerfile"
+    assert expected_in in captured["content"]
+
+
+@pytest.mark.asyncio
+async def test_dockerfile_skips_unknown_stack():
+    db = AsyncMock()
+    ocg = {"STACK_RECOMMENDATION": {"backend": {"language": "Cobol", "framework": "x"}}}
+    res = await generate_kind("dockerfile", PROJECT_ID, db, ocg)
+    assert res.committed is False
+    assert "sem template" in (res.skipped_reason or "")
+
+
+# ────────────────────────── ci_pipeline (C.6) ────────────────────────
+
+@pytest.mark.asyncio
+async def test_ci_pipeline_python_uses_actions():
+    db = AsyncMock()
+    ocg = {"STACK_RECOMMENDATION": {"backend": {"language": "Python"}}, "PROJECT_PROFILE": {"project_name": "P"}}
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["path"] = path
+        captured["content"] = content
+        return True
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit):
+        res = await generate_kind("ci_pipeline", PROJECT_ID, db, ocg)
+    assert res.committed is True
+    assert captured["path"] == ".github/workflows/ci.yml"
+    assert "actions/setup-python@v5" in captured["content"]
+    assert "pytest" in captured["content"]
+
+
+@pytest.mark.asyncio
+async def test_ci_pipeline_skips_unknown_stack():
+    db = AsyncMock()
+    ocg = {"STACK_RECOMMENDATION": {"backend": {"language": "rust"}}}
+    res = await generate_kind("ci_pipeline", PROJECT_ID, db, ocg)
+    assert res.committed is False
+    assert "sem template" in (res.skipped_reason or "")
+
+
+# ────────────────────────── openapi (C.6) ────────────────────────────
+
+@pytest.mark.asyncio
+async def test_openapi_stub_has_health_endpoint():
+    db = AsyncMock()
+    ocg = {"PROJECT_PROFILE": {"project_name": "P Test"}, "STACK_RECOMMENDATION": {"backend": {"framework": "FastAPI"}}}
+    captured = {}
+    async def fake_commit(project_id, db, path, content, commit_message):
+        captured["path"] = path
+        captured["content"] = content
+        return True
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit):
+        res = await generate_kind("openapi", PROJECT_ID, db, ocg)
+    assert res.committed is True
+    assert captured["path"] == "docs/openapi.yaml"
+    assert "openapi: 3.1.0" in captured["content"]
+    assert "/health:" in captured["content"]
+    assert "P Test API" in captured["content"]
+
+
+# ────────────────────────── observability (C.6) ──────────────────────
+
+@pytest.mark.asyncio
+async def test_observability_generates_prometheus_and_grafana():
+    db = AsyncMock()
+    ocg = {"PROJECT_PROFILE": {"project_name": "FinanceHub Pro"}}
+    paths = []
+    async def fake_commit(project_id, db, path, content, commit_message):
+        paths.append((path, content))
+        return True
+    with patch("app.services.deliverable_generators_impl._commit_via_git", new=fake_commit):
+        res = await generate_kind("observability_dashboard", PROJECT_ID, db, ocg)
+    assert res.committed is True
+    assert any(p[0] == "infra/prometheus.yml" for p in paths)
+    assert any(p[0] == "infra/grafana/dashboards/main.json" for p in paths)
+    grafana = next(c for p, c in paths if "grafana" in p)
+    assert "FinanceHub Pro" in grafana
+    # JSON parsável + 3 painéis
+    parsed = json.loads(grafana)
+    assert len(parsed["panels"]) == 3

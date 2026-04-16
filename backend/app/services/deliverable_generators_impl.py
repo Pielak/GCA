@@ -16,6 +16,7 @@ dogfood.
 """
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from datetime import datetime, timezone
@@ -227,6 +228,308 @@ async def _gen_adr(
 
 
 # ────────────────────── architecture_diagram (mermaid C4) ──────────────
+
+@register_generator("dockerfile")
+async def _gen_dockerfile(
+    project_id: UUID,
+    db: AsyncSession,
+    ocg_data: Dict[str, Any],
+) -> GeneratorResult:
+    """Gera ``Dockerfile`` na raiz do repo, baseado em STACK.backend.
+
+    Templates conhecidos: python/fastapi, node/express, go, java/spring.
+    Para stacks não reconhecidas, retorna skipped (o GP escreve manual).
+    """
+    backend = (ocg_data.get("STACK_RECOMMENDATION", {}) or {}).get("backend", {}) or {}
+    language = (backend.get("language") or "").lower().strip()
+    framework = (backend.get("framework") or "").lower().strip()
+
+    project_name = ocg_data.get("PROJECT_PROFILE", {}).get("project_name", "(projeto)")
+    header = f"# Auto-gerado pelo GCA — não editar manualmente.\n# Projeto: {project_name}\n# Stack: {language} / {framework}\n"
+
+    if language == "python":
+        # FastAPI por padrão; ajustar se for Django/Flask exige diff
+        port = "8000"
+        if "django" in framework:
+            cmd = "CMD [\"gunicorn\", \"-b\", \"0.0.0.0:8000\", \"app.wsgi:application\"]"
+        elif "flask" in framework:
+            cmd = "CMD [\"gunicorn\", \"-b\", \"0.0.0.0:8000\", \"app:app\"]"
+        else:
+            cmd = "CMD [\"uvicorn\", \"app.main:app\", \"--host\", \"0.0.0.0\", \"--port\", \"8000\"]"
+        content = (
+            header
+            + "\nFROM python:3.11-slim\n\n"
+            + "WORKDIR /app\n\n"
+            + "RUN apt-get update && apt-get install -y --no-install-recommends \\\n"
+            + "    build-essential libpq-dev && rm -rf /var/lib/apt/lists/*\n\n"
+            + "COPY pyproject.toml ./\nRUN pip install --no-cache-dir poetry && poetry config virtualenvs.create false && poetry install --no-root --only main\n\n"
+            + "COPY . .\n\n"
+            + f"EXPOSE {port}\n\n"
+            + f"{cmd}\n"
+        )
+    elif language in ("typescript", "javascript", "node"):
+        content = (
+            header
+            + "\nFROM node:20-alpine\n\n"
+            + "WORKDIR /app\n\n"
+            + "COPY package.json package-lock.json* ./\nRUN npm ci --omit=dev\n\n"
+            + "COPY . .\nRUN npm run build || true\n\n"
+            + "EXPOSE 3000\n\n"
+            + 'CMD ["npm", "start"]\n'
+        )
+    elif language == "go":
+        content = (
+            header
+            + "\nFROM golang:1.22-alpine AS builder\nWORKDIR /src\nCOPY go.mod go.sum ./\nRUN go mod download\nCOPY . .\nRUN go build -o /out/app ./...\n\n"
+            + "FROM gcr.io/distroless/base-debian12\nCOPY --from=builder /out/app /app\nEXPOSE 8080\nCMD [\"/app\"]\n"
+        )
+    elif language == "java":
+        content = (
+            header
+            + "\nFROM eclipse-temurin:21-jdk-alpine AS builder\nWORKDIR /src\nCOPY . .\nRUN ./mvnw -B package -DskipTests || ./gradlew bootJar -x test\n\n"
+            + "FROM eclipse-temurin:21-jre-alpine\nWORKDIR /app\nCOPY --from=builder /src/target/*.jar /app/app.jar\nEXPOSE 8080\nCMD [\"java\", \"-jar\", \"/app/app.jar\"]\n"
+        )
+    else:
+        return GeneratorResult(
+            kind="dockerfile",
+            committed=False,
+            skipped_reason=f"stack '{language}/{framework}' sem template Dockerfile conhecido",
+        )
+
+    path = "Dockerfile"
+    ok = await _commit_via_git(
+        project_id, db, path, content,
+        commit_message=f"chore(docker): Dockerfile inicial para {language}/{framework} [gca:auto]",
+    )
+    if not ok:
+        return GeneratorResult(kind="dockerfile", committed=False, skipped_reason="commit Git falhou")
+    return GeneratorResult(
+        kind="dockerfile", committed=True, path=path,
+        bytes_written=len(content.encode("utf-8")),
+        notes=f"template para {language}/{framework}",
+    )
+
+
+@register_generator("ci_pipeline")
+async def _gen_ci_pipeline(
+    project_id: UUID,
+    db: AsyncSession,
+    ocg_data: Dict[str, Any],
+) -> GeneratorResult:
+    """Gera ``.github/workflows/ci.yml`` com lint+test+build mínimos."""
+    backend = (ocg_data.get("STACK_RECOMMENDATION", {}) or {}).get("backend", {}) or {}
+    language = (backend.get("language") or "").lower().strip()
+    project_name = ocg_data.get("PROJECT_PROFILE", {}).get("project_name", "project")
+
+    # Steps por linguagem (mínimos viáveis)
+    if language == "python":
+        steps = (
+            "      - name: Setup Python\n"
+            "        uses: actions/setup-python@v5\n"
+            "        with: { python-version: '3.11' }\n"
+            "      - name: Install\n"
+            "        run: pip install poetry && poetry install --no-root\n"
+            "      - name: Lint\n"
+            "        run: poetry run ruff check . || true\n"
+            "      - name: Test\n"
+            "        run: poetry run pytest -q || true\n"
+        )
+    elif language in ("typescript", "javascript", "node"):
+        steps = (
+            "      - name: Setup Node\n"
+            "        uses: actions/setup-node@v4\n"
+            "        with: { node-version: '20' }\n"
+            "      - run: npm ci\n"
+            "      - run: npm run lint --if-present\n"
+            "      - run: npm test --if-present\n"
+            "      - run: npm run build --if-present\n"
+        )
+    elif language == "go":
+        steps = (
+            "      - name: Setup Go\n"
+            "        uses: actions/setup-go@v5\n"
+            "        with: { go-version: '1.22' }\n"
+            "      - run: go vet ./...\n"
+            "      - run: go test ./...\n"
+            "      - run: go build ./...\n"
+        )
+    elif language == "java":
+        steps = (
+            "      - name: Setup Java\n"
+            "        uses: actions/setup-java@v4\n"
+            "        with: { distribution: 'temurin', java-version: '21' }\n"
+            "      - run: ./mvnw -B test || ./gradlew test\n"
+        )
+    else:
+        return GeneratorResult(
+            kind="ci_pipeline",
+            committed=False,
+            skipped_reason=f"stack '{language}' sem template CI conhecido",
+        )
+
+    content = (
+        "# Auto-gerado pelo GCA — pipeline mínimo de CI.\n"
+        f"# Projeto: {project_name}\n"
+        f"name: CI\n\n"
+        "on:\n"
+        "  push:\n"
+        "    branches: [main, master, develop]\n"
+        "  pull_request:\n\n"
+        "jobs:\n"
+        "  test:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        + steps
+    )
+    path = ".github/workflows/ci.yml"
+    ok = await _commit_via_git(
+        project_id, db, path, content,
+        commit_message=f"ci: pipeline inicial para {language} [gca:auto]",
+    )
+    if not ok:
+        return GeneratorResult(kind="ci_pipeline", committed=False, skipped_reason="commit Git falhou")
+    return GeneratorResult(
+        kind="ci_pipeline", committed=True, path=path,
+        bytes_written=len(content.encode("utf-8")),
+        notes=f"workflow GitHub Actions ({language})",
+    )
+
+
+@register_generator("openapi")
+async def _gen_openapi_stub(
+    project_id: UUID,
+    db: AsyncSession,
+    ocg_data: Dict[str, Any],
+) -> GeneratorResult:
+    """Gera ``docs/openapi.yaml`` stub mínimo (skeleton para iteração).
+
+    Frameworks como FastAPI já geram OpenAPI em runtime — este stub serve
+    como contrato versionado em Git, útil para revisão de API e clientes
+    gerados antes de o backend estar rodando.
+    """
+    project_name = ocg_data.get("PROJECT_PROFILE", {}).get("project_name", "API")
+    backend = (ocg_data.get("STACK_RECOMMENDATION", {}) or {}).get("backend", {}) or {}
+    framework = backend.get("framework", "")
+
+    content = (
+        "# Auto-gerado pelo GCA — stub inicial.\n"
+        "# Frameworks como FastAPI/NestJS geram OpenAPI em runtime; este arquivo\n"
+        "# serve como contrato versionado para revisão antes do código.\n"
+        "openapi: 3.1.0\n"
+        "info:\n"
+        f"  title: {project_name} API\n"
+        "  version: 0.1.0\n"
+        f"  description: |\n"
+        f"    API gerada inicialmente pelo GCA para {project_name}.\n"
+        f"    Stack: {framework}. Substituir endpoints abaixo conforme implementação.\n"
+        "servers:\n"
+        "  - url: http://localhost:8000\n"
+        "    description: Local dev\n"
+        "paths:\n"
+        "  /health:\n"
+        "    get:\n"
+        "      summary: Health check\n"
+        "      responses:\n"
+        "        '200':\n"
+        "          description: OK\n"
+        "          content:\n"
+        "            application/json:\n"
+        "              schema:\n"
+        "                type: object\n"
+        "                properties:\n"
+        "                  status: { type: string, example: ok }\n"
+        "components:\n"
+        "  schemas: {}\n"
+    )
+    path = "docs/openapi.yaml"
+    ok = await _commit_via_git(
+        project_id, db, path, content,
+        commit_message=f"docs(api): OpenAPI 3.1 stub inicial [gca:auto]",
+    )
+    if not ok:
+        return GeneratorResult(kind="openapi", committed=False, skipped_reason="commit Git falhou")
+    return GeneratorResult(
+        kind="openapi", committed=True, path=path,
+        bytes_written=len(content.encode("utf-8")),
+        notes="stub OpenAPI 3.1 com endpoint /health",
+    )
+
+
+@register_generator("observability_dashboard")
+async def _gen_observability(
+    project_id: UUID,
+    db: AsyncSession,
+    ocg_data: Dict[str, Any],
+) -> GeneratorResult:
+    """Gera ``infra/grafana/dashboards/main.json`` skeleton + ``infra/prometheus.yml``.
+
+    Skeleton mínimo permite scrape básico (latência, throughput, erros 5xx
+    via /metrics se exposed). GP customiza após.
+    """
+    project_name = ocg_data.get("PROJECT_PROFILE", {}).get("project_name", "project")
+    project_slug = re.sub(r"[^a-z0-9_]", "_", project_name.lower())[:30] or "project"
+
+    prom = (
+        "# Auto-gerado pelo GCA — scrape config inicial.\n"
+        "global:\n"
+        "  scrape_interval: 15s\n"
+        "  evaluation_interval: 15s\n\n"
+        "scrape_configs:\n"
+        f"  - job_name: '{project_slug}'\n"
+        "    static_configs:\n"
+        "      - targets: ['backend:8000']\n"
+        "    metrics_path: /metrics\n"
+    )
+
+    grafana = json.dumps({
+        "title": f"{project_name} — Visão Geral",
+        "schemaVersion": 41,
+        "tags": ["gca:auto"],
+        "panels": [
+            {
+                "id": 1, "type": "timeseries", "title": "Requests/sec",
+                "datasource": "Prometheus",
+                "targets": [{"expr": f'rate(http_requests_total{{job="{project_slug}"}}[5m])'}],
+                "gridPos": {"x": 0, "y": 0, "w": 12, "h": 8},
+            },
+            {
+                "id": 2, "type": "timeseries", "title": "Latência p95 (s)",
+                "datasource": "Prometheus",
+                "targets": [{"expr": f'histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket{{job="{project_slug}"}}[5m])) by (le))'}],
+                "gridPos": {"x": 12, "y": 0, "w": 12, "h": 8},
+            },
+            {
+                "id": 3, "type": "stat", "title": "Erros 5xx (1h)",
+                "datasource": "Prometheus",
+                "targets": [{"expr": f'sum(increase(http_requests_total{{job="{project_slug}",status=~"5.."}}[1h]))'}],
+                "gridPos": {"x": 0, "y": 8, "w": 6, "h": 4},
+            },
+        ],
+    }, ensure_ascii=False, indent=2) + "\n"
+
+    # Commit em duas chamadas (git_service.commit_file processa um por vez)
+    ok1 = await _commit_via_git(
+        project_id, db, "infra/prometheus.yml", prom,
+        commit_message="infra(observability): prometheus scrape config [gca:auto]",
+    )
+    ok2 = await _commit_via_git(
+        project_id, db, "infra/grafana/dashboards/main.json", grafana,
+        commit_message="infra(observability): grafana dashboard inicial [gca:auto]",
+    )
+    if not (ok1 or ok2):
+        return GeneratorResult(kind="observability_dashboard", committed=False, skipped_reason="commits Git falharam")
+    bytes_written = (len(prom.encode("utf-8")) if ok1 else 0) + (len(grafana.encode("utf-8")) if ok2 else 0)
+    paths_ok = []
+    if ok1: paths_ok.append("infra/prometheus.yml")
+    if ok2: paths_ok.append("infra/grafana/dashboards/main.json")
+    return GeneratorResult(
+        kind="observability_dashboard", committed=True,
+        path=" + ".join(paths_ok),
+        bytes_written=bytes_written,
+        notes=f"prometheus scrape + grafana dashboard ({len(paths_ok)} arquivos)",
+    )
+
 
 @register_generator("architecture_diagram")
 async def _gen_architecture_diagram(
