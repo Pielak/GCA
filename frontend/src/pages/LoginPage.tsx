@@ -464,24 +464,7 @@ export function LoginPage() {
             </Link>
           </div>
 
-          {/* Separator */}
-          <div className="mt-7 pt-7 border-t border-white/[0.06]">
-            <button
-              type="button"
-              onClick={handleNewProject}
-              className="
-                w-full flex items-center justify-center gap-2.5 py-3.5 rounded-xl
-                text-sm font-medium text-cyan-300
-                bg-cyan-500/[0.07] border border-cyan-500/[0.15]
-                hover:bg-cyan-500/[0.12] hover:border-cyan-500/[0.25]
-                hover:shadow-[0_0_25px_rgba(0,184,204,0.1)]
-                transition-all duration-300
-              "
-            >
-              <FolderPlus className="w-4 h-4" />
-              Criar Novo Projeto
-            </button>
-          </div>
+          {/* Botão "Criar Novo Projeto" removido — projetos são criados pelo Admin */}
         </div>
 
         {/* Security badge */}

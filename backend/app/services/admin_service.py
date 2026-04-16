@@ -12,6 +12,7 @@ import secrets
 
 from app.core.config import settings
 from app.core.security import hash_password
+from app.utils.slug import generate_short_slug
 from app.models.onboarding import ProjectRequest, ProjectRequestStatus, OnboardingProgress, DeliverableType
 from app.models.base import User, Organization, Project, ProjectMember, AccessAttempt, SupportTicket, TicketResponse, IntegrationWebhook, SystemAlert
 from app.models.pillar import PillarTemplate
@@ -177,10 +178,12 @@ class AdminService:
             # === AÇÃO 4: Criar Project + Membership ===
             org = await self._get_or_create_default_org(request.gp_id)
 
+            short_slug = await generate_short_slug(request.project_name, self.db)
             project = Project(
                 organization_id=org.id,
                 name=request.project_name,
                 slug=request.project_slug,
+                short_slug=short_slug,
                 description=request.description,
                 deliverable_type=request.deliverable_type.value if request.deliverable_type else "new_system",
                 status="active",

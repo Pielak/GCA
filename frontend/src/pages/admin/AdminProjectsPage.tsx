@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink, Package } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink, Package, UserCog } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
 
@@ -52,12 +52,93 @@ export function AdminProjectsPage() {
   const [messageText, setMessageText] = useState('')
   const [sendingMessage, setSendingMessage] = useState(false)
 
+  // GP Substitution modal
+  const [gpModal, setGpModal] = useState<{ project: PendingProject; realProjectId: string } | null>(null)
+  const [availableGPs, setAvailableGPs] = useState<{ id: string; full_name: string; email: string }[]>([])
+  const [currentGPs, setCurrentGPs] = useState<{ user_id: string; full_name: string; email: string }[]>([])
+  const [selectedNewGP, setSelectedNewGP] = useState('')
+  const [gpSubLoading, setGpSubLoading] = useState(false)
+  const [gpSubStep, setGpSubStep] = useState<'select' | 'confirm_remove'>('select')
+  const [gpToRemove, setGpToRemove] = useState<string>('')
+
   // Toast
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 4000)
+  }
+
+  const openGpSubstitution = async (proj: PendingProject, realProjectId: string) => {
+    setGpModal({ project: proj, realProjectId })
+    setSelectedNewGP('')
+    setGpSubStep('select')
+    setGpToRemove('')
+    try {
+      const [usersRes, membersRes] = await Promise.all([
+        apiClient.get('/admin/users'),
+        apiClient.get(`/projects/${realProjectId}/members`).catch(() => ({ data: { members: [] } })),
+      ])
+      const allUsers = usersRes.data?.users || []
+      const members = membersRes.data?.members || []
+      const currentGPList = members.filter((m: any) => m.role === 'gp')
+      setCurrentGPs(currentGPList.map((m: any) => ({ user_id: m.user_id, full_name: m.full_name || '', email: m.email || '' })))
+      // Available GPs: all users that are NOT already GP on this project
+      const currentGPIds = new Set(currentGPList.map((m: any) => m.user_id))
+      setAvailableGPs(allUsers.filter((u: any) => !u.is_admin && !currentGPIds.has(u.id)).map((u: any) => ({
+        id: u.id,
+        full_name: u.full_name || '',
+        email: u.email,
+      })))
+    } catch {
+      setAvailableGPs([])
+      setCurrentGPs([])
+    }
+  }
+
+  const handleAddNewGP = async () => {
+    if (!gpModal || !selectedNewGP) return
+    setGpSubLoading(true)
+    try {
+      await apiClient.post(`/projects/${gpModal.realProjectId}/members`, {
+        user_id: selectedNewGP,
+        role: 'gp',
+      })
+      showToast('Novo GP adicionado ao projeto', 'success')
+      // Refresh current GPs
+      const membersRes = await apiClient.get(`/projects/${gpModal.realProjectId}/members`)
+      const members = membersRes.data?.members || []
+      const currentGPList = members.filter((m: any) => m.role === 'gp')
+      setCurrentGPs(currentGPList.map((m: any) => ({ user_id: m.user_id, full_name: m.full_name || '', email: m.email || '' })))
+      if (currentGPList.length > 1) {
+        setGpSubStep('confirm_remove')
+      } else {
+        setGpModal(null)
+      }
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao adicionar novo GP', 'error')
+    } finally {
+      setGpSubLoading(false)
+    }
+  }
+
+  const handleRemoveOldGP = async () => {
+    if (!gpModal || !gpToRemove) return
+    if (currentGPs.length <= 1) {
+      showToast('Não é possível remover o único GP do projeto', 'error')
+      return
+    }
+    setGpSubLoading(true)
+    try {
+      await apiClient.delete(`/projects/${gpModal.realProjectId}/members/${gpToRemove}`)
+      showToast('GP anterior removido do projeto', 'success')
+      setGpModal(null)
+      await loadData()
+    } catch (err: any) {
+      showToast(err?.message || 'Erro ao remover GP', 'error')
+    } finally {
+      setGpSubLoading(false)
+    }
   }
 
   const loadData = useCallback(async () => {
@@ -268,18 +349,18 @@ export function AdminProjectsPage() {
                           return realProj ? (
                             <>
                               <button
-                                onClick={() => navigate(`/projects/${realProj.id}`)}
+                                onClick={() => navigate(`/admin/projects/${realProj.id}`)}
                                 className="p-1.5 rounded-lg text-slate-500 hover:text-violet-400 hover:bg-violet-900/20 transition-colors"
-                                title="Ver projeto"
+                                title="Ver projeto (visão admin)"
                               >
                                 <Eye className="w-4 h-4" />
                               </button>
                               <button
-                                onClick={() => navigate(`/projects/${realProj.id}/team`)}
-                                className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-900/20 transition-colors"
-                                title="Equipe do projeto"
+                                onClick={() => openGpSubstitution(proj, realProj.id)}
+                                className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 transition-colors"
+                                title="Substituir GP"
                               >
-                                <Users className="w-4 h-4" />
+                                <UserCog className="w-4 h-4" />
                               </button>
                             </>
                           ) : null
@@ -326,6 +407,112 @@ export function AdminProjectsPage() {
           </table>
         </div>
       </div>
+
+      {/* Modal de substituição de GP */}
+      {gpModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-white font-semibold text-sm flex items-center gap-2">
+                <UserCog className="w-4 h-4 text-amber-400" />
+                Substituir GP — {gpModal.project.project_name}
+              </h3>
+              <button onClick={() => setGpModal(null)} className="text-slate-500 hover:text-slate-300">
+                <XCircle className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Current GPs */}
+            <div className="mb-4">
+              <p className="text-slate-400 text-xs mb-2">GP(s) atual(is):</p>
+              <div className="space-y-1.5">
+                {currentGPs.map(gp => (
+                  <div key={gp.user_id} className="flex items-center gap-2 p-2 bg-slate-800 rounded-lg">
+                    <div className="w-6 h-6 rounded bg-emerald-900/40 border border-emerald-800/30 flex items-center justify-center text-emerald-300 text-xs font-bold">
+                      {(gp.full_name || gp.email).charAt(0).toUpperCase()}
+                    </div>
+                    <span className="text-slate-200 text-xs">{gp.full_name || gp.email}</span>
+                    <span className="text-slate-500 text-[10px]">({gp.email})</span>
+                  </div>
+                ))}
+                {currentGPs.length === 0 && <p className="text-slate-600 text-xs">Nenhum GP encontrado</p>}
+              </div>
+            </div>
+
+            {gpSubStep === 'select' && (
+              <div className="space-y-3">
+                <div>
+                  <label className="text-slate-400 text-xs mb-1 block">Selecione o novo GP</label>
+                  <select
+                    value={selectedNewGP}
+                    onChange={e => setSelectedNewGP(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-violet-600"
+                  >
+                    <option value="">— Selecione um usuário —</option>
+                    {availableGPs.map(u => (
+                      <option key={u.id} value={u.id}>{u.full_name || u.email} ({u.email})</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setGpModal(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                    Cancelar
+                  </button>
+                  <button
+                    onClick={handleAddNewGP}
+                    disabled={!selectedNewGP || gpSubLoading}
+                    className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                  >
+                    {gpSubLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Users className="w-4 h-4" />}
+                    Adicionar novo GP
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {gpSubStep === 'confirm_remove' && (
+              <div className="space-y-3">
+                <div className="p-3 bg-amber-900/20 border border-amber-800/30 rounded-lg">
+                  <p className="text-amber-300 text-xs">
+                    Novo GP adicionado com sucesso. Deseja remover o GP anterior?
+                    {currentGPs.length <= 1 && ' (Não é possível remover o único GP.)'}
+                  </p>
+                </div>
+                {currentGPs.length > 1 && (
+                  <div>
+                    <label className="text-slate-400 text-xs mb-1 block">Selecione o GP a remover</label>
+                    <select
+                      value={gpToRemove}
+                      onChange={e => setGpToRemove(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-300 focus:outline-none focus:border-violet-600"
+                    >
+                      <option value="">— Selecione —</option>
+                      {currentGPs.map(gp => (
+                        <option key={gp.user_id} value={gp.user_id}>{gp.full_name || gp.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                <div className="flex justify-end gap-2">
+                  <button onClick={() => setGpModal(null)} className="px-4 py-2 text-sm text-slate-400 hover:text-slate-200 transition-colors">
+                    Manter ambos
+                  </button>
+                  {currentGPs.length > 1 && (
+                    <button
+                      onClick={handleRemoveOldGP}
+                      disabled={!gpToRemove || gpSubLoading}
+                      className="flex items-center gap-1.5 px-4 py-2 bg-red-600 hover:bg-red-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                    >
+                      {gpSubLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <XCircle className="w-4 h-4" />}
+                      Remover GP selecionado
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal de mensagem ao GP */}
       {messageModal && (

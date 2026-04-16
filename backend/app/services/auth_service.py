@@ -123,9 +123,15 @@ class AuthService:
             return False, None, str(e)
 
     @staticmethod
-    def create_tokens(user: User) -> Tuple[str, str, int]:
+    def create_tokens(
+        user: User,
+        project_id: Optional[str] = None,
+        project_slug: Optional[str] = None,
+    ) -> Tuple[str, str, int]:
         """
         Create access and refresh tokens for user.
+        Opcionalmente inclui project_id e project_slug no payload JWT
+        para login com contexto de projeto.
         Returns (access_token, refresh_token, expires_in_seconds)
         """
         # Prepare token payload
@@ -138,12 +144,20 @@ class AuthService:
             exp=datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES),
         )
 
+        token_data = token_payload.to_dict()
+
+        # Incluir contexto de projeto no JWT, se fornecido
+        if project_id:
+            token_data["project_id"] = project_id
+        if project_slug:
+            token_data["project_slug"] = project_slug
+
         # Create tokens
-        access_token = create_access_token(token_payload.to_dict())
+        access_token = create_access_token(token_data)
         refresh_token = create_refresh_token(user.id)
         expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
 
-        logger.info("auth.tokens_created", user_id=str(user.id))
+        logger.info("auth.tokens_created", user_id=str(user.id), project_id=project_id)
         return access_token, refresh_token, expires_in
 
     @staticmethod

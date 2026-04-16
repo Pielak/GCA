@@ -4,7 +4,7 @@ import {
   FolderOpen, Users, CheckCircle2, AlertTriangle, Key, Loader2, Settings, Save,
   Cpu, Eye, EyeOff, Zap, Star, TestTube2, CircleCheck, CircleX,
 } from 'lucide-react'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { apiClient } from '@/lib/api'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 
@@ -15,9 +15,7 @@ interface DashboardMetrics {
   totalUsers: number
   inactiveUsers: number
   statusDistribution: { name: string; value: number; color: string }[]
-  gatekeeperScores: { name: string; score: number; fill: string }[]
   recentProjects: { id: string; name: string; status: string; phase: number; outputProfile: string }[]
-  criticalCredentials: { name: string; project: string; status: string }[]
   recentAudit: { id: string; detail: string; level: string; timestamp: string }[]
 }
 
@@ -452,8 +450,8 @@ export function AdminDashboardPage() {
   const emptyMetrics: DashboardMetrics = {
     totalProjects: 0, activeProjects: 0, degradedProjects: 0,
     totalUsers: 0, inactiveUsers: 0,
-    statusDistribution: [], gatekeeperScores: [],
-    recentProjects: [], criticalCredentials: [], recentAudit: [],
+    statusDistribution: [],
+    recentProjects: [], recentAudit: [],
   }
 
   const loadMetrics = async () => {
@@ -481,15 +479,6 @@ export function AdminDashboardPage() {
         color: statusColors[name] || '#64748b',
       }))
 
-      // Gatekeeper scores por projeto
-      const gatekeeperScores = projects
-        .filter((p: any) => (p.gatekeeper_score || 0) > 0)
-        .map((p: any) => ({
-          name: p.name || p.slug,
-          score: p.gatekeeper_score || 0,
-          fill: (p.gatekeeper_score || 0) >= 80 ? '#34d399' : (p.gatekeeper_score || 0) >= 60 ? '#fbbf24' : '#f87171',
-        }))
-
       // Recent projects
       const recentProjects = projects.slice(0, 5).map((p: any) => ({
         id: p.id,
@@ -515,9 +504,7 @@ export function AdminDashboardPage() {
         totalUsers: summary.total_users || 0,
         inactiveUsers: 0,
         statusDistribution: statusDistribution.length > 0 ? statusDistribution : [],
-        gatekeeperScores,
         recentProjects,
-        criticalCredentials: [],
         recentAudit,
       })
       setPendingCount(pendingRes.data?.pending_count || 0)
@@ -539,9 +526,7 @@ export function AdminDashboardPage() {
   if (!metrics) return null
 
   const statusDist = metrics.statusDistribution || []
-  const gkScores = metrics.gatekeeperScores || []
   const recentProj = metrics.recentProjects || []
-  const critCreds = metrics.criticalCredentials || []
   const recentAud = metrics.recentAudit || []
 
   const pieData = statusDist.length > 0 ? statusDist : [
@@ -600,7 +585,7 @@ export function AdminDashboardPage() {
               {recentProj.map(p => (
                 <div
                   key={p.id}
-                  onClick={() => navigate(`/projects/${p.id}`)}
+                  onClick={() => navigate(`/admin/projects/${p.id}`)}
                   className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
                 >
                   <div className="w-8 h-8 rounded-md bg-violet-900/40 border border-violet-800/40 flex items-center justify-center text-violet-400 text-xs font-bold flex-shrink-0">

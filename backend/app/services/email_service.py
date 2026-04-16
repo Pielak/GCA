@@ -519,62 +519,71 @@ Suporte: https://gca.com/support
         gp_name: str,
         role_name: str,
         accept_link: str,
+        project_url: str = "",
     ) -> tuple[bool, Optional[str]]:
-        """Send team invitation email"""
-        subject = f"🎉 Convite para participar do projeto {project_name}"
+        """Send team invitation email with project-specific URL"""
+        subject = f"Convite para participar do projeto {project_name}"
+
+        # Bloco opcional com URL do projeto
+        project_url_html = ""
+        project_url_text = ""
+        if project_url:
+            project_url_html = f"""
+                <li><strong>URL do Projeto:</strong> <a href="{project_url}">{project_url}</a></li>"""
+            project_url_text = f"\n- URL do Projeto: {project_url}"
 
         html_content = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
-                <h2>🎉 Você foi convidado para um projeto!</h2>
-                <p>Olá <strong>{user_name}</strong>,</p>
-                <p>Você foi convidado para participar do projeto <strong>{project_name}</strong> como <strong>{role_name}</strong>.</p>
+                <h2>Voce foi convidado para um projeto!</h2>
+                <p>Ola <strong>{user_name}</strong>,</p>
+                <p>Voce foi convidado para participar do projeto <strong>{project_name}</strong> como <strong>{role_name}</strong>.</p>
 
-                <h3>📋 Detalhes do Projeto:</h3>
+                <h3>Detalhes do Projeto:</h3>
                 <ul>
                     <li><strong>Nome:</strong> {project_name}</li>
                     <li><strong>Seu Papel:</strong> {role_name}</li>
-                    <li><strong>Gestor do Projeto:</strong> {gp_name}</li>
+                    <li><strong>Gestor do Projeto:</strong> {gp_name}</li>{project_url_html}
                 </ul>
 
                 <p style="background-color: #d1fae5; padding: 12px; border-left: 4px solid #16a34a; border-radius: 3px;">
-                    <strong>✅ Próximo Passo:</strong> Clique no botão abaixo para aceitar o convite e configurar seu acesso.
+                    <strong>Proximo Passo:</strong> Clique no botao abaixo para aceitar o convite e configurar seu acesso.
                 </p>
 
                 <p><a href="{accept_link}" style="display: inline-block; background-color: #16a34a; color: white; padding: 12px 24px; text-decoration: none; border-radius: 5px; font-weight: bold;">Aceitar Convite</a></p>
 
                 <p style="color: #666; font-size: 12px;">
-                    <strong>⏰ Este convite expira em 7 dias.</strong><br>
-                    Se você não conseguir clicar no botão, copie e cole este link no seu navegador:<br>
+                    <strong>Este convite expira em 7 dias.</strong><br>
+                    Se voce nao conseguir clicar no botao, copie e cole este link no seu navegador:<br>
                     <code style="background-color: #f5f5f5; padding: 4px 8px; border-radius: 3px; font-family: monospace; word-break: break-all;">{accept_link}</code>
                 </p>
 
                 <hr style="border: none; border-top: 1px solid #ddd; margin: 20px 0;">
                 <p style="color: #666; font-size: 12px;">
-                    GCA — Gestão de Código Assistida<br>
-                    <a href="https://gca.com/support">Suporte</a> | <a href="https://gca.com/docs">Documentação</a>
+                    GCA — Gestao de Codigo Assistida<br>
+                    <a href="https://gca.com/support">Suporte</a> | <a href="https://gca.com/docs">Documentacao</a>
                 </p>
             </body>
         </html>
         """
 
         text_content = f"""
-Você foi convidado para um projeto!
+Voce foi convidado para um projeto!
 
-Olá {user_name},
+Ola {user_name},
 
-Você foi convidado para participar do projeto {project_name} como {role_name}.
+Voce foi convidado para participar do projeto {project_name} como {role_name}.
 
 Detalhes do Projeto:
 - Nome: {project_name}
 - Seu Papel: {role_name}
-- Gestor do Projeto: {gp_name}
+- Gestor do Projeto: {gp_name}{project_url_text}
 
 Aceitar Convite: {accept_link}
 
 Este convite expira em 7 dias.
 
-GCA — Gestão de Código Assistida
+GCA — Gestao de Codigo Assistida
 Suporte: https://gca.com/support
         """
 

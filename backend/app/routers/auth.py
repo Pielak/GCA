@@ -142,6 +142,115 @@ async def login(
     )
 
 
+class ProjectLoginRequest(BaseModel):
+    """Request: Login com contexto de projeto"""
+    email: str
+    password: str
+    project_slug: str
+
+
+@router.post("/project-login")
+async def project_login(
+    req: ProjectLoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Login com contexto de projeto via short_slug.
+    Valida credenciais + membership no projeto.
+    Retorna JWT com project_id e project_slug no payload.
+    """
+    from app.models.base import Project, ProjectMember
+
+    # 1. Resolver project_slug → Project
+    result = await db.execute(
+        select(Project).where(Project.short_slug == req.project_slug)
+    )
+    project = result.scalar_one_or_none()
+
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Projeto não encontrado",
+        )
+
+    if project.status == "archived":
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Projeto arquivado",
+        )
+
+    # 2. Autenticar usuário (email + password) — lógica existente
+    success, user, error = await AuthService.login(
+        db=db,
+        email=req.email,
+        password=req.password,
+    )
+
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Email ou senha inválidos",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # 3. Verificar membership no projeto
+    member_result = await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project.id,
+            ProjectMember.user_id == user.id,
+            ProjectMember.is_active == True,
+        )
+    )
+    member = member_result.scalar_one_or_none()
+
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não é membro deste projeto",
+        )
+
+    # 4. Criar tokens com contexto de projeto no JWT
+    access_token, refresh_token, expires_in = AuthService.create_tokens(
+        user,
+        project_id=str(project.id),
+        project_slug=project.short_slug,
+    )
+
+    # Buscar papel do usuário no projeto
+    project_roles = await _get_user_project_roles(db, user.id)
+
+    logger.info(
+        "auth.project_login_success",
+        user_id=str(user.id),
+        project_id=str(project.id),
+        project_slug=project.short_slug,
+        role=member.role,
+    )
+
+    return {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "token_type": "bearer",
+        "expires_in": expires_in,
+        "user": {
+            "id": str(user.id),
+            "email": user.email,
+            "full_name": user.full_name,
+            "is_admin": user.is_admin,
+            "is_active": user.is_active,
+            "first_access_completed": user.first_access_completed,
+            "project_roles": [pr.model_dump() if hasattr(pr, 'model_dump') else pr.dict() for pr in project_roles],
+        },
+        "project": {
+            "id": str(project.id),
+            "name": project.name,
+            "short_slug": project.short_slug,
+            "status": project.status,
+            "role": member.role,
+        },
+    }
+
+
 @router.post("/refresh", response_model=LoginResponse)
 async def refresh_token(
     req: RefreshTokenRequest,

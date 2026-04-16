@@ -189,7 +189,7 @@ export function Sidebar() {
                         return <span className={`text-[8px] px-1.5 py-0.5 rounded-md ${rc.bg} ${rc.text} flex-shrink-0 border border-white/[0.04]`}>{rc.label}</span>
                       })()}
                     </NavLink>
-                    {isInProject && (
+                    {isInProject && !isAdmin && (
                       <div className="ml-5 mt-1 mb-2 space-y-0.5 border-l border-white/[0.06] pl-3">
                         <SubNavItem to={`/projects/${proj.id}`} label="Dashboard" icon={<Activity className="w-3 h-3" />} end />
                         <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
@@ -207,6 +207,11 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Revisão de Testes" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
+                      </div>
+                    )}
+                    {isInProject && isAdmin && (
+                      <div className="ml-5 mt-1 mb-2 space-y-0.5 border-l border-white/[0.06] pl-3">
+                        <SubNavItem to={`/admin/projects/${proj.id}`} label="Visão Admin" icon={<Activity className="w-3 h-3" />} end />
                       </div>
                     )}
                   </div>

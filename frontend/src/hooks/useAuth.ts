@@ -28,6 +28,29 @@ export const useAuth = () => {
     [setToken, setUser, addToast]
   )
 
+  /**
+   * Login via slug do projeto — chama POST /auth/project-login
+   * Retorna { project_id, first_access_completed } em caso de sucesso.
+   * Lança erro com status e message em caso de falha.
+   */
+  const projectLogin = useCallback(
+    async (email: string, password: string, projectSlug: string) => {
+      const response = await api.post('/auth/project-login', {
+        email,
+        password,
+        project_slug: projectSlug,
+      })
+      const { access_token, user: userData, project_id } = response.data
+
+      setToken(access_token)
+      if (userData) {
+        setUser(userData)
+      }
+      return { project_id, first_access_completed: userData?.first_access_completed ?? true }
+    },
+    [setToken, setUser]
+  )
+
   const handleLogout = useCallback(() => {
     logout()
     addToast('Logout realizado', 'info')
@@ -38,6 +61,7 @@ export const useAuth = () => {
     user,
     isLoggedIn,
     login,
+    projectLogin,
     logout: handleLogout,
   }
 }

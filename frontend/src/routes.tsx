@@ -8,6 +8,7 @@ import { AdminDashboardPage } from './pages/admin/AdminDashboardPage';
 import { AdminProjectsPage } from './pages/admin/AdminProjectsPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
+import { AdminProjectViewPage } from './pages/admin/AdminProjectViewPage';
 import { DesignShowcasePage } from './pages/DesignShowcasePage';
 import { ProjectListPage } from './pages/projects/ProjectListPage';
 import { ProjectDetailLayout } from './pages/projects/ProjectDetailLayout';
@@ -32,11 +33,16 @@ import { NovoProjetoPage } from './pages/NovoProjetoPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { TesterReviewPage } from './pages/projects/TesterReviewPage';
 import { PipelineAuditPage } from './pages/projects/PipelineAuditPage';
+import { ProjectLoginPage } from './pages/ProjectLoginPage';
 
 export const router = createBrowserRouter([
   {
     path: '/login',
     Component: LoginPage,
+  },
+  {
+    path: '/p/:slug',
+    Component: ProjectLoginPage,
   },
   {
     path: '/reset-password',
@@ -68,6 +74,10 @@ export const router = createBrowserRouter([
       {
         path: 'admin/projects',
         element: <RequireAdmin><AdminProjectsPage /></RequireAdmin>,
+      },
+      {
+        path: 'admin/projects/:id',
+        element: <RequireAdmin><AdminProjectViewPage /></RequireAdmin>,
       },
       {
         path: 'admin/users',
