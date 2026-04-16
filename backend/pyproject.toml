@@ -52,6 +52,11 @@ python-dotenv = "^1.0.0"
 # AI/ML
 anthropic = "^0.25.0"
 
+# Document Extraction
+pdfplumber = "^0.11.0"
+python-docx = "^1.1.0"
+openpyxl = "^3.1.2"
+
 # Utils
 pydantic-extra-types = "^2.1.0"
 pytz = "^2023.3"

@@ -33,6 +33,9 @@ logger = structlog.get_logger(__name__)
 class DocumentExtractor:
     """Extrai texto de diferentes tipos de arquivo."""
 
+    def __init__(self, client=None):
+        self.client = client
+
     async def extract_text(self, file_bytes: bytes, file_type: str) -> str:
         if file_type in ("markdown", "md", "txt", "code"):
             return file_bytes.decode("utf-8", errors="replace")
@@ -170,7 +173,7 @@ class ArguiderService:
         # Preferência: chave do projeto (vault) > chave global (fallback)
         api_key = project_api_key or settings.ANTHROPIC_API_KEY
         self.client = AsyncAnthropic(api_key=api_key)
-        self.extractor = DocumentExtractor()
+        self.extractor = DocumentExtractor(client=self.client)
 
     @gca_retry()
     async def analyze_document(
