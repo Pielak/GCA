@@ -394,15 +394,39 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 task = self.analyze_pillar(pillar_id, pillar_req)
                 tasks.append(task)
 
-            # Executar em paralelo
-            results = await asyncio.gather(*tasks, return_exceptions=False)
-            results = [r for r in results if isinstance(r, PillarAgentResponse)]
+            # Executar em paralelo. return_exceptions=True para que falha em
+            # 1 pilar não derrube os outros 6 (antes: gather levantava na 1ª
+            # exceção, perdendo TODOS os resultados parciais).
+            raw_results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            logger.info(
-                "agent.all_pillars_success",
-                questionnaire_id=str(req.questionnaire_id),
-                pillars_analyzed=len(results),
-            )
+            results = []
+            failed_pillars = []
+            for idx, r in enumerate(raw_results, start=1):
+                if isinstance(r, PillarAgentResponse):
+                    results.append(r)
+                elif isinstance(r, Exception):
+                    failed_pillars.append({"pillar_id": idx, "error": str(r)})
+                    logger.error(
+                        "agent.pillar_failed",
+                        pillar_id=idx,
+                        error=str(r),
+                        error_type=type(r).__name__,
+                    )
+
+            if failed_pillars:
+                logger.warning(
+                    "agent.pillars_partial",
+                    questionnaire_id=str(req.questionnaire_id),
+                    succeeded=len(results),
+                    failed=len(failed_pillars),
+                    failed_pillars=failed_pillars,
+                )
+            else:
+                logger.info(
+                    "agent.all_pillars_success",
+                    questionnaire_id=str(req.questionnaire_id),
+                    pillars_analyzed=len(results),
+                )
 
             return results
 

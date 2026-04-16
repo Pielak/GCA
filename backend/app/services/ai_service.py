@@ -328,6 +328,39 @@ class AIService:
             return False, None, str(e)
 
     @staticmethod
+    async def _query_openrouter(
+        api_key: str,
+        prompt: str,
+        model: str,
+        system_prompt: Optional[str],
+        temperature: float,
+        max_tokens: Optional[int],
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Query OpenRouter (proxy para múltiplos modelos via API OpenAI-compatible)."""
+        try:
+            from openai import AsyncOpenAI
+            client = AsyncOpenAI(
+                api_key=api_key,
+                base_url="https://openrouter.ai/api/v1",
+            )
+
+            messages = []
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens or 2048,
+            )
+
+            return True, response.choices[0].message.content, None
+        except Exception as e:
+            return False, None, str(e)
+
+    @staticmethod
     def list_available_providers() -> list[str]:
         """List all available AI providers"""
         return [provider.value for provider in AIProvider]
