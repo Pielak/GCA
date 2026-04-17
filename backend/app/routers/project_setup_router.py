@@ -31,33 +31,48 @@ async def _has_llm_configured(db: AsyncSession, project_id: UUID) -> bool:
     return result.scalar()
 
 
-async def _has_questionnaire_submitted(db: AsyncSession, project_id: UUID) -> bool:
-    """Verifica se o projeto tem questionário com respostas submetidas.
+async def _questionnaire_state(db: AsyncSession, project_id: UUID) -> tuple[bool, bool]:
+    """Retorna (submitted, approved) do questionário mais recente do projeto.
 
-    Retorna True se existe Questionnaire cujas responses não sejam nulas,
-    vazias ou iguais a '{}'.
+    - submitted = existe Questionnaire com responses preenchidos.
+    - approved  = o Questionnaire mais recente passou na verificação
+      tecnológica (status OK + approved=True).
+
+    A UI usa os dois para distinguir 3 estados no badge da aba:
+      missing → ○ âmbar      (nunca submetido)
+      submitted & !approved → ⚠ amarelo (submetido mas com bloqueadores)
+      approved → ✓ emerald   (OK, OCG pode ser gerado)
     """
     result = await db.execute(
-        select(exists().where(
+        select(Questionnaire)
+        .where(
             Questionnaire.project_id == project_id,
             Questionnaire.responses.isnot(None),
             Questionnaire.responses != "",
             Questionnaire.responses != "{}",
-        ))
+        )
+        .order_by(Questionnaire.submitted_at.desc())
+        .limit(1)
     )
-    return result.scalar()
+    q = result.scalar_one_or_none()
+    if q is None:
+        return False, False
+    return True, bool(q.approved)
 
 
 async def _check_setup_status(db: AsyncSession, project_id: UUID) -> dict:
     """Retorna status completo de configuracao do projeto."""
     repo_configured = await _has_repo_configured(db, project_id)
     llm_configured = await _has_llm_configured(db, project_id)
-    questionnaire_submitted = await _has_questionnaire_submitted(db, project_id)
+    questionnaire_submitted, questionnaire_approved = await _questionnaire_state(db, project_id)
+    # Gate do pipeline só exige submetido (approved ainda pode chegar após
+    # correções). O frontend decide o visual pela combinação submitted+approved.
     ready_to_activate = repo_configured and llm_configured and questionnaire_submitted
     return {
         "repo_configured": repo_configured,
         "llm_configured": llm_configured,
         "questionnaire_submitted": questionnaire_submitted,
+        "questionnaire_approved": questionnaire_approved,
         "ready_to_activate": ready_to_activate,
     }
 

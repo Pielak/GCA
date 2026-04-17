@@ -212,7 +212,7 @@ export function ProjectSettingsPage() {
 
       <div className="flex items-baseline justify-between gap-3">
         <h2 className="text-xl font-bold text-slate-100">Configurações do Projeto</h2>
-        {setupStatus?.ready_to_activate && (
+        {setupStatus?.ready_to_activate && setupStatus?.questionnaire_approved && (
           <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
             <CheckCircle2 className="w-3.5 h-3.5" />
             Setup completo — pipeline liberado
@@ -220,14 +220,19 @@ export function ProjectSettingsPage() {
         )}
       </div>
 
-      {/* HERO de setup — aparece grande e vivo quando há algo pendente.
-          Some sem polução quando o setup está completo (badge emerald acima já
-          comunica). Objetivo: o GP não consegue ignorar que falta configurar. */}
-      {setupStatus && !setupStatus.ready_to_activate && (() => {
+      {/* HERO de setup — aparece em 2 cenários:
+          (a) algum dos 3 passos obrigatórios pendente (ready_to_activate=false)
+          (b) questionário submetido mas com bloqueadores (!approved)
+          Ambos exigem ação do GP antes do pipeline operar plenamente. */}
+      {setupStatus && (!setupStatus.ready_to_activate || !setupStatus.questionnaire_approved) && (() => {
+        // O passo "questionário" só é dado como concluído quando ALÉM de
+        // submetido, também está aprovado. Isso deixa o badge "done" coerente
+        // com o hero — sem enganar o GP que ficou com bloqueadores em aberto.
+        const questionnaireDone = setupStatus.questionnaire_submitted && setupStatus.questionnaire_approved
         const items = [
           { key: 'llm', done: setupStatus.llm_configured, label: 'Provedor de IA', icon: Cpu },
           { key: 'repo', done: setupStatus.repo_configured, label: 'Repositório Git', icon: GitBranch },
-          { key: 'questionario', done: setupStatus.questionnaire_submitted, label: 'Questionário Técnico', icon: ClipboardList },
+          { key: 'questionario', done: questionnaireDone, label: 'Questionário Técnico', icon: ClipboardList },
         ]
         const doneCount = items.filter(i => i.done).length
         const nextItem = items.find(i => !i.done)
@@ -328,9 +333,11 @@ export function ProjectSettingsPage() {
         <button onClick={() => setActiveTab('questionario')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'questionario' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <ClipboardList className="w-3.5 h-3.5" /> Questionário
-          {setupStatus?.questionnaire_submitted
-            ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-            : <Circle className="w-3.5 h-3.5 text-amber-500" />}
+          {!setupStatus?.questionnaire_submitted
+            ? <Circle className="w-3.5 h-3.5 text-amber-500" />
+            : setupStatus?.questionnaire_approved
+              ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+              : <AlertCircle className="w-3.5 h-3.5 text-amber-400" aria-label="Submetido com pendências" />}
         </button>
       </div>
 

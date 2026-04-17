@@ -5,6 +5,9 @@ export interface SetupStatus {
   repo_configured: boolean
   llm_configured: boolean
   questionnaire_submitted: boolean
+  // Diferencia "submetido mas com bloqueadores" de "submetido e aprovado".
+  // Permite a UI mostrar ⚠ amarelo (precisa ajuste) vs ✓ verde (ok).
+  questionnaire_approved: boolean
   ready_to_activate: boolean
 }
 
