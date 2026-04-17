@@ -343,7 +343,7 @@ export function QuestionnairePage() {
         <button
           onClick={async () => {
             try {
-              const res = await apiClient.get(`/projects/${id}/questionnaire/pdf`, { responseType: 'blob' })
+              const res = await apiClient.get(`/projects/${projectId}/questionnaire/pdf`, { responseType: 'blob' })
               const url = URL.createObjectURL(new Blob([res.data as BlobPart]))
               const a = document.createElement('a')
               a.href = url
@@ -370,13 +370,17 @@ export function QuestionnairePage() {
               const form = new FormData()
               form.append('file', file)
               try {
-                const res = await apiClient.post(`/projects/${id}/questionnaire/upload-pdf`, form, {
-                  headers: { 'Content-Type': 'multipart/form-data' },
-                })
+                // Não setar Content-Type manualmente — axios adiciona o boundary automaticamente
+                // ao detectar FormData. Setar 'multipart/form-data' sem boundary quebra o parser.
+                const res = await apiClient.post(`/projects/${projectId}/questionnaire/upload-pdf`, form)
                 alert(res.data?.message || 'PDF processado com sucesso!')
                 window.location.reload()
               } catch (err: any) {
-                alert(err?.message || 'Erro ao processar PDF')
+                const detail = err?.data?.detail || err?.message || 'Erro ao processar PDF'
+                alert(`Erro ao processar PDF: ${detail}`)
+              } finally {
+                // Reset input para permitir reupload do mesmo arquivo após erro
+                e.target.value = ''
               }
             }}
           />

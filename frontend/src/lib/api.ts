@@ -12,11 +12,14 @@ export function getApiBaseUrl(): string {
 }
 
 // Create axios instance
+// IMPORTANTE: não setar Content-Type default aqui. Axios infere sozinho:
+//   - objeto comum  → 'application/json'
+//   - FormData       → 'multipart/form-data; boundary=…' (com boundary correto)
+//   - Blob/string    → conforme o tipo
+// Se fixarmos 'application/json' aqui, FormData vira JSON.stringify(formDataToJSON(data))
+// e uploads de arquivo param de funcionar.
 const api = axios.create({
   baseURL: getApiBaseUrl(),
-  headers: {
-    'Content-Type': 'application/json',
-  },
 })
 
 // Request interceptor: Add JWT token to all requests
@@ -52,12 +55,28 @@ api.interceptors.response.use(
       }
     }
 
-    // Extract error message from response
-    const errorMessage =
-      (error.response?.data as any)?.detail ||
-      (error.response?.data as any)?.message ||
-      error.message ||
-      'Erro ao processar requisição'
+    // Extract error message from response. FastAPI pode retornar `detail` como:
+    //   - string  (HTTPException comum)
+    //   - array de {msg, loc, type, …}  (validation do Pydantic)
+    // Sem este normalize, ${message} em alerts vira "[object Object]".
+    const detail = (error.response?.data as any)?.detail
+    let errorMessage: string
+    if (typeof detail === 'string') {
+      errorMessage = detail
+    } else if (Array.isArray(detail)) {
+      errorMessage = detail
+        .map((d: any) => {
+          if (typeof d === 'string') return d
+          const loc = Array.isArray(d?.loc) ? d.loc.join('.') : ''
+          return loc ? `${loc}: ${d?.msg ?? JSON.stringify(d)}` : (d?.msg ?? JSON.stringify(d))
+        })
+        .join('; ')
+    } else {
+      errorMessage =
+        (error.response?.data as any)?.message ||
+        error.message ||
+        'Erro ao processar requisição'
+    }
 
     return Promise.reject({
       status: error.response?.status,
