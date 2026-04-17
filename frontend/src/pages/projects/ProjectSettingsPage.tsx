@@ -371,8 +371,18 @@ export function ProjectSettingsPage() {
             </div>
             <div>
               <label className="text-slate-400 text-xs block mb-1">Modelo (opcional)</label>
-              <input value={llmModel} onChange={e => setLlmModel(e.target.value)}
-                placeholder="Ex: claude-sonnet-4-6, gpt-4o"
+              {/* autoComplete="off" + name="llm-model" + data-lpignore="true"
+                  bloqueia o Chrome de autopreencher o campo com email/senha
+                  por heurística (bug observado: autofill colocou email aqui). */}
+              <input
+                value={llmModel}
+                onChange={e => setLlmModel(e.target.value)}
+                placeholder="Ex: claude-opus-4-6, gpt-4o, deepseek-chat"
+                name="llm-model"
+                autoComplete="off"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore="true"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
             </div>
           </div>
@@ -380,8 +390,16 @@ export function ProjectSettingsPage() {
           <div>
             <label className="text-slate-400 text-xs block mb-1">API Key {settings.llm?.api_key_configured ? '(deixe vazio para manter a atual)' : ''}</label>
             <div className="relative">
-              <input type={showLlmKey ? 'text' : 'password'} value={llmApiKey} onChange={e => setLlmApiKey(e.target.value)}
+              <input
+                type={showLlmKey ? 'text' : 'password'}
+                value={llmApiKey}
+                onChange={e => setLlmApiKey(e.target.value)}
                 placeholder={settings.llm?.api_key_configured ? 'Manter chave atual...' : 'sk-...'}
+                name="llm-api-key"
+                autoComplete="new-password"
+                spellCheck={false}
+                data-lpignore="true"
+                data-1p-ignore="true"
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
               <button type="button" onClick={() => setShowLlmKey(!showLlmKey)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">

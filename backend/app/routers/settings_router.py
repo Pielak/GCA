@@ -229,6 +229,17 @@ async def save_llm_settings(
     if req.provider not in valid_providers:
         raise HTTPException(status_code=400, detail=f"Provider inválido. Aceitos: {', '.join(valid_providers)}")
 
+    # Model deve ser um identificador técnico — o Chrome às vezes autofilla
+    # esse campo com email/nome do usuário por heurística de contexto.
+    # Rejeita antes de gravar para não quebrar o pipeline no próximo uso.
+    if req.model_preference:
+        m = req.model_preference.strip()
+        if "@" in m or " " in m or len(m) > 120:
+            raise HTTPException(
+                status_code=400,
+                detail="Modelo parece inválido (contém @, espaço ou é longo demais). Exemplos válidos: claude-opus-4-6, gpt-4o, deepseek-chat, gemini-2.0-flash. Deixe vazio para usar o padrão do provedor.",
+            )
+
     settings_obj = await _get_or_create_settings(db, project_id, "llm")
     settings_obj.settings_json = json.dumps({
         "provider": req.provider,
