@@ -1,7 +1,15 @@
 # Análise Completa: GCA — Documento Técnico + Mocks Figma + Questionário
 
+> ⚠️ **DOCUMENTO HISTÓRICO — NÃO É CONTRATO DE IMPLEMENTAÇÃO.**
+> Escrito em 2026-04-05 como análise arquitetural. Pode descrever capacidades,
+> mocks ou papéis que **não refletem o estado atual do código** nem o recorte
+> do MVP ativo. Para o estado real, consultar
+> [`GCA_CANONICAL_CONTRACT.md`](GCA_CANONICAL_CONTRACT.md) e
+> [`GCA_MVP_PROGRESS.md`](GCA_MVP_PROGRESS.md). Ordem de precedência documental
+> em [`CLAUDE.md §2`](CLAUDE.md).
+
 **Data**: 05/04/2026  
-**Status**: ✅ Arquitetura bem definida + UI pronta + Gap crítico identificado
+**Status**: Histórico / analítico
 
 ---
 

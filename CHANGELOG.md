@@ -2,6 +2,42 @@
 
 All notable changes to GCA will be documented in this file.
 
+## [Unreleased — MVP 1 saneamento] - 2026-04-17
+
+### Governança documental
+- Contrato canônico soberano (`GCA_CANONICAL_CONTRACT.md` v1.1) e tracker
+  (`GCA_MVP_PROGRESS.md` v1.1) em vigor. Precedência documental formalizada.
+- `CLAUDE.md` reescrito em 16 seções (fonte soberana, RBAC canônico, política
+  híbrida de IA, debt gates, regras de contenção).
+- README, ARQUITETURA e docs históricas marcadas explicitamente como
+  não-contrato quando contêm visão futura.
+
+### RBAC (DT-001 + DT-002 quitadas)
+- **Breaking:** `ROLE_ACTIONS` reduzido aos 5 papéis canônicos do contrato §4:
+  Admin, GP, Dev, Tester, QA (+ `admin_viewer` virtual). Removidos
+  `tech_lead`, `dev_senior`, `dev_pleno`, `compliance`, `stakeholder`,
+  `viewer` — DB não continha nenhum, sem migration de dados.
+- GP perdeu `code:write/code:review/pipeline:execute/git:commit` (contrato
+  §4.1 — GP não escreve código).
+- QA ganhou `security:review` e `compliance:validate`.
+- Frontend alinhado: `Sidebar`, `AdminUsersPage`, `AdminProjectViewPage`,
+  `ProjectDashPage`, `ProjectListPage`, `ProjectTeamPage`,
+  `RoleAssumptionPrompt`, `StatusBadge` operam apenas com os 5 canônicos.
+
+### Governança de IA (DT-005 + DT-009 quitadas)
+- `ai_key_resolver.py` com docstring de política de criticidade
+  (baixa/média/alta conforme contrato §6.2).
+- `agent_service.py` (camada GCA/pipeline OCG) deixa de fazer fallback
+  silencioso para `ANTHROPIC_API_KEY` quando o admin escolheu outro provider
+  sem a chave correspondente — `_ensure_key()` levanta `RuntimeError` claro.
+- Implementação do roteamento híbrido efetivo (classificar tarefa → escolher
+  provedor) permanece como escopo do MVP 3.
+
+### Testes
+- 81/81 backend integration + 44/44 unit passando ao fim desta sessão.
+
+---
+
 ## [0.1.0-beta] - 2026-04-05
 
 ### Added

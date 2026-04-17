@@ -1,5 +1,13 @@
 # GCA — Arquitetura do Orquestrador Global
 
+> ⚠️ **DOCUMENTO HISTÓRICO / ANALÍTICO — NÃO É CONTRATO DE IMPLEMENTAÇÃO.**
+> Descreve a visão arquitetural original. Contém elementos (papéis "Tech Lead"
+> e "Manager", SaaS multi-tenant central, etc.) que **não refletem o recorte
+> canônico atual**. Para o contrato vigente, consultar
+> [`GCA_CANONICAL_CONTRACT.md`](GCA_CANONICAL_CONTRACT.md) e
+> [`GCA_MVP_PROGRESS.md`](GCA_MVP_PROGRESS.md). Precedência documental em
+> [`CLAUDE.md §2`](CLAUDE.md).
+
 ## 🏗️ Visão Geral: Camadas
 
 ```

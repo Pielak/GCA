@@ -2,10 +2,19 @@
 
 ## Documento Tecnico Completo
 
+> ⚠️ **DOCUMENTO HISTÓRICO — NÃO É CONTRATO DE IMPLEMENTAÇÃO.**
+> Descreve a visão arquitetural do GCA em 2026-04-10. Contém capacidades
+> pipeline-inteiro que **não refletem o estado atual** nem o recorte do MVP
+> ativo (MVP 1 em saneamento). RBAC de 7 papéis descrito aqui é histórico —
+> o contrato canônico usa 5 papéis. Para estado real, consultar
+> [`../GCA_CANONICAL_CONTRACT.md`](../GCA_CANONICAL_CONTRACT.md) e
+> [`../GCA_MVP_PROGRESS.md`](../GCA_MVP_PROGRESS.md). Ordem de precedência
+> documental em [`../CLAUDE.md §2`](../CLAUDE.md).
+
 **Versao:** 2.0
 **Data:** 2026-04-10
 **Autor:** Luiz Carlos Pielak
-**Status:** Producao
+**Status:** Histórico / visão original (não-contrato)
 
 ---
 
