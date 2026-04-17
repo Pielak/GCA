@@ -1,12 +1,36 @@
 """
-AI Key Resolver — Resolução compartimentalizada de API keys.
+AI Key Resolver — resolução compartimentalizada de API keys.
 
-DUAS CAMADAS (spec seção 2 e 8):
-  1. Camada GCA (Admin): chaves globais → APENAS para OCG pipeline (avaliação questionário externo)
-  2. Camada Projeto (GP): chaves por projeto via vault → Arguidor, CodeGen, QA, LiveDocs, etc.
+Fonte soberana: `GCA_CANONICAL_CONTRACT.md §6` (Política canônica de IA).
 
-O GP configura suas chaves via /settings/llm do projeto.
-O Admin configura as chaves globais via /admin/gca/ai-providers.
+DUAS CAMADAS:
+  1. **Camada GCA (Admin):** chaves globais do admin da instância.
+     Uso exclusivo: pipeline de pré-OCG (avaliação do questionário antes da
+     aprovação do projeto, quando ainda não há GP dono da chave).
+     Única consumidora legítima: `agent_service.py` (8 agentes OCG).
+  2. **Camada Projeto (GP):** chaves por projeto via vault criptografado.
+     Uso: Arguidor, CodeGen, QA, LiveDocs e qualquer operação pós-aprovação.
+
+REGRAS DURAS (contrato §6.4):
+- Nunca misturar chave global do admin com chave de projeto sem regra explícita.
+- Se o projeto não configurou chave, falhar explicitamente em tarefas de alta
+  criticidade (contrato §6.2). Não cair silenciosamente em chave de outro
+  provedor ou na chave global.
+- Cada chamada de IA deve registrar provedor, modelo, motivo e criticidade.
+
+CRITICIDADE DA TAREFA (contrato §6.2):
+- **baixa:** classificação simples, extração, sumarização curta, normalização,
+  pré-processamento, enriquecimento leve. Pode usar modelo local/Ollama.
+- **média:** perguntas dirigidas preliminares, propostas iniciais de backlog,
+  pré-análise de artefatos, insumos para OCG/Gatekeeper/Arguidor. Local ou
+  remoto com validação.
+- **alta:** consolidação final do OCG, arbitragem de conflitos, decisões
+  arquiteturais, compliance/segurança críticos, liberação/bloqueio de pipeline,
+  backlog oficial, codegen crítico, síntese executiva. **Modelo premium
+  obrigatório.**
+
+O GP configura chaves via `/settings/llm` do projeto.
+O Admin configura chaves globais via `/admin/gca/ai-providers`.
 """
 from typing import Optional
 from uuid import UUID

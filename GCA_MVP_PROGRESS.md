@@ -61,7 +61,7 @@ Nesta fase, o trabalho prioritário é:
 | DT-002 | Critical | UI/Admin | Há análise apontando que a aba de usuários/admin está modelada com RBAC global ampliado e lista papéis além do recorte canônico. | Análise completa | **Quitada 2026-04-17** — ver §4 |
 | DT-003 | Critical | Contrato de produto | Há tensão entre textos que sugerem plataforma ampla pronta e o recorte real que ainda exige saneamento da base. | Docs / README / manual | Aberto |
 | DT-004 | Critical | Segurança operacional | PAT de Git ainda aparece documentado em texto plano / criptografia pendente. | Tutorial / requisitos / roadmap | Aberto |
-| DT-005 | Critical | Governança de IA | Falta consolidar regra canônica para seleção de provedor/modelo por objetivo do cliente final, evitando default rígido enganoso. | Requisitos / contrato | Aberto |
+| DT-005 | Critical | Governança de IA | Falta consolidar regra canônica para seleção de provedor/modelo por objetivo do cliente final, evitando default rígido enganoso. | Requisitos / contrato | **Quitada 2026-04-17** — ver §4 |
 
 ### 3.2 Major
 
@@ -70,7 +70,7 @@ Nesta fase, o trabalho prioritário é:
 | DT-006 | Major | Fases vs realidade | Há materiais descrevendo pipeline completo com módulos avançados como se estivessem igualmente maduros. | Manual / tutorial / análise | Aberto |
 | DT-007 | Major | Placeholders / continuidade | Há placeholders de telas/módulos previstos que não devem ser promovidos automaticamente a entregas da fase atual. | TASK_GCA_MASTER | Aberto |
 | DT-008 | Major | Consistência documental | Há discrepâncias entre documentos sobre readiness, testes e maturidade operacional. | Changelog / docs / task | Aberto |
-| DT-009 | Major | Roteamento híbrido | Falta explicitar em código e docs ativas que tarefas menores podem usar modelo local/Ollama e decisões críticas exigem modelo premium. | Contrato / operação | Aberto |
+| DT-009 | Major | Roteamento híbrido | Falta explicitar em código e docs ativas que tarefas menores podem usar modelo local/Ollama e decisões críticas exigem modelo premium. | Contrato / operação | **Quitada 2026-04-17** (política) — ver §4 |
 
 ### 3.3 Minor
 
@@ -87,6 +87,16 @@ Nesta fase, o trabalho prioritário é:
 |---|---|---|---|---|
 | DT-001 | 2026-04-17 | RBAC reduzido aos 5 papéis canônicos no backend: `admin_viewer` (virtual) + `gp` + `dev` + `tester` + `qa`. Papéis históricos (tech_lead, dev_senior, dev_pleno, compliance, stakeholder, viewer) removidos. GP perdeu `code:write/review/execute/commit` (contrato §4.1 — GP não escreve código); QA ganhou `security:review` e `compliance:validate`. Comentários dos campos `role` em `models/base.py` atualizados. | `backend/app/core/permissions.py`, `backend/app/models/base.py`, `backend/tests/test_permissions.py`, `backend/tests/test_rbac_integration.py`, `backend/tests/test_multi_roles.py`, `backend/tests/test_project_setup.py` | 81/81 testes backend + 44/44 unit passando. DB com 3 `gp` preservados sem migration. |
 | DT-002 | 2026-04-17 | Frontend alinhado ao RBAC canônico. Todos os mapas `ROLE_LABELS`/`ROLE_COLORS`/`ROLE_OPTIONS` e dropdowns de convite agora listam apenas Admin/GP/Dev/Tester/QA. `RoleAssumptionPrompt` remapeado para ações → papéis canônicos. Defaults de convite mudam de `dev_pleno` para `dev`. | `frontend/src/components/layout/Sidebar.tsx`, `frontend/src/components/ui/StatusBadge.tsx`, `frontend/src/components/projects/RoleAssumptionPrompt.tsx`, `frontend/src/pages/admin/AdminUsersPage.tsx`, `frontend/src/pages/admin/AdminProjectViewPage.tsx`, `frontend/src/pages/projects/ProjectDashPage.tsx`, `frontend/src/pages/projects/ProjectListPage.tsx`, `frontend/src/app/pages/projects/ProjectTeamPage.tsx`, `frontend/src/pages/projects/CodeGeneratorPage.tsx` (comentário TODO) | Build frontend limpo (vite preview up). Grep `tech_lead\|dev_senior\|dev_pleno\|stakeholder\|senior_dev\|pleno_dev` no diretório `frontend/src` = 0 ocorrências. |
+| DT-005 | 2026-04-17 | Política canônica de IA consolidada no escopo do MVP 1. Docstring de `ai_key_resolver.py` explicita as duas camadas (GCA/Admin vs Projeto/GP), as regras duras do contrato §6.4 e a taxonomia de criticidade (baixa/média/alta) do §6.2. `agent_service.py` (pipeline OCG — camada GCA) deixa de fazer fallback silencioso: se o admin configurou `DEFAULT_AI_PROVIDER=X` mas `X_API_KEY` está ausente, o service levanta `RuntimeError` explícito na primeira chamada a `_call_llm`, em vez de cair silenciosamente em `ANTHROPIC_API_KEY`. | `backend/app/services/ai_key_resolver.py` (docstring expandida), `backend/app/services/agent_service.py` (`__init__` sem fallback silencioso + novo `_ensure_key` chamado no início de `_call_llm`) | 81/81 + 44/44 testes passando; import da classe sem erro. |
+| DT-009 (política) | 2026-04-17 | Roteamento híbrido por criticidade explicitado nos docs operacionais ativos (CLAUDE.md §6.2-6.3) e no docstring de `ai_key_resolver.py`. Baixa/Média → Ollama ou modelo barato aceitáveis; Alta → modelo premium obrigatório e sem fallback silencioso. | `GCA_CANONICAL_CONTRACT.md §6.2-6.5`, `CLAUDE.md §6.2-6.3`, `backend/app/services/ai_key_resolver.py` | Doc lido e referenciado pelo código. Pendente a implementação do roteador em si (ver nota abaixo). |
+
+### Resíduos conhecidos (fora do escopo do MVP 1; programados para MVPs posteriores)
+
+- `arguider_service.py:174` ainda faz fallback a `settings.ANTHROPIC_API_KEY` quando projeto não tem chave. Arguidor é escopo do MVP 2.
+- `module_codegen_service.py:164, 298` e `llm_service.py:73, 81` instanciam Anthropic diretamente. CodeGen controlado é escopo do MVP 3.
+- `ingestion_service.py:288` hardcode `provider="anthropic"`. Ingestão profunda é escopo do MVP 2.
+- `ocg_updater_service.py:250, 413` e `ai_service.py:86, 100` usam `DEFAULT_AI_PROVIDER`/`ANTHROPIC_API_KEY` em camadas compartilhadas. Saneamento deve acompanhar o refactor do MVP 2/3.
+- Implementação efetiva de roteamento por criticidade (classificação de tarefa → seleção de provedor) é escopo do MVP 3 (análise de adequação do provedor ao uso pretendido no CodeGen, contrato §7).
 
 > Regra: toda quitação relevante deve ser adicionada aqui com data, módulos afetados e evidência.
 

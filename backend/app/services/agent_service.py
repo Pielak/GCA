@@ -46,28 +46,58 @@ class UUIDEncoder(json.JSONEncoder):
 
 class AgentService:
     """Service para gerenciar os 8 agentes OCG.
+
     CAMADA GCA ADMIN — usa chave global configurada pelo admin.
     Não deve usar chave de projeto. Avalia questionários externos apenas.
     Suporta múltiplos providers: Anthropic, DeepSeek, OpenAI (compatíveis).
+
+    Criticidade (contrato §6.2): **ALTA**. Consolidação do OCG exige modelo
+    premium de raciocínio. Sem fallback silencioso a outro provider/chave:
+    se o admin configurou provider X mas não forneceu `X_API_KEY`, o service
+    falha explicitamente na primeira chamada (ver `_ensure_key`).
     """
 
     def __init__(self, db: AsyncSession):
         self.db = db
-        # Detectar provider configurado pelo admin
+        # Detectar provider configurado pelo admin (camada GCA).
         self.provider = settings.DEFAULT_AI_PROVIDER or "anthropic"
-        self.api_key = getattr(settings, f"{self.provider.upper()}_API_KEY", None) or settings.ANTHROPIC_API_KEY
-        self.model = getattr(settings, f"{self.provider.upper()}_MODEL", None) or settings.ANTHROPIC_MODEL
+        self.api_key = getattr(settings, f"{self.provider.upper()}_API_KEY", None)
+        self.model = getattr(settings, f"{self.provider.upper()}_MODEL", None)
 
+        # Cliente SDK nativo apenas para Anthropic. Outros providers usam httpx
+        # em `_call_llm` (rota OpenAI-compatible).
         if self.provider == "anthropic" and self.api_key:
             self.client = AsyncAnthropic(api_key=self.api_key)
         else:
-            self.client = None  # Usará _call_llm via httpx
+            self.client = None
+
+    def _ensure_key(self) -> None:
+        """Garante que o provider configurado tem chave. Falha explícita se
+        não tiver — evita fallback silencioso (contrato §6.4).
+        """
+        if not self.api_key:
+            raise RuntimeError(
+                f"Provider de IA '{self.provider}' configurado (DEFAULT_AI_PROVIDER) "
+                f"mas {self.provider.upper()}_API_KEY está ausente. "
+                f"Admin deve configurar a chave correspondente em /admin/gca/ai-providers. "
+                f"Geração de OCG é tarefa de ALTA criticidade (contrato §6.2) e não "
+                f"aceita fallback silencioso para outro provider."
+            )
+        if not self.model:
+            raise RuntimeError(
+                f"Provider de IA '{self.provider}' sem modelo configurado "
+                f"({self.provider.upper()}_MODEL). Admin deve definir o modelo."
+            )
 
     async def _call_llm(self, system_prompt: str, user_prompt: str, max_tokens: int = 4096, project_id: UUID = None, operation: str = "ocg_generation") -> tuple[str, int]:
         """Chamada unificada ao LLM — suporta Anthropic e OpenAI-compatible (DeepSeek, Grok, etc.)
         Returns: (response_text, tokens_used)
         Integra billing ao final da chamada.
+
+        Criticidade: **ALTA** (contrato §6.2). Falha explícita se provider
+        configurado não tiver chave — sem fallback silencioso.
         """
+        self._ensure_key()
         import httpx
 
         tokens_in = 0
