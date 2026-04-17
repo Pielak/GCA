@@ -67,6 +67,7 @@ Mesma do MVP 1:
 |---|---|---|---|---|---|
 | DT-012 | Critical | Governança de IA (Arguidor) | `arguider_service.py:174` faz fallback silencioso a `settings.ANTHROPIC_API_KEY` quando o projeto não tem chave configurada. Contradiz contrato §6.4 (nunca misturar chave global com projeto). | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
 | DT-013 | Critical | Governança de IA (Ingestão) | `ingestion_service.py:288` resolve chave com `provider="anthropic"` hardcoded. Ignora o provedor escolhido pelo GP. | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
+| DT-015 | Major | UX/Ingestão | PDF preenchido do questionário é sempre quarentenado pelo detector de PII (respostas têm email/CPF/telefone de stakeholders). Caminho oficial de alimentar o OCG fica bloqueado na abertura do projeto. Descoberto no smoke E2E do MVP 2 em 2026-04-17. | Smoke E2E MVP 2 | **Aberto** — unificação em estratégia B (PDF-only) fecha essa DT |
 
 #### Herdadas (MVP 1, já quitadas — mantidas para rastreabilidade)
 
@@ -88,6 +89,7 @@ Mesma do MVP 1:
 | DT-007 | Major | Placeholders / continuidade | Placeholders de telas/módulos previstos não promovidos automaticamente a entregas. | TASK_GCA_MASTER | Aberto |
 | DT-008 | Major | Consistência documental | Discrepâncias entre documentos sobre readiness, testes e maturidade. | Changelog / docs / task | Aberto |
 | DT-014 | Major | Governança de IA (OCG Updater) | `ocg_updater_service.py:250, 413` usa `settings.DEFAULT_AI_PROVIDER` como fallback sem aplicar a política de criticidade (§6.2). OCG updates dependem de decisões críticas. | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
+| DT-016 | Major | Compartimentalização operacional (SMTP) | GCA hoje envia todos os emails (convites, notificações, aprovações) via SMTP global do admin. Sem isolamento por projeto/cliente: identidade do remetente é misturada, compliance LGPD fica exposto. Paralelo ao §6.6 do contrato (IA compartimentalizada por projeto) — mesma lógica aplica a SMTP. | Decisão arquitetural 2026-04-17 | **Aberto — escopo MVP 5 (Hardening)**. Não implementar antes de MVP 5 por: não é blocker do gate MVP 2/3, requer refactor do EmailService, pode afetar caminhos hoje estáveis. |
 
 #### Herdadas (MVP 1, já quitadas)
 
