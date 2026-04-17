@@ -13,29 +13,15 @@ from app.db.database import get_db
 from app.routers.project_setup_router import _check_setup_status
 
 
-async def require_project_setup_complete(
-    request: Request,
-    db: AsyncSession = Depends(get_db),
+async def assert_project_setup_complete(
+    db: AsyncSession,
+    project_id: UUID,
 ) -> dict:
-    """Bloqueia execução se o projeto não completou os 3 pré-requisitos.
+    """Função helper — levanta 412 se o projeto não completou os 3 pré-requisitos.
 
-    Extrai project_id dos path params. Endpoint que usa essa dep DEVE ter
-    `project_id` no path (ex.: `/projects/{project_id}/...`).
+    Use quando o `project_id` vem do corpo da request (Pydantic model) em vez
+    do path. Devolve o dict de status quando tudo ok.
     """
-    project_id_raw = request.path_params.get("project_id")
-    if not project_id_raw:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="require_project_setup_complete usada em endpoint sem {project_id} no path",
-        )
-    try:
-        project_id = UUID(str(project_id_raw))
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="project_id inválido no path",
-        )
-
     setup = await _check_setup_status(db, project_id)
     if setup["ready_to_activate"]:
         return setup
@@ -59,3 +45,29 @@ async def require_project_setup_complete(
             "missing": missing,
         },
     )
+
+
+async def require_project_setup_complete(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """FastAPI dependency — extrai `project_id` do path e delega ao helper.
+
+    Endpoint que usa essa dep DEVE ter `{project_id}` no path
+    (ex.: `/projects/{project_id}/...`).
+    """
+    project_id_raw = request.path_params.get("project_id")
+    if not project_id_raw:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="require_project_setup_complete usada em endpoint sem {project_id} no path",
+        )
+    try:
+        project_id = UUID(str(project_id_raw))
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="project_id inválido no path",
+        )
+
+    return await assert_project_setup_complete(db, project_id)

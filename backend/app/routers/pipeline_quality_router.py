@@ -14,6 +14,7 @@ import httpx
 
 from app.db.database import get_db
 from app.dependencies.require_action import require_action
+from app.dependencies.require_project_setup import require_project_setup_complete
 from app.models.base import BacklogItem, OCG, ProjectSettings, ProjectGitConfig
 from app.services.vault_service import VaultService
 from app.services.llm_service import LLMServiceFactory, LLMProvider
@@ -81,6 +82,7 @@ async def generate_tests(
     item_id: UUID,
     permissions: dict = Depends(require_action("code:write")),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Gera testes unitarios + integracao para o codigo do item via LLM."""
     item = await _get_item(db, project_id, item_id)
@@ -184,6 +186,7 @@ async def run_tests(
     item_id: UUID,
     permissions: dict = Depends(require_action("pipeline:execute")),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Cria branch temporaria, commita codigo+testes, dispara GitHub Actions."""
     item = await _get_item(db, project_id, item_id)
@@ -300,6 +303,7 @@ async def security_scan(
     item_id: UUID,
     permissions: dict = Depends(require_action("security:review")),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Analise de seguranca via LLM (OWASP Top 10)."""
     item = await _get_item(db, project_id, item_id)
@@ -414,6 +418,7 @@ async def compliance_check(
     item_id: UUID,
     permissions: dict = Depends(require_action("compliance:validate")),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Validacao de compliance ISO 27001 + LGPD via LLM."""
     item = await _get_item(db, project_id, item_id)
@@ -519,6 +524,7 @@ async def qa_approve(
     request: QAApprovalRequest,
     permissions: dict = Depends(require_action("qa:approve")),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Aprovacao de QA — acao humana."""
     item = await _get_item(db, project_id, item_id)

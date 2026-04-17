@@ -10,6 +10,7 @@ import structlog
 from app.db.database import get_db
 from app.services.ingestion_service import IngestionService
 from app.middleware.auth import get_current_user_from_token
+from app.dependencies.require_project_setup import require_project_setup_complete
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["ingestion"])
@@ -22,6 +23,7 @@ async def upload_document(
     description: Optional[str] = Form(None),
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Upload de documento para análise pelo Arguidor."""
     file_bytes = await file.read()

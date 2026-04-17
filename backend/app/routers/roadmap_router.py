@@ -11,6 +11,7 @@ from app.db.database import get_db
 from app.services.roadmap_service import RoadmapService
 from app.middleware.auth import get_current_user_from_token
 from app.dependencies.require_action import require_action
+from app.dependencies.require_project_setup import require_project_setup_complete
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["roadmap"])
@@ -128,6 +129,7 @@ async def ingest_arguider_candidates(
     project_id: UUID,
     permissions: dict = Depends(require_action("backlog:manage")),
     db: AsyncSession = Depends(get_db),
+    _setup: dict = Depends(require_project_setup_complete),
 ):
     """Converte ModuleCandidates do Arguider em itens do backlog."""
     from app.services.backlog_service import BacklogService
