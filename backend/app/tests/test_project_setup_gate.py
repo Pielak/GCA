@@ -5,12 +5,16 @@ from datetime import datetime, timezone
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import FastAPI, Depends
+from httpx import AsyncClient, ASGITransport
 
 from app.models.base import (
     User, Organization, Project, ProjectGitConfig, ProjectSettings, Questionnaire,
 )
 from app.routers.project_setup_router import _check_setup_status
 from app.core.security import hash_password
+from app.dependencies.require_project_setup import require_project_setup_complete
+from app.db.database import get_db
 
 pytestmark = pytest.mark.asyncio
 
@@ -124,12 +128,6 @@ async def test_ready_to_activate_requires_all_three(db_session: AsyncSession):
 
 # ─── Dependency tests ────────────────────────────────────────────────
 
-from fastapi import FastAPI, Depends
-from httpx import AsyncClient, ASGITransport
-
-from app.dependencies.require_project_setup import require_project_setup_complete
-from app.db.database import get_db
-
 
 def _make_test_app(db: AsyncSession):
     """Mini-app FastAPI que expõe um endpoint protegido pela dependency."""
@@ -176,7 +174,7 @@ async def test_dependency_allows_when_setup_complete(db_session: AsyncSession):
         id=uuid.uuid4(), project_id=pid, gp_email="gp@t.local",
         responses=json.dumps({"1": "x"}), status="pending",
     ))
-    await db_session.commit()
+    await db_session.flush()
 
     app = _make_test_app(db_session)
     transport = ASGITransport(app=app)
