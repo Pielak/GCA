@@ -18,6 +18,7 @@ from app.services.llm_service import LLMProvider, LLMServiceFactory
 from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
 from app.models.base import Project, ProjectGitConfig
 from app.core.config import settings as app_settings
+from app.dependencies.require_project_setup import assert_project_setup_complete
 
 logger = structlog.get_logger(__name__)
 
@@ -279,6 +280,7 @@ async def generate_scaffold(request: ScaffoldRequest, db: AsyncSession = Depends
     5. Retorna lista de arquivos com status (complete/todo/nmi)
     """
     project_id = request.project_id
+    await assert_project_setup_complete(db, project_id)
 
     # 1. Buscar projeto
     project = await db.get(Project, project_id)
@@ -658,6 +660,8 @@ async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSe
     - **llm_provider**: LLM provider (anthropic, openai, grok, deepseek)
     - **api_key**: Optional API key (uses env variable if not provided)
     """
+    project_id = request.project_id
+    await assert_project_setup_complete(db, project_id)
 
     try:
         provider = LLMProvider(request.llm_provider.lower())
@@ -722,6 +726,8 @@ async def generate_module_code(request: GenerateModuleCodeRequest, db: AsyncSess
     - **requirements**: Module-specific requirements
     - **llm_provider**: LLM provider to use
     """
+    project_id = request.project_id
+    await assert_project_setup_complete(db, project_id)
 
     try:
         provider = LLMProvider(request.llm_provider.lower())
@@ -953,6 +959,7 @@ async def regenerate_single_file(
 ):
     """Gera apenas o arquivo indicado (não toca nos outros) e commita no Git."""
     project_id = request.project_id
+    await assert_project_setup_complete(db, project_id)
 
     project = await db.get(Project, project_id)
     if not project:
