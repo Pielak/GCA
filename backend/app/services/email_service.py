@@ -22,6 +22,32 @@ def _is_test_environment() -> bool:
     return "PYTEST_CURRENT_TEST" in os.environ
 
 
+# Domínios reservados/inválidos que nunca devem receber email real.
+# Baseado em RFC 2606 (.test, .example, .invalid, .localhost, example.com/org/net)
+# e nos domínios usados pelas factories do GCA (test.com, test.org, localhost).
+# Complementa `_is_test_environment`: mesmo fora do pytest, se algum admin/usuário
+# fake sobreviveu no DB (lixo de teste persistido), o SMTP não tenta entregar
+# — evita bounces chegando no admin real. Camada de defesa independente da
+# DT-016 (SMTP compartimentalizado por projeto, MVP 5).
+_BLOCKED_TLDS = (".test", ".example", ".invalid", ".localhost")
+_BLOCKED_DOMAINS = (
+    "example.com", "example.org", "example.net",
+    "test.com", "test.org", "localhost",
+)
+
+
+def _is_non_deliverable_email(to_email: Optional[str]) -> bool:
+    """True se o destinatário usa domínio reservado/fake que jamais resolveria."""
+    if not to_email or "@" not in to_email:
+        return False
+    domain = to_email.strip().lower().rsplit("@", 1)[-1]
+    if any(domain.endswith(tld) for tld in _BLOCKED_TLDS):
+        return True
+    if any(domain == d or domain.endswith("." + d) for d in _BLOCKED_DOMAINS):
+        return True
+    return False
+
+
 class EmailService:
     """Service for sending emails via SMTP"""
 
@@ -62,6 +88,18 @@ class EmailService:
                 "email.skipped_test_environment",
                 to=to_email,
                 subject=subject,
+            )
+            return True, None
+
+        # Segunda camada: mesmo fora de pytest, recusa domínios reservados
+        # (RFC 2606 + test.com/test.org usados pelas factories). Protege o
+        # admin real quando há lixo de teste persistido no DB.
+        if _is_non_deliverable_email(to_email):
+            logger.warning(
+                "email.skipped_non_deliverable",
+                to=to_email,
+                subject=subject,
+                reason="domain_in_blocklist",
             )
             return True, None
 
@@ -813,6 +851,9 @@ GCA — Gestão de Codificação Assistida
         if _is_test_environment():
             logger.info("email.skipped_test_environment", to=to_email, kind="questionnaire_link")
             return True, None
+        if _is_non_deliverable_email(to_email):
+            logger.warning("email.skipped_non_deliverable", to=to_email, kind="questionnaire_link")
+            return True, None
         try:
             from app.core.config import settings
             import smtplib
@@ -872,6 +913,9 @@ GCA — Gestão de Codificação Assistida
         """Template 12: Notifica GP quando OCG é gerado com sucesso."""
         if _is_test_environment():
             logger.info("email.skipped_test_environment", to=to_email, kind="ocg_generated")
+            return True, None
+        if _is_non_deliverable_email(to_email):
+            logger.warning("email.skipped_non_deliverable", to=to_email, kind="ocg_generated")
             return True, None
         try:
             from app.core.config import settings
