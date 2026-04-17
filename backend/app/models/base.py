@@ -77,7 +77,7 @@ class OrganizationMember(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     organization_id = Column(UUID(as_uuid=True), ForeignKey("organizations.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    role = Column(String(50), nullable=False)  # admin, member, viewer
+    role = Column(String(50), nullable=False)  # organization-level: admin | member
     joined_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -140,7 +140,7 @@ class ProjectMember(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    role = Column(String(50), nullable=False)  # gp, tech_lead, dev_senior, dev_pleno, qa, compliance, stakeholder, viewer
+    role = Column(String(50), nullable=False)  # papéis canônicos (contrato §4): gp | dev | tester | qa
     invited_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     invite_token = Column(String(255), unique=True, nullable=True)
     invite_expires_at = Column(DateTime(timezone=True), nullable=True)
@@ -173,7 +173,7 @@ class ProjectInvite(Base):
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
     email = Column(String(255), nullable=False)
     full_name = Column(String(255), nullable=True)
-    role = Column(String(50), nullable=False)  # project_role enum values
+    role = Column(String(50), nullable=False)  # papéis canônicos do projeto: gp | dev | tester | qa
     invited_by_user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     invite_token = Column(String(255), unique=True, nullable=False)
     status = Column(String(20), nullable=False, default="PENDING")  # PENDING, ACCEPTED, EXPIRED, REVOKED, CANCELLED
@@ -637,7 +637,7 @@ class InvitationToken(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     email = Column(String(255), nullable=False, index=True)
     full_name = Column(String(255), nullable=True)
-    role = Column(String(50), default="admin")
+    role = Column(String(50), default="admin")  # admin (system-level) para convite de novo Admin
     token = Column(String(255), unique=True, nullable=False, index=True)
     temporary_password_hash = Column(String(255), nullable=False)
     validation_attempts = Column(Integer, default=0)

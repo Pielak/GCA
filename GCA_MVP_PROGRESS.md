@@ -57,7 +57,7 @@ Nesta fase, o trabalho prioritário é:
 
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
-| DT-001 | Critical | RBAC | Conflito entre documentação histórica com 7 papéis e contrato canônico com 5 papéis. | Docs históricos vs contrato | Aberto |
+| DT-001 | Critical | RBAC | Conflito entre documentação histórica com 7 papéis e contrato canônico com 5 papéis. | Docs históricos vs contrato | **Quitada 2026-04-17 (backend)** — ver §4 |
 | DT-002 | Critical | UI/Admin | Há análise apontando que a aba de usuários/admin está modelada com RBAC global ampliado e lista papéis além do recorte canônico. | Análise completa | Aberto |
 | DT-003 | Critical | Contrato de produto | Há tensão entre textos que sugerem plataforma ampla pronta e o recorte real que ainda exige saneamento da base. | Docs / README / manual | Aberto |
 | DT-004 | Critical | Segurança operacional | PAT de Git ainda aparece documentado em texto plano / criptografia pendente. | Tutorial / requisitos / roadmap | Aberto |
@@ -83,15 +83,13 @@ Nesta fase, o trabalho prioritário é:
 
 ## 4. Dívida quitada
 
-Nenhuma registrada ainda neste arquivo.
-
-> Regra: toda quitação relevante deve ser adicionada aqui com data, módulos afetados e evidência.
-
-Modelo:
-
 | ID | Data | Item quitado | Arquivos/módulos | Evidência |
 |---|---|---|---|---|
-| EX-001 | AAAA-MM-DD | Exemplo | backend/... frontend/... | testes / build / revisão |
+| DT-001 (parcial — backend) | 2026-04-17 | RBAC reduzido aos 5 papéis canônicos no backend: `admin_viewer` (virtual) + `gp` + `dev` + `tester` + `qa`. Papéis históricos (tech_lead, dev_senior, dev_pleno, compliance, stakeholder, viewer) removidos. GP perdeu `code:write/review/execute/commit` (contrato §4.1 — GP não escreve código); QA ganhou `security:review` e `compliance:validate`. Comentários dos campos `role` em `models/base.py` atualizados. | `backend/app/core/permissions.py`, `backend/app/models/base.py`, `backend/tests/test_permissions.py`, `backend/tests/test_rbac_integration.py`, `backend/tests/test_multi_roles.py`, `backend/tests/test_project_setup.py` | 81/81 testes backend + 44/44 unit passando. DB com 3 `gp` preservados sem migration. |
+
+> Parte pendente de DT-001: papéis nos `ROLE_LABELS` do frontend (`Sidebar.tsx`, `AdminUsersPage.tsx`) ainda listam 11 entradas — alinhamento frontend é escopo da DT-002.
+
+> Regra: toda quitação relevante deve ser adicionada aqui com data, módulos afetados e evidência.
 
 ---
 

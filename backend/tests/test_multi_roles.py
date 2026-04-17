@@ -1,4 +1,9 @@
-"""Testes para multi-papeis e nova matriz de permissoes (Secao 10 spec v2.0)."""
+"""Testes para multi-papéis e matriz de permissões canônica.
+
+Fonte: GCA_CANONICAL_CONTRACT.md §4. Papéis canônicos: admin (via admin_viewer
+virtual), gp, dev, tester, qa. Papéis históricos (tech_lead, dev_senior,
+dev_pleno, compliance, stakeholder) foram removidos do RBAC.
+"""
 import pytest
 from uuid import uuid4
 from app.core.permissions import (
@@ -7,135 +12,115 @@ from app.core.permissions import (
 )
 
 
-class TestNewPermissionMatrix:
-    """Testa nova matriz de permissoes (Secao 10 do spec)."""
+class TestCanonicalPermissionMatrix:
+    """Matriz de permissões dos 5 papéis canônicos + admin_viewer."""
 
-    # GP — agora tem code:write, code:review, security:review, etc.
-    def test_gp_has_code_write(self):
-        assert has_action("gp", "code:write") is True
+    # ── GP: conduz projeto, aprova, NÃO escreve código ──
 
-    def test_gp_has_code_review(self):
-        assert has_action("gp", "code:review") is True
-
-    def test_gp_has_security_review(self):
-        assert has_action("gp", "security:review") is True
+    def test_gp_cannot_write_code(self):
+        assert has_action("gp", "code:write") is False
+        assert has_action("gp", "code:review") is False
+        assert has_action("gp", "git:commit") is False
+        assert has_action("gp", "pipeline:execute") is False
 
     def test_gp_has_qa_approve(self):
         assert has_action("gp", "qa:approve") is True
 
-    def test_gp_has_git_commit(self):
-        assert has_action("gp", "git:commit") is True
-
     def test_gp_has_backlog_manage(self):
         assert has_action("gp", "backlog:manage") is True
 
-    def test_gp_has_audit_view(self):
+    def test_gp_has_audit_view_and_export(self):
         assert has_action("gp", "audit:view") is True
-
-    def test_gp_has_audit_export(self):
         assert has_action("gp", "audit:export") is True
 
-    def test_gp_has_compliance_validate(self):
-        assert has_action("gp", "compliance:validate") is True
+    def test_gp_has_project_edit_and_manage_team(self):
+        assert has_action("gp", "project:edit") is True
+        assert has_action("gp", "project:manage_team") is True
 
-    # Tech Lead
-    def test_tech_lead_has_code_review(self):
-        assert has_action("tech_lead", "code:review") is True
+    def test_gp_has_pipeline_review(self):
+        assert has_action("gp", "pipeline:review") is True
 
-    def test_tech_lead_has_security_review(self):
-        assert has_action("tech_lead", "security:review") is True
+    def test_gp_has_docs_edit(self):
+        assert has_action("gp", "docs:edit") is True
 
-    def test_tech_lead_has_git_commit(self):
-        assert has_action("tech_lead", "git:commit") is True
+    # ── Dev: implementa código, NÃO aprova módulo ──
 
-    def test_tech_lead_has_backlog_manage(self):
-        assert has_action("tech_lead", "backlog:manage") is True
+    def test_dev_writes_and_reviews_code(self):
+        assert has_action("dev", "code:write") is True
+        assert has_action("dev", "code:review") is True
 
-    def test_tech_lead_no_qa_approve(self):
-        assert has_action("tech_lead", "qa:approve") is False
+    def test_dev_can_commit_and_execute(self):
+        assert has_action("dev", "git:commit") is True
+        assert has_action("dev", "pipeline:execute") is True
 
-    def test_tech_lead_no_compliance_validate(self):
-        assert has_action("tech_lead", "compliance:validate") is False
+    def test_dev_no_qa_approve(self):
+        assert has_action("dev", "qa:approve") is False
 
-    # Dev Senior
-    def test_dev_senior_has_code_review(self):
-        assert has_action("dev_senior", "code:review") is True
+    def test_dev_no_manage_team(self):
+        assert has_action("dev", "project:manage_team") is False
 
-    def test_dev_senior_has_git_commit(self):
-        assert has_action("dev_senior", "git:commit") is True
+    # ── Tester: cria/edita/executa testes, exporta evidências ──
 
-    def test_dev_senior_has_audit_view(self):
-        assert has_action("dev_senior", "audit:view") is True
+    def test_tester_has_pipeline_execute(self):
+        assert has_action("tester", "pipeline:execute") is True
 
-    def test_dev_senior_no_security_review(self):
-        assert has_action("dev_senior", "security:review") is False
+    def test_tester_has_audit_export(self):
+        assert has_action("tester", "audit:export") is True
 
-    # Dev Pleno
-    def test_dev_pleno_no_git_commit(self):
-        assert has_action("dev_pleno", "git:commit") is False
+    def test_tester_no_code_write(self):
+        assert has_action("tester", "code:write") is False
 
-    def test_dev_pleno_no_code_review(self):
-        assert has_action("dev_pleno", "code:review") is False
+    def test_tester_no_qa_approve(self):
+        assert has_action("tester", "qa:approve") is False
 
-    # QA
-    def test_qa_has_qa_approve(self):
+    # ── QA: revisa/aprova, NÃO edita teste ──
+
+    def test_qa_has_approve(self):
         assert has_action("qa", "qa:approve") is True
 
-    def test_qa_has_audit_view(self):
-        assert has_action("qa", "audit:view") is True
+    def test_qa_has_security_and_compliance(self):
+        assert has_action("qa", "security:review") is True
+        assert has_action("qa", "compliance:validate") is True
 
     def test_qa_no_code_write(self):
         assert has_action("qa", "code:write") is False
 
-    # Compliance
-    def test_compliance_has_compliance_validate(self):
-        assert has_action("compliance", "compliance:validate") is True
+    def test_qa_no_pipeline_execute(self):
+        # QA revisa, não executa.
+        assert has_action("qa", "pipeline:execute") is False
 
-    def test_compliance_has_security_review(self):
-        assert has_action("compliance", "security:review") is True
+    # ── Papéis históricos foram removidos ──
 
-    def test_compliance_has_backlog_manage(self):
-        assert has_action("compliance", "backlog:manage") is True
-
-    def test_compliance_has_audit_export(self):
-        assert has_action("compliance", "audit:export") is True
-
-    def test_compliance_has_project_edit(self):
-        assert has_action("compliance", "project:edit") is True
-
-    # Stakeholder
-    def test_stakeholder_only_view(self):
-        actions = get_actions_for_role("stakeholder")
-        assert actions == {"project:view"}
+    def test_historical_roles_removed(self):
+        for legacy in ("tech_lead", "dev_senior", "dev_pleno", "compliance", "stakeholder", "viewer"):
+            assert legacy not in ROLE_ACTIONS
 
 
 class TestMultiRoleFunctions:
-    """Testa funcoes para multiplos papeis."""
+    """Funções para múltiplos papéis (um usuário pode ter 1+ roles no projeto)."""
 
     def test_get_actions_for_roles_union(self):
-        actions = get_actions_for_roles(["gp", "dev_senior"])
-        assert "project:manage_team" in actions
-        assert "code:write" in actions
-        assert "pipeline:execute" in actions
+        # Usuário com gp+dev: aprovação de GP + escrita de código de Dev.
+        actions = get_actions_for_roles(["gp", "dev"])
+        assert "project:manage_team" in actions  # vem do GP
+        assert "code:write" in actions           # vem do Dev
+        assert "qa:approve" in actions           # vem do GP
 
     def test_get_actions_for_roles_empty(self):
-        actions = get_actions_for_roles([])
-        assert actions == set()
+        assert get_actions_for_roles([]) == set()
 
     def test_has_action_any_true(self):
-        assert has_action_any(["qa", "compliance"], "qa:approve") is True
+        assert has_action_any(["qa", "tester"], "qa:approve") is True
 
     def test_has_action_any_false(self):
-        assert has_action_any(["stakeholder"], "code:write") is False
+        assert has_action_any(["tester"], "code:write") is False
 
     def test_has_action_any_empty_roles(self):
         assert has_action_any([], "project:view") is False
 
     def test_admin_viewer_unchanged(self):
         actions = get_actions_for_role("admin_viewer")
-        assert "project:view" in actions
-        assert "project:manage_gp" in actions
-        assert len(actions) == 2
+        assert actions == {"project:view", "project:manage_gp"}
 
 
 @pytest.mark.asyncio
@@ -146,10 +131,10 @@ class TestResolveMultiRoles:
         from unittest.mock import AsyncMock, patch
 
         db = AsyncMock()
-        with patch("app.dependencies.require_action.get_user_project_roles", return_value=["gp", "dev_senior"]), \
+        with patch("app.dependencies.require_action.get_user_project_roles", return_value=["gp", "dev"]), \
              patch("app.dependencies.require_action._get_user_is_admin", return_value=False):
             roles = await resolve_user_roles_in_project(uuid4(), uuid4(), db)
-            assert roles == ["gp", "dev_senior"]
+            assert roles == ["gp", "dev"]
 
     async def test_admin_without_membership_returns_admin_viewer(self):
         from app.dependencies.require_action import resolve_user_roles_in_project
