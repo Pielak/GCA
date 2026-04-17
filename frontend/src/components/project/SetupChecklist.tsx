@@ -24,8 +24,9 @@ interface Step {
 // 2. Git — repo + PAT viabiliza ingestão de repos externos e CodeGen futuro.
 // 3. Questionário — dispara geração do OCG; precisa de IA configurada.
 //
-// SMTP por projeto (DT-016) fica como passo 3 no roadmap, antes do
-// questionário — escopo MVP 5 (Hardening). Aparece aqui como preview locked.
+// Depois da consolidação (C3), os 3 passos são abas dentro de /settings.
+// SMTP por projeto (DT-016) é passo futuro — escopo MVP 5. Aparece aqui
+// como preview locked.
 const STEPS: Step[] = [
   {
     n: 1,
@@ -43,7 +44,7 @@ const STEPS: Step[] = [
     description: 'Conecte o repositório (GitHub/GitLab/Bitbucket) com Personal Access Token.',
     rationale: 'Necessário para ingestão de repos externos e CodeGen. Mesmo sem PAT, o OCG inicial roda — mas CodeGen e merge dependem dele.',
     icon: GitBranch,
-    to: (id) => `/projects/${id}/repository`,
+    to: (id) => `/projects/${id}/settings?tab=repo`,
   },
   {
     n: 3,
@@ -52,7 +53,7 @@ const STEPS: Step[] = [
     description: 'Baixe o PDF editável, preencha offline e envie. 49 perguntas que alimentam o OCG.',
     rationale: 'Dispara a geração do OCG (pipeline de 8 agentes IA). Precisa dos passos 1 e 2 completos para ser útil.',
     icon: ClipboardList,
-    to: (id) => `/projects/${id}/questionnaire`,
+    to: (id) => `/projects/${id}/settings?tab=questionario`,
   },
 ]
 

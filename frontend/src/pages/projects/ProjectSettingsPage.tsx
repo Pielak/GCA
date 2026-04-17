@@ -1,9 +1,14 @@
-import { useState, useEffect, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
-import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle } from 'lucide-react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useParams, useSearchParams } from 'react-router-dom'
+import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
+import { RepositoryPage } from '@/pages/projects/RepositoryPage'
+import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
+
+type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario'
+const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario']
 
 // Resultado do teste de conexão — `ok=null` significa "provedor válido mas
 // sem teste real implementado" (ex: gemini/ollama). A UI distingue isso
@@ -22,7 +27,20 @@ export function ProjectSettingsPage() {
   const canEdit = can('project:edit')
   const currentUserEmail = useAuthStore((s) => s.user?.email || '')
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'llm' | 'smtp' | 'n8n'>('llm')
+
+  // A aba ativa vem de ?tab=... para suportar deep-links da SetupChecklist
+  // (passos IA / Repo / Questionário) e dos redirects de /repository, /questionnaire.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab: TabKey = useMemo(() => {
+    const raw = searchParams.get('tab')
+    return VALID_TABS.includes(raw as TabKey) ? (raw as TabKey) : 'llm'
+  }, [searchParams])
+  const setActiveTab = useCallback((t: TabKey) => {
+    const next = new URLSearchParams(searchParams)
+    if (t === 'llm') next.delete('tab')
+    else next.set('tab', t)
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
 
   // Settings data
   const [settings, setSettings] = useState<any>({})
@@ -198,15 +216,23 @@ export function ProjectSettingsPage() {
         </p>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-slate-800">
+      {/* Tabs — parametrização do projeto consolidada aqui (contrato MVP 1) */}
+      <div className="flex gap-1 border-b border-slate-800 overflow-x-auto">
         <button onClick={() => setActiveTab('llm')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'llm' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'llm' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <Cpu className="w-3.5 h-3.5" /> Provedor de IA
         </button>
         <button onClick={() => setActiveTab('smtp')}
-          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeTab === 'smtp' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'smtp' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <Mail className="w-3.5 h-3.5" /> SMTP
+        </button>
+        <button onClick={() => setActiveTab('repo')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'repo' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <GitBranch className="w-3.5 h-3.5" /> Repositório
+        </button>
+        <button onClick={() => setActiveTab('questionario')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'questionario' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <ClipboardList className="w-3.5 h-3.5" /> Questionário
         </button>
       </div>
 
@@ -351,6 +377,20 @@ export function ProjectSettingsPage() {
               Salvar SMTP
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Tab: Repositório — reusa RepositoryPage (que pega projectId do useParams). */}
+      {activeTab === 'repo' && (
+        <div className="-mx-6 -my-0">
+          <RepositoryPage />
+        </div>
+      )}
+
+      {/* Tab: Questionário — reusa QuestionnairePage. */}
+      {activeTab === 'questionario' && (
+        <div className="-mx-6 -my-0">
+          <QuestionnairePage />
         </div>
       )}
     </div>

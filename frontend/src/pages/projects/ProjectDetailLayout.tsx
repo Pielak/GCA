@@ -22,12 +22,13 @@ interface ProjectHeader {
   pendingIssues: number
 }
 
+// Configurações consolida parametrização do projeto (LLM, SMTP, Repositório,
+// Questionário). As rotas /questionnaire e /repository continuam vivas como
+// redirects para /settings?tab=... — preserva bookmarks e links de email.
 const MODULES = [
   { path: '', label: 'Dashboard', icon: Activity, end: true },
   { path: 'settings', label: 'Configurações', icon: SlidersHorizontal },
   { path: 'ocg', label: 'OCG', icon: Settings },
-  { path: 'questionnaire', label: 'Questionário', icon: ClipboardList },
-  { path: 'repository', label: 'Repositório', icon: Shield },
   { path: 'external-repos', label: 'Repos Externos', icon: GitBranch },
   { path: 'ingestion', label: 'Ingestão', icon: FileText },
   { path: 'gatekeeper', label: 'Gatekeeper', icon: Shield },

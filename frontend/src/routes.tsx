@@ -17,9 +17,7 @@ import { ProjectTeamPage } from './app/pages/projects/ProjectTeamPage';
 import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
-import { RepositoryPage } from './pages/projects/RepositoryPage';
 import { BacklogPage } from './pages/projects/BacklogPage';
-import { RequireRepository } from './components/guards/RequireRepository';
 import { RequireProjectSetup } from './components/guards/RequireProjectSetup';
 import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
@@ -29,7 +27,6 @@ import { QAReadinessPage } from './pages/projects/QAReadinessPage';
 import { RoadmapPage } from './pages/projects/RoadmapPage';
 import { LiveDocsPage } from './pages/projects/LiveDocsPage';
 import { ReadinessPage } from './pages/projects/ReadinessPage';
-import { QuestionnairePage } from './pages/projects/QuestionnairePage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
 import { SolicitarProjetoPage } from './pages/SolicitarProjetoPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
@@ -104,11 +101,14 @@ export const router = createBrowserRouter([
         path: 'projects/:id',
         Component: ProjectDetailLayout,
         children: [
-          { index: true, Component: ProjectDashPage },
+          { index: true, element: <RequireProjectSetup><ProjectDashPage /></RequireProjectSetup> },
           { path: 'team', Component: ProjectTeamPage },
           { path: 'ocg', Component: OCGPage },
-          { path: 'questionnaire', Component: QuestionnairePage },
-          { path: 'repository', Component: RepositoryPage },
+          // Rotas antigas redirecionam para /settings?tab=... (consolidação).
+          // Preserva bookmarks, links de email e a SetupChecklist não quebra
+          // se alguém acertar /questionnaire ou /repository direto.
+          { path: 'questionnaire', element: <Navigate to="../settings?tab=questionario" replace /> },
+          { path: 'repository', element: <Navigate to="../settings?tab=repo" replace /> },
           { path: 'external-repos', Component: ExternalReposPage },
           { path: 'ingestion', element: <RequireProjectSetup><IngestionPage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
