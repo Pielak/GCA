@@ -9,45 +9,51 @@ Status: **controle de avanço por fase**
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 1 — Base operacional e saneamento do núcleo**
+**MVP 2 — Contexto vivo e governança de conteúdo** (iniciado 2026-04-17)
+
+### MVP anterior
+MVP 1 — Base operacional e saneamento do núcleo — **ENCERRADO 2026-04-17**
+com todos os 5 Criticals quitados (ver §4). Gate do MVP 1 permaneceu aberto;
+nenhuma regressão observada até a abertura desta fase.
 
 ### Objetivo do momento
-Estabilizar a base já existente do GCA, eliminar conflitos de contrato/RBAC/escopo e impedir que novas features agravem a dívida técnica antes da evolução para os próximos MVPs.
+Ativar o fluxo de contexto vivo: ingestão de documentos, quarentena de PII,
+OCG versionado com deltas, backlog derivado do OCG, Arguidor, reavaliação do
+Gatekeeper após ingestão. Mantém o rigor do MVP 1: sem expansão além do
+escopo da fase; correção local preferível a refatoração sistêmica.
 
 ### Princípio desta fase
-Nesta fase, o trabalho prioritário é:
+Mesma do MVP 1:
 1. diagnosticar;
 2. classificar dívida;
-3. corrigir blockers e criticals;
-4. revalidar a base;
-5. só então considerar avanço.
+3. corrigir blockers e criticals antes de feature nova;
+4. revalidar após cada passo;
+5. só então considerar avanço para o MVP 3.
 
 ---
 
 ## 2. Escopo da fase atual
 
-### Em escopo agora
-- autenticação;
-- RBAC canônico de 5 papéis;
-- cadastro/aprovação de projetos;
-- questionário;
-- OCG básico persistido;
-- Gatekeeper básico;
-- auditoria mínima;
-- configuração básica de provedor de IA;
-- política de adequação e roteamento híbrido de IA;
-- saneamento de documentação operacional do núcleo;
-- saneamento de telas/rotas/componentes que conflitem com o RBAC canônico.
+### Em escopo agora (contrato §7, MVP 2)
+- ingestão de documentos;
+- quarentena de PII;
+- OCG versionado com deltas;
+- backlog derivado do OCG;
+- Arguidor;
+- consolidação de findings;
+- reavaliação do Gatekeeper após ingestão;
+- extensão da governança de IA para as camadas tocadas (Arguidor, Ingestão):
+  remover hardcodes residuais herdados do MVP 1 e aplicar a política de
+  criticidade (contrato §6.2).
 
 ### Fora de escopo agora
-- expansão de papéis;
-- marketplace;
-- billing avançado;
-- auto-upgrade avançado;
-- hardening completo de produção;
-- Release Bundle completo;
-- evolução ampla de Documentação Viva;
-- expansão livre de módulos apenas porque já aparecem em documentos históricos.
+- expansão automática para features de entrega final;
+- Release Bundle;
+- Documentação Viva completa;
+- CodeGen controlado (MVP 3);
+- QA Readiness completo (MVP 4);
+- hardening operacional avançado (MVP 5);
+- automações além do necessário para estabilizar contexto.
 
 ---
 
@@ -55,22 +61,39 @@ Nesta fase, o trabalho prioritário é:
 
 ### 3.1 Blocker / Critical
 
+#### Abertas (MVP 2)
+
+| ID | Severidade | Tema | Descrição | Origem | Status |
+|---|---|---|---|---|---|
+| DT-012 | Critical | Governança de IA (Arguidor) | `arguider_service.py:174` faz fallback silencioso a `settings.ANTHROPIC_API_KEY` quando o projeto não tem chave configurada. Contradiz contrato §6.4 (nunca misturar chave global com projeto). | Auditoria MVP 2 | Aberto |
+| DT-013 | Critical | Governança de IA (Ingestão) | `ingestion_service.py:288` resolve chave com `provider="anthropic"` hardcoded. Ignora o provedor escolhido pelo GP. | Auditoria MVP 2 | Aberto |
+
+#### Herdadas (MVP 1, já quitadas — mantidas para rastreabilidade)
+
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
 | DT-001 | Critical | RBAC | Conflito entre documentação histórica com 7 papéis e contrato canônico com 5 papéis. | Docs históricos vs contrato | **Quitada 2026-04-17** — ver §4 |
-| DT-002 | Critical | UI/Admin | Há análise apontando que a aba de usuários/admin está modelada com RBAC global ampliado e lista papéis além do recorte canônico. | Análise completa | **Quitada 2026-04-17** — ver §4 |
-| DT-003 | Critical | Contrato de produto | Há tensão entre textos que sugerem plataforma ampla pronta e o recorte real que ainda exige saneamento da base. | Docs / README / manual | **Quitada 2026-04-17** — ver §4 |
-| DT-004 | Critical | Segurança operacional | PAT de Git ainda aparece documentado em texto plano / criptografia pendente. | Tutorial / requisitos / roadmap | **Quitada 2026-04-17** — ver §4 |
-| DT-005 | Critical | Governança de IA | Falta consolidar regra canônica para seleção de provedor/modelo por objetivo do cliente final, evitando default rígido enganoso. | Requisitos / contrato | **Quitada 2026-04-17** — ver §4 |
+| DT-002 | Critical | UI/Admin | Aba de usuários/admin modelada com RBAC global ampliado. | Análise completa | **Quitada 2026-04-17** — ver §4 |
+| DT-003 | Critical | Contrato de produto | Textos que sugerem plataforma ampla pronta conflitavam com recorte real. | Docs / README / manual | **Quitada 2026-04-17** — ver §4 |
+| DT-004 | Critical | Segurança operacional | PAT de Git com fallback plaintext em `decrypt_pat`. | Tutorial / requisitos / roadmap | **Quitada 2026-04-17** — ver §4 |
+| DT-005 | Critical | Governança de IA | Falta regra canônica para seleção de provedor/modelo por objetivo. | Requisitos / contrato | **Quitada 2026-04-17** — ver §4 |
 
 ### 3.2 Major
 
+#### Abertas
+
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
-| DT-006 | Major | Fases vs realidade | Há materiais descrevendo pipeline completo com módulos avançados como se estivessem igualmente maduros. | Manual / tutorial / análise | Aberto |
-| DT-007 | Major | Placeholders / continuidade | Há placeholders de telas/módulos previstos que não devem ser promovidos automaticamente a entregas da fase atual. | TASK_GCA_MASTER | Aberto |
-| DT-008 | Major | Consistência documental | Há discrepâncias entre documentos sobre readiness, testes e maturidade operacional. | Changelog / docs / task | Aberto |
-| DT-009 | Major | Roteamento híbrido | Falta explicitar em código e docs ativas que tarefas menores podem usar modelo local/Ollama e decisões críticas exigem modelo premium. | Contrato / operação | **Quitada 2026-04-17** (política) — ver §4 |
+| DT-006 | Major | Fases vs realidade | Materiais descrevendo pipeline completo como se estivessem igualmente maduros. | Manual / tutorial / análise | Aberto |
+| DT-007 | Major | Placeholders / continuidade | Placeholders de telas/módulos previstos não promovidos automaticamente a entregas. | TASK_GCA_MASTER | Aberto |
+| DT-008 | Major | Consistência documental | Discrepâncias entre documentos sobre readiness, testes e maturidade. | Changelog / docs / task | Aberto |
+| DT-014 | Major | Governança de IA (OCG Updater) | `ocg_updater_service.py:250, 413` usa `settings.DEFAULT_AI_PROVIDER` como fallback sem aplicar a política de criticidade (§6.2). OCG updates dependem de decisões críticas. | Auditoria MVP 2 | Aberto |
+
+#### Herdadas (MVP 1, já quitadas)
+
+| ID | Severidade | Tema | Descrição | Origem | Status |
+|---|---|---|---|---|---|
+| DT-009 | Major | Roteamento híbrido | Política definida; implementação do roteador em código fica para MVP 3. | Contrato / operação | **Quitada 2026-04-17** (política) — ver §4 |
 
 ### 3.3 Minor
 
@@ -137,33 +160,22 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate
-**PODE AVANÇAR** (atualizado 2026-04-17)
+### Situação atual do gate (MVP 2)
+**NÃO AVANÇAR** (fase recém-iniciada em 2026-04-17)
 
-### Justificativa registrada
-Todos os 5 Criticals do MVP 1 foram quitados nesta sessão:
-- **DT-001** (RBAC 7→5 papéis canônicos em backend + frontend)
-- **DT-002** (UI/Admin alinhada aos 5 papéis)
-- **DT-003** (narrativa de produto neutralizada; docs históricos marcados)
-- **DT-004** (PAT plaintext eliminado; `decrypt_pat` sem fallback silencioso)
-- **DT-005** (governança de IA consolidada; OCG sem fallback silencioso)
+### Motivo
+MVP 2 abriu com 2 Criticals herdados do código do núcleo que agora pertencem
+ao escopo desta fase (DT-012, DT-013 — governança de IA nos serviços de
+Arguidor e Ingestão) + 1 Major relacionado (DT-014 — OCG Updater). Esses
+resíduos estavam registrados como "programados para MVP 2" no §4 do MVP 1
+e agora tornam-se o primeiro alvo de saneamento antes de qualquer feature
+nova desta fase.
 
-Critérios do §9 "Próximo marco de saída do MVP 1" — todos atendidos:
-- RBAC de 5 papéis coerente em backend, frontend e docs ✅
-- Telas e fluxos do núcleo respeitam o RBAC canônico ✅
-- Política de IA configurável por cliente explicitada (contrato §6 + CLAUDE §6) ✅
-- Roteamento híbrido de IA definido (criticidade baixa/média/alta) ✅
-- Conflitos documentais críticos neutralizados (README, ARQUITETURA, docs
-  históricos marcados como não-contrato) ✅
-- Núcleo auth/projeto/questionário/OCG básico/Gatekeeper básico estável —
-  81/81 integration + 44/44 unit + 10/10 crypto passando ✅
-
-Dívida remanescente (Major/Minor, não bloqueante do gate):
-- DT-006, DT-007, DT-008 (Major, documental — readiness de materiais,
-  placeholders, consistência). Saneamento incremental durante MVP 2.
-- DT-009 (Major, roteamento híbrido — política fechada; implementação do
-  roteador em código fica para MVP 3, conforme contrato §7).
-- DT-010, DT-011 (Minor, terminologia e narrativa promocional).
+### Histórico do gate
+- MVP 1 → **PODE AVANÇAR** em 2026-04-17 com todos os 5 Criticals quitados
+  (DT-001..DT-005). Nenhuma regressão observada até a abertura desta fase.
+- MVP 2 → **NÃO AVANÇAR** na abertura (2026-04-17) com DT-012, DT-013, DT-014
+  abertas do audit inicial.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -171,28 +183,27 @@ automaticamente a **NÃO AVANÇAR** até quitação.
 
 ---
 
-## 7. Ordem recomendada de saneamento
+## 7. Ordem recomendada de saneamento (MVP 2)
 
-1. **RBAC canônico**
-   - congelar 5 papéis em backend, frontend e docs ativas;
-   - marcar documentos históricos como históricos.
+1. **Governança de IA nos serviços do escopo MVP 2** (DT-012, DT-013)
+   - remover fallback silencioso em `arguider_service.py` e `ingestion_service.py`;
+   - aplicar resolver canônico (`AIKeyResolver.get_project_key` sem fallback
+     ao `ANTHROPIC_API_KEY` global);
+   - toda chamada deve falhar explicitamente se o projeto não tem chave.
 
-2. **Contrato de produto**
-   - consolidar instalação por cliente + isolamento por projeto;
-   - eliminar leituras ambíguas de SaaS compartilhado.
+2. **OCG Updater alinhado à política** (DT-014)
+   - tratar uso de `DEFAULT_AI_PROVIDER` em `ocg_updater_service.py` com
+     classificação de criticidade;
+   - OCG updates = alta criticidade (consolidação → modelo premium).
 
-3. **Admin / gestão de usuários**
-   - alinhar páginas e fluxos ao RBAC canônico;
-   - remover dependência implícita de papéis históricos.
+3. **Features do MVP 2** (ordem canônica do contrato §7)
+   - ingestão madura + quarentena de PII;
+   - OCG versionado com deltas + contração no delete (feedback do user);
+   - backlog derivado do OCG consistente;
+   - Arguidor funcional end-to-end;
+   - reavaliação do Gatekeeper após ingestão.
 
-4. **Política de IA**
-   - introduzir recomendação por objetivo do cliente;
-   - explicitar roteamento híbrido por criticidade;
-   - manter provedores/modelos configuráveis.
-
-5. **Segurança operacional do núcleo**
-   - preparar trilha de correção para PAT/segredos;
-   - evitar expansão de módulos antes disso.
+> Cada passo exige revalidação de testes e gate antes do próximo.
 
 ---
 
@@ -201,7 +212,7 @@ automaticamente a **NÃO AVANÇAR** até quitação.
 Antes de qualquer mudança:
 1. ler `GCA_CANONICAL_CONTRACT.md`;
 2. ler este arquivo;
-3. identificar se a solicitação pertence ao MVP 1;
+3. identificar se a solicitação pertence ao MVP ativo;
 4. verificar blockers/criticals;
 5. se houver impedimento, corrigir só o necessário;
 6. atualizar este arquivo ao concluir a correção.
@@ -215,13 +226,15 @@ Antes de qualquer mudança:
 
 ---
 
-## 9. Próximo marco de saída do MVP 1
+## 9. Próximo marco de saída do MVP 2
 
-O MVP 1 poderá ser considerado apto a encerrar quando:
-- RBAC de 5 papéis estiver coerente;
-- telas e fluxos do núcleo respeitarem esse RBAC;
-- política de IA configurável por cliente estiver explicitada;
-- roteamento híbrido de IA estiver definido para tarefas menores vs decisões críticas;
-- conflitos documentais críticos estiverem neutralizados;
-- núcleo auth/projeto/questionário/OCG/Gatekeeper básico estiver estável;
-- gate de avanço mudar para **PODE AVANÇAR** com justificativa registrada.
+O MVP 2 poderá ser considerado apto a encerrar quando:
+- todos os Criticals da fase (DT-012, DT-013) estiverem quitados;
+- OCG Updater aplicar a política de criticidade (DT-014);
+- ingestão + quarentena PII estiverem estáveis e testadas;
+- OCG versionado com deltas operacional (incluindo contração no delete);
+- backlog derivado do OCG consistente com o contexto atual;
+- Arguidor funcional sem resíduos de hardcode;
+- reavaliação do Gatekeeper após ingestão disparando corretamente;
+- testes da fase passando e nenhum Critical do MVP 1 tiver regredido;
+- gate mudar para **PODE AVANÇAR** com justificativa registrada.
