@@ -7,7 +7,7 @@ export interface IngestedDocument {
   original_filename: string
   file_type: string
   document_category: string | null
-  arguider_status: 'pending' | 'processing' | 'completed' | 'error'
+  arguider_status: 'pending' | 'processing' | 'completed' | 'error' | 'quarantined'
   ocg_updated: boolean
   file_size_bytes: number
   created_at: string
@@ -34,7 +34,7 @@ export interface DocumentDetail extends IngestedDocument {
 
 export interface DocumentStatus {
   document_id: string
-  arguider_status: 'pending' | 'processing' | 'completed' | 'error'
+  arguider_status: 'pending' | 'processing' | 'completed' | 'error' | 'quarantined'
   arguider_started_at: string | null
   arguider_completed_at: string | null
   ocg_updated: boolean
@@ -88,9 +88,9 @@ export const useUploadDocument = (projectId: string | undefined) => {
     mutationFn: async (file: File) => {
       const formData = new FormData()
       formData.append('file', file)
-      const response = await apiClient.post(`/projects/${projectId}/ingestion`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
+      // Não setar Content-Type manualmente — axios detecta FormData e adiciona o
+      // boundary. Setar 'multipart/form-data' sem boundary quebra o parser FastAPI.
+      const response = await apiClient.post(`/projects/${projectId}/ingestion`, formData)
       return response.data
     },
     onSuccess: (data) => {

@@ -8,11 +8,14 @@ import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/Pi
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
 
 const STATUS_MAP: Record<IngestedDocument['arguider_status'], { icon: string; label: string; color: string }> = {
-  pending:    { icon: '⚪', label: 'Aguardando',  color: 'text-slate-400' },
-  processing: { icon: '⏳', label: 'Processando', color: 'text-amber-400' },
-  completed:  { icon: '✅', label: 'Processado',  color: 'text-emerald-500' },
-  error:      { icon: '❌', label: 'Erro',        color: 'text-red-400' },
+  pending:     { icon: '⚪', label: 'Aguardando',  color: 'text-slate-400' },
+  processing:  { icon: '⏳', label: 'Processando', color: 'text-amber-400' },
+  completed:   { icon: '✅', label: 'Processado',  color: 'text-emerald-500' },
+  error:       { icon: '❌', label: 'Erro',        color: 'text-red-400' },
+  quarantined: { icon: '🛡️', label: 'Em quarentena (PII)', color: 'text-orange-400' },
 };
+
+const UNKNOWN_STATUS = { icon: '❔', label: 'Desconhecido', color: 'text-slate-500' };
 
 const FILTER_LABELS: Record<FilterStatus, string> = {
   all: 'Todos',
@@ -20,6 +23,7 @@ const FILTER_LABELS: Record<FilterStatus, string> = {
   processing: 'Processando',
   completed: 'Processado',
   error: 'Erro',
+  quarantined: 'Quarentena',
 };
 
 function formatFileSize(bytes: number): string {
@@ -164,7 +168,7 @@ export function IngestionPage() {
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
           <h3 className="text-slate-200 text-sm font-semibold">Documentos ({documents.length})</h3>
           <div className="flex gap-1">
-            {(['all', 'pending', 'processing', 'completed', 'error'] as FilterStatus[]).map(s => (
+            {(['all', 'pending', 'processing', 'completed', 'error', 'quarantined'] as FilterStatus[]).map(s => (
               <button
                 key={s}
                 onClick={() => setFilter(s)}
@@ -203,7 +207,7 @@ export function IngestionPage() {
         ) : (
           <div className="divide-y divide-slate-800">
             {filtered.map(doc => {
-              const st = STATUS_MAP[doc.arguider_status];
+              const st = STATUS_MAP[doc.arguider_status] ?? UNKNOWN_STATUS;
               return (
                 <div key={doc.id} className="grid grid-cols-[1fr_80px_80px_120px_140px_40px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
@@ -277,12 +281,13 @@ export function IngestionPage() {
 
       {/* Status summary */}
       {documents.length > 0 && (
-        <div className="grid grid-cols-4 gap-3">
+        <div className="grid grid-cols-5 gap-3">
           {([
             { key: 'pending', label: 'Aguardando', bg: 'bg-slate-900 border-slate-800', tc: 'text-slate-300' },
             { key: 'processing', label: 'Processando', bg: 'bg-amber-950/20 border-amber-800/30', tc: 'text-amber-400' },
             { key: 'completed', label: 'Processados', bg: 'bg-emerald-950/20 border-emerald-800/30', tc: 'text-emerald-400' },
             { key: 'error', label: 'Erros', bg: 'bg-red-950/20 border-red-800/30', tc: 'text-red-400' },
+            { key: 'quarantined', label: 'Quarentena', bg: 'bg-orange-950/20 border-orange-800/30', tc: 'text-orange-400' },
           ] as const).map(({ key, label, bg, tc }) => (
             <div key={key} className={`${bg} border rounded-xl p-3 text-center`}>
               <p className={`text-xl font-semibold ${tc}`}>{documents.filter(d => d.arguider_status === key).length}</p>

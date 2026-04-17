@@ -12,7 +12,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
-from app.models.base import IngestedDocument, ArguiderAnalysis, ModuleCandidate, OCG
+from app.models.base import IngestedDocument, ArguiderAnalysis, ModuleCandidate, OCG, OCGDeltaLog
 from app.services.arguider_service import ArguiderService, DocumentExtractor
 
 logger = structlog.get_logger(__name__)
@@ -502,7 +502,14 @@ class IngestionService:
         }
 
     async def delete_document(self, project_id: UUID, document_id: UUID) -> dict:
-        """Remove documento se não tem módulos aprovados."""
+        """Remove documento se não tem módulos aprovados.
+
+        Se o documento deixou deltas no OCG (`ocg_delta_log`), faz contração
+        segura antes de deletar: reverte os campos que este doc alterou ao
+        valor anterior, exceto aqueles que foram posteriormente modificados
+        por outros deltas. Registra um delta com `trigger_source=
+        'document_removal'` para auditoria e rollback (contrato §5).
+        """
         result = await self.db.execute(
             select(IngestedDocument).where(
                 IngestedDocument.id == document_id,
@@ -528,7 +535,149 @@ class IngestionService:
         if approved_count > 0:
             return {"success": False, "error": "Módulos aprovados dependem deste documento", "status_code": 409}
 
+        # Contração de OCG antes do delete (contrato §5: OCG contrai com
+        # ingestão ruim ou conflitante; aqui, com remoção explícita).
+        contraction_info = await self._contract_ocg_for_deleted_document(project_id, document_id)
+
         await self.db.delete(doc)
         await self.db.commit()
-        logger.info("ingestion.document_deleted", document_id=str(document_id))
-        return {"success": True}
+        logger.info(
+            "ingestion.document_deleted",
+            document_id=str(document_id),
+            contracted_fields=contraction_info.get("fields_reverted", []),
+            skipped_fields=contraction_info.get("fields_skipped", []),
+        )
+        return {"success": True, "ocg_contraction": contraction_info}
+
+    async def _contract_ocg_for_deleted_document(
+        self, project_id: UUID, document_id: UUID
+    ) -> dict:
+        """Reverte no OCG os campos alterados pelo doc, exceto os que foram
+        tocados por deltas posteriores (evita perder contribuições de outros
+        documentos).
+
+        Retorna dict com `fields_reverted` e `fields_skipped`. Se o doc não
+        teve deltas, retorna `{"fields_reverted": [], "fields_skipped": []}`.
+        """
+        # 1. Buscar deltas deste doc em ordem cronológica (mais antigo primeiro).
+        doc_deltas_q = await self.db.execute(
+            select(OCGDeltaLog).where(
+                OCGDeltaLog.project_id == project_id,
+                OCGDeltaLog.document_id == document_id,
+            ).order_by(OCGDeltaLog.created_at.asc())
+        )
+        doc_deltas = list(doc_deltas_q.scalars().all())
+        if not doc_deltas:
+            return {"fields_reverted": [], "fields_skipped": []}
+
+        # 2. Para cada campo tocado por este doc, descobrir o valor "antes"
+        #    do primeiro delta que o tocou. O delta mais antigo guarda o `old`
+        #    em `fields_changed[field].old` — essa é a origem da reversão.
+        first_old: dict[str, any] = {}
+        for delta in doc_deltas:
+            try:
+                changes = json.loads(delta.fields_changed) if delta.fields_changed else {}
+            except (ValueError, TypeError):
+                changes = {}
+            for field, change in changes.items():
+                if field not in first_old and isinstance(change, dict) and "old" in change:
+                    first_old[field] = change["old"]
+
+        if not first_old:
+            return {"fields_reverted": [], "fields_skipped": []}
+
+        touched_fields = set(first_old.keys())
+        doc_delta_ids = {d.id for d in doc_deltas}
+
+        # 3. Verificar deltas posteriores (de outros docs ou de propagação) que
+        #    tocaram os mesmos campos. Para cada campo com delta posterior,
+        #    NÃO reverte — apenas registra no fields_skipped.
+        later_q = await self.db.execute(
+            select(OCGDeltaLog).where(
+                OCGDeltaLog.project_id == project_id,
+                OCGDeltaLog.created_at > doc_deltas[0].created_at,
+            ).order_by(OCGDeltaLog.created_at.asc())
+        )
+        later_deltas = [d for d in later_q.scalars().all() if d.id not in doc_delta_ids]
+
+        fields_blocked = set()
+        for later in later_deltas:
+            try:
+                later_changes = json.loads(later.fields_changed) if later.fields_changed else {}
+            except (ValueError, TypeError):
+                later_changes = {}
+            for field in later_changes:
+                if field in touched_fields:
+                    fields_blocked.add(field)
+
+        fields_to_revert = touched_fields - fields_blocked
+
+        # 4. Carregar OCG atual; se nenhum campo a reverter, só registra delta
+        #    documental sem alterar OCG.
+        ocg_q = await self.db.execute(
+            select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+        )
+        ocg = ocg_q.scalar_one_or_none()
+        if not ocg:
+            return {
+                "fields_reverted": [],
+                "fields_skipped": sorted(fields_blocked),
+                "note": "OCG inexistente; nada a contrair",
+            }
+
+        try:
+            ocg_current = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+        except (ValueError, TypeError):
+            ocg_current = {}
+
+        reverted_changes = {}
+        for field in fields_to_revert:
+            old_value = first_old[field]
+            current_value = ocg_current.get(field)
+            ocg_current[field] = old_value
+            reverted_changes[field] = {
+                "old": current_value,
+                "new": old_value,
+                "reasoning": f"Revertido por remoção do documento {document_id}",
+            }
+
+        # 5. Se houve reversão, incrementar versão + gravar OCG novo + delta.
+        version_from = ocg.version
+        version_to = version_from + (1 if reverted_changes else 0)
+
+        if reverted_changes:
+            ocg.ocg_data = json.dumps(ocg_current, ensure_ascii=False)
+            ocg.version = version_to
+            ocg.updated_at = datetime.now(timezone.utc)
+
+        # Sempre grava delta de removal (mesmo que fields_to_revert vazio) —
+        # audit trail de que o doc foi removido e quais campos ficaram presos.
+        summary_parts = []
+        if reverted_changes:
+            summary_parts.append(
+                f"Contraídos {len(reverted_changes)} campo(s): {sorted(reverted_changes)}"
+            )
+        if fields_blocked:
+            summary_parts.append(
+                f"Não contraídos (tocados por deltas posteriores): {sorted(fields_blocked)}"
+            )
+        change_summary = " | ".join(summary_parts) if summary_parts else "Remoção sem impacto no OCG"
+
+        delta = OCGDeltaLog(
+            project_id=project_id,
+            document_id=None,  # doc está sendo deletado; FK seria inválida
+            ocg_version_from=version_from,
+            ocg_version_to=version_to,
+            fields_changed=json.dumps(reverted_changes, ensure_ascii=False),
+            change_summary=change_summary,
+            trigger_source="document_removal",
+            ocg_snapshot=json.dumps(ocg_current, ensure_ascii=False) if reverted_changes else None,
+        )
+        self.db.add(delta)
+
+        return {
+            "fields_reverted": sorted(reverted_changes.keys()),
+            "fields_skipped": sorted(fields_blocked),
+            "version_from": version_from,
+            "version_to": version_to,
+        }
