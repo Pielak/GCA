@@ -165,7 +165,7 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - feature nova adicionada para “contornar” dívida não resolvida.
 
 ### Situação atual do gate (MVP 2)
-**NÃO AVANÇAR** (2 de 6 itens do §10 ainda pendentes)
+**NÃO AVANÇAR** (1 item do §10 ainda pendente — validação manual)
 
 ### Motivo
 Dívida de saneamento (DT-012, DT-013, DT-014) quitada em 2026-04-17.
@@ -175,8 +175,8 @@ Features canônicas entregues em 2026-04-17:
 - ✅ **Quarentena de PII estável e testada** — commit `3942f6a`. `_detect_pii` passa a validar CPF/CNPJ via mod-11 e cartão via Luhn, elimina falso-positivo de runs de 14 dígitos em xref de PDF que causava quarentena espúria do questionário. 33 testes passando.
 - ✅ **Arguidor sem resíduos de hardcode** — DT-012 (commit `1947340`, 2026-04-17) removeu o fallback a `ANTHROPIC_API_KEY` e agora o `__init__` levanta `RuntimeError` explícito se não houver chave do projeto. O SDK `AsyncAnthropic` direto na linha 184 é conhecido residual, mas cai em escopo MVP 3 (multi-provider adapter, §4 resíduos).
 - ✅ **Reavaliação do Gatekeeper após ingestão disparando corretamente** — commit `1a2e917`. `_reevaluate_gatekeeper_async` fire-and-forget adjacente ao `_propagate_async` grava evento `GATEKEEPER_REEVALUATED` no audit_log com `blocking_pillars`, `derived_status` e `ocg_version`. 3 testes passando.
-- ⏸️ **Ingestão madura end-to-end** — quarentena + contração + reavaliação OK; falta validar integração no dogfood sem quebras.
-- ❌ **Backlog derivado do OCG consistente com o contexto atual** — pendente.
+- ✅ **Backlog derivado do OCG consistente com o contexto atual** — commit `96eb131`. `_fire_ocg_change_hooks` centraliza o disparo de propagate + gatekeeper reeval nos 3 pontos onde OCG muda: ingestão (já existia), contração no delete (antes não disparava), e geração inicial via questionário (antes não disparava). Projeto novo agora tem backlog populado automaticamente. 4 testes passando.
+- ⏸️ **Ingestão madura end-to-end** — quarentena + contração + reavaliação + backlog seeding OK; falta validar integração no dogfood sem quebras.
 
 Gate abre apenas quando §10 estiver inteiramente atendido.
 
@@ -193,6 +193,9 @@ Gate abre apenas quando §10 estiver inteiramente atendido.
   reavaliação commit `1a2e917`, + Arguidor sem resíduos por reinterpretação
   correta da DT-012). 2 pendentes: backlog-OCG consistente, validação
   ingestão end-to-end no dogfood.
+- MVP 2 → 5 de 6 itens canônicos entregues em 2026-04-17 (+ backlog
+  consistente commit `96eb131` cobrindo os 3 pontos de mudança de OCG).
+  Resta apenas validação ingestão end-to-end no dogfood.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -261,7 +264,7 @@ O MVP 2 poderá ser considerado apto a encerrar quando:
 - [x] OCG Updater aplicar a política de criticidade (DT-014) — 2026-04-17;
 - [~] ingestão + quarentena PII estiverem estáveis e testadas — quarentena OK (commit `3942f6a`, 33 testes); integração end-to-end falta validar no dogfood;
 - [x] OCG versionado com deltas operacional (incluindo contração no delete) — commit `3942f6a`, 4 testes;
-- [ ] backlog derivado do OCG consistente com o contexto atual;
+- [x] backlog derivado do OCG consistente com o contexto atual — commit `96eb131`, 4 testes; `_fire_ocg_change_hooks` centraliza o disparo nos 3 pontos: ingestão, contração no delete, geração inicial via questionário;
 - [x] Arguidor funcional sem resíduos de hardcode — DT-012 quitada em commit `1947340` (`arguider_service.py:174` agora é o guard `RuntimeError`, não o fallback). Multi-provider adapter permanece escopo MVP 3;
 - [x] reavaliação do Gatekeeper após ingestão disparando corretamente — commit `1a2e917`, 3 testes; emite evento `GATEKEEPER_REEVALUATED` com `{trigger, ocg_version, blocking_pillars, derived_status}`;
 - [x] testes da fase passando e nenhum Critical do MVP 1 tiver regredido — 313/336 passando; 23 failures pré-existentes inalteradas;
