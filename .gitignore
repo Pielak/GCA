@@ -33,6 +33,14 @@ venv/
 ENV/
 env/
 .venv
+.venv-screenshots/
+
+# Artefatos regeneráveis da Session 22 (manual/tutorial)
+# — regeneráveis via scripts/capturar_telas_gca.{py,sh} +
+# scripts/gerar_{manual,tutorial}_*.py. Mantidos fora do repo
+# por peso (Manual_GCA_Completo.docx ~21MB) e por serem derivados.
+screenshots/
+*.docx
 
 # IDE
 .vscode/
