@@ -1,13 +1,26 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap } from 'lucide-react'
+import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
+import { useAuthStore } from '@/stores/authStore'
+
+// Resultado do teste de conexão — `ok=null` significa "provedor válido mas
+// sem teste real implementado" (ex: gemini/ollama). A UI distingue isso
+// do ok=false (chave rejeitada) para não confundir o GP.
+type TestResult = {
+  ok: boolean | null
+  message: string
+  provider?: string
+  model?: string | null
+  latencyMs?: number
+} | null
 
 export function ProjectSettingsPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const { can } = useProjectPermissions()
   const canEdit = can('project:edit')
+  const currentUserEmail = useAuthStore((s) => s.user?.email || '')
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<'llm' | 'smtp' | 'n8n'>('llm')
 
@@ -29,6 +42,10 @@ export function ProjectSettingsPage() {
 
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [testingLlm, setTestingLlm] = useState(false)
+  const [llmTestResult, setLlmTestResult] = useState<TestResult>(null)
+  const [testingSmtp, setTestingSmtp] = useState(false)
+  const [smtpTestResult, setSmtpTestResult] = useState<TestResult>(null)
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type })
@@ -61,7 +78,7 @@ export function ProjectSettingsPage() {
   useEffect(() => { loadSettings() }, [loadSettings])
 
   const saveLlm = async () => {
-    if (!llmApiKey.trim() && !settings.llm?.has_key) {
+    if (!llmApiKey.trim() && !settings.llm?.api_key_configured) {
       showToast('Informe a API Key do provedor de IA', 'error')
       return
     }
@@ -98,6 +115,69 @@ export function ProjectSettingsPage() {
       showToast(err?.response?.data?.detail || 'Erro ao salvar', 'error')
     }
     setSaving(false)
+  }
+
+  const testLlm = async () => {
+    if (!projectId) return
+    setTestingLlm(true)
+    setLlmTestResult(null)
+    try {
+      const res: any = await apiClient.post(`/projects/${projectId}/settings/llm/validate`, {})
+      const data = res?.data || {}
+      if (data.valid === true) {
+        setLlmTestResult({
+          ok: true,
+          message: `Chave aceita pelo ${data.provider}. Modelo: ${data.model || '—'} · ${data.latency_ms ?? '?'}ms`,
+          provider: data.provider,
+          model: data.model,
+          latencyMs: data.latency_ms,
+        })
+      } else if (data.valid === false) {
+        setLlmTestResult({
+          ok: false,
+          message: data.detail || `Erro ao validar (${data.error || 'desconhecido'})`,
+          provider: data.provider,
+        })
+      } else {
+        // valid === null (provider_supported=false)
+        setLlmTestResult({
+          ok: null,
+          message: data.detail || 'Teste automático não implementado para este provedor.',
+          provider: data.provider,
+        })
+      }
+    } catch (err: any) {
+      setLlmTestResult({
+        ok: false,
+        message: err?.response?.data?.detail || err?.message || 'Falha ao contatar o servidor',
+      })
+    }
+    setTestingLlm(false)
+  }
+
+  const testSmtp = async () => {
+    if (!projectId) return
+    if (!currentUserEmail) {
+      setSmtpTestResult({ ok: false, message: 'Não foi possível identificar seu email para receber o teste.' })
+      return
+    }
+    setTestingSmtp(true)
+    setSmtpTestResult(null)
+    try {
+      await apiClient.post(`/projects/${projectId}/settings/smtp/test`, {
+        to_email: currentUserEmail,
+      })
+      setSmtpTestResult({
+        ok: true,
+        message: `Email de teste enviado para ${currentUserEmail}. Verifique sua caixa nos próximos minutos.`,
+      })
+    } catch (err: any) {
+      setSmtpTestResult({
+        ok: false,
+        message: err?.response?.data?.detail || err?.message || 'Falha ao enviar email de teste',
+      })
+    }
+    setTestingSmtp(false)
   }
 
   if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
@@ -139,7 +219,7 @@ export function ProjectSettingsPage() {
             É diferente da chave do Admin (usada apenas para avaliação do questionário externo).
           </p>
 
-          {settings.llm?.has_key && (
+          {settings.llm?.api_key_configured && (
             <div className="flex items-center gap-2 px-3 py-2 bg-emerald-900/20 border border-emerald-800/40 rounded-lg">
               <Check className="w-4 h-4 text-emerald-400" />
               <span className="text-emerald-300 text-xs">Chave configurada ({settings.llm.provider}) — {settings.llm.masked_key}</span>
@@ -167,10 +247,10 @@ export function ProjectSettingsPage() {
           </div>
 
           <div>
-            <label className="text-slate-400 text-xs block mb-1">API Key {settings.llm?.has_key ? '(deixe vazio para manter a atual)' : ''}</label>
+            <label className="text-slate-400 text-xs block mb-1">API Key {settings.llm?.api_key_configured ? '(deixe vazio para manter a atual)' : ''}</label>
             <div className="relative">
               <input type={showLlmKey ? 'text' : 'password'} value={llmApiKey} onChange={e => setLlmApiKey(e.target.value)}
-                placeholder={settings.llm?.has_key ? 'Manter chave atual...' : 'sk-...'}
+                placeholder={settings.llm?.api_key_configured ? 'Manter chave atual...' : 'sk-...'}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
               <button type="button" onClick={() => setShowLlmKey(!showLlmKey)}
                 className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
@@ -180,7 +260,28 @@ export function ProjectSettingsPage() {
             <p className="text-slate-600 text-xs mt-1">Armazenada criptografada no vault do projeto.</p>
           </div>
 
-          <div className="flex justify-end">
+          {llmTestResult && (
+            <div className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${
+              llmTestResult.ok === true
+                ? 'bg-emerald-900/20 border-emerald-800/40 text-emerald-300'
+                : llmTestResult.ok === false
+                  ? 'bg-red-900/20 border-red-800/40 text-red-300'
+                  : 'bg-amber-900/20 border-amber-800/40 text-amber-300'
+            }`}>
+              {llmTestResult.ok === true && <Wifi className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+              {llmTestResult.ok === false && <WifiOff className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+              {llmTestResult.ok === null && <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+              <span className="leading-snug">{llmTestResult.message}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button onClick={testLlm} disabled={testingLlm || !settings.llm?.api_key_configured || !canEdit}
+              title={!settings.llm?.api_key_configured ? 'Salve uma chave antes de testar' : 'Testar conexão com o provedor'}
+              className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-sm rounded-lg border border-slate-700 transition-colors">
+              {testingLlm ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
+              Testar conexão
+            </button>
             <button onClick={saveLlm} disabled={saving || !canEdit}
               className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
@@ -213,9 +314,9 @@ export function ProjectSettingsPage() {
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
             </div>
             <div>
-              <label className="text-slate-400 text-xs block mb-1">Senha {settings.smtp?.has_password ? '(manter)' : ''}</label>
+              <label className="text-slate-400 text-xs block mb-1">Senha {settings.smtp?.password_configured ? '(manter)' : ''}</label>
               <input type="password" value={smtpPass} onChange={e => setSmtpPass(e.target.value)}
-                placeholder={settings.smtp?.has_password ? 'Manter senha atual...' : 'Senha do SMTP'}
+                placeholder={settings.smtp?.password_configured ? 'Manter senha atual...' : 'Senha do SMTP'}
                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
             </div>
           </div>
@@ -226,7 +327,24 @@ export function ProjectSettingsPage() {
               className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
           </div>
 
-          <div className="flex justify-end">
+          {smtpTestResult && (
+            <div className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${
+              smtpTestResult.ok === true
+                ? 'bg-emerald-900/20 border-emerald-800/40 text-emerald-300'
+                : 'bg-red-900/20 border-red-800/40 text-red-300'
+            }`}>
+              {smtpTestResult.ok ? <Wifi className="w-4 h-4 flex-shrink-0 mt-0.5" /> : <WifiOff className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+              <span className="leading-snug">{smtpTestResult.message}</span>
+            </div>
+          )}
+
+          <div className="flex justify-end gap-2">
+            <button onClick={testSmtp} disabled={testingSmtp || !settings.smtp?.password_configured || !canEdit}
+              title={!settings.smtp?.password_configured ? 'Salve credenciais SMTP antes de testar' : `Enviar email de teste para ${currentUserEmail}`}
+              className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-sm rounded-lg border border-slate-700 transition-colors">
+              {testingSmtp ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+              Enviar email de teste
+            </button>
             <button onClick={saveSmtp} disabled={saving || !canEdit}
               className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}

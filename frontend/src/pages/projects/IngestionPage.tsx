@@ -40,6 +40,29 @@ function fileTypeLabel(ft: string): string {
   return map[ft] || ft.toUpperCase();
 }
 
+// DT-022: converte mensagem crua do provider/SDK para uma linha que o GP
+// consiga agir. Mantém a crua disponível no `title` como fallback técnico.
+function humanizeArguiderError(raw: string | null | undefined): string {
+  if (!raw) return 'Erro na análise pelo Arguidor.';
+  const s = raw.toLowerCase();
+  if (s.includes('401') || s.includes('authentication') || s.includes('invalid x-api-key') || s.includes('invalid api key')) {
+    return 'Provedor de IA rejeitou a chave (401). Verifique em Configurações → Provedor de IA e use "Testar conexão".';
+  }
+  if (s.includes('403')) {
+    return 'Provedor de IA negou acesso (403). A chave pode não ter permissão para este modelo.';
+  }
+  if (s.includes('429') || s.includes('rate') || s.includes('quota')) {
+    return 'Provedor retornou rate limit ou quota esgotada. Tente novamente em alguns minutos.';
+  }
+  if (s.includes('timeout') || s.includes('timed out')) {
+    return 'Timeout ao contatar o provedor de IA. Verifique sua rede.';
+  }
+  if (s.includes('connection') || s.includes('econnrefused')) {
+    return 'Falha de rede ao contatar o provedor de IA.';
+  }
+  return raw.length > 200 ? raw.slice(0, 200) + '…' : raw;
+}
+
 export function IngestionPage() {
   const { id: projectId } = useParams<{ id: string }>();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -208,8 +231,10 @@ export function IngestionPage() {
           <div className="divide-y divide-slate-800">
             {filtered.map(doc => {
               const st = STATUS_MAP[doc.arguider_status] ?? UNKNOWN_STATUS;
+              const hasError = doc.arguider_status === 'error' && doc.arguider_error_message;
               return (
-                <div key={doc.id} className="grid grid-cols-[1fr_80px_80px_120px_140px_40px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
+              <div key={doc.id}>
+                <div className="grid grid-cols-[1fr_80px_80px_120px_140px_40px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-4 h-4 text-slate-400" />
@@ -273,6 +298,16 @@ export function IngestionPage() {
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
                 </div>
+                {hasError && (
+                  <div
+                    className="px-5 pb-3 -mt-1 text-xs text-red-300/90 leading-snug"
+                    title={doc.arguider_error_message || undefined}
+                  >
+                    <span className="inline-block w-8" />
+                    ↳ {humanizeArguiderError(doc.arguider_error_message)}
+                  </div>
+                )}
+              </div>
               );
             })}
           </div>

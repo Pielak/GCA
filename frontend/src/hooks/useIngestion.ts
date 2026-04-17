@@ -8,6 +8,9 @@ export interface IngestedDocument {
   file_type: string
   document_category: string | null
   arguider_status: 'pending' | 'processing' | 'completed' | 'error' | 'quarantined'
+  // DT-022: mensagem crua do provider/Arguidor quando arguider_status='error'.
+  // A UI humaniza para o GP (ex: 401 → "chave IA rejeitada pelo provedor").
+  arguider_error_message?: string | null
   ocg_updated: boolean
   file_size_bytes: number
   created_at: string

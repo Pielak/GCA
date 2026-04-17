@@ -642,6 +642,10 @@ class IngestionService:
                 "file_type": d.file_type,
                 "document_category": d.document_category,
                 "arguider_status": d.arguider_status,
+                # DT-022: expõe mensagem de erro na listagem para a UI mostrar
+                # o motivo direto no row (sem precisar clicar pra ver detalhe).
+                # Só é preenchida quando arguider_status='error'.
+                "arguider_error_message": d.arguider_error_message,
                 "ocg_updated": d.ocg_updated,
                 "file_size_bytes": d.file_size_bytes,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
