@@ -224,7 +224,7 @@ function statusDisplay(q: ExistingQuestionnaire) {
       description: 'Análise técnica passou. OCG gerado — veja a aba Contexto Global (OCG).',
     }
   }
-  if (q.status === 'pending' || q.status === 'submitted') {
+  if (q.status === 'pending' || q.status === 'submitted' || q.status === 'pending_analysis' || q.status === 'analyzing') {
     return {
       icon: Clock,
       color: 'text-amber-400',
