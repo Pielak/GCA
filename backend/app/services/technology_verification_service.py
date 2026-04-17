@@ -205,7 +205,11 @@ class TechnologyVerificationService:
         # A.3
         self.deliverables = _as_list(r.get("main_deliverable", []))
         self.arch_profiles = _as_list(r.get("architectural_profile", []))
-        self.exec_model = r.get("execution_model", "")
+        # Q17 é multi-select no PDF (user pode marcar On-premises + Containerizado,
+        # Cloud + Híbrido, etc). Tratar como string explode em `... in valid_exec`
+        # quando chega uma lista. `exec_models` como lista é consistente com o
+        # resto dos multi-select do schema (DT-024, fix do bug unhashable type: 'list').
+        self.exec_models = _as_list(r.get("execution_model", []))
         self.multi_tenant = r.get("multi_tenant", "Não")
         self.high_availability = r.get("high_availability", "Não")
         self.async_processing = r.get("async_processing", "Não")
@@ -484,19 +488,23 @@ class TechnologyVerificationService:
 
     def _check_arch_execution_compat(self):
         """Verifica se perfil arquitetural ↔ modelo de execução são compatíveis."""
-        if not self.arch_profiles or not self.exec_model:
+        if not self.arch_profiles or not self.exec_models:
             return
 
         for arch in self.arch_profiles:
             valid_exec = ARCH_EXECUTION_MATRIX.get(arch)
             if not valid_exec:
                 continue
-            if self.exec_model not in valid_exec:
+            # User pode ter marcado vários modelos. Incompatível só se NENHUM
+            # dos escolhidos está na lista válida para essa arquitetura.
+            chosen = set(self.exec_models)
+            if not (chosen & valid_exec):
                 self._add(
                     Category.ARCH_CONSISTENCY, Severity.BLOCKER, "ARCH-001",
-                    f"{arch} + {self.exec_model}: incompatível",
-                    f"A arquitetura '{arch}' (Q16) não funciona com o modelo de execução "
-                    f"'{self.exec_model}' (Q17). Modelos válidos: "
+                    f"{arch} + {', '.join(self.exec_models)}: incompatível",
+                    f"A arquitetura '{arch}' (Q16) não funciona com nenhum dos "
+                    f"modelos de execução selecionados em Q17: "
+                    f"{', '.join(self.exec_models)}. Modelos válidos: "
                     f"{', '.join(sorted(valid_exec))}.",
                     ["16", "17"],
                     f"Altere o modelo de execução para um compatível com {arch}.",
@@ -696,7 +704,7 @@ class TechnologyVerificationService:
 
         # Serverless + Container = conflito
         if "Serverless" in self.arch_profiles:
-            if self.exec_model == "Containerizado":
+            if "Containerizado" in self.exec_models:
                 self._add(
                     Category.TECH_FEASIBILITY, Severity.CRITICAL, "TECH-005",
                     "Serverless e Containerizado são abordagens distintas",
@@ -764,7 +772,7 @@ class TechnologyVerificationService:
                 )
 
         # High availability + Stand-alone = conflito
-        if self.high_availability == "Sim" and self.exec_model == "Stand-alone":
+        if self.high_availability == "Sim" and "Stand-alone" in self.exec_models:
             self._add(
                 Category.TECH_FEASIBILITY, Severity.BLOCKER, "TECH-010",
                 "Alta disponibilidade incompatível com Stand-alone",
@@ -868,7 +876,7 @@ class TechnologyVerificationService:
                 )
 
         # Cloud sem vault de segredos
-        if self.exec_model in ("Cloud", "Híbrido"):
+        if set(self.exec_models) & {"Cloud", "Híbrido"}:
             if "Vault de segredos" not in self.security_controls:
                 self._add(
                     Category.CROSS_PILLAR, Severity.WARNING, "XPILLAR-007",
@@ -1348,7 +1356,7 @@ class TechnologyVerificationService:
             agents.add("QA")
         if self.security_controls:
             agents.add("Segurança")
-        if self.exec_model or self.needs_redis or self.needs_messaging:
+        if self.exec_models or self.needs_redis or self.needs_messaging:
             agents.add("Infraestrutura")
         if self.info_classification or self.ai_restrictions:
             agents.add("Compliance")
@@ -1452,7 +1460,7 @@ class TechnologyVerificationService:
             )
 
         # Restrições de modo offline
-        if self.exec_model == "Offline com sincronização posterior":
+        if "Offline com sincronização posterior" in self.exec_models:
             restrictions.append(
                 "📴 Modo offline: estratégia de conflict resolution obrigatória, "
                 "versionamento de dados local, sync queue com retry."
