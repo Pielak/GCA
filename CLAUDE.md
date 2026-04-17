@@ -421,6 +421,16 @@ Fluxo esperado:
 - Não usar estilos inline se já houver convenção utilitária
 - Não quebrar rotas existentes sem migração planejada
 
+#### Regra dura de deploy do frontend (armadilha recorrente)
+O container `gca-frontend` roda `vite preview` sobre build estático — **não há hot-reload**. Backend (`gca-backend`) tem `uvicorn --reload` e recarrega sozinho; frontend **não**. Mudança em `frontend/**` sem rebuild = user vê build antigo e parece que o commit não teve efeito.
+
+**Toda vez que um commit tocar `frontend/**`, Claude deve, antes de declarar a entrega como visível ao user:**
+1. `docker exec gca-frontend npm run build` — regenera `dist/` com novos hashes.
+2. `docker compose restart gca-frontend` (ou `docker restart gca-frontend`) — garante que o preview server aponte para o dist novo.
+3. Informar o user: **hard refresh no browser** (`Ctrl+Shift+R` / `Cmd+Shift+R`) para bypassar cache do navegador.
+
+Não cumprir esses 3 passos é a causa mais comum de "você disse que fez, mas eu continuo vendo o mesmo". Se o commit só toca backend, nenhum desses passos é necessário.
+
 ### Banco
 - Não remover tabelas/colunas existentes sem fase de deprecação
 - Toda mudança estrutural exige migração
