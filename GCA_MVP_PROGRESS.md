@@ -67,7 +67,7 @@ Mesma do MVP 1:
 |---|---|---|---|---|---|
 | DT-012 | Critical | Governança de IA (Arguidor) | `arguider_service.py:174` faz fallback silencioso a `settings.ANTHROPIC_API_KEY` quando o projeto não tem chave configurada. Contradiz contrato §6.4 (nunca misturar chave global com projeto). | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
 | DT-013 | Critical | Governança de IA (Ingestão) | `ingestion_service.py:288` resolve chave com `provider="anthropic"` hardcoded. Ignora o provedor escolhido pelo GP. | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
-| DT-015 | Major | UX/Ingestão | PDF preenchido do questionário é sempre quarentenado pelo detector de PII (respostas têm email/CPF/telefone de stakeholders). Caminho oficial de alimentar o OCG fica bloqueado na abertura do projeto. Descoberto no smoke E2E do MVP 2 em 2026-04-17. | Smoke E2E MVP 2 | **Aberto** — unificação em estratégia B (PDF-only) fecha essa DT |
+| DT-015 | Major | UX/Ingestão | PDF preenchido do questionário é sempre quarentenado pelo detector de PII (respostas têm email/CPF/telefone de stakeholders). Caminho oficial de alimentar o OCG fica bloqueado na abertura do projeto. Descoberto no smoke E2E do MVP 2 em 2026-04-17. | Smoke E2E MVP 2 | **Quitada 2026-04-17** — commit `8fc52fc`: estratégia B unificada. PDF vira transporte de respostas (não documento), delega a `QuestionnaireService.submit_questionnaire` → pipeline 8 agentes IA → hooks de consistência. Detector de PII não é acionado no caminho oficial. QuestionnairePage reescrita PDF-only (-20KB no bundle). |
 
 #### Herdadas (MVP 1, já quitadas — mantidas para rastreabilidade)
 
