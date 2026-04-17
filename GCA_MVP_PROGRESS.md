@@ -165,14 +165,20 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - feature nova adicionada para “contornar” dívida não resolvida.
 
 ### Situação atual do gate (MVP 2)
-**NÃO AVANÇAR** (features da fase ainda não implementadas)
+**NÃO AVANÇAR** (3 de 5 features canônicas ainda não implementadas)
 
 ### Motivo
-Dívida de saneamento (DT-012, DT-013, DT-014) quitada em 2026-04-17. O gate
-permanece fechado porque as features canônicas do MVP 2 (contrato §7) ainda
-não estão entregues: contração de OCG no delete, reavaliação do Gatekeeper
-pós-ingestão, Arguidor end-to-end sem quebras no dogfood. O gate só abre
-quando o §9 "Próximo marco de saída do MVP 2" for inteiramente atendido.
+Dívida de saneamento (DT-012, DT-013, DT-014) quitada em 2026-04-17.
+Features canônicas entregues parcialmente em 2026-04-17:
+
+- ✅ **OCG versionado com deltas operacional (incluindo contração no delete)** — commit `3942f6a`. `IngestionService._contract_ocg_for_deleted_document` reverte campos tocados pelo doc, respeita deltas posteriores (fields_skipped), grava delta `trigger_source=document_removal`. 4 testes passando.
+- ✅ **Quarentena de PII estável e testada** — commit `3942f6a`. `_detect_pii` passa a validar CPF/CNPJ via mod-11 e cartão via Luhn, elimina falso-positivo de runs de 14 dígitos em xref de PDF que causava quarentena espúria do questionário. 33 testes passando.
+- ⏸️ **Ingestão madura end-to-end** — quarentena + contração OK; falta validar integração no dogfood sem quebras.
+- ❌ **Backlog derivado do OCG consistente com o contexto atual** — pendente.
+- ❌ **Arguidor funcional sem resíduos de hardcode** — pendente (resíduo `arguider_service.py:174` em `settings.ANTHROPIC_API_KEY` ainda aberto).
+- ❌ **Reavaliação do Gatekeeper após ingestão disparando corretamente** — pendente.
+
+Gate abre apenas quando §10 estiver inteiramente atendido.
 
 ### Histórico do gate
 - MVP 1 → **PODE AVANÇAR** em 2026-04-17 com todos os 5 Criticals quitados
@@ -181,6 +187,8 @@ quando o §9 "Próximo marco de saída do MVP 2" for inteiramente atendido.
   herdados de código.
 - MVP 2 → Criticals/Major de saneamento (DT-012, DT-013, DT-014) quitados em
   2026-04-17. Gate continua fechado aguardando as features canônicas.
+- MVP 2 → 2 de 5 features canônicas entregues em 2026-04-17 (contração OCG
+  + quarentena PII). 3 pendentes: backlog, Arguidor, Gatekeeper reavaliação.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -236,6 +244,7 @@ Antes de qualquer mudança:
 | Data | Emenda | Arquivos | Motivo |
 |---|---|---|---|
 | 2026-04-17 | Separação explícita entre Contexto A (IA de desenvolvimento do GCA) e Contexto B (IA operacional do cliente). Regra dura de não acoplamento: escolha de IA no desenvolvimento do produto não vira dependência obrigatória do cliente. | `GCA_CANONICAL_CONTRACT.md §6.6` (novo), `CLAUDE.md §6.5` (novo), `GCA_MVP_PROGRESS.md §5.3` (nota) | Prevenir que conveniência de desenvolvimento (ex.: usar Claude/Anthropic para construir o GCA) seja lida como obrigação do cliente final. Preserva flexibilidade multi-provedor por instância/projeto. Sem mudança de código. |
+| 2026-04-17 | Saneamento de working tree acumulada: 5 commits organizando 3 frentes (bugfixes, MVP 2 core, automação session 22). Trabalho anterior não commitado foi agrupado por coerência; senha em plaintext em `scripts/capturar_telas_gca.py` extraída para env var antes do commit. | commits `32e12a8`, `80d438d`, `3942f6a`, `f3db454`, `609ca1c` | Reduzir risco de rollback confuso. Trabalho de sessão anterior (contração OCG + PII + scripts manual/tutorial + bugfixes de aprovação GP e axios multipart) estava misturado na working tree sem trilha clara. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
@@ -244,12 +253,12 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 ## 10. Próximo marco de saída do MVP 2
 
 O MVP 2 poderá ser considerado apto a encerrar quando:
-- todos os Criticals da fase (DT-012, DT-013) estiverem quitados;
-- OCG Updater aplicar a política de criticidade (DT-014);
-- ingestão + quarentena PII estiverem estáveis e testadas;
-- OCG versionado com deltas operacional (incluindo contração no delete);
-- backlog derivado do OCG consistente com o contexto atual;
-- Arguidor funcional sem resíduos de hardcode;
-- reavaliação do Gatekeeper após ingestão disparando corretamente;
-- testes da fase passando e nenhum Critical do MVP 1 tiver regredido;
-- gate mudar para **PODE AVANÇAR** com justificativa registrada.
+- [x] todos os Criticals da fase (DT-012, DT-013) estiverem quitados — 2026-04-17;
+- [x] OCG Updater aplicar a política de criticidade (DT-014) — 2026-04-17;
+- [~] ingestão + quarentena PII estiverem estáveis e testadas — quarentena OK (commit `3942f6a`, 33 testes); integração end-to-end falta validar no dogfood;
+- [x] OCG versionado com deltas operacional (incluindo contração no delete) — commit `3942f6a`, 4 testes;
+- [ ] backlog derivado do OCG consistente com o contexto atual;
+- [ ] Arguidor funcional sem resíduos de hardcode (resíduo em `arguider_service.py:174`);
+- [ ] reavaliação do Gatekeeper após ingestão disparando corretamente;
+- [x] testes da fase passando e nenhum Critical do MVP 1 tiver regredido — 313/336 passando; 23 failures pré-existentes inalteradas;
+- [ ] gate mudar para **PODE AVANÇAR** com justificativa registrada.
