@@ -1,6 +1,6 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 1.1  
+Versão: 1.2  
 Data-base: 2026-04-17  
 Status: **controle de avanço por fase**
 
@@ -149,6 +149,7 @@ Mesma do MVP 1:
   - tarefas auxiliares e repetitivas com modelo local/Ollama;
   - consolidação e decisão crítica com modelo premium.
 - Não pode assumir um único provedor como verdade universal do produto.
+- **Contexto A (IA para construir o GCA) é distinto de Contexto B (IA operacional do cliente)** — contrato §6.6, CLAUDE.md §6.5. A escolha de IA feita no desenvolvimento do produto nunca se torna dependência obrigatória do cliente final.
 
 ---
 
@@ -230,7 +231,17 @@ Antes de qualquer mudança:
 
 ---
 
-## 9. Próximo marco de saída do MVP 2
+## 9. Emendas de governança documental
+
+| Data | Emenda | Arquivos | Motivo |
+|---|---|---|---|
+| 2026-04-17 | Separação explícita entre Contexto A (IA de desenvolvimento do GCA) e Contexto B (IA operacional do cliente). Regra dura de não acoplamento: escolha de IA no desenvolvimento do produto não vira dependência obrigatória do cliente. | `GCA_CANONICAL_CONTRACT.md §6.6` (novo), `CLAUDE.md §6.5` (novo), `GCA_MVP_PROGRESS.md §5.3` (nota) | Prevenir que conveniência de desenvolvimento (ex.: usar Claude/Anthropic para construir o GCA) seja lida como obrigação do cliente final. Preserva flexibilidade multi-provedor por instância/projeto. Sem mudança de código. |
+
+Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
+
+---
+
+## 10. Próximo marco de saída do MVP 2
 
 O MVP 2 poderá ser considerado apto a encerrar quando:
 - todos os Criticals da fase (DT-012, DT-013) estiverem quitados;

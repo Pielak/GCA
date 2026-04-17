@@ -1,6 +1,6 @@
 # GCA_CANONICAL_CONTRACT.md
 
-Versão: 1.1  
+Versão: 1.2  
 Data-base: 2026-04-17  
 Status: **Canônico / soberano para implementação**
 
@@ -207,6 +207,94 @@ Independentemente do modelo usado:
 - o OCG continua sendo a fonte única de verdade do projeto;
 - toda saída relevante deve respeitar o contexto atual do OCG;
 - mudanças relevantes devem atualizar o OCG conforme as regras de versionamento e auditoria.
+
+### 6.6 Separação entre IA de desenvolvimento do produto e IA operacional do cliente
+
+O GCA deve ser interpretado sob dois contextos distintos de uso de IA. Essa separação é contratual e precede qualquer decisão sobre provedor/modelo padrão.
+
+#### 6.6.1 Contexto A — IA usada para desenvolver e evoluir o GCA
+
+Cobre a IA utilizada pelo criador/equipe do produto para:
+- desenhar arquitetura;
+- testar e consolidar o OCG;
+- reduzir dívida técnica;
+- evoluir módulos;
+- gerar ou revisar código do próprio GCA;
+- criar documentação e estrutura do produto.
+
+Regras:
+- a escolha da IA é decisão de engenharia do produto;
+- pode ser adotado um modelo premium/forte para maximizar qualidade analítica;
+- o custo é de desenvolvimento do produto, não custo operacional do cliente;
+- decisões tomadas aqui **não definem automaticamente** o padrão de IA do cliente final.
+
+#### 6.6.2 Contexto B — IA usada pelo cliente dentro da sua instância do GCA
+
+Cobre a IA utilizada na operação diária da instância on-premises do cliente para:
+- gerar e atualizar OCGs de projetos;
+- executar Gatekeeper, Arguidor, backlog, roadmap e CodeGen;
+- analisar documentos, contexto e entregáveis;
+- apoiar governança, testes e documentação viva.
+
+Regras:
+- o cliente escolhe o provedor/modelo que deseja utilizar;
+- o cliente paga pelos custos operacionais de IA da sua instância;
+- o GCA deve permitir configuração por instância e, quando aplicável, por projeto;
+- o produto deve **recomendar, mas não impor**, a escolha de IA;
+- a recomendação deve considerar objetivo, custo, latência, privacidade, contexto e risco de erro.
+
+#### 6.6.3 Regra de não acoplamento entre os dois contextos
+
+Regra dura:
+- a IA usada para construir o GCA **não pode virar dependência obrigatória** da operação do cliente;
+- a escolha atual de IA do produto não deve ser hardcoded como verdade universal do sistema;
+- nenhuma decisão de implementação deve presumir que o cliente final usará o mesmo provedor/modelo do desenvolvedor do GCA;
+- o GCA deve permanecer compatível com múltiplos provedores e modelos, inclusive por endpoint compatível quando previsto pela configuração.
+
+#### 6.6.4 Política de recomendação de IA ao cliente
+
+Antes de fixar um padrão de IA para a instância do cliente, o GCA deve avaliar:
+1. objetivo principal do cliente com a IA;
+2. nível de criticidade das tarefas;
+3. expectativa de custo;
+4. expectativa de latência;
+5. exigência de privacidade ou localidade;
+6. necessidade de codegen;
+7. necessidade de análise documental e consolidação de contexto;
+8. aderência do modelo ao volume de contexto e idioma esperado.
+
+O resultado deve classificar a opção como:
+- recomendada;
+- aceitável com ressalvas;
+- inadequada para o objetivo informado.
+
+#### 6.6.5 Política operacional recomendada
+
+Para clientes que desejam equilíbrio entre custo e qualidade:
+- tarefas menores e auxiliares podem usar modelo local ou modelo mais barato;
+- tarefas oficiais de consolidação, arbitragem e decisão crítica devem usar modelo mais forte;
+- OCG final, conflitos entre artefatos, decisões de arquitetura, compliance e segurança críticos **não devem depender exclusivamente de modelo fraco**.
+
+Essa política é consistente com §6.2 (roteamento híbrido por criticidade): Contexto B herda a taxonomia baixa/média/alta, mas aplicada à instância do cliente — nunca presumindo a mesma configuração do Contexto A.
+
+#### 6.6.6 Relação com o OCG
+
+Independentemente do provedor/modelo escolhido em qualquer um dos contextos:
+- o OCG continua sendo a fonte única de verdade do projeto;
+- nenhuma saída relevante pode ignorar o OCG;
+- mudanças relevantes de contexto devem refletir no versionamento, auditoria e propagação do OCG;
+- a escolha de IA influencia o perfil operacional, mas **não substitui** a governança do OCG.
+
+#### 6.6.7 Exemplos de interpretação correta
+
+Exemplo 1:
+- durante a construção do GCA, o produto pode usar uma IA premium para amadurecer o OCG;
+- isso **não obriga** o cliente a usar a mesma IA em produção.
+
+Exemplo 2:
+- o cliente pode configurar modelo local/Ollama para tarefas auxiliares;
+- e modelo premium para OCG final, Gatekeeper crítico ou codegen estrutural;
+- isso é comportamento **válido e desejável** quando explicitamente configurado.
 
 ---
 

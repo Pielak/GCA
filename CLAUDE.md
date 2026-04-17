@@ -174,6 +174,74 @@ Diretriz prática: Ollama/local = auxiliar barato para tarefas menores e repetit
 - Sempre externalizar provider, model, endpoint, api_key, timeouts e limites.
 - Se houver suporte a endpoint compatível com OpenAI, deixar isso explícito como compatibilidade, não como suporte oficial pleno.
 
+### 6.5 Separação obrigatória entre IA de desenvolvimento do GCA e IA operacional do cliente
+
+Referência autoritativa: `GCA_CANONICAL_CONTRACT.md §6.6`. Aplicação obrigatória no raciocínio de Claude.
+
+Claude deve **sempre raciocinar sob dois contextos distintos**.
+
+#### 6.5.1 Contexto A — IA usada para construir o GCA
+
+Cobre:
+- arquitetura do produto;
+- saneamento técnico;
+- teste e consolidação do OCG;
+- evolução dos módulos do próprio GCA;
+- geração e revisão de código do produto.
+
+Regra:
+- neste contexto, pode ser usada uma IA mais forte para maximizar qualidade e reduzir risco de erro;
+- isso é custo de desenvolvimento do produto;
+- essa escolha **não define automaticamente** o comportamento exigido do cliente final.
+
+#### 6.5.2 Contexto B — IA usada pelo cliente dentro da instância do GCA
+
+Cobre:
+- uso diário do GCA pelo cliente;
+- OCG dos projetos do cliente;
+- Gatekeeper, Arguidor, backlog, roadmap, CodeGen, QA e documentação viva;
+- custos operacionais de IA da instância on-premises do cliente.
+
+Regra:
+- a escolha do provedor/modelo pertence ao cliente;
+- o GCA deve suportar configuração por instância e, quando aplicável, por projeto;
+- Claude **não deve transformar** a IA usada no desenvolvimento do GCA em dependência mandatória da operação do cliente.
+
+#### 6.5.3 Regra dura de implementação
+
+Claude **nunca** deve:
+- hardcodar como obrigatório o mesmo provedor/modelo usado para construir o GCA;
+- assumir que todo cliente usará Anthropic, OpenAI ou qualquer outro provedor específico;
+- tratar uma escolha atual do produto como contrato obrigatório da operação do cliente;
+- reduzir a arquitetura a um único provedor quando o contrato do produto exige flexibilidade configurável.
+
+#### 6.5.4 Regra de desenho do sistema
+
+Ao trabalhar em qualquer módulo com IA, Claude deve perguntar:
+1. esta decisão pertence ao desenvolvimento do GCA ou à operação do cliente?
+2. esta escolha de IA é uma decisão de engenharia do produto ou uma configuração da instância do cliente?
+3. estou acidentalmente transformando uma conveniência de desenvolvimento em obrigação do produto?
+
+#### 6.5.5 Política operacional decorrente
+
+Claude deve preservar no sistema:
+- múltiplos provedores configuráveis;
+- possibilidade de recomendação por objetivo do cliente;
+- possibilidade de roteamento híbrido por criticidade (§6.2);
+- separação entre chaves globais do pipeline e chaves do projeto;
+- registro auditável da escolha de provedor/modelo quando a tarefa for relevante.
+
+#### 6.5.6 Frase de verificação obrigatória
+
+Sempre que uma mudança envolver IA, Claude deve validar:
+
+> "Esta decisão é apenas do meu ambiente de desenvolvimento do GCA ou está virando indevidamente uma obrigação da operação do cliente?"
+
+Se a resposta indicar acoplamento indevido:
+- parar;
+- reportar a divergência;
+- corrigir o desenho para manter o produto flexível ao cliente final.
+
 ---
 
 ## 7. Fatiamento por MVP
