@@ -165,18 +165,18 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - feature nova adicionada para “contornar” dívida não resolvida.
 
 ### Situação atual do gate (MVP 2)
-**NÃO AVANÇAR** (3 de 5 features canônicas ainda não implementadas)
+**NÃO AVANÇAR** (2 de 6 itens do §10 ainda pendentes)
 
 ### Motivo
 Dívida de saneamento (DT-012, DT-013, DT-014) quitada em 2026-04-17.
-Features canônicas entregues parcialmente em 2026-04-17:
+Features canônicas entregues em 2026-04-17:
 
 - ✅ **OCG versionado com deltas operacional (incluindo contração no delete)** — commit `3942f6a`. `IngestionService._contract_ocg_for_deleted_document` reverte campos tocados pelo doc, respeita deltas posteriores (fields_skipped), grava delta `trigger_source=document_removal`. 4 testes passando.
 - ✅ **Quarentena de PII estável e testada** — commit `3942f6a`. `_detect_pii` passa a validar CPF/CNPJ via mod-11 e cartão via Luhn, elimina falso-positivo de runs de 14 dígitos em xref de PDF que causava quarentena espúria do questionário. 33 testes passando.
-- ⏸️ **Ingestão madura end-to-end** — quarentena + contração OK; falta validar integração no dogfood sem quebras.
+- ✅ **Arguidor sem resíduos de hardcode** — DT-012 (commit `1947340`, 2026-04-17) removeu o fallback a `ANTHROPIC_API_KEY` e agora o `__init__` levanta `RuntimeError` explícito se não houver chave do projeto. O SDK `AsyncAnthropic` direto na linha 184 é conhecido residual, mas cai em escopo MVP 3 (multi-provider adapter, §4 resíduos).
+- ✅ **Reavaliação do Gatekeeper após ingestão disparando corretamente** — commit `1a2e917`. `_reevaluate_gatekeeper_async` fire-and-forget adjacente ao `_propagate_async` grava evento `GATEKEEPER_REEVALUATED` no audit_log com `blocking_pillars`, `derived_status` e `ocg_version`. 3 testes passando.
+- ⏸️ **Ingestão madura end-to-end** — quarentena + contração + reavaliação OK; falta validar integração no dogfood sem quebras.
 - ❌ **Backlog derivado do OCG consistente com o contexto atual** — pendente.
-- ❌ **Arguidor funcional sem resíduos de hardcode** — pendente (resíduo `arguider_service.py:174` em `settings.ANTHROPIC_API_KEY` ainda aberto).
-- ❌ **Reavaliação do Gatekeeper após ingestão disparando corretamente** — pendente.
 
 Gate abre apenas quando §10 estiver inteiramente atendido.
 
@@ -189,6 +189,10 @@ Gate abre apenas quando §10 estiver inteiramente atendido.
   2026-04-17. Gate continua fechado aguardando as features canônicas.
 - MVP 2 → 2 de 5 features canônicas entregues em 2026-04-17 (contração OCG
   + quarentena PII). 3 pendentes: backlog, Arguidor, Gatekeeper reavaliação.
+- MVP 2 → 4 de 6 itens canônicos entregues em 2026-04-17 (+ Gatekeeper
+  reavaliação commit `1a2e917`, + Arguidor sem resíduos por reinterpretação
+  correta da DT-012). 2 pendentes: backlog-OCG consistente, validação
+  ingestão end-to-end no dogfood.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -258,7 +262,7 @@ O MVP 2 poderá ser considerado apto a encerrar quando:
 - [~] ingestão + quarentena PII estiverem estáveis e testadas — quarentena OK (commit `3942f6a`, 33 testes); integração end-to-end falta validar no dogfood;
 - [x] OCG versionado com deltas operacional (incluindo contração no delete) — commit `3942f6a`, 4 testes;
 - [ ] backlog derivado do OCG consistente com o contexto atual;
-- [ ] Arguidor funcional sem resíduos de hardcode (resíduo em `arguider_service.py:174`);
-- [ ] reavaliação do Gatekeeper após ingestão disparando corretamente;
+- [x] Arguidor funcional sem resíduos de hardcode — DT-012 quitada em commit `1947340` (`arguider_service.py:174` agora é o guard `RuntimeError`, não o fallback). Multi-provider adapter permanece escopo MVP 3;
+- [x] reavaliação do Gatekeeper após ingestão disparando corretamente — commit `1a2e917`, 3 testes; emite evento `GATEKEEPER_REEVALUATED` com `{trigger, ocg_version, blocking_pillars, derived_status}`;
 - [x] testes da fase passando e nenhum Critical do MVP 1 tiver regredido — 313/336 passando; 23 failures pré-existentes inalteradas;
 - [ ] gate mudar para **PODE AVANÇAR** com justificativa registrada.
