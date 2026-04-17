@@ -34,25 +34,18 @@ async def _has_llm_configured(db: AsyncSession, project_id: UUID) -> bool:
 async def _has_questionnaire_submitted(db: AsyncSession, project_id: UUID) -> bool:
     """Verifica se o projeto tem questionário com respostas submetidas.
 
-    Retorna True se existe Questionnaire com responses não nulo, não vazio, e não '{}'.
+    Retorna True se existe Questionnaire cujas responses não sejam nulas,
+    vazias ou iguais a '{}'.
     """
     result = await db.execute(
-        select(Questionnaire).where(Questionnaire.project_id == project_id)
+        select(exists().where(
+            Questionnaire.project_id == project_id,
+            Questionnaire.responses.isnot(None),
+            Questionnaire.responses != "",
+            Questionnaire.responses != "{}",
+        ))
     )
-    questionnaire = result.scalar_one_or_none()
-
-    if questionnaire is None:
-        return False
-
-    if questionnaire.responses is None:
-        return False
-
-    # Check if responses is not an empty string or '{}'
-    responses_str = questionnaire.responses.strip()
-    if not responses_str or responses_str == "{}":
-        return False
-
-    return True
+    return result.scalar()
 
 
 async def _check_setup_status(db: AsyncSession, project_id: UUID) -> dict:
