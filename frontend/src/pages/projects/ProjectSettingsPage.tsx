@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList } from 'lucide-react'
+import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
+import { useSetupStatus } from '@/hooks/useSetupStatus'
 import { RepositoryPage } from '@/pages/projects/RepositoryPage'
 import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
 
@@ -27,6 +28,7 @@ export function ProjectSettingsPage() {
   const canEdit = can('project:edit')
   const currentUserEmail = useAuthStore((s) => s.user?.email || '')
   const [loading, setLoading] = useState(true)
+  const { data: setupStatus } = useSetupStatus(projectId)
 
   // A aba ativa vem de ?tab=... para suportar deep-links da SetupChecklist
   // (passos IA / Repo / Questionário) e dos redirects de /repository, /questionnaire.
@@ -211,28 +213,72 @@ export function ProjectSettingsPage() {
       <div>
         <h2 className="text-lg font-semibold text-slate-100">Configurações do Projeto</h2>
         <p className="text-slate-500 text-sm mt-0.5">
-          Configure o provedor de IA, SMTP e integrações para este projeto.
-          Estas configurações são compartimentalizadas — não afetam outros projetos.
+          Configure o provedor de IA, SMTP, Repositório Git e envie o Questionário Técnico.
+          Estas 4 abas são a parametrização oficial do projeto — o pipeline (Ingestão,
+          Gatekeeper, Arguidor, etc.) fica bloqueado até IA + Repositório + Questionário
+          estarem completos.
         </p>
       </div>
 
-      {/* Tabs — parametrização do projeto consolidada aqui (contrato MVP 1) */}
+      {/* Banner de progresso do setup — só aparece quando há algo pendente */}
+      {setupStatus && !setupStatus.ready_to_activate && (() => {
+        const items = [
+          { key: 'llm', done: setupStatus.llm_configured, label: 'Provedor de IA' },
+          { key: 'repo', done: setupStatus.repo_configured, label: 'Repositório' },
+          { key: 'questionario', done: setupStatus.questionnaire_submitted, label: 'Questionário' },
+        ]
+        const doneCount = items.filter(i => i.done).length
+        const nextItem = items.find(i => !i.done)
+        return (
+          <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-950/20 border border-amber-800/30">
+            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1 min-w-0">
+              <p className="text-amber-200 text-sm font-semibold">
+                Setup incompleto — {doneCount}/3 concluídos
+              </p>
+              <p className="text-amber-200/80 text-xs mt-0.5 leading-snug">
+                O pipeline do projeto (Ingestão, Gatekeeper, Arguidor, Dashboard) está
+                bloqueado até os 3 passos obrigatórios serem preenchidos. Próximo:{' '}
+                <button
+                  onClick={() => nextItem && setActiveTab(nextItem.key as TabKey)}
+                  className="font-semibold text-amber-200 underline underline-offset-2 hover:text-amber-100"
+                >
+                  {nextItem?.label}
+                </button>.
+              </p>
+            </div>
+          </div>
+        )
+      })()}
+
+      {/* Tabs — parametrização do projeto consolidada aqui (contrato MVP 1). */}
+      {/* Badges ✓/○ no label quando o item faz parte do setup obrigatório. */}
       <div className="flex gap-1 border-b border-slate-800 overflow-x-auto">
         <button onClick={() => setActiveTab('llm')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'llm' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <Cpu className="w-3.5 h-3.5" /> Provedor de IA
+          {setupStatus?.llm_configured
+            ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+            : <Circle className="w-3.5 h-3.5 text-amber-500" />}
         </button>
         <button onClick={() => setActiveTab('smtp')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'smtp' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <Mail className="w-3.5 h-3.5" /> SMTP
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">opcional</span>
         </button>
         <button onClick={() => setActiveTab('repo')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'repo' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <GitBranch className="w-3.5 h-3.5" /> Repositório
+          {setupStatus?.repo_configured
+            ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+            : <Circle className="w-3.5 h-3.5 text-amber-500" />}
         </button>
         <button onClick={() => setActiveTab('questionario')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'questionario' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <ClipboardList className="w-3.5 h-3.5" /> Questionário
+          {setupStatus?.questionnaire_submitted
+            ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+            : <Circle className="w-3.5 h-3.5 text-amber-500" />}
         </button>
       </div>
 
