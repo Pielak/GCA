@@ -65,6 +65,91 @@ async def _propagate_async(
         )
 
 
+async def _reevaluate_gatekeeper_for_audit(
+    db: AsyncSession,
+    project_id: UUID,
+    ocg_version: Optional[int],
+    trigger: str,
+) -> None:
+    """Recomputa Gatekeeper com o OCG atual e grava evento no audit_log.
+
+    Gatekeeper é consolidação read-only em tempo real: aplica thresholds no
+    momento da leitura usando o OCG mais recente. Esta função força essa
+    recomputação após uma mudança relevante de OCG (contrato §5) e deixa
+    trilha auditável do estado resultante.
+
+    - Se o projeto não tem OCG, é no-op silencioso (nada a reavaliar).
+    - Não muta `GatekeeperItem` nem `ModuleCandidate` (permanecem como os
+      Arguiders anteriores os gravaram).
+    - Idempotente do ponto de vista de dados; cada chamada gera um novo
+      evento de audit (trilha cronológica).
+    """
+    from app.services.gatekeeper_service import GatekeeperService
+    from app.services.audit_service import AuditService
+
+    ocg_check = await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+    )
+    if ocg_check.scalar_one_or_none() is None:
+        logger.info(
+            "ingestion.gatekeeper_reeval_noop_no_ocg",
+            project_id=str(project_id),
+            trigger=trigger,
+        )
+        return
+
+    gatekeeper = GatekeeperService(db)
+    state = await gatekeeper.get_project_gatekeeper(project_id)
+    ocg_section = state.get("ocg", {}) or {}
+    summary = state.get("summary", {}) or {}
+
+    audit = AuditService(db)
+    await audit.log_event(
+        event_type="GATEKEEPER_REEVALUATED",
+        resource_type="project",
+        resource_id=project_id,
+        details={
+            "trigger": trigger,
+            "ocg_version": ocg_version,
+            "blocking_pillars": ocg_section.get("blocking_pillars", []),
+            "derived_status": ocg_section.get("derived_status"),
+            "overall_score": (ocg_section.get("status") or {}).get("overall_score"),
+            "has_blockers": summary.get("has_blockers"),
+            "open_gaps": summary.get("open_gaps"),
+            "open_show_stoppers": summary.get("open_show_stoppers"),
+        },
+    )
+
+
+async def _reevaluate_gatekeeper_async(
+    project_id: UUID,
+    ocg_version: Optional[int],
+    trigger: str = "document_ingestion",
+) -> None:
+    """Wrapper fire-and-forget de `_reevaluate_gatekeeper_for_audit`.
+
+    Abre sessão própria, commita o evento de audit. Isolado: se falhar, não
+    afeta a transação de OCG/ingestão (já commitadas).
+    """
+    try:
+        from app.db.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            await _reevaluate_gatekeeper_for_audit(
+                db, project_id, ocg_version=ocg_version, trigger=trigger,
+            )
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        logger.warning(
+            "ingestion.gatekeeper_reeval_failed",
+            project_id=str(project_id),
+            error=str(exc) or repr(exc),
+            error_type=type(exc).__name__,
+            traceback=traceback.format_exc(),
+        )
+
+
 class IngestionService:
     """Serviço de ingestão de documentos por projeto."""
 
@@ -392,6 +477,17 @@ class IngestionService:
                                     project_id=project_id,
                                     changes=update_result["changes"],
                                     ocg_version=update_result.get("version_to"),
+                                )
+                            )
+                            # Reavaliar Gatekeeper com o OCG novo (MVP 2 §10).
+                            # Também fire-and-forget: grava evento
+                            # GATEKEEPER_REEVALUATED no audit_log com
+                            # blocking_pillars/derived_status resultantes.
+                            asyncio.create_task(
+                                _reevaluate_gatekeeper_async(
+                                    project_id=project_id,
+                                    ocg_version=update_result.get("version_to"),
+                                    trigger="document_ingestion",
                                 )
                             )
 
