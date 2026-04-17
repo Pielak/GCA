@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useOutletContext } from 'react-router-dom'
-import { SetupChecklist } from '@/components/projects/SetupChecklist'
+import { SetupChecklist } from '@/components/project/SetupChecklist'
 import { useSetupStatus } from '@/hooks/useSetupStatus'
 import { FileText, Code2, TestTube2, Cpu, Shield, Users, GitBranch, Key, Loader2, AlertTriangle } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
