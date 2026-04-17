@@ -62,7 +62,14 @@ class AgentService:
         # Detectar provider configurado pelo admin (camada GCA).
         self.provider = settings.DEFAULT_AI_PROVIDER or "anthropic"
         self.api_key = getattr(settings, f"{self.provider.upper()}_API_KEY", None)
-        self.model = getattr(settings, f"{self.provider.upper()}_MODEL", None)
+        # Modelo: prefere `{PROVIDER}_MODEL` explícito do admin; se ausente,
+        # usa `DEFAULT_AI_MODEL` global (consistente com ocg_updater_service
+        # e ai_service). Sem isso, admin precisava setar uma env var por
+        # provider mesmo tendo DEFAULT_AI_MODEL apontando para o escolhido.
+        self.model = (
+            getattr(settings, f"{self.provider.upper()}_MODEL", None)
+            or settings.DEFAULT_AI_MODEL
+        )
 
         # Cliente SDK nativo apenas para Anthropic. Outros providers usam httpx
         # em `_call_llm` (rota OpenAI-compatible).
@@ -70,6 +77,28 @@ class AgentService:
             self.client = AsyncAnthropic(api_key=self.api_key)
         else:
             self.client = None
+
+    async def _project_id_for_questionnaire(self, questionnaire_id) -> Optional[UUID]:
+        """Resolve project_id a partir de um questionnaire_id.
+
+        O billing exige project_id NOT NULL (migration 009). O analyzer e
+        pillar agents são disparados com questionnaire_id conhecido e é daí
+        que derivamos o projeto. Sem isso, cada log falha com
+        IntegrityError NotNullViolationError e arrasta a transação — o
+        OCG nem chega a ser salvo.
+        """
+        if questionnaire_id is None:
+            return None
+        from sqlalchemy import text
+        try:
+            result = await self.db.execute(
+                text("SELECT project_id FROM questionnaires WHERE id = :qid"),
+                {"qid": str(questionnaire_id)},
+            )
+            row = result.fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
 
     def _ensure_key(self) -> None:
         """Garante que o provider configurado tem chave. Falha explícita se
@@ -210,13 +239,15 @@ class AgentService:
                 submitted_at=datetime.now(timezone.utc).isoformat(),
             )
 
-            # Chamar LLM (Anthropic, DeepSeek, etc.)
+            # Chamar LLM (Anthropic, DeepSeek, etc.). project_id é resolvido
+            # a partir do questionnaire_id para permitir billing correto.
             start_time = datetime.now(timezone.utc)
+            pid = await self._project_id_for_questionnaire(req.questionnaire_id)
             response_text, tokens_used = await self._call_llm(
                 system_prompt=ANALYZER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-                project_id=None,
+                project_id=pid,
                 operation="analyzer",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
@@ -313,13 +344,15 @@ Project Context:
 
 Return complete JSON analysis with score, classification, findings, and recommendations."""
 
-            # Chamar LLM
+            # Chamar LLM. project_id resolvido via questionnaire_id → billing
+            # evita IntegrityError que antes derrubava a transação do OCG.
             start_time = datetime.now(timezone.utc)
+            pid = await self._project_id_for_questionnaire(req.questionnaire_id)
             response_text, tokens_used = await self._call_llm(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-                project_id=None,
+                project_id=pid,
                 operation=f"pillar_p{pillar_id}",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
