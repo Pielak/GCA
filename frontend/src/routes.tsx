@@ -20,6 +20,7 @@ import { GatekeeperPage } from './pages/projects/GatekeeperPage';
 import { RepositoryPage } from './pages/projects/RepositoryPage';
 import { BacklogPage } from './pages/projects/BacklogPage';
 import { RequireRepository } from './components/guards/RequireRepository';
+import { RequireProjectSetup } from './components/guards/RequireProjectSetup';
 import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
 import { ArguiderPage } from './pages/projects/ArguiderPage';
@@ -107,17 +108,17 @@ export const router = createBrowserRouter([
           { path: 'ocg', Component: OCGPage },
           { path: 'questionnaire', Component: QuestionnairePage },
           { path: 'repository', Component: RepositoryPage },
-          { path: 'external-repos', element: <RequireRepository><ExternalReposPage /></RequireRepository> },
-          { path: 'ingestion', element: <RequireRepository><IngestionPage /></RequireRepository> },
-          { path: 'gatekeeper', element: <RequireRepository><GatekeeperPage /></RequireRepository> },
-          { path: 'arguider', element: <RequireRepository><ArguiderPage /></RequireRepository> },
-          { path: 'codegen', element: <RequireRepository><CodeGeneratorPage /></RequireRepository> },
-          { path: 'qa', element: <RequireRepository><QAReadinessPage /></RequireRepository> },
-          { path: 'tester-review', element: <RequireRepository><TesterReviewPage /></RequireRepository> },
-          { path: 'backlog', element: <RequireRepository><BacklogPage /></RequireRepository> },
-          { path: 'roadmap', element: <RequireRepository><RoadmapPage /></RequireRepository> },
-          { path: 'docs', element: <RequireRepository><LiveDocsPage /></RequireRepository> },
-          { path: 'readiness', element: <RequireRepository><ReadinessPage /></RequireRepository> },
+          { path: 'external-repos', Component: ExternalReposPage },
+          { path: 'ingestion', element: <RequireProjectSetup><IngestionPage /></RequireProjectSetup> },
+          { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
+          { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
+          { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },
+          { path: 'qa', element: <RequireProjectSetup><QAReadinessPage /></RequireProjectSetup> },
+          { path: 'tester-review', element: <RequireProjectSetup><TesterReviewPage /></RequireProjectSetup> },
+          { path: 'backlog', element: <RequireProjectSetup><BacklogPage /></RequireProjectSetup> },
+          { path: 'roadmap', element: <RequireProjectSetup><RoadmapPage /></RequireProjectSetup> },
+          { path: 'docs', element: <RequireProjectSetup><LiveDocsPage /></RequireProjectSetup> },
+          { path: 'readiness', element: <RequireProjectSetup><ReadinessPage /></RequireProjectSetup> },
           { path: 'settings', Component: ProjectSettingsPage },
           { path: 'audit', Component: PipelineAuditPage },
         ],
