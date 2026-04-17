@@ -6,6 +6,7 @@ from app.core.crypto import (
     decrypt_pat,
     encrypt_pat,
     is_encrypted,
+    PatNotEncryptedError,
 )
 
 
@@ -41,14 +42,15 @@ def test_encrypt_idempotent_on_already_encrypted():
     assert decrypt_pat(cipher_twice) == plaintext
 
 
-# ─────────────────────────── backward compat ────────────────────────────
+# ─────────────────────────── política de plaintext ─────────────────────
 
-def test_decrypt_passes_through_legacy_plaintext():
-    """PAT plaintext legado (sem prefixo gAAAAA) é devolvido como está,
-    sem levantar erro — garante que sistemas existentes continuem a
-    funcionar até o próximo write."""
+def test_decrypt_raises_on_legacy_plaintext():
+    """PAT plaintext legado (sem prefixo gAAAAA) agora levanta
+    PatNotEncryptedError — contrato §6.4 / §8 MVP 5 proíbe secrets em claro
+    no banco. Nenhum fallback silencioso."""
     legacy = "ghp_legacyTokenSemFernet123"
-    assert decrypt_pat(legacy) == legacy
+    with pytest.raises(PatNotEncryptedError):
+        decrypt_pat(legacy)
 
 
 def test_encrypt_empty_returns_empty():

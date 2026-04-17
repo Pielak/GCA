@@ -60,7 +60,7 @@ Nesta fase, o trabalho prioritário é:
 | DT-001 | Critical | RBAC | Conflito entre documentação histórica com 7 papéis e contrato canônico com 5 papéis. | Docs históricos vs contrato | **Quitada 2026-04-17** — ver §4 |
 | DT-002 | Critical | UI/Admin | Há análise apontando que a aba de usuários/admin está modelada com RBAC global ampliado e lista papéis além do recorte canônico. | Análise completa | **Quitada 2026-04-17** — ver §4 |
 | DT-003 | Critical | Contrato de produto | Há tensão entre textos que sugerem plataforma ampla pronta e o recorte real que ainda exige saneamento da base. | Docs / README / manual | **Quitada 2026-04-17** — ver §4 |
-| DT-004 | Critical | Segurança operacional | PAT de Git ainda aparece documentado em texto plano / criptografia pendente. | Tutorial / requisitos / roadmap | Aberto |
+| DT-004 | Critical | Segurança operacional | PAT de Git ainda aparece documentado em texto plano / criptografia pendente. | Tutorial / requisitos / roadmap | **Quitada 2026-04-17** — ver §4 |
 | DT-005 | Critical | Governança de IA | Falta consolidar regra canônica para seleção de provedor/modelo por objetivo do cliente final, evitando default rígido enganoso. | Requisitos / contrato | **Quitada 2026-04-17** — ver §4 |
 
 ### 3.2 Major
@@ -90,6 +90,7 @@ Nesta fase, o trabalho prioritário é:
 | DT-005 | 2026-04-17 | Política canônica de IA consolidada no escopo do MVP 1. Docstring de `ai_key_resolver.py` explicita as duas camadas (GCA/Admin vs Projeto/GP), as regras duras do contrato §6.4 e a taxonomia de criticidade (baixa/média/alta) do §6.2. `agent_service.py` (pipeline OCG — camada GCA) deixa de fazer fallback silencioso: se o admin configurou `DEFAULT_AI_PROVIDER=X` mas `X_API_KEY` está ausente, o service levanta `RuntimeError` explícito na primeira chamada a `_call_llm`, em vez de cair silenciosamente em `ANTHROPIC_API_KEY`. | `backend/app/services/ai_key_resolver.py` (docstring expandida), `backend/app/services/agent_service.py` (`__init__` sem fallback silencioso + novo `_ensure_key` chamado no início de `_call_llm`) | 81/81 + 44/44 testes passando; import da classe sem erro. |
 | DT-009 (política) | 2026-04-17 | Roteamento híbrido por criticidade explicitado nos docs operacionais ativos (CLAUDE.md §6.2-6.3) e no docstring de `ai_key_resolver.py`. Baixa/Média → Ollama ou modelo barato aceitáveis; Alta → modelo premium obrigatório e sem fallback silencioso. | `GCA_CANONICAL_CONTRACT.md §6.2-6.5`, `CLAUDE.md §6.2-6.3`, `backend/app/services/ai_key_resolver.py` | Doc lido e referenciado pelo código. Pendente a implementação do roteador em si (ver nota abaixo). |
 | DT-003 | 2026-04-17 | Narrativa de produto neutralizada. README reescrito apontando o status real (MVP 1 em saneamento), a precedência documental e o modelo instalável-por-cliente. Docs históricos (`ANALISE_COMPLETA_GCA.md`, `ARQUITETURA.md`, `docs/GCA_Documento_Completo.md`) receberam cabeçalho ⚠️ **"DOCUMENTO HISTÓRICO — NÃO É CONTRATO DE IMPLEMENTAÇÃO"** com referência ao contrato canônico. CHANGELOG tem entrada nova cobrindo a sessão de saneamento. | `README.md`, `CHANGELOG.md`, `ARQUITETURA.md`, `ANALISE_COMPLETA_GCA.md`, `docs/GCA_Documento_Completo.md` | Grep por "Production Ready" no README = 0 ocorrências. Cada doc histórico abre com aviso claro de não-contrato. |
+| DT-004 | 2026-04-17 | PAT plaintext eliminado do fluxo de crypto. `decrypt_pat` removeu o fallback silencioso que devolvia plaintext quando o valor armazenado não era Fernet. Agora levanta `PatNotEncryptedError` explícito. Introduzida exceção dedicada `PatNotEncryptedError` em `crypto.py`. Docstring do módulo reescrita sem menção a "backward-compat plaintext". Teste `test_decrypt_passes_through_legacy_plaintext` reescrito para garantir que plaintext agora **falha**. | `backend/app/core/crypto.py`, `backend/app/tests/test_crypto.py` | 10/10 crypto + 44/44 unit + 81/81 integration passando. DB inspecionado: 2/2 `pat_encrypted` já em Fernet (`gAAAAAB…`, 140 chars); decrypt OK nos 2 projetos reais. Sem migration de dados necessária. |
 
 ### Resíduos conhecidos (fora do escopo do MVP 1; programados para MVPs posteriores)
 
@@ -137,10 +138,36 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - feature nova adicionada para “contornar” dívida não resolvida.
 
 ### Situação atual do gate
-**NÃO AVANÇAR**
+**PODE AVANÇAR** (atualizado 2026-04-17)
 
-### Motivo
-A base ainda possui conflitos canônicos de RBAC, produto, governança de IA e segurança operacional que tornam perigoso avançar sem saneamento mínimo.
+### Justificativa registrada
+Todos os 5 Criticals do MVP 1 foram quitados nesta sessão:
+- **DT-001** (RBAC 7→5 papéis canônicos em backend + frontend)
+- **DT-002** (UI/Admin alinhada aos 5 papéis)
+- **DT-003** (narrativa de produto neutralizada; docs históricos marcados)
+- **DT-004** (PAT plaintext eliminado; `decrypt_pat` sem fallback silencioso)
+- **DT-005** (governança de IA consolidada; OCG sem fallback silencioso)
+
+Critérios do §9 "Próximo marco de saída do MVP 1" — todos atendidos:
+- RBAC de 5 papéis coerente em backend, frontend e docs ✅
+- Telas e fluxos do núcleo respeitam o RBAC canônico ✅
+- Política de IA configurável por cliente explicitada (contrato §6 + CLAUDE §6) ✅
+- Roteamento híbrido de IA definido (criticidade baixa/média/alta) ✅
+- Conflitos documentais críticos neutralizados (README, ARQUITETURA, docs
+  históricos marcados como não-contrato) ✅
+- Núcleo auth/projeto/questionário/OCG básico/Gatekeeper básico estável —
+  81/81 integration + 44/44 unit + 10/10 crypto passando ✅
+
+Dívida remanescente (Major/Minor, não bloqueante do gate):
+- DT-006, DT-007, DT-008 (Major, documental — readiness de materiais,
+  placeholders, consistência). Saneamento incremental durante MVP 2.
+- DT-009 (Major, roteamento híbrido — política fechada; implementação do
+  roteador em código fica para MVP 3, conforme contrato §7).
+- DT-010, DT-011 (Minor, terminologia e narrativa promocional).
+
+### Regra se surgir regressão
+Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
+automaticamente a **NÃO AVANÇAR** até quitação.
 
 ---
 
