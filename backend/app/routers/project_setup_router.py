@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.dependencies.require_action import require_action
-from app.models.base import Project, ProjectSettings, ProjectGitConfig
+from app.models.base import Project, ProjectSettings, ProjectGitConfig, Questionnaire
 
 router = APIRouter(tags=["Project Setup"])
 
@@ -31,14 +31,40 @@ async def _has_llm_configured(db: AsyncSession, project_id: UUID) -> bool:
     return result.scalar()
 
 
+async def _has_questionnaire_submitted(db: AsyncSession, project_id: UUID) -> bool:
+    """Verifica se o projeto tem questionário com respostas submetidas.
+
+    Retorna True se existe Questionnaire com responses não nulo, não vazio, e não '{}'.
+    """
+    result = await db.execute(
+        select(Questionnaire).where(Questionnaire.project_id == project_id)
+    )
+    questionnaire = result.scalar_one_or_none()
+
+    if questionnaire is None:
+        return False
+
+    if questionnaire.responses is None:
+        return False
+
+    # Check if responses is not an empty string or '{}'
+    responses_str = questionnaire.responses.strip()
+    if not responses_str or responses_str == "{}":
+        return False
+
+    return True
+
+
 async def _check_setup_status(db: AsyncSession, project_id: UUID) -> dict:
     """Retorna status completo de configuracao do projeto."""
     repo_configured = await _has_repo_configured(db, project_id)
     llm_configured = await _has_llm_configured(db, project_id)
-    ready_to_activate = repo_configured and llm_configured
+    questionnaire_submitted = await _has_questionnaire_submitted(db, project_id)
+    ready_to_activate = repo_configured and llm_configured and questionnaire_submitted
     return {
         "repo_configured": repo_configured,
         "llm_configured": llm_configured,
+        "questionnaire_submitted": questionnaire_submitted,
         "ready_to_activate": ready_to_activate,
     }
 
@@ -67,6 +93,8 @@ async def activate_project(
             missing.append("repositorio_git")
         if not status["llm_configured"]:
             missing.append("configuracao_llm")
+        if not status["questionnaire_submitted"]:
+            missing.append("questionario_submetido")
         raise HTTPException(
             status_code=400,
             detail={"message": "Configuracao incompleta", "missing": missing},
