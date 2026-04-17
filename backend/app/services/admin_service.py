@@ -174,6 +174,25 @@ class AdminService:
                     correlation_id=correlation_id,
                     details={"gp_email": gp.email, "project": request.project_name},
                 )
+            else:
+                # GP já existe (caso típico: submeteu questionário antes).
+                # Grava a temp_password no user para que o email/primeiro-acesso funcionem.
+                gp.password_hash = hash_password(temp_password)
+                gp.is_active = True
+                gp.first_access_completed = False
+                gp.password_changed_at = None
+                self.db.add(gp)
+                await self.db.flush()
+                logger.info("project.gp_user_activated", gp_id=str(gp.id), email=gp.email)
+
+                await audit.log_event(
+                    event_type="GP_USER_ACTIVATED",
+                    resource_type="user",
+                    actor_id=admin_id,
+                    resource_id=gp.id,
+                    correlation_id=correlation_id,
+                    details={"gp_email": gp.email, "project": request.project_name},
+                )
 
             # === AÇÃO 4: Criar Project + Membership ===
             org = await self._get_or_create_default_org(request.gp_id)
@@ -224,10 +243,7 @@ class AdminService:
             self.db.add(onboarding)
             await self.db.commit()
 
-            # === AÇÃO 5: Gerar token de convite para primeiro acesso ===
-            invite_token = secrets.token_urlsafe(32)
-
-            # === AÇÃO 6: Enviar email de aprovação + email convite ===
+            # === AÇÃO 5: Enviar email de aprovação + email convite ===
             try:
                 if gp:
                     from app.services.email_service import EmailService
@@ -254,9 +270,8 @@ class AdminService:
                         """,
                     )
 
-                    # Email 2: Convite com token e instruções de acesso
-                    login_url = f"https://gca.code-auditor.com.br/login"
-                    is_first_access = not gp.first_access_completed
+                    # Email 2: Convite com senha provisória e instruções de primeiro acesso
+                    login_url = f"https://gca.code-auditor.com.br/p/{project.short_slug}"
 
                     EmailService.send_email(
                         to_email=gp.email,
@@ -269,18 +284,33 @@ class AdminService:
                             <div style="background: #1e293b; padding: 24px; border-radius: 0 0 12px 12px; color: #cbd5e1;">
                                 <p>Olá <strong>{gp.full_name}</strong>,</p>
                                 <p>Você foi designado(a) como <strong style="color: #a78bfa;">Gerente de Projeto</strong> no projeto <strong>{request.project_name}</strong>.</p>
-                                <p>Acesse o GCA para gerenciar seu projeto:</p>
+
+                                <div style="background: #0f172a; padding: 16px; border-radius: 8px; border: 1px solid #7c3aed; margin: 20px 0;">
+                                    <p style="margin: 0 0 8px 0; color: #a78bfa; font-weight: bold; font-size: 13px;">Senha provisória para primeiro acesso:</p>
+                                    <p style="font-family: 'Courier New', monospace; font-size: 18px; background: #1e293b; color: #fbbf24; padding: 12px; text-align: center; margin: 8px 0; border-radius: 6px; letter-spacing: 1px; font-weight: bold; border: 1px dashed #334155;">{temp_password}</p>
+                                    <p style="margin: 8px 0 0 0; color: #94a3b8; font-size: 12px;">No primeiro login o sistema irá pedir que você defina uma senha permanente.</p>
+                                </div>
+
+                                <p>Use o link abaixo para acessar o projeto:</p>
                                 <p style="text-align: center; margin: 20px 0;">
-                                    <a href="{login_url}" style="background: #7c3aed; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;">Acessar GCA</a>
+                                    <a href="{login_url}" style="background: #7c3aed; color: white; padding: 12px 24px; border-radius: 8px; text-decoration: none; font-weight: bold;">Acessar projeto</a>
                                 </p>
-                                {'<p><strong>Primeiro acesso:</strong> Ao entrar, você deverá definir uma nova senha.</p>' if is_first_access else ''}
-                                <p>Ao entrar, você verá apenas os projetos dos quais é membro. Selecione o projeto para acessar Ingestão, Dashboard, Team Invite e acompanhar o backlog.</p>
+                                <p style="color: #94a3b8; font-size: 12px; word-break: break-all;">Ou copie este endereço: <code style="background: #0f172a; padding: 2px 6px; border-radius: 4px;">{login_url}</code></p>
+
+                                <p>Passos:</p>
+                                <ol style="color: #cbd5e1; padding-left: 20px;">
+                                    <li>Abra o link acima.</li>
+                                    <li>Informe seu email (<strong>{gp.email}</strong>) e a senha provisória acima.</li>
+                                    <li>Defina uma nova senha permanente (mínimo 10 caracteres, 1 maiúscula, 1 número, 1 símbolo).</li>
+                                    <li>Você entrará automaticamente no projeto.</li>
+                                </ol>
+
                                 <div style="background: #0f172a; padding: 16px; border-radius: 8px; border-left: 4px solid #7c3aed; margin: 16px 0;">
                                     <p style="margin: 0; color: #a78bfa; font-weight: bold; font-size: 13px;">Questionário Técnico em PDF</p>
                                     <p style="margin: 8px 0 0 0; font-size: 12px;">Na aba <strong>Questionário</strong> do seu projeto, você pode baixar o <strong>PDF editável</strong> com as 49 perguntas técnicas. Preencha offline, no seu tempo, consultando colegas — depois faça upload do PDF preenchido. O GCA analisará as respostas e gerará o contexto inicial (OCG) automaticamente.</p>
                                 </div>
                                 <hr style="border-color: #334155; margin: 20px 0;" />
-                                <p style="color: #64748b; font-size: 12px;">Este acesso é limitado ao projeto e ao papel concedidos. — GCA</p>
+                                <p style="color: #64748b; font-size: 12px;">Este acesso é limitado ao projeto e ao papel concedidos. Se você não reconhece esta solicitação, ignore este email. — GCA</p>
                             </div>
                         </div>
                         """,

@@ -149,16 +149,21 @@ async def upload_questionnaire_pdf(
     try:
         from app.services.ingestion_service import IngestionService
         ing = IngestionService(db)
-        doc = await ing.upload_document(
+        result = await ing.upload_document(
             project_id=project_id,
-            user_id=current_user_id,
-            filename=file.filename or "questionario_preenchido.pdf",
-            content=pdf_bytes,
+            uploaded_by=current_user_id,
+            file_bytes=pdf_bytes,
+            original_filename=file.filename or "questionario_preenchido.pdf",
             content_type="application/pdf",
             category="Questionário PDF",
         )
-        logger.info("questionnaire_pdf.ingested",
-                     project_id=str(project_id), doc_id=str(doc.id))
+        if result.get("document_id"):
+            logger.info("questionnaire_pdf.ingested",
+                         project_id=str(project_id),
+                         doc_id=result["document_id"])
+        else:
+            logger.warning("questionnaire_pdf.ingestion_skipped",
+                           project_id=str(project_id), result=result)
     except Exception as e:
         logger.warning("questionnaire_pdf.ingestion_failed", error=str(e))
 
