@@ -53,6 +53,7 @@ Interpretação obrigatória:
 - Não assumir billing centralizado
 - Não assumir compartilhamento de contexto entre instâncias
 - Não assumir marketplace ou operação SaaS central como realidade atual
+- IA pode operar em **modo híbrido**: modelos diferentes por tipo de tarefa, desde que configurável e auditável (detalhe em §6)
 
 ---
 
@@ -146,13 +147,32 @@ Sempre que houver definição, alteração ou recomendação de provedor/modelo 
 5. Nunca tratar uma IA como “melhor universal”
    - a recomendação deve ser contextual ao objetivo do cliente
 
-### 6.2 Regras de implementação para IA
+### 6.2 Roteamento híbrido por criticidade
 
-- Nunca hardcodar provedor como se fosse obrigatório do produto inteiro
-- Nunca presumir Anthropic como único caminho, mesmo se estiver presente em documentos antigos
-- Nunca misturar chave global de avaliação com chaves específicas do projeto sem regra explícita
-- Sempre externalizar provider, model, endpoint, api_key, timeouts e limites
-- Se houver suporte a endpoint compatível com OpenAI, deixar isso explícito como compatibilidade, não como suporte oficial pleno
+Referência autoritativa: `GCA_CANONICAL_CONTRACT.md §6.2`. Resumo operacional:
+
+- **Baixa criticidade** (classificação simples, extração de campos, sumarização curta, normalização, pré-processamento, enriquecimento leve): modelo local/Ollama ou modelo barato quando configurado pelo cliente.
+- **Média criticidade** (perguntas dirigidas preliminares, propostas iniciais de backlog, pré-análise de artefatos, insumos para OCG/Gatekeeper/Arguidor): local ou remoto, com validação posterior.
+- **Alta criticidade** (consolidação final do OCG, arbitragem de conflitos, decisões arquiteturais, achados críticos de compliance/segurança, liberação/bloqueio de pipeline, backlog oficial, codegen crítico, síntese executiva): modelo premium de raciocínio obrigatório.
+
+Diretriz prática: Ollama/local = auxiliar barato para tarefas menores e repetitivas; modelo premium = consolidação e decisão crítica.
+
+### 6.3 Regras duras de IA
+
+- Nenhum modelo local deve consolidar sozinho o OCG final sem validação da política do projeto.
+- Nenhum modelo de baixa criticidade deve decidir sozinho arquitetura, compliance, segurança ou liberação de pipeline.
+- Uso híbrido deve ser explícito, auditável e parametrizável.
+- Cada tarefa relevante de IA deve registrar: provedor, modelo, motivo da escolha, nível de criticidade, e custo estimado/observado.
+- Compatibilidade com endpoint estilo OpenAI não é equivalência funcional entre modelos.
+- Roteamento híbrido **não** substitui o OCG — todo output relevante respeita o OCG atual.
+
+### 6.4 Regras de implementação para IA
+
+- Nunca hardcodar provedor como se fosse obrigatório do produto inteiro.
+- Nunca presumir Anthropic como único caminho, mesmo se estiver presente em documentos antigos.
+- Nunca misturar chave global de avaliação com chaves específicas do projeto sem regra explícita.
+- Sempre externalizar provider, model, endpoint, api_key, timeouts e limites.
+- Se houver suporte a endpoint compatível com OpenAI, deixar isso explícito como compatibilidade, não como suporte oficial pleno.
 
 ---
 
@@ -171,6 +191,7 @@ Escopo:
 - Gatekeeper básico
 - auditoria mínima necessária
 - configuração básica de provedor de IA
+- política de adequação e roteamento híbrido de IA (§6)
 - vínculo obrigatório com repositório Git quando a fase exigir ingestão/codegen
 
 Fora de escopo:

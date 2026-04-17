@@ -1,6 +1,6 @@
 # GCA_CANONICAL_CONTRACT.md
 
-Versão: 1.0  
+Versão: 1.1  
 Data-base: 2026-04-17  
 Status: **Canônico / soberano para implementação**
 
@@ -14,7 +14,8 @@ Ele existe para:
 - eliminar conflito entre documentos históricos e código atual;
 - congelar o modelo do produto nesta fase;
 - definir o recorte do MVP ativo;
-- impedir expansão de escopo antes do saneamento da base.
+- impedir expansão de escopo antes do saneamento da base;
+- padronizar o uso de IA por criticidade, custo, latência e risco.
 
 Em caso de conflito, este documento prevalece sobre manual, tutorial, análises, mocks, README e demais documentos históricos.
 
@@ -41,6 +42,7 @@ O **GCA (Gestão de Codificação Assistida / Gerenciador Central de Arquitetura
 - O cliente final usa suas próprias chaves, provedores e modelos, conforme objetivo, custo, latência, privacidade e compatibilidade desejados.
 - O sistema deve oferecer **análise de adequação do provedor/modelo** ao objetivo do cliente antes de consolidar defaults que possam gerar decepção operacional.
 - Nenhum provedor deve ser tratado como “melhor universal”.
+- O GCA pode operar em **modo híbrido de IA**, com modelos diferentes por tipo de tarefa, desde que isso seja configurável e auditável.
 
 ---
 
@@ -133,7 +135,82 @@ Regras obrigatórias:
 
 ---
 
-## 6. Escopo canônico por MVP
+## 6. Política canônica de IA
+
+### 6.1 Regra de adequação antes de fixar default
+Antes de definir um provedor/modelo como padrão do cliente, o sistema deve avaliar:
+1. objetivo principal do uso da IA no GCA;
+2. nível de criticidade das tarefas;
+3. expectativa de custo;
+4. expectativa de latência;
+5. necessidade de privacidade/localidade;
+6. necessidade de codegen;
+7. necessidade de análise documental e consolidação de contexto;
+8. aderência do modelo ao idioma e ao volume de contexto esperado.
+
+O resultado dessa análise deve classificar a IA como:
+- **recomendada**;
+- **aceitável com ressalvas**;
+- **inadequada para o objetivo informado**.
+
+### 6.2 Política de roteamento híbrido por criticidade
+
+#### Baixa criticidade
+Podem usar modelos locais ou mais baratos, inclusive via Ollama, quando configurados pelo cliente:
+- classificação simples;
+- extração de campos;
+- sumarização curta;
+- normalização de texto;
+- pré-processamento de documentos;
+- enriquecimento leve;
+- transformação estrutural de conteúdo.
+
+#### Média criticidade
+Podem usar modelos locais ou remotos, com validação posterior:
+- perguntas dirigidas preliminares;
+- propostas iniciais de backlog;
+- pré-análise de artefatos;
+- agrupamento temático;
+- preparação de insumos para OCG, Gatekeeper ou Arguidor.
+
+#### Alta criticidade
+Devem usar modelos de maior confiabilidade, qualidade analítica e contexto:
+- consolidação final do OCG;
+- arbitragem de conflitos entre documentos;
+- decisões de arquitetura;
+- achados críticos de compliance e segurança;
+- decisões que bloqueiam ou liberam o pipeline;
+- geração de backlog oficial;
+- codegen crítico;
+- síntese executiva oficial do projeto.
+
+### 6.3 Diretriz prática
+Regra recomendada:
+- **Ollama/modelo local** = auxiliar de baixo custo para tarefas menores e repetitivas;
+- **modelo premium de raciocínio** = consolidação, análise profunda, conflitos, arquitetura e decisões críticas.
+
+### 6.4 Regras duras de IA
+- Nenhum modelo local deve consolidar sozinho o OCG final sem validação da política do projeto.
+- Nenhum modelo de baixa criticidade deve decidir sozinho arquitetura, compliance, segurança ou liberação de pipeline.
+- O uso híbrido deve ser explícito, auditável e parametrizável.
+- Cada tarefa relevante deve registrar:
+  - provedor;
+  - modelo;
+  - motivo da escolha;
+  - nível de criticidade;
+  - custo estimado ou observado, quando aplicável.
+- Compatibilidade com endpoint estilo OpenAI não deve ser tratada automaticamente como equivalência funcional entre modelos.
+
+### 6.5 Relação com o OCG
+O roteamento híbrido nunca substitui o OCG.
+Independentemente do modelo usado:
+- o OCG continua sendo a fonte única de verdade do projeto;
+- toda saída relevante deve respeitar o contexto atual do OCG;
+- mudanças relevantes devem atualizar o OCG conforme as regras de versionamento e auditoria.
+
+---
+
+## 7. Escopo canônico por MVP
 
 ### MVP 1 — Base operacional e saneamento do núcleo
 
@@ -147,6 +224,7 @@ Regras obrigatórias:
 - Gatekeeper básico;
 - auditoria mínima necessária;
 - configuração básica de provedor de IA;
+- política de adequação e roteamento de IA;
 - vínculo com repositório Git quando exigido pelo fluxo da fase;
 - correção de conflitos estruturais entre código e contrato.
 
@@ -202,7 +280,7 @@ Regras obrigatórias:
 
 ---
 
-## 7. MVP ativo (definição atual)
+## 8. MVP ativo (definição atual)
 
 ### MVP ativo inferido
 **MVP 1 — Base operacional e saneamento do núcleo**
@@ -221,57 +299,13 @@ Portanto, a fase ativa não deve ser tratada como “expandir produto”, mas co
 
 ---
 
-## 8. Regras duras de implementação
+## 9. Regras duras de implementação
 
-Valem sempre:
-- não antecipar features de MVP futuro;
-- não criar papéis fora dos 5 canônicos;
-- não reconciliar documentos históricos em silêncio;
-- não alterar contratos existentes sem migração/compatibilidade explícita;
-- não reescrever módulos inteiros se correção cirúrgica for suficiente;
-- não criar novas camadas genéricas sem necessidade concreta;
-- não assumir Anthropic como único caminho de IA;
-- não assumir SaaS multi-cliente compartilhado;
-- não avançar de MVP com blocker, critical, contradição de contrato ou testes quebrados.
-
----
-
-## 9. Critérios de pronto da fase atual
-
-O MVP 1 só pode ser considerado encerrado quando:
-- RBAC de 5 papéis estiver coerente em backend, frontend e documentação ativa;
-- não houver conflito estrutural aberto entre contrato e código do núcleo;
-- autenticação e fluxo de projeto estiverem estáveis;
-- OCG básico e Gatekeeper básico estiverem consistentes com o recorte do MVP;
-- testes e validações mínimas da fase passarem;
-- gaps bloqueantes forem classificados e reduzidos ao mínimo aceitável;
-- o próximo MVP puder começar sem depender de “interpretação criativa” do Claude.
-
----
-
-## 10. Conflitos documentais conhecidos
-
-Conflitos já reconhecidos e não resolvidos automaticamente:
-- documentos históricos com **7 papéis** versus contrato canônico com **5 papéis**;
-- materiais que descrevem pipeline completo como se tudo já estivesse pronto;
-- textos que tratam a instância dogfood como se provasse SaaS compartilhado;
-- trechos que apontam provedores específicos de IA como padrão rígido;
-- discrepâncias entre “production ready/beta” e gaps ainda documentados.
-
-Esses conflitos devem ser tratados como **dívida de contrato/documentação**, não como autorização para novas implementações.
-
----
-
-## 11. Mandato para Claude Code
-
-Claude deve atuar como:
-- saneador incremental do GCA;
-- executor por MVP;
-- verificador de aderência ao contrato;
-- analista de adequação de IA ao objetivo do cliente.
-
-Claude não deve atuar como:
-- autor livre da plataforma;
-- reconciliador silencioso de contradições;
-- expansor de escopo;
-- reescritor amplo de arquitetura sem necessidade demonstrada.
+- Não antecipar feature de MVP futuro.
+- Não expandir RBAC além de 5 papéis.
+- Não promover documento histórico a contrato de implementação.
+- Não reescrever arquitetura inteira quando correção cirúrgica resolver.
+- Não hardcodar um único provedor de IA no produto.
+- Não assumir que todo fluxo precisa usar a mesma IA.
+- Não permitir que modelo barato/local tome decisão oficial crítica sozinho.
+- Não avançar para o próximo MVP enquanto o gate da fase atual estiver fechado.

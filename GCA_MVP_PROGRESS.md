@@ -1,6 +1,6 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 1.0  
+Versão: 1.1  
 Data-base: 2026-04-17  
 Status: **controle de avanço por fase**
 
@@ -35,6 +35,7 @@ Nesta fase, o trabalho prioritário é:
 - Gatekeeper básico;
 - auditoria mínima;
 - configuração básica de provedor de IA;
+- política de adequação e roteamento híbrido de IA;
 - saneamento de documentação operacional do núcleo;
 - saneamento de telas/rotas/componentes que conflitem com o RBAC canônico.
 
@@ -52,7 +53,7 @@ Nesta fase, o trabalho prioritário é:
 
 ## 3. Dívida aberta conhecida
 
-## 3.1 Blocker / Critical
+### 3.1 Blocker / Critical
 
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
@@ -62,20 +63,21 @@ Nesta fase, o trabalho prioritário é:
 | DT-004 | Critical | Segurança operacional | PAT de Git ainda aparece documentado em texto plano / criptografia pendente. | Tutorial / requisitos / roadmap | Aberto |
 | DT-005 | Critical | Governança de IA | Falta consolidar regra canônica para seleção de provedor/modelo por objetivo do cliente final, evitando default rígido enganoso. | Requisitos / contrato | Aberto |
 
-## 3.2 Major
+### 3.2 Major
 
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
 | DT-006 | Major | Fases vs realidade | Há materiais descrevendo pipeline completo com módulos avançados como se estivessem igualmente maduros. | Manual / tutorial / análise | Aberto |
 | DT-007 | Major | Placeholders / continuidade | Há placeholders de telas/módulos previstos que não devem ser promovidos automaticamente a entregas da fase atual. | TASK_GCA_MASTER | Aberto |
 | DT-008 | Major | Consistência documental | Há discrepâncias entre documentos sobre readiness, testes e maturidade operacional. | Changelog / docs / task | Aberto |
+| DT-009 | Major | Roteamento híbrido | Falta explicitar em código e docs ativas que tarefas menores podem usar modelo local/Ollama e decisões críticas exigem modelo premium. | Contrato / operação | Aberto |
 
-## 3.3 Minor
+### 3.3 Minor
 
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
-| DT-009 | Minor | Terminologia | Uso inconsistente de termos como tenant, projeto, instância e cliente. | Docs históricos | Aberto |
-| DT-010 | Minor | Narrativa de produto | Parte da documentação promocional está mais madura que o contrato técnico real. | README / manual | Aberto |
+| DT-010 | Minor | Terminologia | Uso inconsistente de termos como tenant, projeto, instância e cliente. | Docs históricos | Aberto |
+| DT-011 | Minor | Narrativa de produto | Parte da documentação promocional está mais madura que o contrato técnico real. | README / manual | Aberto |
 
 ---
 
@@ -108,6 +110,9 @@ Modelo:
 ### 5.3 IA
 - O sistema suporta múltiplos provedores/modelos em documentação e serviços.
 - Claude deve tratar a IA como componente configurável por objetivo do cliente.
+- O sistema pode operar em modo híbrido:
+  - tarefas auxiliares e repetitivas com modelo local/Ollama;
+  - consolidação e decisão crítica com modelo premium.
 - Não pode assumir um único provedor como verdade universal do produto.
 
 ---
@@ -127,7 +132,7 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 **NÃO AVANÇAR**
 
 ### Motivo
-A base ainda possui conflitos canônicos de RBAC, produto e segurança operacional que tornam perigoso avançar sem saneamento mínimo.
+A base ainda possui conflitos canônicos de RBAC, produto, governança de IA e segurança operacional que tornam perigoso avançar sem saneamento mínimo.
 
 ---
 
@@ -147,6 +152,7 @@ A base ainda possui conflitos canônicos de RBAC, produto e segurança operacion
 
 4. **Política de IA**
    - introduzir recomendação por objetivo do cliente;
+   - explicitar roteamento híbrido por criticidade;
    - manter provedores/modelos configuráveis.
 
 5. **Segurança operacional do núcleo**
@@ -180,6 +186,7 @@ O MVP 1 poderá ser considerado apto a encerrar quando:
 - RBAC de 5 papéis estiver coerente;
 - telas e fluxos do núcleo respeitarem esse RBAC;
 - política de IA configurável por cliente estiver explicitada;
+- roteamento híbrido de IA estiver definido para tarefas menores vs decisões críticas;
 - conflitos documentais críticos estiverem neutralizados;
 - núcleo auth/projeto/questionário/OCG/Gatekeeper básico estiver estável;
 - gate de avanço mudar para **PODE AVANÇAR** com justificativa registrada.
