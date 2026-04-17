@@ -31,7 +31,6 @@ import { LiveDocsPage } from './pages/projects/LiveDocsPage';
 import { ReadinessPage } from './pages/projects/ReadinessPage';
 import { QuestionnairePage } from './pages/projects/QuestionnairePage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
-import { NovoProjetoPage } from './pages/NovoProjetoPage';
 import { SolicitarProjetoPage } from './pages/SolicitarProjetoPage';
 import { SetupWizardPage } from './pages/SetupWizardPage';
 import { TesterReviewPage } from './pages/projects/TesterReviewPage';
@@ -56,8 +55,10 @@ export const router = createBrowserRouter([
     Component: AcceptInvitationPage,
   },
   {
+    // DT-017: caminho antigo redireciona para o wizard canônico /solicitar-projeto.
+    // Mantido como Navigate para não quebrar links em emails/histórico de navegação.
     path: '/novo-projeto',
-    Component: NovoProjetoPage,
+    element: <Navigate to="/solicitar-projeto" replace />,
   },
   {
     path: '/solicitar-projeto',

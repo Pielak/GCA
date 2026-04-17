@@ -589,7 +589,7 @@ export function LoginPage() {
             <p className="text-slate-200 text-sm leading-relaxed">{toast}</p>
             <div className="flex gap-2.5 mt-4">
               <button
-                onClick={() => { setToast(null); navigate('/novo-projeto') }}
+                onClick={() => { setToast(null); navigate('/solicitar-projeto') }}
                 className="flex-1 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 text-white rounded-xl py-2.5 text-xs font-semibold transition-colors"
               >
                 Continuar
