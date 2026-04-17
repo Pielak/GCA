@@ -120,3 +120,67 @@ async def test_ready_to_activate_requires_all_three(db_session: AsyncSession):
     assert status["repo_configured"] is True
     assert status["llm_configured"] is True
     assert status["questionnaire_submitted"] is True
+
+
+# ─── Dependency tests ────────────────────────────────────────────────
+
+from fastapi import FastAPI, Depends
+from httpx import AsyncClient, ASGITransport
+
+from app.dependencies.require_project_setup import require_project_setup_complete
+from app.db.database import get_db
+
+
+def _make_test_app(db: AsyncSession):
+    """Mini-app FastAPI que expõe um endpoint protegido pela dependency."""
+    app = FastAPI()
+
+    async def _override_db():
+        yield db
+
+    app.dependency_overrides[get_db] = _override_db
+
+    @app.post("/projects/{project_id}/test-endpoint")
+    async def _ep(project_id: uuid.UUID, _setup=Depends(require_project_setup_complete)):
+        return {"ok": True}
+
+    return app
+
+
+async def test_dependency_blocks_when_setup_incomplete(db_session: AsyncSession):
+    pid = await _seed_project(db_session, "blocked")
+    app = _make_test_app(db_session)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        res = await client.post(f"/projects/{pid}/test-endpoint")
+    assert res.status_code == 412
+    body = res.json()
+    assert body["detail"]["code"] == "project_setup_incomplete"
+    assert set(body["detail"]["missing"]) == {
+        "repositorio_git", "configuracao_llm", "questionario_submetido",
+    }
+
+
+async def test_dependency_allows_when_setup_complete(db_session: AsyncSession):
+    pid = await _seed_project(db_session, "ready")
+    db_session.add(ProjectGitConfig(
+        id=uuid.uuid4(), project_id=pid, provider="github",
+        repository_url="https://g/r", pat_encrypted="pat",
+        connection_verified=True, default_branch="main",
+    ))
+    db_session.add(ProjectSettings(
+        id=uuid.uuid4(), project_id=pid, setting_type="llm",
+        settings_json=json.dumps({"provider": "anthropic"}),
+    ))
+    db_session.add(Questionnaire(
+        id=uuid.uuid4(), project_id=pid, gp_email="gp@t.local",
+        responses=json.dumps({"1": "x"}), status="pending",
+    ))
+    await db_session.commit()
+
+    app = _make_test_app(db_session)
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        res = await client.post(f"/projects/{pid}/test-endpoint")
+    assert res.status_code == 200
+    assert res.json() == {"ok": True}
