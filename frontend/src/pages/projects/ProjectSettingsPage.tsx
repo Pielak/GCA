@@ -210,42 +210,94 @@ export function ProjectSettingsPage() {
         </div>
       )}
 
-      <div>
-        <h2 className="text-lg font-semibold text-slate-100">Configurações do Projeto</h2>
-        <p className="text-slate-500 text-sm mt-0.5">
-          Configure o provedor de IA, SMTP, Repositório Git e envie o Questionário Técnico.
-          Estas 4 abas são a parametrização oficial do projeto — o pipeline (Ingestão,
-          Gatekeeper, Arguidor, etc.) fica bloqueado até IA + Repositório + Questionário
-          estarem completos.
-        </p>
+      <div className="flex items-baseline justify-between gap-3">
+        <h2 className="text-xl font-bold text-slate-100">Configurações do Projeto</h2>
+        {setupStatus?.ready_to_activate && (
+          <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+            Setup completo — pipeline liberado
+          </span>
+        )}
       </div>
 
-      {/* Banner de progresso do setup — só aparece quando há algo pendente */}
+      {/* HERO de setup — aparece grande e vivo quando há algo pendente.
+          Some sem polução quando o setup está completo (badge emerald acima já
+          comunica). Objetivo: o GP não consegue ignorar que falta configurar. */}
       {setupStatus && !setupStatus.ready_to_activate && (() => {
         const items = [
-          { key: 'llm', done: setupStatus.llm_configured, label: 'Provedor de IA' },
-          { key: 'repo', done: setupStatus.repo_configured, label: 'Repositório' },
-          { key: 'questionario', done: setupStatus.questionnaire_submitted, label: 'Questionário' },
+          { key: 'llm', done: setupStatus.llm_configured, label: 'Provedor de IA', icon: Cpu },
+          { key: 'repo', done: setupStatus.repo_configured, label: 'Repositório Git', icon: GitBranch },
+          { key: 'questionario', done: setupStatus.questionnaire_submitted, label: 'Questionário Técnico', icon: ClipboardList },
         ]
         const doneCount = items.filter(i => i.done).length
         const nextItem = items.find(i => !i.done)
+        const progressPct = (doneCount / items.length) * 100
         return (
-          <div className="flex items-start gap-3 px-4 py-3 rounded-xl bg-amber-950/20 border border-amber-800/30">
-            <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
-            <div className="flex-1 min-w-0">
-              <p className="text-amber-200 text-sm font-semibold">
-                Setup incompleto — {doneCount}/3 concluídos
-              </p>
-              <p className="text-amber-200/80 text-xs mt-0.5 leading-snug">
-                O pipeline do projeto (Ingestão, Gatekeeper, Arguidor, Dashboard) está
-                bloqueado até os 3 passos obrigatórios serem preenchidos. Próximo:{' '}
-                <button
-                  onClick={() => nextItem && setActiveTab(nextItem.key as TabKey)}
-                  className="font-semibold text-amber-200 underline underline-offset-2 hover:text-amber-100"
-                >
-                  {nextItem?.label}
-                </button>.
-              </p>
+          <div className="relative overflow-hidden rounded-2xl border border-amber-500/40 bg-gradient-to-br from-amber-950/60 via-orange-950/40 to-amber-950/30 p-6 shadow-lg shadow-amber-900/20">
+            {/* Glow de fundo */}
+            <div className="absolute -top-20 -right-20 w-60 h-60 rounded-full bg-amber-500/10 blur-3xl pointer-events-none" />
+
+            <div className="relative flex items-start gap-4">
+              <div className="flex-shrink-0 w-12 h-12 rounded-xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center">
+                <AlertTriangle className="w-6 h-6 text-amber-300" />
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-baseline gap-3 flex-wrap">
+                  <h3 className="text-amber-100 text-lg font-bold tracking-tight">
+                    Projeto ainda não está operacional
+                  </h3>
+                  <span className="text-amber-300 text-sm font-semibold tabular-nums">
+                    {doneCount}/{items.length} passos
+                  </span>
+                </div>
+
+                <p className="text-amber-100/80 text-sm mt-1 leading-snug">
+                  O pipeline do GCA (<span className="font-semibold text-amber-200">Ingestão, OCG, Gatekeeper, Arguidor, CodeGen, Backlog, Roadmap</span>) fica bloqueado até você completar os 3 passos obrigatórios abaixo. SMTP é opcional e não bloqueia.
+                </p>
+
+                {/* Barra de progresso */}
+                <div className="mt-4 h-2 bg-amber-950/60 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-amber-400 to-orange-400 rounded-full transition-all duration-500"
+                    style={{ width: `${progressPct}%` }}
+                  />
+                </div>
+
+                {/* Pills por item + CTA */}
+                <div className="mt-4 flex items-center gap-2 flex-wrap">
+                  {items.map(i => {
+                    const Icon = i.icon
+                    return (
+                      <button
+                        key={i.key}
+                        onClick={() => setActiveTab(i.key as TabKey)}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
+                          i.done
+                            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                            : 'bg-amber-500/10 border-amber-400/40 text-amber-200 hover:bg-amber-500/20 hover:border-amber-400/60'
+                        }`}
+                      >
+                        {i.done
+                          ? <CheckCircle2 className="w-3.5 h-3.5" />
+                          : <Circle className="w-3.5 h-3.5" />}
+                        <Icon className="w-3 h-3" />
+                        {i.label}
+                      </button>
+                    )
+                  })}
+                </div>
+
+                {nextItem && (
+                  <button
+                    onClick={() => setActiveTab(nextItem.key as TabKey)}
+                    className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-amber-950 text-sm font-semibold shadow-lg shadow-amber-500/30 transition-all hover:shadow-amber-400/40"
+                  >
+                    Próximo passo: {nextItem.label}
+                    <span aria-hidden>→</span>
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         )
