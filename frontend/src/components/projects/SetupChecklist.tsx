@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { CheckCircle2, Circle, GitBranch, Cpu, Loader2, Rocket } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
@@ -9,19 +9,15 @@ interface SetupStatus {
   ready_to_activate: boolean
 }
 
-export function SetupChecklist() {
-  const { id: projectId } = useParams<{ id: string }>()
+interface SetupChecklistProps {
+  projectId: string
+  status: SetupStatus
+}
+
+export function SetupChecklist({ projectId, status }: SetupChecklistProps) {
   const navigate = useNavigate()
-  const [status, setStatus] = useState<SetupStatus | null>(null)
   const [activating, setActivating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!projectId) return
-    apiClient.get(`/projects/${projectId}/setup-status`)
-      .then((res) => setStatus(res.data))
-      .catch(() => setStatus(null))
-  }, [projectId])
 
   const handleActivate = async () => {
     if (!projectId) return
@@ -36,8 +32,6 @@ export function SetupChecklist() {
       setActivating(false)
     }
   }
-
-  if (!status) return null
 
   const items = [
     {

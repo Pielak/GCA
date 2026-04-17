@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useOutletContext } from 'react-router-dom'
 import { SetupChecklist } from '@/components/projects/SetupChecklist'
+import { useSetupStatus } from '@/hooks/useSetupStatus'
 import { FileText, Code2, TestTube2, Cpu, Shield, Users, GitBranch, Key, Loader2, AlertTriangle } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { apiClient } from '@/lib/api'
@@ -47,6 +48,7 @@ export function ProjectDashPage() {
   const { id } = useParams<{ id: string }>()
   const context = useOutletContext<{ projectStatus?: string }>()
   const projectStatus = context?.projectStatus
+  const { data: setupStatus } = useSetupStatus(id)
   const [loading, setLoading] = useState(true)
   const [ocg, setOcg] = useState<any>(null)
   const [members, setMembers] = useState<any[]>([])
@@ -117,9 +119,11 @@ export function ProjectDashPage() {
 
   return (
     <div className="p-6 space-y-6">
-      {/* Setup Checklist — visivel quando projeto em initializing */}
-      {projectStatus === 'initializing' && (
-        <SetupChecklist />
+      {/* Setup Checklist — visivel quando setup incompleto */}
+      {setupStatus && !setupStatus.ready_to_activate && (
+        <div className="mb-6">
+          <SetupChecklist projectId={id!} status={setupStatus} />
+        </div>
       )}
 
       {/* KPIs */}
