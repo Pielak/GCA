@@ -71,6 +71,80 @@ class SmtpTestRequest(BaseModel):
 # Helper
 # ============================================================================
 
+def _normalize_llm_settings(raw: dict | None) -> dict:
+    """Converte o settings_json de LLM para o formato multi-provider atual.
+
+    Formato novo (suportado):
+        {"providers": [{"provider": ..., "model": ..., "is_default": ...,
+                        "last_validated_at": ..., "last_validation_ok": ...}],
+         "default_provider": "deepseek"}
+
+    Formato legado (ainda lido para retrocompat com projetos existentes):
+        {"provider": "deepseek", "model_preference": "deepseek-chat"}
+      → convertido para 1 item na lista, marcado como default.
+    """
+    if not raw:
+        return {"providers": [], "default_provider": None}
+
+    # Formato novo já?
+    if isinstance(raw.get("providers"), list):
+        providers = raw["providers"]
+        default = raw.get("default_provider")
+        # Garante um default coerente: se ninguém está marcado, o primeiro vence
+        if providers and not any(p.get("is_default") for p in providers):
+            providers[0]["is_default"] = True
+            default = providers[0].get("provider")
+        if not default:
+            for p in providers:
+                if p.get("is_default"):
+                    default = p.get("provider")
+                    break
+        return {"providers": providers, "default_provider": default}
+
+    # Formato legado → converter
+    legacy_provider = raw.get("provider")
+    legacy_model = raw.get("model_preference") or raw.get("model")
+    if not legacy_provider:
+        return {"providers": [], "default_provider": None}
+    return {
+        "providers": [{
+            "provider": legacy_provider,
+            "model": legacy_model,
+            "is_default": True,
+            "last_validated_at": None,
+            "last_validation_ok": None,
+        }],
+        "default_provider": legacy_provider,
+    }
+
+
+async def _load_llm_providers(db: AsyncSession, project_id: UUID) -> dict:
+    """Carrega e normaliza os provedores LLM do projeto."""
+    result = await db.execute(
+        select(ProjectSettings).where(
+            ProjectSettings.project_id == project_id,
+            ProjectSettings.setting_type == "llm",
+        )
+    )
+    obj = result.scalar_one_or_none()
+    if not obj or not obj.settings_json:
+        return {"providers": [], "default_provider": None}
+    try:
+        return _normalize_llm_settings(json.loads(obj.settings_json))
+    except (json.JSONDecodeError, TypeError):
+        return {"providers": [], "default_provider": None}
+
+
+async def _save_llm_providers(db: AsyncSession, project_id: UUID, user_id: UUID, data: dict) -> None:
+    """Persiste o bloco de provedores LLM no settings_json."""
+    settings_obj = await _get_or_create_settings(db, project_id, "llm")
+    # Normaliza antes de gravar — garante coerência do default.
+    normalized = _normalize_llm_settings(data)
+    settings_obj.settings_json = json.dumps(normalized)
+    settings_obj.updated_by = user_id
+    await db.commit()
+
+
 async def _get_or_create_settings(db: AsyncSession, project_id: UUID, setting_type: str) -> ProjectSettings:
     result = await db.execute(
         select(ProjectSettings).where(
@@ -120,9 +194,29 @@ async def get_project_settings(
     smtp = settings_map.get("smtp", {})
     smtp["password_configured"] = "smtp_password:main" in secret_types
 
-    llm = settings_map.get("llm", {})
-    provider = llm.get("provider", "")
-    llm["api_key_configured"] = f"llm_api_key:{provider}" in secret_types if provider else False
+    # LLM agora suporta múltiplos provedores (um marcado como padrão).
+    # Cada item ganha `api_key_configured` baseado no vault. O shape
+    # retornado é o novo (providers + default_provider) — o formato legado
+    # `provider`/`model_preference` foi migrado por _normalize_llm_settings.
+    llm_raw = settings_map.get("llm", {})
+    llm_normalized = _normalize_llm_settings(llm_raw)
+    enriched_providers = []
+    for p in llm_normalized["providers"]:
+        pname = p.get("provider")
+        enriched_providers.append({
+            **p,
+            "api_key_configured": f"llm_api_key:{pname}" in secret_types if pname else False,
+        })
+    llm = {
+        "providers": enriched_providers,
+        "default_provider": llm_normalized["default_provider"],
+        # Chaves de retrocompat para código frontend/CLI que ainda lê o formato antigo.
+        # Refletem o provider default.
+        "provider": llm_normalized["default_provider"] or "",
+        "api_key_configured": any(
+            p.get("is_default") and p.get("api_key_configured") for p in enriched_providers
+        ),
+    }
 
     n8n = settings_map.get("n8n", {})
     n8n["api_token_configured"] = "n8n_token:main" in secret_types
@@ -221,17 +315,21 @@ async def save_llm_settings(
     permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Salva configurações LLM do projeto."""
+    """Adiciona ou atualiza um provedor LLM no projeto.
+
+    Comportamento (novo formato multi-provider):
+    - Se já existe o provider no projeto: atualiza model e (se veio chave nova) chave.
+    - Se é novo: adiciona. Se é o primeiro da lista, vira default.
+    - Default nunca é trocado automaticamente por este endpoint — use
+      POST /settings/llm/providers/{provider}/default.
+    """
     user_id = permissions["user_id"]
-    # Providers aceitos. Ollama fica de fora até termos schema para base_url
-    # (endpoint local, sem api_key, configurável) — DT-023 registra a pendência.
     valid_providers = ("anthropic", "openai", "grok", "deepseek", "gemini")
     if req.provider not in valid_providers:
         raise HTTPException(status_code=400, detail=f"Provider inválido. Aceitos: {', '.join(valid_providers)}")
 
     # Model deve ser um identificador técnico — o Chrome às vezes autofilla
     # esse campo com email/nome do usuário por heurística de contexto.
-    # Rejeita antes de gravar para não quebrar o pipeline no próximo uso.
     if req.model_preference:
         m = req.model_preference.strip()
         if "@" in m or " " in m or len(m) > 120:
@@ -240,65 +338,142 @@ async def save_llm_settings(
                 detail="Modelo parece inválido (contém @, espaço ou é longo demais). Exemplos válidos: claude-opus-4-6, gpt-4o, deepseek-chat, gemini-2.0-flash. Deixe vazio para usar o padrão do provedor.",
             )
 
-    settings_obj = await _get_or_create_settings(db, project_id, "llm")
-    settings_obj.settings_json = json.dumps({
-        "provider": req.provider,
-        "model_preference": req.model_preference,
-    })
-    settings_obj.updated_by = user_id
-    await db.commit()
+    data = await _load_llm_providers(db, project_id)
+    providers = data["providers"]
+    existing = next((p for p in providers if p.get("provider") == req.provider), None)
 
-    # Salvar API key no vault
-    await vault.store_secret(db, project_id, "llm_api_key", req.provider, req.api_key, user_id)
+    if existing:
+        # Update do mesmo provider: modelo novo (se veio), invalida validação
+        # anterior se a chave mudou.
+        existing["model"] = req.model_preference
+        if req.api_key:
+            existing["last_validated_at"] = None
+            existing["last_validation_ok"] = None
+    else:
+        is_first = len(providers) == 0
+        providers.append({
+            "provider": req.provider,
+            "model": req.model_preference,
+            "is_default": is_first,
+            "last_validated_at": None,
+            "last_validation_ok": None,
+        })
+        if is_first:
+            data["default_provider"] = req.provider
+
+    await _save_llm_providers(db, project_id, user_id, data)
+
+    # Salvar API key no vault se veio. Vazio = manter a atual.
+    if req.api_key:
+        await vault.store_secret(db, project_id, "llm_api_key", req.provider, req.api_key, user_id)
 
     return {"success": True}
+
+
+@router.delete("/projects/{project_id}/settings/llm/providers/{provider}")
+async def remove_llm_provider(
+    project_id: UUID,
+    provider: str,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove um provedor do projeto (chave no vault + item da lista)."""
+    user_id = permissions["user_id"]
+    data = await _load_llm_providers(db, project_id)
+    providers = data["providers"]
+    item = next((p for p in providers if p.get("provider") == provider), None)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Provedor '{provider}' não está configurado neste projeto.")
+
+    was_default = bool(item.get("is_default"))
+    providers.remove(item)
+    # Se o removido era o default, promove o primeiro restante.
+    if was_default and providers:
+        providers[0]["is_default"] = True
+        data["default_provider"] = providers[0].get("provider")
+    elif not providers:
+        data["default_provider"] = None
+
+    await _save_llm_providers(db, project_id, user_id, data)
+    # Remove chave do vault. O vault não tem delete público claro, então
+    # sobrescreve com string vazia — suficiente para o resolver retornar None.
+    try:
+        await vault.store_secret(db, project_id, "llm_api_key", provider, "", user_id)
+    except Exception:
+        pass
+    return {"success": True, "default_provider": data["default_provider"]}
+
+
+@router.post("/projects/{project_id}/settings/llm/providers/{provider}/default")
+async def set_llm_default_provider(
+    project_id: UUID,
+    provider: str,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marca um provedor já configurado como o padrão do projeto."""
+    user_id = permissions["user_id"]
+    data = await _load_llm_providers(db, project_id)
+    providers = data["providers"]
+    item = next((p for p in providers if p.get("provider") == provider), None)
+    if not item:
+        raise HTTPException(status_code=404, detail=f"Provedor '{provider}' não está configurado neste projeto.")
+    for p in providers:
+        p["is_default"] = (p.get("provider") == provider)
+    data["default_provider"] = provider
+    await _save_llm_providers(db, project_id, user_id, data)
+    return {"success": True, "default_provider": provider}
 
 
 @router.post("/projects/{project_id}/settings/llm/validate")
 async def validate_llm_settings(
     project_id: UUID,
+    provider: Optional[str] = None,
     permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Valida a API key do LLM provider configurado no projeto.
+    """Valida a API key de um provedor LLM do projeto.
 
-    Classificação de criticidade (contrato §6.2): **baixa** — é só um ping no
-    endpoint `/v1/models` do provedor para confirmar que a chave é aceita.
-    Não consolida nada, não custa tokens. Camada Projeto (contrato §6.6,
-    Contexto B) — usa chave do GP via vault, nunca a chave global do admin.
+    Se `provider` é omitido (query param), valida o **default** do projeto.
+    Se `provider` é passado, valida aquele específico (útil para a UI
+    multi-provider testar cada um independentemente).
 
-    Retorna estrutura explícita:
-      - `{valid: True,  provider, model, latency_ms}` se o provedor aceitou a chave.
-      - `{valid: False, provider, error, detail}` se rejeitou ou falhou rede.
-      - `{valid: None,  provider, provider_supported: False, detail}` se o
-        provedor é válido mas o GCA ainda não implementou teste real dele.
-        Evita falso-positivo que ocorria no código anterior para deepseek/grok.
+    Grava `last_validated_at` e `last_validation_ok` no settings_json
+    para a UI mostrar "validada há X minutos" sem precisar re-executar.
+
+    Classificação (contrato §6.2): **baixa** — ping em `/v1/models`.
     """
     import time
+    from datetime import datetime, timezone as _tz
 
-    result = await db.execute(
-        select(ProjectSettings).where(
-            ProjectSettings.project_id == project_id,
-            ProjectSettings.setting_type == "llm",
-        )
-    )
-    settings_obj = result.scalar_one_or_none()
-    if not settings_obj:
-        raise HTTPException(status_code=400, detail="LLM não configurado")
+    user_id = permissions["user_id"]
+    data = await _load_llm_providers(db, project_id)
+    providers = data["providers"]
+    if not providers:
+        raise HTTPException(status_code=400, detail="Nenhum provedor LLM configurado neste projeto.")
 
-    llm_config = json.loads(settings_obj.settings_json)
-    provider = llm_config.get("provider")
-    api_key = await vault.get_secret(db, project_id, "llm_api_key", provider)
+    # Determina qual provider validar. Default = o marcado como padrão.
+    target = provider or data["default_provider"]
+    target_item = next((p for p in providers if p.get("provider") == target), None)
+    if not target_item:
+        raise HTTPException(status_code=404, detail=f"Provedor '{target}' não está configurado neste projeto.")
+
+    api_key = await vault.get_secret(db, project_id, "llm_api_key", target)
+
+    async def _persist_validation(ok: Optional[bool]) -> None:
+        """Atualiza last_validated_at e last_validation_ok no provider testado."""
+        for p in providers:
+            if p.get("provider") == target:
+                p["last_validated_at"] = datetime.now(_tz.utc).isoformat()
+                p["last_validation_ok"] = ok
+                break
+        await _save_llm_providers(db, project_id, user_id, {"providers": providers, "default_provider": data["default_provider"]})
 
     if not api_key:
-        raise HTTPException(status_code=400, detail="API key não encontrada no vault")
+        await _persist_validation(False)
+        raise HTTPException(status_code=400, detail=f"Chave do provedor '{target}' não encontrada no vault.")
 
     # Endpoints /v1/models (ou equivalente) aceitos por provider.
-    # - Anthropic: x-api-key header + versão.
-    # - OpenAI e compatíveis (deepseek, grok): Bearer no Authorization.
-    # - Gemini: API key em query param (?key=…), schema diferente.
-    # - Ollama: escopo DT-023 — requer base_url configurável + backend em
-    #   container precisa resolver host do daemon do user.
     provider_config = {
         "anthropic": {
             "url": "https://api.anthropic.com/v1/models",
@@ -321,28 +496,25 @@ async def validate_llm_settings(
             "default_model": "grok-2",
         },
         "gemini": {
-            # Google usa ?key=… em vez de header. A chave vai na URL.
             "url": f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
             "headers": {},
             "default_model": "gemini-2.0-flash",
         },
     }
 
-    # Providers não previstos (ex: ollama até DT-023 ser tratada).
-    if provider not in provider_config:
+    if target not in provider_config:
+        await _persist_validation(None)
         return {
             "valid": None,
-            "provider": provider,
+            "provider": target,
             "provider_supported": False,
             "detail": (
                 f"Teste automático ainda não implementado para o provedor "
-                f"'{provider}'. A chave foi salva no vault, mas você precisa "
-                f"validar manualmente chamando seu próprio endpoint. "
-                f"Suportados hoje: anthropic, openai, deepseek, grok, gemini."
+                f"'{target}'. Suportados hoje: anthropic, openai, deepseek, grok, gemini."
             ),
         }
 
-    cfg = provider_config[provider]
+    cfg = provider_config[target]
     start = time.monotonic()
     try:
         import httpx
@@ -351,64 +523,52 @@ async def validate_llm_settings(
         latency_ms = int((time.monotonic() - start) * 1000)
 
         if resp.status_code == 200:
-            logger.info(
-                "llm.validate_ok",
-                project_id=str(project_id),
-                provider=provider,
-                latency_ms=latency_ms,
-            )
+            await _persist_validation(True)
+            logger.info("llm.validate_ok", project_id=str(project_id), provider=target, latency_ms=latency_ms)
             return {
                 "valid": True,
-                "provider": provider,
-                "model": llm_config.get("model_preference") or cfg["default_model"],
+                "provider": target,
+                "model": target_item.get("model") or cfg["default_model"],
                 "latency_ms": latency_ms,
             }
 
-        # Humaniza o erro pelo status code
         if resp.status_code in (401, 403):
             error_code = "invalid_key"
             detail = (
-                f"O provedor {provider} rejeitou a chave (HTTP {resp.status_code}). "
-                f"Verifique em Configurações → LLM se a chave está correta e não expirou."
+                f"O provedor {target} rejeitou a chave (HTTP {resp.status_code}). "
+                f"Verifique em Configurações → Provedor de IA e salve uma chave nova."
             )
         elif resp.status_code == 429:
             error_code = "rate_limited"
-            detail = f"Provedor {provider} retornou rate limit. Tente novamente em alguns segundos."
+            detail = f"Provedor {target} retornou rate limit. Tente novamente em alguns segundos."
         else:
             error_code = "provider_error"
-            detail = f"Provedor {provider} retornou HTTP {resp.status_code}."
+            detail = f"Provedor {target} retornou HTTP {resp.status_code}."
 
-        logger.warning(
-            "llm.validate_failed",
-            project_id=str(project_id),
-            provider=provider,
-            status=resp.status_code,
-        )
+        await _persist_validation(False)
+        logger.warning("llm.validate_failed", project_id=str(project_id), provider=target, status=resp.status_code)
         return {
             "valid": False,
-            "provider": provider,
+            "provider": target,
             "latency_ms": latency_ms,
             "error": error_code,
             "detail": detail,
         }
 
     except httpx.TimeoutException:
+        await _persist_validation(False)
         return {
             "valid": False,
-            "provider": provider,
+            "provider": target,
             "error": "timeout",
-            "detail": f"Timeout ao contatar {provider}. Verifique sua rede.",
+            "detail": f"Timeout ao contatar {target}. Verifique sua rede.",
         }
     except Exception as e:
-        logger.error(
-            "llm.validate_error",
-            project_id=str(project_id),
-            provider=provider,
-            error=str(e)[:300],
-        )
+        await _persist_validation(False)
+        logger.error("llm.validate_error", project_id=str(project_id), provider=target, error=str(e)[:300])
         return {
             "valid": False,
-            "provider": provider,
+            "provider": target,
             "error": "network_error",
             "detail": str(e)[:300],
         }

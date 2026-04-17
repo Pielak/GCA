@@ -87,9 +87,25 @@ class AIKeyResolver:
             return None
         import json
         try:
-            return json.loads(row[0]).get("provider")
+            data = json.loads(row[0])
         except (ValueError, TypeError):
             return None
+
+        # Formato novo multi-provider: {providers:[...], default_provider:"..."}
+        # Preferir o default_provider salvo; se ausente, o primeiro marcado
+        # is_default; se ninguém, o primeiro da lista.
+        if isinstance(data.get("providers"), list):
+            if data.get("default_provider"):
+                return data["default_provider"]
+            for p in data["providers"]:
+                if p.get("is_default"):
+                    return p.get("provider")
+            if data["providers"]:
+                return data["providers"][0].get("provider")
+            return None
+
+        # Formato legado single-provider.
+        return data.get("provider")
 
     @staticmethod
     async def get_project_key(
