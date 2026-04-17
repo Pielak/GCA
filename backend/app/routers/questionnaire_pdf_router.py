@@ -78,6 +78,41 @@ async def upload_questionnaire_pdf(
     if len(pdf_bytes) < 100:
         raise HTTPException(status_code=400, detail="PDF vazio ou corrompido")
 
+    # Pré-flight: detecta PDF flattened (sem AcroForm) antes de tentar extrair.
+    # Leitores como Chrome "Salvar como PDF", certas versões de Evince/Preview
+    # achatam o formulário ao salvar — checkboxes viram pixels e o
+    # text_fallback não consegue ler seu estado. Sem esse guard, o GP recebia
+    # "Incompleto" com blockers em Q40/Q41/Q43 sem entender que a causa era
+    # o PDF, não as respostas (DT-018).
+    import pypdf
+    try:
+        _preflight = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        _root_keys = list(_preflight.trailer["/Root"].keys()) if "/Root" in _preflight.trailer else []
+        _has_acroform = "/AcroForm" in _root_keys
+    except Exception as e:
+        # Se o pré-flight falhou, deixa o extrator adiante dar o erro real.
+        logger.warning("questionnaire_pdf.preflight_failed", error=str(e))
+        _has_acroform = True
+
+    if not _has_acroform:
+        logger.warning(
+            "questionnaire_pdf.flattened_rejected",
+            project_id=str(project_id),
+            filename=file.filename,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "O PDF enviado não contém campos editáveis (AcroForm). "
+                "Seu leitor provavelmente achatou o formulário ao salvar — "
+                "checkboxes viraram imagem e o sistema não consegue ler. "
+                "Baixe o PDF novamente usando o botão 'Baixar PDF editável', "
+                "abra-o em Adobe Reader, Foxit Reader ou Okular, preencha, "
+                "e salve com Ctrl+S (não use 'Salvar como…' nem 'Imprimir → PDF'). "
+                "Reenvie em seguida."
+            ),
+        )
+
     # 1. Extrair respostas dos campos AcroForm
     from app.services.questionnaire_pdf_service import extract_answers_from_pdf, extract_answers_from_text
 
