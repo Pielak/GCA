@@ -223,7 +223,9 @@ async def save_llm_settings(
 ):
     """Salva configurações LLM do projeto."""
     user_id = permissions["user_id"]
-    valid_providers = ("anthropic", "openai", "grok", "deepseek")
+    # Providers aceitos. Ollama fica de fora até termos schema para base_url
+    # (endpoint local, sem api_key, configurável) — DT-023 registra a pendência.
+    valid_providers = ("anthropic", "openai", "grok", "deepseek", "gemini")
     if req.provider not in valid_providers:
         raise HTTPException(status_code=400, detail=f"Provider inválido. Aceitos: {', '.join(valid_providers)}")
 
@@ -280,10 +282,12 @@ async def validate_llm_settings(
     if not api_key:
         raise HTTPException(status_code=400, detail="API key não encontrada no vault")
 
-    # Endpoints /v1/models aceitos por provider. Anthropic usa header próprio;
-    # OpenAI e compatíveis (deepseek, grok) usam Bearer. Gemini tem formato
-    # distinto e fica como teste manual (provider_supported=False) até
-    # o adapter multi-provider do MVP 3.
+    # Endpoints /v1/models (ou equivalente) aceitos por provider.
+    # - Anthropic: x-api-key header + versão.
+    # - OpenAI e compatíveis (deepseek, grok): Bearer no Authorization.
+    # - Gemini: API key em query param (?key=…), schema diferente.
+    # - Ollama: escopo DT-023 — requer base_url configurável + backend em
+    #   container precisa resolver host do daemon do user.
     provider_config = {
         "anthropic": {
             "url": "https://api.anthropic.com/v1/models",
@@ -305,9 +309,15 @@ async def validate_llm_settings(
             "headers": {"Authorization": f"Bearer {api_key}"},
             "default_model": "grok-2",
         },
+        "gemini": {
+            # Google usa ?key=… em vez de header. A chave vai na URL.
+            "url": f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
+            "headers": {},
+            "default_model": "gemini-2.0-flash",
+        },
     }
 
-    # Gemini, ollama e providers não previstos: não forçar teste que gere falso-positivo.
+    # Providers não previstos (ex: ollama até DT-023 ser tratada).
     if provider not in provider_config:
         return {
             "valid": None,
@@ -317,7 +327,7 @@ async def validate_llm_settings(
                 f"Teste automático ainda não implementado para o provedor "
                 f"'{provider}'. A chave foi salva no vault, mas você precisa "
                 f"validar manualmente chamando seu próprio endpoint. "
-                f"Suportados hoje: anthropic, openai, deepseek, grok."
+                f"Suportados hoje: anthropic, openai, deepseek, grok, gemini."
             ),
         }
 
