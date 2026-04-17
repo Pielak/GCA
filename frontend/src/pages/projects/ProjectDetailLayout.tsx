@@ -2,7 +2,8 @@ import { useState, useEffect } from 'react'
 import { Outlet, NavLink, useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ChevronLeft, Activity, Settings, FileText, Shield, GitBranch, Zap,
-  Code2, TestTube2, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2
+  Code2, TestTube2, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
@@ -23,6 +24,7 @@ interface ProjectHeader {
 
 const MODULES = [
   { path: '', label: 'Dashboard', icon: Activity, end: true },
+  { path: 'settings', label: 'Configurações', icon: SlidersHorizontal },
   { path: 'ocg', label: 'OCG', icon: Settings },
   { path: 'questionnaire', label: 'Questionário', icon: ClipboardList },
   { path: 'repository', label: 'Repositório', icon: Shield },
