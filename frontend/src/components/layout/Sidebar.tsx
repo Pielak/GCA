@@ -17,18 +17,13 @@ interface SidebarProject {
   role: string
 }
 
+// Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4): Admin, GP, Dev, Tester, QA.
 const ROLE_LABELS: Record<string, { label: string; bg: string; text: string }> = {
   admin: { label: 'Admin', bg: 'bg-violet-500/15', text: 'text-violet-300' },
   gp: { label: 'GP', bg: 'bg-emerald-500/15', text: 'text-emerald-300' },
-  tech_lead: { label: 'Tech Lead', bg: 'bg-blue-500/15', text: 'text-blue-300' },
   dev: { label: 'Dev', bg: 'bg-cyan-500/15', text: 'text-cyan-300' },
-  dev_senior: { label: 'Dev Sr', bg: 'bg-cyan-500/15', text: 'text-cyan-300' },
-  dev_pleno: { label: 'Dev Pl', bg: 'bg-cyan-500/15', text: 'text-cyan-300' },
-  qa: { label: 'QA', bg: 'bg-amber-500/15', text: 'text-amber-300' },
   tester: { label: 'Tester', bg: 'bg-orange-500/15', text: 'text-orange-300' },
-  compliance: { label: 'Compliance', bg: 'bg-rose-500/15', text: 'text-rose-300' },
-  stakeholder: { label: 'Stakeholder', bg: 'bg-indigo-500/15', text: 'text-indigo-300' },
-  viewer: { label: 'Viewer', bg: 'bg-slate-500/15', text: 'text-slate-400' },
+  qa: { label: 'QA', bg: 'bg-amber-500/15', text: 'text-amber-300' },
 }
 
 const statusDot = (status: string) => {
@@ -68,10 +63,12 @@ export function Sidebar() {
           const res = await apiClient.get('/admin/projects/pending')
           setPendingCount(res.data.pending_count || 0)
         } catch {}
+      } else {
+        setPendingCount(0)
       }
     }
     load()
-  }, [isAdmin])
+  }, [isAdmin, location.pathname])
 
   const handleLogout = () => {
     logout()

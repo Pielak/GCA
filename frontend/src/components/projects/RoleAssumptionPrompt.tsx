@@ -3,15 +3,20 @@ import { useParams } from 'react-router-dom'
 import { ShieldPlus, Loader2 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
+// Mapeia ação → papel canônico necessário (GCA_CANONICAL_CONTRACT.md §4).
+// Alinha com ROLE_ACTIONS em backend/app/core/permissions.py.
 const ACTION_ROLES: Record<string, { role: string; label: string }> = {
-  'code:write': { role: 'dev_senior', label: 'Dev Senior' },
-  'code:review': { role: 'dev_senior', label: 'Dev Senior' },
-  'git:commit': { role: 'dev_senior', label: 'Dev Senior' },
-  'security:review': { role: 'tech_lead', label: 'Tech Lead' },
-  'compliance:validate': { role: 'compliance', label: 'Compliance' },
+  'code:write': { role: 'dev', label: 'Dev' },
+  'code:review': { role: 'dev', label: 'Dev' },
+  'git:commit': { role: 'dev', label: 'Dev' },
+  'pipeline:execute': { role: 'dev', label: 'Dev' },
+  'security:review': { role: 'qa', label: 'QA' },
+  'compliance:validate': { role: 'qa', label: 'QA' },
   'qa:approve': { role: 'qa', label: 'QA' },
-  'pipeline:execute': { role: 'dev_pleno', label: 'Dev Pleno' },
-  'backlog:manage': { role: 'tech_lead', label: 'Tech Lead' },
+  'backlog:manage': { role: 'gp', label: 'GP' },
+  'project:manage_team': { role: 'gp', label: 'GP' },
+  'project:edit': { role: 'gp', label: 'GP' },
+  'audit:export': { role: 'gp', label: 'GP' },
 }
 
 interface Props {

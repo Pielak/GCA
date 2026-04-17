@@ -22,17 +22,13 @@ interface UserItem {
   last_login_at?: string
 }
 
-// Cores e labels por papel — alinha com RBAC do GCA (7 papéis em projeto).
+// Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4): GP, Dev, Tester, QA.
+// Admin é camada administrativa (is_admin=true) — renderizado à parte, não aparece como "project role".
 const ROLE_LABELS: Record<string, { label: string; color: string }> = {
-  gp:         { label: 'GP',         color: 'bg-violet-500/20 text-violet-300 border-violet-500/30' },
-  tech_lead:  { label: 'Tech Lead',  color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
-  dev_sr:     { label: 'Dev Sr',     color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
-  dev_pl:     { label: 'Dev Pl',     color: 'bg-emerald-500/15 text-emerald-200 border-emerald-500/20' },
-  dev:        { label: 'Dev',        color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
-  qa:         { label: 'QA',         color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
-  compliance: { label: 'Compliance', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
-  viewer:     { label: 'Viewer',     color: 'bg-slate-500/20 text-slate-300 border-slate-500/30' },
-  stakeholder:{ label: 'Stakeholder',color: 'bg-slate-500/20 text-slate-300 border-slate-500/30' },
+  gp:     { label: 'GP',     color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+  dev:    { label: 'Dev',    color: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30' },
+  tester: { label: 'Tester', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
+  qa:     { label: 'QA',     color: 'bg-amber-500/20 text-amber-300 border-amber-500/30' },
 }
 
 export function AdminUsersPage() {

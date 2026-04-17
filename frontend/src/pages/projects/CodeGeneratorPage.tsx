@@ -191,7 +191,7 @@ export function CodeGeneratorPage() {
   const [testResult, setTestResult] = useState<string | null>(null)
 
   // Permissions
-  const isDevOrQA = true // TODO: check user.role in project (developer, qa, tech_lead, gp)
+  const isDevOrQA = true // TODO: check user.role in project (papéis canônicos: dev, qa)
   const isTestFile = selectedFile.includes('test') || selectedFile.includes('spec')
   const canEdit = isTestFile ? isDevOrQA : isDevOrQA
 

@@ -21,25 +21,22 @@ interface TeamMember {
   joined_at: string
 }
 
-type InviteRole = 'tech_lead' | 'dev_senior' | 'dev_pleno' | 'qa' | 'compliance' | 'stakeholder'
+// Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4): Dev, Tester, QA.
+// GP não é convidado aqui (é criado na aprovação do projeto); Admin é camada
+// administrativa, não é membro de projeto.
+type InviteRole = 'dev' | 'tester' | 'qa'
 
 const ROLE_OPTIONS: { value: InviteRole; label: string }[] = [
-  { value: 'tech_lead', label: 'Tech Lead' },
-  { value: 'dev_senior', label: 'Dev Senior' },
-  { value: 'dev_pleno', label: 'Dev Pleno' },
+  { value: 'dev', label: 'Dev' },
+  { value: 'tester', label: 'Tester' },
   { value: 'qa', label: 'QA' },
-  { value: 'compliance', label: 'Compliance / Segurança' },
-  { value: 'stakeholder', label: 'Stakeholder / Gestão' },
 ]
 
 const ROLE_COLORS: Record<string, string> = {
-  gp: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
-  tech_lead: 'bg-blue-500/20 text-blue-300 border-blue-500/30',
-  dev_senior: 'bg-slate-500/20 text-slate-200 border-slate-500/30',
-  dev_pleno: 'bg-slate-600/20 text-slate-300 border-slate-600/30',
-  qa: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
-  compliance: 'bg-violet-500/20 text-violet-300 border-violet-500/30',
-  stakeholder: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+  gp:     'bg-emerald-500/20 text-emerald-300 border-emerald-500/30',
+  dev:    'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
+  tester: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+  qa:     'bg-amber-500/20 text-amber-300 border-amber-500/30',
 }
 
 function getRoleLabel(role: string): string {
@@ -55,12 +52,9 @@ function formatDate(dateString: string): string {
 }
 
 const SELF_ROLE_OPTIONS = [
-  { value: 'tech_lead', label: 'Tech Lead' },
-  { value: 'dev_senior', label: 'Dev Senior' },
-  { value: 'dev_pleno', label: 'Dev Pleno' },
+  { value: 'dev', label: 'Dev' },
+  { value: 'tester', label: 'Tester' },
   { value: 'qa', label: 'QA' },
-  { value: 'compliance', label: 'Compliance' },
-  { value: 'stakeholder', label: 'Stakeholder' },
 ]
 
 export function ProjectTeamPage() {
@@ -69,7 +63,7 @@ export function ProjectTeamPage() {
   const canManageTeam = can('project:manage_team')
 
   const [email, setEmail] = useState('')
-  const [role, setRole] = useState<InviteRole>('dev_pleno')
+  const [role, setRole] = useState<InviteRole>('dev')
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteError, setInviteError] = useState<string | null>(null)
   const [inviteSuccess, setInviteSuccess] = useState<string | null>(null)
@@ -138,7 +132,7 @@ export function ProjectTeamPage() {
       await apiClient.post(`/projects/${projectId}/invite`, { email, role })
       setInviteSuccess('Convite enviado com sucesso!')
       setEmail('')
-      setRole('dev_pleno')
+      setRole('dev')
       await loadTeamData()
       setTimeout(() => setInviteSuccess(null), 3000)
     } catch (err: any) {

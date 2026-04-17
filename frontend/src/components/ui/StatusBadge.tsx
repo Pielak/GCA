@@ -65,15 +65,13 @@ export function StatusBadge({ status, size = 'md' }: StatusBadgeProps) {
 }
 
 export function RoleBadge({ role }: { role: string }) {
+  // Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4).
   const config: Record<string, { label: string; className: string }> = {
-    admin: { label: 'Admin GCA', className: 'bg-indigo-900/60 text-indigo-300' },
-    gp: { label: 'Ger. de Projeto', className: 'bg-blue-900/60 text-blue-300' },
-    tech_lead: { label: 'Tech Lead', className: 'bg-violet-900/60 text-violet-300' },
-    senior_dev: { label: 'Dev Sênior', className: 'bg-cyan-900/60 text-cyan-300' },
-    pleno_dev: { label: 'Dev Pleno', className: 'bg-teal-900/60 text-teal-300' },
-    qa: { label: 'QA Engineer', className: 'bg-emerald-900/60 text-emerald-300' },
-    compliance: { label: 'Compliance', className: 'bg-amber-900/60 text-amber-300' },
-    stakeholder: { label: 'Stakeholder', className: 'bg-slate-700 text-slate-300' },
+    admin:  { label: 'Admin GCA',      className: 'bg-violet-900/60 text-violet-300' },
+    gp:     { label: 'Ger. de Projeto', className: 'bg-emerald-900/60 text-emerald-300' },
+    dev:    { label: 'Dev',            className: 'bg-cyan-900/60 text-cyan-300' },
+    tester: { label: 'Tester',         className: 'bg-orange-900/60 text-orange-300' },
+    qa:     { label: 'QA',             className: 'bg-amber-900/60 text-amber-300' },
   };
   const c = config[role] ?? { label: role, className: 'bg-slate-700 text-slate-300' };
   return <span className={`inline-flex items-center rounded-md px-2 py-1 text-xs font-medium ${c.className}`}>{c.label}</span>;

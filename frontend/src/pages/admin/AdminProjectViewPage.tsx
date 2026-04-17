@@ -3,27 +3,21 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Loader2, Users, Calendar, FolderOpen, Mail, Activity, DollarSign } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
+// Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4): Admin, GP, Dev, Tester, QA.
 const ROLE_LABELS: Record<string, string> = {
-  gp: 'Gerente de Projeto',
-  tech_lead: 'Tech Lead',
-  dev_senior: 'Dev Sênior',
-  dev_pleno: 'Dev Pleno',
-  qa: 'QA Engineer',
-  compliance: 'Compliance',
-  stakeholder: 'Stakeholder',
   admin: 'Admin',
-  viewer: 'Visualizador',
+  gp: 'Gerente de Projeto',
+  dev: 'Dev',
+  tester: 'Tester',
+  qa: 'QA Engineer',
 }
 
 const ROLE_COLORS: Record<string, string> = {
-  gp: 'bg-emerald-500/20 text-emerald-300',
-  tech_lead: 'bg-blue-500/20 text-blue-300',
-  dev_senior: 'bg-cyan-500/20 text-cyan-300',
-  dev_pleno: 'bg-cyan-600/20 text-cyan-300',
-  qa: 'bg-amber-500/20 text-amber-300',
-  compliance: 'bg-violet-500/20 text-violet-300',
-  stakeholder: 'bg-indigo-500/20 text-indigo-300',
   admin: 'bg-violet-600/20 text-violet-300',
+  gp: 'bg-emerald-500/20 text-emerald-300',
+  dev: 'bg-cyan-500/20 text-cyan-300',
+  tester: 'bg-orange-500/20 text-orange-300',
+  qa: 'bg-amber-500/20 text-amber-300',
 }
 
 const PILLAR_NAMES: Record<string, string> = {

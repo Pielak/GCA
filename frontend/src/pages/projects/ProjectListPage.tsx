@@ -21,14 +21,12 @@ interface Project {
   userRole?: string
 }
 
+// Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4).
 const ROLE_LABELS: Record<string, string> = {
   gp: 'Gerente de Projeto',
-  tech_lead: 'Tech Lead',
-  dev_senior: 'Dev Senior',
-  dev_pleno: 'Dev Pleno',
+  dev: 'Dev',
+  tester: 'Tester',
   qa: 'QA',
-  compliance: 'Compliance',
-  stakeholder: 'Stakeholder',
 }
 
 const OUTPUT_LABELS: Record<string, string> = {
