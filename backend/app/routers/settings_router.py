@@ -247,7 +247,22 @@ async def validate_llm_settings(
     permissions: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Valida a API key do LLM provider."""
+    """Valida a API key do LLM provider configurado no projeto.
+
+    Classificação de criticidade (contrato §6.2): **baixa** — é só um ping no
+    endpoint `/v1/models` do provedor para confirmar que a chave é aceita.
+    Não consolida nada, não custa tokens. Camada Projeto (contrato §6.6,
+    Contexto B) — usa chave do GP via vault, nunca a chave global do admin.
+
+    Retorna estrutura explícita:
+      - `{valid: True,  provider, model, latency_ms}` se o provedor aceitou a chave.
+      - `{valid: False, provider, error, detail}` se rejeitou ou falhou rede.
+      - `{valid: None,  provider, provider_supported: False, detail}` se o
+        provedor é válido mas o GCA ainda não implementou teste real dele.
+        Evita falso-positivo que ocorria no código anterior para deepseek/grok.
+    """
+    import time
+
     result = await db.execute(
         select(ProjectSettings).where(
             ProjectSettings.project_id == project_id,
@@ -265,33 +280,117 @@ async def validate_llm_settings(
     if not api_key:
         raise HTTPException(status_code=400, detail="API key não encontrada no vault")
 
-    # Teste simples por provider
+    # Endpoints /v1/models aceitos por provider. Anthropic usa header próprio;
+    # OpenAI e compatíveis (deepseek, grok) usam Bearer. Gemini tem formato
+    # distinto e fica como teste manual (provider_supported=False) até
+    # o adapter multi-provider do MVP 3.
+    provider_config = {
+        "anthropic": {
+            "url": "https://api.anthropic.com/v1/models",
+            "headers": {"x-api-key": api_key, "anthropic-version": "2023-06-01"},
+            "default_model": "claude-haiku-4-5-20251001",
+        },
+        "openai": {
+            "url": "https://api.openai.com/v1/models",
+            "headers": {"Authorization": f"Bearer {api_key}"},
+            "default_model": "gpt-4o-mini",
+        },
+        "deepseek": {
+            "url": "https://api.deepseek.com/v1/models",
+            "headers": {"Authorization": f"Bearer {api_key}"},
+            "default_model": "deepseek-chat",
+        },
+        "grok": {
+            "url": "https://api.x.ai/v1/models",
+            "headers": {"Authorization": f"Bearer {api_key}"},
+            "default_model": "grok-2",
+        },
+    }
+
+    # Gemini, ollama e providers não previstos: não forçar teste que gere falso-positivo.
+    if provider not in provider_config:
+        return {
+            "valid": None,
+            "provider": provider,
+            "provider_supported": False,
+            "detail": (
+                f"Teste automático ainda não implementado para o provedor "
+                f"'{provider}'. A chave foi salva no vault, mas você precisa "
+                f"validar manualmente chamando seu próprio endpoint. "
+                f"Suportados hoje: anthropic, openai, deepseek, grok."
+            ),
+        }
+
+    cfg = provider_config[provider]
+    start = time.monotonic()
     try:
         import httpx
-        if provider == "anthropic":
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    "https://api.anthropic.com/v1/models",
-                    headers={"x-api-key": api_key, "anthropic-version": "2023-06-01"},
-                )
-            if resp.status_code == 200:
-                return {"valid": True, "model": llm_config.get("model_preference", "claude-opus-4-6")}
-            return {"valid": False, "error": f"Anthropic retornou {resp.status_code}"}
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(cfg["url"], headers=cfg["headers"])
+        latency_ms = int((time.monotonic() - start) * 1000)
 
-        elif provider == "openai":
-            async with httpx.AsyncClient(timeout=15) as client:
-                resp = await client.get(
-                    "https://api.openai.com/v1/models",
-                    headers={"Authorization": f"Bearer {api_key}"},
-                )
-            if resp.status_code == 200:
-                return {"valid": True, "model": llm_config.get("model_preference", "gpt-4")}
-            return {"valid": False, "error": f"OpenAI retornou {resp.status_code}"}
+        if resp.status_code == 200:
+            logger.info(
+                "llm.validate_ok",
+                project_id=str(project_id),
+                provider=provider,
+                latency_ms=latency_ms,
+            )
+            return {
+                "valid": True,
+                "provider": provider,
+                "model": llm_config.get("model_preference") or cfg["default_model"],
+                "latency_ms": latency_ms,
+            }
 
-        return {"valid": True, "model": llm_config.get("model_preference", provider)}
+        # Humaniza o erro pelo status code
+        if resp.status_code in (401, 403):
+            error_code = "invalid_key"
+            detail = (
+                f"O provedor {provider} rejeitou a chave (HTTP {resp.status_code}). "
+                f"Verifique em Configurações → LLM se a chave está correta e não expirou."
+            )
+        elif resp.status_code == 429:
+            error_code = "rate_limited"
+            detail = f"Provedor {provider} retornou rate limit. Tente novamente em alguns segundos."
+        else:
+            error_code = "provider_error"
+            detail = f"Provedor {provider} retornou HTTP {resp.status_code}."
 
+        logger.warning(
+            "llm.validate_failed",
+            project_id=str(project_id),
+            provider=provider,
+            status=resp.status_code,
+        )
+        return {
+            "valid": False,
+            "provider": provider,
+            "latency_ms": latency_ms,
+            "error": error_code,
+            "detail": detail,
+        }
+
+    except httpx.TimeoutException:
+        return {
+            "valid": False,
+            "provider": provider,
+            "error": "timeout",
+            "detail": f"Timeout ao contatar {provider}. Verifique sua rede.",
+        }
     except Exception as e:
-        return {"valid": False, "error": str(e)}
+        logger.error(
+            "llm.validate_error",
+            project_id=str(project_id),
+            provider=provider,
+            error=str(e)[:300],
+        )
+        return {
+            "valid": False,
+            "provider": provider,
+            "error": "network_error",
+            "detail": str(e)[:300],
+        }
 
 
 # ============================================================================
