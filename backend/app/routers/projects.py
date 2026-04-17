@@ -503,6 +503,135 @@ async def get_project_questionnaire(
     }
 
 
+class QuestionnaireCorrectionsRequest(BaseModel):
+    # Dict {q_id: valor} — valor pode ser string (single/text) ou list[str] (multi).
+    # Campos ausentes são preservados dos responses atuais.
+    corrections: dict
+
+
+@router.post("/{project_id}/questionnaire/correct")
+async def correct_project_questionnaire(
+    project_id: UUID,
+    req: QuestionnaireCorrectionsRequest,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Corrige respostas específicas do último questionário do projeto.
+
+    Alternativa ao re-upload de PDF: o GP corrige apenas as perguntas
+    apontadas como bloqueadoras na aba Questionário e re-dispara a
+    análise técnica, sem sair da tela.
+
+    Fluxo:
+      1. Carrega o questionário mais recente do projeto.
+      2. Mergea `corrections` com `responses` existentes (patch parcial).
+      3. Roda `TechnologyVerificationService` no responses mesclado.
+      4. Atualiza o próprio questionário in-place (não cria novo) —
+         status, approved, adherence, validations, highlighted_fields,
+         observations, responses, analyzed_at.
+      5. Se aprovado: dispara `_generate_ocg` (pipeline 8 agentes IA).
+
+    Mantém o histórico mais enxuto do que criar novo Questionnaire a
+    cada ajuste — cada correção é uma iteração sobre a mesma submissão.
+    """
+    from sqlalchemy import select
+    from app.models.base import Questionnaire
+    from app.services.technology_verification_service import TechnologyVerificationService
+    from app.services.questionnaire_service import QuestionnaireService
+    from datetime import datetime, timezone
+    import asyncio
+    import json
+
+    result = await db.execute(
+        select(Questionnaire)
+        .where(Questionnaire.project_id == project_id)
+        .order_by(Questionnaire.submitted_at.desc())
+        .limit(1)
+    )
+    q = result.scalar_one_or_none()
+    if q is None:
+        raise HTTPException(status_code=404, detail="Nenhum questionário submetido para este projeto.")
+
+    if not req.corrections:
+        raise HTTPException(status_code=400, detail="Nenhuma correção informada.")
+
+    # Merge: responses existentes + corrections
+    try:
+        current_responses = json.loads(q.responses) if q.responses else {}
+    except json.JSONDecodeError:
+        current_responses = {}
+    merged = {**current_responses, **req.corrections}
+
+    # Re-rodar verificação tecnológica
+    try:
+        service = TechnologyVerificationService(merged)
+        res = service.run_full_pipeline()
+    except Exception as e:
+        logger.error("questionnaire.correct_verification_failed", project_id=str(project_id), error=str(e))
+        raise HTTPException(status_code=500, detail=f"Falha ao re-analisar: {e}")
+
+    approved = res["approved"]
+    adherence = res["adherenceScore"]
+    blockers_count = res["summary"]["blockers"]
+    criticals_count = res["summary"]["criticals"]
+
+    # Observation amigável em PT-BR
+    if approved:
+        new_status = "ok"
+        new_obs = f"Análise aprovada após correções · Aderência {adherence}%. OCG será gerado."
+    elif blockers_count > 0:
+        new_status = "incomplete"
+        new_obs = f"Ainda restam {blockers_count} problema(s) crítico(s). Continue ajustando as respostas abaixo."
+    elif criticals_count > 0:
+        new_status = "revision_needed"
+        new_obs = f"Análise com {criticals_count} ponto(s) crítico(s). Revise antes de prosseguir."
+    else:
+        new_status = "revision_needed"
+        new_obs = "Análise com observações. Revise antes de prosseguir."
+
+    # Update in-place
+    q.responses = json.dumps(merged)
+    q.status = new_status
+    q.approved = approved
+    q.adherence_score = adherence
+    q.validations = json.dumps(res["validations"])
+    q.highlighted_fields = json.dumps(res["highlightedFields"])
+    q.restrictions = (res.get("restrictions") or "")[:500]
+    q.observations = new_obs[:500]
+    q.analyzed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    logger.info(
+        "questionnaire.corrected",
+        project_id=str(project_id),
+        questionnaire_id=str(q.id),
+        corrected_fields=list(req.corrections.keys()),
+        approved=approved,
+        adherence=adherence,
+    )
+
+    # Se passou, dispara geração de OCG em background (mesmo padrão do submit)
+    if approved:
+        asyncio.create_task(
+            QuestionnaireService._generate_ocg(
+                questionnaire_id=q.id,
+                project_id=project_id,
+                gp_email=q.gp_email,
+            )
+        )
+
+    return {
+        "success": True,
+        "questionnaire_id": str(q.id),
+        "status": new_status,
+        "approved": approved,
+        "adherence_score": adherence,
+        "blockers": blockers_count,
+        "criticals": criticals_count,
+        "observations": new_obs,
+    }
+
+
 @router.get("/{project_id}/ocg")
 async def get_project_ocg(
     project_id: UUID,

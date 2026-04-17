@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   ClipboardList, Download, FileUp, Loader2, CheckCircle2,
-  AlertTriangle, AlertCircle, Clock, Lightbulb, ShieldAlert,
+  AlertTriangle, AlertCircle, Clock, Lightbulb, ShieldAlert, Wand2,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { questionLabel } from '@/data/questionLabels'
+import { QUESTION_SCHEMA, type QuestionDef } from '@/data/questionSchema'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -38,6 +39,9 @@ interface ExistingQuestionnaire {
   analyzed_at: string | null
   observations: string | null
   blocking_issues?: BlockingIssue[]
+  // Respostas atuais (q_id → string ou lista). Usadas para pré-preencher
+  // o painel de correção inline sem exigir novo upload de PDF.
+  responses?: Record<string, string | string[]>
 }
 
 // ─── Component ─────────────────────────────────────────────────────
@@ -50,18 +54,17 @@ export function QuestionnairePage() {
   const [downloading, setDownloading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  const fetchExisting = async () => {
+    if (!projectId) return
+    try {
+      const res: any = await apiClient.get(`/projects/${projectId}/questionnaire`)
+      if (res?.data?.questionnaire) setExisting(res.data.questionnaire)
+    } catch { /* sem questionário ainda */ }
+  }
+
   useEffect(() => {
-    if (!projectId) {
-      setLoading(false)
-      return
-    }
-    apiClient
-      .get(`/projects/${projectId}/questionnaire`)
-      .then((res: any) => {
-        if (res?.data?.questionnaire) setExisting(res.data.questionnaire)
-      })
-      .catch(() => { /* sem questionário ainda */ })
-      .finally(() => setLoading(false))
+    if (!projectId) { setLoading(false); return }
+    fetchExisting().finally(() => setLoading(false))
   }, [projectId])
 
   const handleDownload = async () => {
@@ -133,6 +136,16 @@ export function QuestionnairePage() {
 
       {/* Status card (se já submetido) */}
       {existing && <StatusCard q={existing} />}
+
+      {/* Painel de correção inline — só aparece quando há bloqueadores */}
+      {existing && projectId && (existing.blocking_issues?.length ?? 0) > 0 && (
+        <InlineFixPanel
+          projectId={projectId}
+          issues={existing.blocking_issues ?? []}
+          currentResponses={existing.responses ?? {}}
+          onSaved={fetchExisting}
+        />
+      )}
 
       {/* Ações — SEMPRE disponíveis; reenvio atualiza responses */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
@@ -389,4 +402,231 @@ function statusDisplay(q: ExistingQuestionnaire) {
     label: `Status: ${q.status}`,
     description: 'Houve um problema na análise. Reenvie o PDF ou contate o suporte.',
   }
+}
+
+// ─── Painel de correção inline ────────────────────────────────────
+
+/**
+ * Painel que permite ao GP editar diretamente as perguntas apontadas como
+ * bloqueadoras — sem baixar PDF, re-preencher e re-uploadar.
+ *
+ * Fluxo:
+ *  1. Union de `affected_questions` de todos os issues → lista de QIDs a editar
+ *  2. Pré-preenche com `currentResponses[qid]` (state local)
+ *  3. GP ajusta só o necessário
+ *  4. Submit → POST /projects/:id/questionnaire/correct com só os campos
+ *     alterados; backend mergea com responses existentes e re-roda análise
+ *  5. `onSaved()` refetcha o questionário → cards reavaliam.
+ */
+function InlineFixPanel({
+  projectId,
+  issues,
+  currentResponses,
+  onSaved,
+}: {
+  projectId: string
+  issues: BlockingIssue[]
+  currentResponses: Record<string, string | string[]>
+  onSaved: () => void | Promise<void>
+}) {
+  // QIDs afetados por qualquer issue — ordem mantém aparecimento nos cards
+  const affectedQIDs = useMemo(() => {
+    const seen = new Set<string>()
+    const ordered: string[] = []
+    for (const issue of issues) {
+      for (const qid of issue.affected_questions) {
+        if (!seen.has(qid) && QUESTION_SCHEMA[qid]) {
+          seen.add(qid)
+          ordered.push(qid)
+        }
+      }
+    }
+    return ordered
+  }, [issues])
+
+  const [edits, setEdits] = useState<Record<string, string | string[]>>(() => {
+    const init: Record<string, string | string[]> = {}
+    for (const qid of affectedQIDs) {
+      const cur = currentResponses[qid]
+      const def = QUESTION_SCHEMA[qid]
+      if (cur !== undefined) init[qid] = cur
+      else init[qid] = def.type === 'multi' ? [] : ''
+    }
+    return init
+  })
+  const [saving, setSaving] = useState(false)
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null)
+
+  if (affectedQIDs.length === 0) return null
+
+  const setValue = (qid: string, value: string | string[]) => {
+    setEdits(prev => ({ ...prev, [qid]: value }))
+  }
+
+  const save = async () => {
+    setSaving(true)
+    setResult(null)
+    try {
+      // Envia só as respostas que realmente mudaram, pra reduzir o diff.
+      const corrections: Record<string, string | string[]> = {}
+      for (const [qid, val] of Object.entries(edits)) {
+        const cur = currentResponses[qid]
+        const changed = Array.isArray(val) || Array.isArray(cur)
+          ? JSON.stringify(val) !== JSON.stringify(cur ?? [])
+          : val !== (cur ?? '')
+        if (changed) corrections[qid] = val
+      }
+      if (Object.keys(corrections).length === 0) {
+        setResult({ ok: false, message: 'Nenhuma alteração para enviar.' })
+        setSaving(false)
+        return
+      }
+      const res: any = await apiClient.post(
+        `/projects/${projectId}/questionnaire/correct`,
+        { corrections },
+      )
+      const data = res?.data || {}
+      if (data.approved) {
+        setResult({ ok: true, message: `Análise aprovada! Aderência ${data.adherence_score}%. OCG será gerado.` })
+      } else {
+        setResult({
+          ok: true,
+          message: `Salvo. Agora: ${data.blockers ?? 0} bloqueador(es), ${data.criticals ?? 0} crítico(s). Aderência ${data.adherence_score}%.`,
+        })
+      }
+      await onSaved()
+    } catch (err: any) {
+      setResult({
+        ok: false,
+        message: err?.response?.data?.detail || err?.message || 'Falha ao salvar correções',
+      })
+    }
+    setSaving(false)
+  }
+
+  return (
+    <div className="bg-slate-900 border border-violet-800/40 rounded-xl p-5 space-y-4">
+      <div className="flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-violet-600/20 border border-violet-600/40 flex items-center justify-center flex-shrink-0">
+          <Wand2 className="w-4.5 h-4.5 text-violet-300" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <h3 className="text-slate-100 text-base font-semibold">Corrigir respostas sem baixar o PDF</h3>
+          <p className="text-slate-400 text-xs mt-0.5">
+            Edite abaixo as {affectedQIDs.length} pergunta(s) apontadas nos bloqueadores.
+            Ao salvar, a análise é re-rodada e o status é atualizado — sem precisar baixar, preencher e enviar o PDF de novo.
+          </p>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {affectedQIDs.map(qid => {
+          const def = QUESTION_SCHEMA[qid]
+          const val = edits[qid] ?? (def.type === 'multi' ? [] : '')
+          return (
+            <div key={qid} className="bg-slate-950/50 border border-slate-800 rounded-lg p-3">
+              <label className="block text-slate-200 text-sm font-medium">
+                {questionLabel(qid)}
+              </label>
+              <div className="mt-2">
+                <QuestionInput def={def} value={val} onChange={v => setValue(qid, v)} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
+      {result && (
+        <div className={`px-3 py-2 rounded-lg text-xs border ${
+          result.ok
+            ? 'bg-emerald-900/20 border-emerald-800/40 text-emerald-300'
+            : 'bg-red-900/20 border-red-800/40 text-red-300'
+        }`}>
+          {result.message}
+        </div>
+      )}
+
+      <div className="flex justify-end">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-2 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm font-semibold rounded-lg transition-colors"
+        >
+          {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wand2 className="w-4 h-4" />}
+          {saving ? 'Re-analisando…' : 'Salvar correções e re-analisar'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function QuestionInput({
+  def,
+  value,
+  onChange,
+}: {
+  def: QuestionDef
+  value: string | string[]
+  onChange: (v: string | string[]) => void
+}) {
+  if (def.type === 'text') {
+    return (
+      <input
+        type="text"
+        value={typeof value === 'string' ? value : ''}
+        onChange={e => onChange(e.target.value)}
+        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600"
+      />
+    )
+  }
+
+  if (def.type === 'single') {
+    return (
+      <select
+        value={typeof value === 'string' ? value : ''}
+        onChange={e => onChange(e.target.value)}
+        className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600"
+      >
+        <option value="">Selecione…</option>
+        {def.options?.map(opt => (
+          <option key={opt} value={opt}>{opt}</option>
+        ))}
+      </select>
+    )
+  }
+
+  // multi
+  const selected = Array.isArray(value) ? value : []
+  const toggle = (opt: string) => {
+    const next = selected.includes(opt)
+      ? selected.filter(x => x !== opt)
+      : [...selected, opt]
+    onChange(next)
+  }
+  return (
+    <div className="grid grid-cols-2 gap-1.5">
+      {def.options?.map(opt => {
+        const checked = selected.includes(opt)
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => toggle(opt)}
+            className={`flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-md border transition-colors text-left ${
+              checked
+                ? 'bg-violet-600/20 border-violet-500/50 text-violet-200'
+                : 'bg-slate-800/50 border-slate-700 text-slate-300 hover:border-slate-600'
+            }`}
+          >
+            <span className={`w-3.5 h-3.5 flex-shrink-0 rounded border flex items-center justify-center ${
+              checked ? 'bg-violet-500 border-violet-400' : 'border-slate-500'
+            }`}>
+              {checked && <CheckCircle2 className="w-3 h-3 text-white" />}
+            </span>
+            <span className="truncate">{opt}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
 }
