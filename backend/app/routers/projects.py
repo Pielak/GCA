@@ -464,6 +464,27 @@ async def get_project_questionnaire(
     except json.JSONDecodeError:
         validations = {}
 
+    # Deriva lista plana de issues acionáveis a partir dos 4 buckets de findings
+    # (logicConflicts, gaps, incompatibilities, delivery_alignment). Cada item
+    # traz título humano, perguntas afetadas, sugestão de correção, severidade
+    # e pilar — pronto pra UI renderizar sem decodificar códigos técnicos.
+    blocking_issues = []
+    for bucket in ("logicConflicts", "gaps", "incompatibilities", "delivery_alignment"):
+        for f in validations.get(bucket, []):
+            sev = f.get("severity")
+            if sev in ("blocker", "critical", "warning"):
+                blocking_issues.append({
+                    "severity": sev,
+                    "rule_id": f.get("rule_id"),
+                    "title": f.get("title", ""),
+                    "description": f.get("description", ""),
+                    "affected_questions": f.get("affected_questions", []),
+                    "suggestion": f.get("suggestion", ""),
+                    "pillar": f.get("pillar"),
+                })
+    order = {"blocker": 0, "critical": 1, "warning": 2}
+    blocking_issues.sort(key=lambda x: order.get(x["severity"], 99))
+
     return {
         "questionnaire": {
             "id": str(q.id),
@@ -473,6 +494,7 @@ async def get_project_questionnaire(
             "status": q.status,
             "approved": q.approved,
             "validations": validations,
+            "blocking_issues": blocking_issues,
             "observations": q.observations,
             "restrictions": q.restrictions,
             "submitted_at": q.submitted_at.isoformat() if q.submitted_at else None,

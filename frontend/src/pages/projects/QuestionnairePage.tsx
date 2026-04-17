@@ -2,9 +2,10 @@ import { useState, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import {
   ClipboardList, Download, FileUp, Loader2, CheckCircle2,
-  AlertTriangle, AlertCircle, Clock,
+  AlertTriangle, AlertCircle, Clock, Lightbulb, ShieldAlert,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { questionLabel } from '@/data/questionLabels'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -18,6 +19,16 @@ import { apiClient } from '@/lib/api'
 
 // ─── Types ─────────────────────────────────────────────────────────
 
+interface BlockingIssue {
+  severity: 'blocker' | 'critical' | 'warning'
+  rule_id: string | null
+  title: string
+  description: string
+  affected_questions: string[]
+  suggestion: string
+  pillar?: string | null
+}
+
 interface ExistingQuestionnaire {
   id: string
   status: string
@@ -26,6 +37,7 @@ interface ExistingQuestionnaire {
   submitted_at: string | null
   analyzed_at: string | null
   observations: string | null
+  blocking_issues?: BlockingIssue[]
 }
 
 // ─── Component ─────────────────────────────────────────────────────
@@ -187,25 +199,150 @@ export function QuestionnairePage() {
 
 function StatusCard({ q }: { q: ExistingQuestionnaire }) {
   const { icon: Icon, color, bg, border, label, description } = statusDisplay(q)
+  const issues = q.blocking_issues || []
+  const blockers = issues.filter(i => i.severity === 'blocker')
+  const criticals = issues.filter(i => i.severity === 'critical')
+  const warnings = issues.filter(i => i.severity === 'warning')
+  const hasIssues = issues.length > 0
+
   return (
-    <div className={`${bg} ${border} border rounded-xl p-4`}>
+    <div className="space-y-4">
+      {/* Card-header com status + métricas */}
+      <div className={`${bg} ${border} border rounded-xl p-4`}>
+        <div className="flex items-start gap-3">
+          <Icon className={`w-5 h-5 ${color} flex-shrink-0 mt-0.5`} />
+          <div className="flex-1">
+            <p className={`text-sm font-semibold ${color}`}>{label}</p>
+            <p className="text-xs text-slate-400 mt-0.5">{description}</p>
+            {q.submitted_at && (
+              <p className="text-[11px] text-slate-500 mt-2">
+                Enviado em {new Date(q.submitted_at).toLocaleString('pt-BR')}
+                {q.adherence_score !== null && (
+                  <>
+                    {' · '}Aderência: <span className="font-semibold">{q.adherence_score}%</span>
+                  </>
+                )}
+              </p>
+            )}
+            {q.observations && (
+              <p className="text-xs text-slate-300 mt-2">{q.observations}</p>
+            )}
+            {hasIssues && (
+              <div className="flex gap-3 mt-3 text-[11px]">
+                {blockers.length > 0 && (
+                  <span className="flex items-center gap-1 text-red-300">
+                    <ShieldAlert className="w-3 h-3" />
+                    {blockers.length} bloqueador{blockers.length > 1 ? 'es' : ''}
+                  </span>
+                )}
+                {criticals.length > 0 && (
+                  <span className="flex items-center gap-1 text-orange-300">
+                    <AlertTriangle className="w-3 h-3" />
+                    {criticals.length} crítico{criticals.length > 1 ? 's' : ''}
+                  </span>
+                )}
+                {warnings.length > 0 && (
+                  <span className="flex items-center gap-1 text-amber-300">
+                    <AlertCircle className="w-3 h-3" />
+                    {warnings.length} aviso{warnings.length > 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Lista estruturada de issues — só quando há. Cada item é um card
+          acionável com título humano, perguntas afetadas (com rótulo) e
+          sugestão de correção. Substitui a string crua com códigos técnicos. */}
+      {hasIssues && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold text-slate-300 uppercase tracking-wide px-1">
+            O que ajustar no seu questionário
+          </p>
+          {issues.map((issue, idx) => (
+            <IssueCard key={`${issue.rule_id}-${idx}`} issue={issue} />
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function IssueCard({ issue }: { issue: BlockingIssue }) {
+  const severityStyle = {
+    blocker: {
+      bg: 'bg-red-950/20',
+      border: 'border-red-800/40',
+      chipBg: 'bg-red-500/20',
+      chipText: 'text-red-200',
+      label: 'Bloqueador',
+      icon: ShieldAlert,
+      iconColor: 'text-red-400',
+    },
+    critical: {
+      bg: 'bg-orange-950/20',
+      border: 'border-orange-800/40',
+      chipBg: 'bg-orange-500/20',
+      chipText: 'text-orange-200',
+      label: 'Crítico',
+      icon: AlertTriangle,
+      iconColor: 'text-orange-400',
+    },
+    warning: {
+      bg: 'bg-amber-950/15',
+      border: 'border-amber-800/30',
+      chipBg: 'bg-amber-500/20',
+      chipText: 'text-amber-200',
+      label: 'Aviso',
+      icon: AlertCircle,
+      iconColor: 'text-amber-400',
+    },
+  }[issue.severity]
+  const Icon = severityStyle.icon
+
+  return (
+    <div className={`${severityStyle.bg} ${severityStyle.border} border rounded-lg p-3.5`}>
       <div className="flex items-start gap-3">
-        <Icon className={`w-5 h-5 ${color} flex-shrink-0 mt-0.5`} />
-        <div className="flex-1">
-          <p className={`text-sm font-semibold ${color}`}>{label}</p>
-          <p className="text-xs text-slate-400 mt-0.5">{description}</p>
-          {q.submitted_at && (
-            <p className="text-[11px] text-slate-500 mt-2">
-              Enviado em {new Date(q.submitted_at).toLocaleString('pt-BR')}
-              {q.adherence_score !== null && (
-                <>
-                  {' · '}Aderência: <span className="font-semibold">{q.adherence_score}%</span>
-                </>
-              )}
-            </p>
+        <Icon className={`w-4 h-4 ${severityStyle.iconColor} flex-shrink-0 mt-0.5`} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide ${severityStyle.chipBg} ${severityStyle.chipText}`}>
+              {severityStyle.label}
+            </span>
+            <p className="text-sm font-semibold text-slate-100">{issue.title}</p>
+          </div>
+
+          {issue.description && (
+            <p className="text-xs text-slate-400 mt-1.5 leading-snug">{issue.description}</p>
           )}
-          {q.observations && (
-            <p className="text-xs text-slate-300 mt-2 italic">{q.observations}</p>
+
+          {issue.affected_questions.length > 0 && (
+            <div className="mt-2">
+              <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">Questões afetadas</p>
+              <div className="flex flex-wrap gap-1.5 mt-1">
+                {issue.affected_questions.map(qid => (
+                  <span
+                    key={qid}
+                    className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-[11px] text-slate-200"
+                    title={questionLabel(qid)}
+                  >
+                    {questionLabel(qid)}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {issue.suggestion && (
+            <div className="mt-2 flex items-start gap-1.5 text-xs text-emerald-300/90">
+              <Lightbulb className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-emerald-400" />
+              <span className="leading-snug">
+                <span className="font-semibold">Como corrigir: </span>
+                {issue.suggestion}
+              </span>
+            </div>
           )}
         </div>
       </div>

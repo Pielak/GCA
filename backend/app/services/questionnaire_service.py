@@ -440,13 +440,49 @@ class QuestionnaireService:
             except (json.JSONDecodeError, TypeError):
                 highlighted_fields = []
 
+            # Deriva issues acionáveis para o GP a partir das validations
+            # salvas (que hoje só admin vê). Aqui NÃO exponho categorias
+            # internas nem contadores técnicos — só o que o GP precisa para
+            # corrigir: título, perguntas afetadas, sugestão, severidade.
+            blocking_issues: list[dict] = []
+            try:
+                if questionnaire.validations:
+                    validations = json.loads(questionnaire.validations)
+                    # `validations` tem 4 buckets (logicConflicts, gaps,
+                    # incompatibilities, delivery_alignment) — cada um lista
+                    # de findings completos. Vamos achatar.
+                    all_findings = []
+                    for bucket in ("logicConflicts", "gaps", "incompatibilities", "delivery_alignment"):
+                        all_findings.extend(validations.get(bucket, []))
+                    for f in all_findings:
+                        sev = f.get("severity")
+                        if sev in ("blocker", "critical", "warning"):
+                            blocking_issues.append({
+                                "severity": sev,
+                                "rule_id": f.get("rule_id"),
+                                "title": f.get("title", ""),
+                                "description": f.get("description", ""),
+                                "affected_questions": f.get("affected_questions", []),
+                                "suggestion": f.get("suggestion", ""),
+                                "pillar": f.get("pillar"),
+                            })
+                    # Ordena: blocker > critical > warning
+                    order = {"blocker": 0, "critical": 1, "warning": 2}
+                    blocking_issues.sort(key=lambda x: order.get(x["severity"], 99))
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                blocking_issues = []
+
             response = {
                 "questionnaire_id": str(questionnaire.id),
                 "status": questionnaire.status,
+                "approved": questionnaire.approved,
+                "adherence_score": questionnaire.adherence_score,
                 "submission_date": questionnaire.submitted_at.isoformat(),
-                "observations": questionnaire.observations or "No observations",
-                "restrictions": questionnaire.restrictions or "No restrictions",
+                "analyzed_at": questionnaire.analyzed_at.isoformat() if questionnaire.analyzed_at else None,
+                "observations": questionnaire.observations or "",
+                "restrictions": questionnaire.restrictions or "",
                 "highlighted_fields": highlighted_fields,
+                "blocking_issues": blocking_issues,
             }
 
             # Add internal details for admin
