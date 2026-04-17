@@ -835,8 +835,9 @@ class TechnologyVerificationService:
 
         # Alta disponibilidade sem testes de resiliência
         if self.high_availability == "Sim":
-            resilience_tests = {"Resiliência/Recuperação", "Backup/Restore",
-                                "Performance/Carga", "Stress/Soak"}
+            # Opções exatas de Q45 (schema BLOCKS):
+            # "Resiliência", "Backup", "Performance", "Stress"
+            resilience_tests = {"Resiliência", "Backup", "Performance", "Stress"}
             if not (resilience_tests & set(self.test_types)):
                 self._add(
                     Category.CROSS_PILLAR, Severity.WARNING, "XPILLAR-004",
@@ -844,7 +845,8 @@ class TechnologyVerificationService:
                     "Q19='Sim' mas nenhum teste de resiliência, performance ou "
                     "stress foi selecionado (Q45).",
                     ["19", "45"],
-                    "Adicione: Resiliência/Recuperação, Performance/Carga.",
+
+                    "Marque em Q45 pelo menos um de: Resiliência, Backup, Performance, Stress.",
                     pillar="P4",
                 )
 
@@ -862,22 +864,23 @@ class TechnologyVerificationService:
 
     def _check_cross_pillar_p5_p7(self):
         """P5 (Architecture) vs P7 (Security): segurança da arquitetura."""
-        # Microserviços sem criptografia em trânsito
+        # Microserviços sem criptografia em trânsito.
+        # "HTTPS" é a opção correspondente em Q43 (schema: BLOCKS).
         if "Microserviços" in self.arch_profiles:
-            if "Criptografia em trânsito" not in self.security_controls:
+            if "HTTPS" not in self.security_controls:
                 self._add(
                     Category.CROSS_PILLAR, Severity.CRITICAL, "XPILLAR-006",
                     "Microserviços sem criptografia em trânsito",
                     "Microserviços (Q16) comunicam pela rede. Sem criptografia "
                     "em trânsito (Q43), dados trafegam em plain text entre serviços.",
                     ["16", "43"],
-                    "Adicione 'Criptografia em trânsito' (mTLS ou TLS).",
+                    "Marque 'HTTPS' em Q43 (criptografia em trânsito / mTLS / TLS).",
                     pillar="P5/P7",
                 )
 
-        # Cloud sem vault de segredos
+        # Cloud sem vault de segredos. Opção correspondente em Q43 é "Vault".
         if set(self.exec_models) & {"Cloud", "Híbrido"}:
-            if "Vault de segredos" not in self.security_controls:
+            if "Vault" not in self.security_controls:
                 self._add(
                     Category.CROSS_PILLAR, Severity.WARNING, "XPILLAR-007",
                     "Deploy em cloud sem vault de segredos",
@@ -885,7 +888,7 @@ class TechnologyVerificationService:
                     "HashiCorp Vault) para gerenciar credenciais. Sem vault (Q43), "
                     "segredos ficam em variáveis de ambiente ou arquivos.",
                     ["17", "43"],
-                    "Adicione 'Vault de segredos' aos controles.",
+                    "Marque 'Vault' em Q43.",
                     pillar="P5/P7",
                 )
 
@@ -905,11 +908,15 @@ class TechnologyVerificationService:
 
     def _check_cross_pillar_p2_p7(self):
         """P2 (Compliance) vs P7 (Security): conformidade legal."""
-        # Dados confidenciais/restritos sem criptografia
+        # Dados confidenciais/restritos sem criptografia.
+        # Mapeamento com opções exatas de Q43 (schema BLOCKS):
+        #   criptografia em trânsito → "HTTPS"
+        #   criptografia em repouso  → "Cripto repouso"
+        #   trilhas de auditoria     → "Auditoria"
         if self.info_classification in ("Confidencial", "Restrita"):
-            has_transit = "Criptografia em trânsito" in self.security_controls
-            has_rest = "Criptografia em repouso" in self.security_controls
-            has_audit = "Trilhas de auditoria" in self.security_controls
+            has_transit = "HTTPS" in self.security_controls
+            has_rest = "Cripto repouso" in self.security_controls
+            has_audit = "Auditoria" in self.security_controls
 
             if not has_transit:
                 self._add(
@@ -918,7 +925,7 @@ class TechnologyVerificationService:
                     "LGPD/GDPR exigem proteção de dados em trânsito para "
                     "dados classificados como confidenciais ou restritos.",
                     ["6", "43"],
-                    "Adicione 'Criptografia em trânsito' (Q43).",
+                    "Marque 'HTTPS' em Q43 (criptografia em trânsito / TLS).",
                     pillar="P7",
                 )
 
@@ -929,7 +936,7 @@ class TechnologyVerificationService:
                     "Dados confidenciais/restritos devem ser criptografados "
                     "at rest (banco, backups, logs).",
                     ["6", "43"],
-                    "Adicione 'Criptografia em repouso' (Q43).",
+                    "Marque 'Cripto repouso' em Q43.",
                     pillar="P7",
                 )
 
@@ -940,7 +947,7 @@ class TechnologyVerificationService:
                     "Compliance exige rastreabilidade de acessos e modificações "
                     "em dados classificados.",
                     ["6", "43"],
-                    "Adicione 'Trilhas de auditoria' (Q43).",
+                    "Marque 'Auditoria' em Q43.",
                     pillar="P7",
                 )
 
@@ -1087,53 +1094,57 @@ class TechnologyVerificationService:
 
     def _check_delivery_alignment(self):
         """Verifica se os entregáveis do pipeline são coerentes."""
-        # Se tem backend + frontend, deve ter doc técnico
+        # Se tem backend + frontend, deve ter doc técnico.
+        # Opção correspondente em Q48 (schema BLOCKS): "Doc técnico".
         if self.has_backend == "Sim" and self.has_frontend == "Sim":
-            if "Documento técnico consolidado" not in self.pipeline_deliverables:
+            if "Doc técnico" not in self.pipeline_deliverables:
                 self._add(
                     Category.DELIVERY_ALIGNMENT, Severity.INFO, "ALIGN-001",
-                    "Projeto full-stack sem documento técnico nos entregáveis",
+                    "Projeto full-stack sem documentação técnica nos entregáveis",
                     "Projetos com frontend + backend devem gerar documentação "
                     "técnica consolidada para alinhamento entre equipes.",
                     ["48"],
-                    "Considere adicionar 'Documento técnico consolidado' em Q48.",
+                    "Marque 'Doc técnico' em Q48.",
                     pillar="P3",
                 )
 
-        # Testes definidos mas sem plano de testes nos entregáveis
-        if self.test_types and "Plano de testes" not in self.pipeline_deliverables:
+        # Testes definidos mas sem plano de testes nos entregáveis.
+        # Opção correspondente em Q48: "Plano testes" (sem "de").
+        if self.test_types and "Plano testes" not in self.pipeline_deliverables:
             self._add(
                 Category.DELIVERY_ALIGNMENT, Severity.INFO, "ALIGN-002",
                 "Testes definidos sem plano de testes nos entregáveis",
-                "Q45 define tipos de teste mas Q48 não inclui 'Plano de testes'.",
+                "Q45 define tipos de teste mas Q48 não inclui 'Plano testes'.",
                 ["45", "48"],
-                "Considere adicionar 'Plano de testes' em Q48.",
+                "Marque 'Plano testes' em Q48.",
                 pillar="P3",
             )
 
-        # Segurança definida mas sem plano de segurança
-        if self.security_controls and "Plano de segurança" not in self.pipeline_deliverables:
+        # Segurança definida mas sem plano de segurança.
+        # Opção correspondente em Q48: "Plano segurança" (sem "de").
+        if self.security_controls and "Plano segurança" not in self.pipeline_deliverables:
             if self.criticality in ("Alta", "Crítica"):
                 self._add(
                     Category.DELIVERY_ALIGNMENT, Severity.WARNING, "ALIGN-003",
                     "Controles de segurança sem plano de segurança nos entregáveis",
                     f"Criticidade '{self.criticality}' com controles de segurança "
-                    f"definidos, mas sem 'Plano de segurança' em Q48.",
+                    f"definidos, mas sem 'Plano segurança' em Q48.",
                     ["43", "48"],
-                    "Adicione 'Plano de segurança' em Q48.",
+                    "Marque 'Plano segurança' em Q48.",
                     pillar="P7",
                 )
 
-        # Observabilidade definida sem plano de observabilidade
-        if self.observability and "Plano de observabilidade" not in self.pipeline_deliverables:
+        # Observabilidade definida sem plano de observabilidade.
+        # Opção correspondente em Q48: "Plano observabilidade" (sem "de").
+        if self.observability and "Plano observabilidade" not in self.pipeline_deliverables:
             if self.high_availability in ("Sim", "Futuramente"):
                 self._add(
                     Category.DELIVERY_ALIGNMENT, Severity.INFO, "ALIGN-004",
                     "Observabilidade sem plano nos entregáveis",
                     "Observabilidade definida (Q44) com alta disponibilidade, "
-                    "mas sem 'Plano de observabilidade' em Q48.",
+                    "mas sem 'Plano observabilidade' em Q48.",
                     ["44", "48"],
-                    "Considere adicionar 'Plano de observabilidade' em Q48.",
+                    "Marque 'Plano observabilidade' em Q48.",
                     pillar="P4",
                 )
 
