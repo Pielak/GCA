@@ -576,6 +576,19 @@ class QuestionnaireService:
                     status=ocg_response.COMPOSITE_SCORE.get("status", "UNKNOWN"),
                 )
 
+                # Seed inicial do backlog + reavaliação do Gatekeeper com o OCG
+                # recém-criado (MVP 2 §10: backlog consistente com o contexto).
+                # Fire-and-forget: abre sessões próprias, não afeta a transação
+                # que acabou de commitar o OCG.
+                from app.services.ingestion_service import _fire_ocg_change_hooks
+                ocg_version_new = getattr(ocg_response, "version", None) or 1
+                await _fire_ocg_change_hooks(
+                    project_id=project_id,
+                    ocg_version=ocg_version_new,
+                    trigger="questionnaire_approved",
+                    changes=None,  # geração inicial: sem diff; regenera do zero
+                )
+
                 # Enviar email ao GP com resultado do OCG
                 try:
                     from app.services.email_service import EmailService

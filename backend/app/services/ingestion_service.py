@@ -150,6 +150,125 @@ async def _reevaluate_gatekeeper_async(
         )
 
 
+async def _regenerate_backlog_for_audit(
+    db: AsyncSession,
+    project_id: UUID,
+    ocg_version: Optional[int],
+    trigger: str,
+) -> None:
+    """Regenera backlog do OCG atual e grava evento BACKLOG_REGENERATED.
+
+    Usado em dois cenários sem `changes` estruturados:
+    - **Geração inicial** do OCG a partir do questionário aprovado (não há
+      diff; o backlog precisa ser populado do zero).
+    - **Contração** no delete de documento (itens de versões obsoletas
+      precisam ser substituídos pelo estado atual do OCG).
+
+    Preserva items com `source="manual"`. No-op silencioso se o projeto não
+    tem OCG. Não comita — caller decide.
+    """
+    from app.services.backlog_service import BacklogService
+    from app.services.audit_service import AuditService
+
+    ocg_check = await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+    )
+    if ocg_check.scalar_one_or_none() is None:
+        logger.info(
+            "ingestion.backlog_regen_noop_no_ocg",
+            project_id=str(project_id),
+            trigger=trigger,
+        )
+        return
+
+    backlog_svc = BacklogService(db)
+    result = await backlog_svc.regenerate_from_ocg(project_id, ocg_version)
+
+    audit = AuditService(db)
+    await audit.log_event(
+        event_type="BACKLOG_REGENERATED",
+        resource_type="backlog",
+        resource_id=project_id,
+        details={
+            "trigger": trigger,
+            "ocg_version": ocg_version,
+            "regenerated": result.get("regenerated", 0),
+        },
+    )
+
+
+async def _regenerate_backlog_async(
+    project_id: UUID,
+    ocg_version: Optional[int],
+    trigger: str,
+) -> None:
+    """Wrapper fire-and-forget de `_regenerate_backlog_for_audit`.
+
+    Abre sessão própria, commita o resultado. Isolado: se falhar, não afeta
+    a transação de OCG (já commitada).
+    """
+    try:
+        from app.db.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            await _regenerate_backlog_for_audit(
+                db, project_id, ocg_version=ocg_version, trigger=trigger,
+            )
+            await db.commit()
+    except Exception as exc:  # noqa: BLE001
+        import traceback
+        logger.warning(
+            "ingestion.backlog_regen_failed",
+            project_id=str(project_id),
+            error=str(exc) or repr(exc),
+            error_type=type(exc).__name__,
+            traceback=traceback.format_exc(),
+        )
+
+
+async def _fire_ocg_change_hooks(
+    project_id: UUID,
+    ocg_version: Optional[int],
+    trigger: str,
+    changes: Optional[list[dict]] = None,
+) -> None:
+    """Dispara hooks de consistência downstream após uma mudança de OCG.
+
+    Unifica os 3 pontos onde OCG pode mudar:
+    - Ingestão de documento: passa `changes` do `OCGUpdaterService`
+      (roteia via PropagationService para categorias afetadas).
+    - Contração no delete: passa `changes` dos campos revertidos.
+    - Geração inicial via questionário: passa `changes=None` (não há diff;
+      regenera backlog do zero).
+
+    Todos os hooks são fire-and-forget com sessão própria e erros isolados.
+    """
+    if changes:
+        asyncio.create_task(
+            _propagate_async(
+                project_id=project_id,
+                changes=changes,
+                ocg_version=ocg_version,
+            )
+        )
+    else:
+        asyncio.create_task(
+            _regenerate_backlog_async(
+                project_id=project_id,
+                ocg_version=ocg_version,
+                trigger=trigger,
+            )
+        )
+
+    asyncio.create_task(
+        _reevaluate_gatekeeper_async(
+            project_id=project_id,
+            ocg_version=ocg_version,
+            trigger=trigger,
+        )
+    )
+
+
 class IngestionService:
     """Serviço de ingestão de documentos por projeto."""
 
@@ -643,6 +762,19 @@ class IngestionService:
             contracted_fields=contraction_info.get("fields_reverted", []),
             skipped_fields=contraction_info.get("fields_skipped", []),
         )
+
+        # Disparar hooks de consistência se a contração efetivamente mudou
+        # o OCG. Sem fields_reverted, não há delta a propagar (skipped-only).
+        fields_reverted = contraction_info.get("fields_reverted", [])
+        if fields_reverted:
+            changes = [{"field": f} for f in fields_reverted]
+            await _fire_ocg_change_hooks(
+                project_id=project_id,
+                ocg_version=contraction_info.get("version_to"),
+                trigger="document_removal",
+                changes=changes,
+            )
+
         return {"success": True, "ocg_contraction": contraction_info}
 
     async def _contract_ocg_for_deleted_document(
