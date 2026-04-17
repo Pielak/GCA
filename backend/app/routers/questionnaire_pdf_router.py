@@ -112,76 +112,58 @@ async def upload_questionnaire_pdf(
             ),
         )
 
-    # 3. Persistir respostas no questionário
+    # 3. Unificar no fluxo oficial de submissão do questionário (estratégia B).
+    # O PDF é transporte, não documento — não ingerir como `ingested_documents`
+    # (evita falso-positivo de PII em dados naturais de stakeholders, DT-015).
+    # As respostas são submetidas via `QuestionnaireService.submit_questionnaire`,
+    # que roda o pipeline completo: TechnologyVerificationService (8 fases de
+    # validação) → analise + salva Questionnaire → se aprovado, dispara
+    # `_generate_ocg` (pipeline de 8 agentes IA) → `_fire_ocg_change_hooks`
+    # (backlog + Gatekeeper reeval).
+    from app.services.questionnaire_service import QuestionnaireService
+
+    gp_email = await _get_user_email(current_user_id, db)
+    success, questionnaire_id, error = await QuestionnaireService.submit_questionnaire(
+        db=db,
+        project_id=project_id,
+        gp_email=gp_email,
+        responses=answers,
+    )
+
     answered_count = len(answers)
     total_questions = 49
     percentage = round(answered_count / total_questions * 100, 1)
 
-    import json as _json
-    from app.models.base import Questionnaire
-    from datetime import datetime, timezone
-
-    existing_q = (await db.execute(
-        select(Questionnaire).where(
-            Questionnaire.project_id == project_id
-        ).order_by(Questionnaire.submitted_at.desc()).limit(1)
-    )).scalar_one_or_none()
-
-    if existing_q:
-        try:
-            existing_responses = _json.loads(existing_q.responses) if existing_q.responses else {}
-        except (ValueError, TypeError):
-            existing_responses = {}
-        existing_responses.update(answers)
-        existing_q.responses = _json.dumps(existing_responses, ensure_ascii=False)
-        existing_q.updated_at = datetime.now(timezone.utc)
-    else:
-        new_q = Questionnaire(
-            project_id=project_id,
-            gp_email=(await _get_user_email(current_user_id, db)),
-            responses=_json.dumps(answers, ensure_ascii=False),
-            status="pending",
-            submitted_at=datetime.now(timezone.utc),
+    if not success:
+        logger.warning(
+            "questionnaire_pdf.submit_failed",
+            project_id=str(project_id),
+            error=error,
+            answered=answered_count,
         )
-        db.add(new_q)
-
-    # 4. Ingerir o PDF como documento (alimenta o OCG via pipeline normal)
-    try:
-        from app.services.ingestion_service import IngestionService
-        ing = IngestionService(db)
-        result = await ing.upload_document(
-            project_id=project_id,
-            uploaded_by=current_user_id,
-            file_bytes=pdf_bytes,
-            original_filename=file.filename or "questionario_preenchido.pdf",
-            content_type="application/pdf",
-            category="Questionário PDF",
+        raise HTTPException(
+            status_code=500,
+            detail=f"Falha ao processar questionário: {error or 'erro desconhecido'}",
         )
-        if result.get("document_id"):
-            logger.info("questionnaire_pdf.ingested",
-                         project_id=str(project_id),
-                         doc_id=result["document_id"])
-        else:
-            logger.warning("questionnaire_pdf.ingestion_skipped",
-                           project_id=str(project_id), result=result)
-    except Exception as e:
-        logger.warning("questionnaire_pdf.ingestion_failed", error=str(e))
 
-    await db.commit()
-
-    logger.info("questionnaire_pdf.processed",
-                 project_id=str(project_id),
-                 answered=answered_count,
-                 percentage=percentage)
+    logger.info(
+        "questionnaire_pdf.processed",
+        project_id=str(project_id),
+        questionnaire_id=questionnaire_id,
+        answered=answered_count,
+        percentage=percentage,
+    )
 
     return {
         "success": True,
+        "questionnaire_id": questionnaire_id,
         "answered_questions": answered_count,
         "total_questions": total_questions,
         "completion_percentage": percentage,
         "message": (
             f"{answered_count} de {total_questions} perguntas extraídas "
-            f"({percentage}%). PDF ingerido como documento — OCG será atualizado."
+            f"({percentage}%). Questionário submetido para análise — se aprovado, "
+            f"o OCG será gerado automaticamente."
         ),
     }
 
