@@ -65,64 +65,92 @@ class AIKeyResolver:
         return key
 
     @staticmethod
+    async def _resolve_project_provider(
+        db: AsyncSession,
+        project_id: UUID,
+    ) -> Optional[str]:
+        """Lê o provedor configurado pelo GP em `project_settings` (setting_type='llm').
+
+        Retorna a string do provedor (anthropic|openai|gemini|deepseek|grok|ollama|...)
+        ou None se o GP ainda não configurou. Não faz fallback — chamador decide.
+        """
+        from sqlalchemy import text
+        result = await db.execute(
+            text("""
+                SELECT settings_json FROM project_settings
+                WHERE project_id = :pid AND setting_type = 'llm'
+            """),
+            {"pid": str(project_id)},
+        )
+        row = result.fetchone()
+        if not row or not row[0]:
+            return None
+        import json
+        try:
+            return json.loads(row[0]).get("provider")
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
     async def get_project_key(
         db: AsyncSession,
         project_id: UUID,
         provider: str = None,
     ) -> Optional[str]:
         """Camada Projeto — chave do GP via vault (criptografada).
-        Usada em: arguider_service, code_generation_service, livedocs_service, etc.
-        Fallback: NÃO usa chave global. Retorna None se GP não configurou.
+
+        Usada em: arguider_service, code_generation_service, livedocs_service etc.
+
+        - Se `provider` for passado explicitamente: tenta retornar a chave desse
+          provedor específico (mantido para casos onde o caller precisa de um
+          provedor determinado).
+        - Se `provider=None`: **lê o provedor configurado pelo GP** em
+          `project_settings` e retorna a chave correspondente. Sem hardcode
+          para "anthropic".
+
+        Fallback: NUNCA usa chave global do admin (contrato §6.4). Retorna
+        None se o GP não configurou provedor ou chave.
         """
         from app.services.vault_service import VaultService
 
-        provider = provider or "anthropic"
-
         try:
+            # Descobrir o provedor a usar
+            if provider is None:
+                provider = await AIKeyResolver._resolve_project_provider(db, project_id)
+                if not provider:
+                    logger.warning(
+                        "ai_key.project_not_configured",
+                        project_id=str(project_id),
+                        message="GP não configurou provedor de IA em Settings > LLM",
+                    )
+                    return None
+
             vault = VaultService()
             key = await vault.get_secret(db, project_id, "llm_api_key", provider)
 
             if key:
-                logger.debug("ai_key.project_resolved",
-                            project_id=str(project_id),
-                            provider=provider,
-                            source="vault")
+                logger.debug(
+                    "ai_key.project_resolved",
+                    project_id=str(project_id),
+                    provider=provider,
+                    source="vault",
+                )
                 return key
 
-            # Tentar provider alternativo APENAS se compatível com o solicitado
-            from sqlalchemy import select, text
-            result = await db.execute(
-                text("""
-                    SELECT settings_json FROM project_settings
-                    WHERE project_id = :pid AND setting_type = 'llm'
-                """),
-                {"pid": str(project_id)},
+            logger.warning(
+                "ai_key.project_key_missing",
+                project_id=str(project_id),
+                provider=provider,
+                message="GP configurou provedor mas chave ausente no vault",
             )
-            row = result.fetchone()
-            if row and row[0]:
-                import json
-                llm_config = json.loads(row[0])
-                alt_provider = llm_config.get("provider")
-                # Só retorna key alternativa se for do MESMO provider solicitado
-                if alt_provider and alt_provider == provider:
-                    key = await vault.get_secret(db, project_id, "llm_api_key", alt_provider)
-                    if key:
-                        logger.debug("ai_key.project_resolved_alt",
-                                    project_id=str(project_id),
-                                    provider=alt_provider,
-                                    source="vault")
-                        return key
-
-            logger.warning("ai_key.project_not_configured",
-                          project_id=str(project_id),
-                          provider=provider,
-                          message="GP deve configurar chave IA nas Settings do projeto")
             return None
 
         except Exception as e:
-            logger.error("ai_key.project_resolve_error",
-                        project_id=str(project_id),
-                        error=str(e))
+            logger.error(
+                "ai_key.project_resolve_error",
+                project_id=str(project_id),
+                error=str(e),
+            )
             return None
 
     @staticmethod

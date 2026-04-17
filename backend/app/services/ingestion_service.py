@@ -78,6 +78,7 @@ class IngestionService:
         file_bytes: bytes,
         original_filename: str,
         content_type: str = "",
+        category: str | None = None,
     ) -> dict:
         """Upload e análise assíncrona de documento."""
         # Validar tamanho
@@ -126,6 +127,7 @@ class IngestionService:
             filename=filename,
             original_filename=original_filename,
             file_type=file_type,
+            document_category=category,
             file_hash=file_hash,
             file_size_bytes=len(file_bytes),
             uploaded_by=uploaded_by,
@@ -175,9 +177,58 @@ class IngestionService:
         }
 
     @staticmethod
+    def _valid_cpf(digits: str) -> bool:
+        if len(digits) != 11 or digits == digits[0] * 11:
+            return False
+        s1 = sum(int(digits[i]) * (10 - i) for i in range(9))
+        r1 = (s1 * 10) % 11
+        d1 = 0 if r1 == 10 else r1
+        if d1 != int(digits[9]):
+            return False
+        s2 = sum(int(digits[i]) * (11 - i) for i in range(10))
+        r2 = (s2 * 10) % 11
+        d2 = 0 if r2 == 10 else r2
+        return d2 == int(digits[10])
+
+    @staticmethod
+    def _valid_cnpj(digits: str) -> bool:
+        if len(digits) != 14 or digits == digits[0] * 14:
+            return False
+        w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+        w2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
+        s1 = sum(int(digits[i]) * w1[i] for i in range(12))
+        r1 = s1 % 11
+        d1 = 0 if r1 < 2 else 11 - r1
+        if d1 != int(digits[12]):
+            return False
+        s2 = sum(int(digits[i]) * w2[i] for i in range(13))
+        r2 = s2 % 11
+        d2 = 0 if r2 < 2 else 11 - r2
+        return d2 == int(digits[13])
+
+    @staticmethod
+    def _valid_luhn(digits: str) -> bool:
+        if len(digits) < 13 or len(digits) > 19:
+            return False
+        if digits == digits[0] * len(digits):
+            return False  # todos-iguais (ex: "0000...") — Luhn aceita mas não é cartão real
+        total = 0
+        for i, ch in enumerate(reversed(digits)):
+            n = int(ch)
+            if i % 2 == 1:
+                n *= 2
+                if n > 9:
+                    n -= 9
+            total += n
+        return total % 10 == 0
+
+    @staticmethod
     def _detect_pii(file_bytes: bytes, file_type: str) -> tuple[bool, list[str]]:
         """Triagem básica de PII em conteúdo textual.
-        Detecta padrões comuns: CPF, CNPJ, email pessoal, telefone, cartão de crédito.
+
+        Para CPF/CNPJ/cartão: exige que o valor passe pelo dígito verificador real
+        (mod-11 / Luhn) — regex puro dá falso-positivo em PDFs/binários que têm
+        runs de 14 dígitos em xref tables, IDs de objetos etc.
         """
         import re
 
@@ -190,18 +241,34 @@ class IngestionService:
         except Exception:
             return False, []
 
-        pii_patterns = {
-            "cpf": r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b",
-            "cnpj": r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b",
-            "email_pessoal": r"\b[a-zA-Z0-9._%+-]+@(gmail|hotmail|yahoo|outlook)\.[a-zA-Z]{2,}\b",
-            "telefone_br": r"\b\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b",
-            "cartao_credito": r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
-        }
+        only_digits = re.compile(r"\D")
+        detected: list[str] = []
 
-        detected = []
-        for field_name, pattern in pii_patterns.items():
-            if re.search(pattern, text):
-                detected.append(field_name)
+        # CPF: 11 dígitos, opcional formatação, valida mod-11
+        for m in re.finditer(r"\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b", text):
+            if IngestionService._valid_cpf(only_digits.sub("", m.group(0))):
+                detected.append("cpf")
+                break
+
+        # CNPJ: 14 dígitos, opcional formatação, valida mod-11
+        for m in re.finditer(r"\b\d{2}\.?\d{3}\.?\d{3}/?\d{4}-?\d{2}\b", text):
+            if IngestionService._valid_cnpj(only_digits.sub("", m.group(0))):
+                detected.append("cnpj")
+                break
+
+        # Cartão de crédito: 13-19 dígitos, valida Luhn
+        for m in re.finditer(r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", text):
+            if IngestionService._valid_luhn(only_digits.sub("", m.group(0))):
+                detected.append("cartao_credito")
+                break
+
+        # Email pessoal: regex é suficiente (formato é discriminante)
+        if re.search(r"\b[a-zA-Z0-9._%+-]+@(gmail|hotmail|yahoo|outlook)\.[a-zA-Z]{2,}\b", text):
+            detected.append("email_pessoal")
+
+        # Telefone BR: regex é suficiente
+        if re.search(r"\b\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b", text):
+            detected.append("telefone_br")
 
         return len(detected) > 0, detected
 
@@ -216,9 +283,10 @@ class IngestionService:
         try:
             from app.db.database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
-                # Resolver chave Anthropic do projeto (Arguidor usa Claude)
+                # Resolver chave do provedor configurado pelo GP (contrato §6.2).
+                # Análise do Arguidor é alta criticidade — sem fallback silencioso.
                 from app.services.ai_key_resolver import AIKeyResolver
-                project_api_key = await AIKeyResolver.get_project_key(db, project_id, provider="anthropic")
+                project_api_key = await AIKeyResolver.get_project_key(db, project_id)
 
                 extractor = DocumentExtractor()
                 arguider = ArguiderService(db, project_api_key=project_api_key)

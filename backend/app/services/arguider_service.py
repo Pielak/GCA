@@ -164,15 +164,24 @@ IMPORTANTE:
 
 class ArguiderService:
     """Agent 9: Arguidor — analisa documentos e atualiza OCG.
+
     CAMADA PROJETO — usa chave de IA configurada pelo GP do projeto.
-    Se não configurada, tenta chave GCA como fallback temporário.
+    Criticidade (contrato §6.2): **ALTA** (análise que alimenta o OCG e dispara
+    módulos candidatos e achados). Sem fallback silencioso para chave global
+    do admin — se o projeto não tem chave, levanta `RuntimeError` claro.
     """
 
     def __init__(self, db: AsyncSession, project_api_key: str = None):
         self.db = db
-        # Preferência: chave do projeto (vault) > chave global (fallback)
-        api_key = project_api_key or settings.ANTHROPIC_API_KEY
-        self.client = AsyncAnthropic(api_key=api_key)
+        # Contrato §6.4: nenhum fallback para ANTHROPIC_API_KEY global.
+        if not project_api_key:
+            raise RuntimeError(
+                "Arguidor não pode operar sem chave IA do projeto. "
+                "GP deve configurar provedor e chave em Settings > LLM. "
+                "Arguidor é tarefa de ALTA criticidade (contrato §6.2) e "
+                "não aceita fallback para chave global do admin."
+            )
+        self.client = AsyncAnthropic(api_key=project_api_key)
         self.extractor = DocumentExtractor(client=self.client)
 
     @gca_retry()

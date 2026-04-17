@@ -244,11 +244,21 @@ class OCGUpdaterService:
             ocg_snapshot=updated_ocg,
         )
 
-        # 7. Registrar billing
+        # 7. Registrar billing (contrato §6.4: registrar provedor/modelo reais).
+        # Se o llm_result não trouxer esses metadados é bug do caller — logar
+        # como "unknown" em vez de adivinhar via DEFAULT_AI_PROVIDER, que poderia
+        # atribuir custo ao provedor errado.
         tokens_in = llm_result.get("tokens_input", 0)
         tokens_out = llm_result.get("tokens_output", 0)
-        provider = llm_result.get("provider", settings.DEFAULT_AI_PROVIDER)
-        model = llm_result.get("model", settings.DEFAULT_AI_MODEL)
+        provider = llm_result.get("provider") or "unknown"
+        model = llm_result.get("model") or "unknown"
+        if provider == "unknown" or model == "unknown":
+            logger.warning(
+                "ocg_updater.billing_metadata_missing",
+                project_id=str(project_id),
+                provider=provider,
+                model=model,
+            )
         await self.billing_service.log_usage(
             project_id=project_id,
             provider=provider,
@@ -402,9 +412,13 @@ class OCGUpdaterService:
     ) -> Dict[str, Any]:
         """
         Chama o LLM com o OCG atual e a análise do Arguidor.
-        Suporta DeepSeek (padrão) e Anthropic como fallback.
 
-        Retorna dict com: raw_text, tokens_input, tokens_output, provider, model
+        Criticidade (contrato §6.2): **ALTA**. Atualização do OCG é
+        consolidação/arbitragem de contexto — exige modelo premium. A
+        resolução da chave é da CAMADA GCA (admin), pois o OCG evolui no
+        pipeline do produto; não usa chave do projeto aqui.
+
+        Retorna dict com: raw_text, tokens_input, tokens_output, provider, model.
         """
         # Carregar chaves do banco (system_settings) antes de resolver
         from app.routers.admin_gca_router import _load_ai_providers_from_db

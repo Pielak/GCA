@@ -65,8 +65,8 @@ Mesma do MVP 1:
 
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
-| DT-012 | Critical | Governança de IA (Arguidor) | `arguider_service.py:174` faz fallback silencioso a `settings.ANTHROPIC_API_KEY` quando o projeto não tem chave configurada. Contradiz contrato §6.4 (nunca misturar chave global com projeto). | Auditoria MVP 2 | Aberto |
-| DT-013 | Critical | Governança de IA (Ingestão) | `ingestion_service.py:288` resolve chave com `provider="anthropic"` hardcoded. Ignora o provedor escolhido pelo GP. | Auditoria MVP 2 | Aberto |
+| DT-012 | Critical | Governança de IA (Arguidor) | `arguider_service.py:174` faz fallback silencioso a `settings.ANTHROPIC_API_KEY` quando o projeto não tem chave configurada. Contradiz contrato §6.4 (nunca misturar chave global com projeto). | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
+| DT-013 | Critical | Governança de IA (Ingestão) | `ingestion_service.py:288` resolve chave com `provider="anthropic"` hardcoded. Ignora o provedor escolhido pelo GP. | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
 
 #### Herdadas (MVP 1, já quitadas — mantidas para rastreabilidade)
 
@@ -87,7 +87,7 @@ Mesma do MVP 1:
 | DT-006 | Major | Fases vs realidade | Materiais descrevendo pipeline completo como se estivessem igualmente maduros. | Manual / tutorial / análise | Aberto |
 | DT-007 | Major | Placeholders / continuidade | Placeholders de telas/módulos previstos não promovidos automaticamente a entregas. | TASK_GCA_MASTER | Aberto |
 | DT-008 | Major | Consistência documental | Discrepâncias entre documentos sobre readiness, testes e maturidade. | Changelog / docs / task | Aberto |
-| DT-014 | Major | Governança de IA (OCG Updater) | `ocg_updater_service.py:250, 413` usa `settings.DEFAULT_AI_PROVIDER` como fallback sem aplicar a política de criticidade (§6.2). OCG updates dependem de decisões críticas. | Auditoria MVP 2 | Aberto |
+| DT-014 | Major | Governança de IA (OCG Updater) | `ocg_updater_service.py:250, 413` usa `settings.DEFAULT_AI_PROVIDER` como fallback sem aplicar a política de criticidade (§6.2). OCG updates dependem de decisões críticas. | Auditoria MVP 2 | **Quitada 2026-04-17** — ver §4 |
 
 #### Herdadas (MVP 1, já quitadas)
 
@@ -114,6 +114,9 @@ Mesma do MVP 1:
 | DT-009 (política) | 2026-04-17 | Roteamento híbrido por criticidade explicitado nos docs operacionais ativos (CLAUDE.md §6.2-6.3) e no docstring de `ai_key_resolver.py`. Baixa/Média → Ollama ou modelo barato aceitáveis; Alta → modelo premium obrigatório e sem fallback silencioso. | `GCA_CANONICAL_CONTRACT.md §6.2-6.5`, `CLAUDE.md §6.2-6.3`, `backend/app/services/ai_key_resolver.py` | Doc lido e referenciado pelo código. Pendente a implementação do roteador em si (ver nota abaixo). |
 | DT-003 | 2026-04-17 | Narrativa de produto neutralizada. README reescrito apontando o status real (MVP 1 em saneamento), a precedência documental e o modelo instalável-por-cliente. Docs históricos (`ANALISE_COMPLETA_GCA.md`, `ARQUITETURA.md`, `docs/GCA_Documento_Completo.md`) receberam cabeçalho ⚠️ **"DOCUMENTO HISTÓRICO — NÃO É CONTRATO DE IMPLEMENTAÇÃO"** com referência ao contrato canônico. CHANGELOG tem entrada nova cobrindo a sessão de saneamento. | `README.md`, `CHANGELOG.md`, `ARQUITETURA.md`, `ANALISE_COMPLETA_GCA.md`, `docs/GCA_Documento_Completo.md` | Grep por "Production Ready" no README = 0 ocorrências. Cada doc histórico abre com aviso claro de não-contrato. |
 | DT-004 | 2026-04-17 | PAT plaintext eliminado do fluxo de crypto. `decrypt_pat` removeu o fallback silencioso que devolvia plaintext quando o valor armazenado não era Fernet. Agora levanta `PatNotEncryptedError` explícito. Introduzida exceção dedicada `PatNotEncryptedError` em `crypto.py`. Docstring do módulo reescrita sem menção a "backward-compat plaintext". Teste `test_decrypt_passes_through_legacy_plaintext` reescrito para garantir que plaintext agora **falha**. | `backend/app/core/crypto.py`, `backend/app/tests/test_crypto.py` | 10/10 crypto + 44/44 unit + 81/81 integration passando. DB inspecionado: 2/2 `pat_encrypted` já em Fernet (`gAAAAAB…`, 140 chars); decrypt OK nos 2 projetos reais. Sem migration de dados necessária. |
+| DT-013 | 2026-04-17 | `ingestion_service.py:288` deixou de hardcodar `provider="anthropic"`. Agora chama `AIKeyResolver.get_project_key(db, project_id)` sem provider, que lê o provedor configurado pelo GP em `project_settings.settings_json.provider`. Se o GP não configurou, retorna `None` e o caller decide (arguider levanta erro claro). `AIKeyResolver` ganhou helper `_resolve_project_provider` + `get_project_key` reescrita sem default `"anthropic"`. | `backend/app/services/ai_key_resolver.py`, `backend/app/services/ingestion_service.py` | 44/44 unit + 81/81 integration passando; imports OK. |
+| DT-012 | 2026-04-17 | `ArguiderService.__init__` não aceita mais `project_api_key=None`. Fim do fallback a `settings.ANTHROPIC_API_KEY`. Levanta `RuntimeError` explícito pedindo configuração em Settings > LLM. Docstring classifica o Arguidor como ALTA criticidade (contrato §6.2). | `backend/app/services/arguider_service.py` | 44/44 + 81/81 passando; import OK. |
+| DT-014 | 2026-04-17 | `ocg_updater_service` recebeu 2 ajustes: (1) metadados de billing (provider/model) agora caem em `"unknown"` + warning quando o `llm_result` não traz, em vez de adivinhar via `DEFAULT_AI_PROVIDER` (evita atribuir custo ao provedor errado); (2) docstring de `_call_llm_for_ocg_update` classifica a operação como ALTA criticidade (contrato §6.2) e explicita que usa camada GCA (admin), não chave de projeto. | `backend/app/services/ocg_updater_service.py` | 44/44 + 81/81 passando. |
 
 ### Resíduos conhecidos (fora do escopo do MVP 1; programados para MVPs posteriores)
 
@@ -161,21 +164,22 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - feature nova adicionada para “contornar” dívida não resolvida.
 
 ### Situação atual do gate (MVP 2)
-**NÃO AVANÇAR** (fase recém-iniciada em 2026-04-17)
+**NÃO AVANÇAR** (features da fase ainda não implementadas)
 
 ### Motivo
-MVP 2 abriu com 2 Criticals herdados do código do núcleo que agora pertencem
-ao escopo desta fase (DT-012, DT-013 — governança de IA nos serviços de
-Arguidor e Ingestão) + 1 Major relacionado (DT-014 — OCG Updater). Esses
-resíduos estavam registrados como "programados para MVP 2" no §4 do MVP 1
-e agora tornam-se o primeiro alvo de saneamento antes de qualquer feature
-nova desta fase.
+Dívida de saneamento (DT-012, DT-013, DT-014) quitada em 2026-04-17. O gate
+permanece fechado porque as features canônicas do MVP 2 (contrato §7) ainda
+não estão entregues: contração de OCG no delete, reavaliação do Gatekeeper
+pós-ingestão, Arguidor end-to-end sem quebras no dogfood. O gate só abre
+quando o §9 "Próximo marco de saída do MVP 2" for inteiramente atendido.
 
 ### Histórico do gate
 - MVP 1 → **PODE AVANÇAR** em 2026-04-17 com todos os 5 Criticals quitados
-  (DT-001..DT-005). Nenhuma regressão observada até a abertura desta fase.
-- MVP 2 → **NÃO AVANÇAR** na abertura (2026-04-17) com DT-012, DT-013, DT-014
-  abertas do audit inicial.
+  (DT-001..DT-005). Nenhuma regressão observada.
+- MVP 2 → **NÃO AVANÇAR** na abertura (2026-04-17) com 2 Criticals + 1 Major
+  herdados de código.
+- MVP 2 → Criticals/Major de saneamento (DT-012, DT-013, DT-014) quitados em
+  2026-04-17. Gate continua fechado aguardando as features canônicas.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
