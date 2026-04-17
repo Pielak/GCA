@@ -1,4 +1,5 @@
 """Email Service"""
+import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -8,6 +9,17 @@ import structlog
 from app.core.config import settings
 
 logger = structlog.get_logger(__name__)
+
+
+def _is_test_environment() -> bool:
+    """Detecta se o processo está rodando dentro de pytest.
+
+    pytest injeta `PYTEST_CURRENT_TEST` no ambiente durante a execução de
+    cada teste. Funciona sem configuração, sem fixture, sem monkeypatch —
+    garante que `EmailService.send_email` nunca dispare SMTP real em CI
+    ou dev local quando testes rodarem com `SMTP_ENABLED=True`.
+    """
+    return "PYTEST_CURRENT_TEST" in os.environ
 
 
 class EmailService:
@@ -41,6 +53,18 @@ class EmailService:
         Returns:
             (success, error_message)
         """
+        # Curto-circuito em ambiente de teste: nunca dispara SMTP real
+        # quando rodando via pytest, mesmo com SMTP_ENABLED=True. Evita
+        # que testes criem usuários fake com email `@test.com` e o admin
+        # receba bounce do SMTP tentando entregar nesses destinatários.
+        if _is_test_environment():
+            logger.info(
+                "email.skipped_test_environment",
+                to=to_email,
+                subject=subject,
+            )
+            return True, None
+
         if not settings.SMTP_ENABLED:
             logger.warning("email.smtp_disabled")
             return False, "SMTP is disabled"
@@ -786,6 +810,9 @@ GCA — Gestão de Codificação Assistida
         expires_at,
     ) -> tuple:
         """Envia email com link único do questionário."""
+        if _is_test_environment():
+            logger.info("email.skipped_test_environment", to=to_email, kind="questionnaire_link")
+            return True, None
         try:
             from app.core.config import settings
             import smtplib
@@ -843,6 +870,9 @@ GCA — Gestão de Codificação Assistida
         project_id: str,
     ) -> tuple:
         """Template 12: Notifica GP quando OCG é gerado com sucesso."""
+        if _is_test_environment():
+            logger.info("email.skipped_test_environment", to=to_email, kind="ocg_generated")
+            return True, None
         try:
             from app.core.config import settings
             import smtplib
