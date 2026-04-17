@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
-import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle } from 'lucide-react'
+import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle, Plus, Trash2, Star } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -10,6 +10,18 @@ import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
 
 type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario'
 const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario']
+
+const PROVIDER_LABELS: Record<string, string> = {
+  anthropic: 'Anthropic (Claude)',
+  openai: 'OpenAI (GPT)',
+  deepseek: 'DeepSeek',
+  grok: 'xAI (Grok)',
+  gemini: 'Google (Gemini)',
+  ollama: 'Ollama (local)',
+}
+function providerLabel(p: string): string {
+  return PROVIDER_LABELS[p] || p
+}
 
 // Resultado do teste de conexão — `ok=null` significa "provedor válido mas
 // sem teste real implementado" (ex: gemini/ollama). A UI distingue isso
@@ -47,11 +59,20 @@ export function ProjectSettingsPage() {
   // Settings data
   const [settings, setSettings] = useState<any>({})
 
-  // LLM form
-  const [llmProvider, setLlmProvider] = useState('anthropic')
-  const [llmApiKey, setLlmApiKey] = useState('')
-  const [llmModel, setLlmModel] = useState('')
+  // LLM form (novo — modo "adicionar novo provider"). O card principal
+  // lista os provedores já configurados; este form só é visível quando o
+  // user clica em "+ Adicionar provedor".
+  const [addingLlm, setAddingLlm] = useState(false)
+  const [newLlmProvider, setNewLlmProvider] = useState('anthropic')
+  const [newLlmApiKey, setNewLlmApiKey] = useState('')
+  const [newLlmModel, setNewLlmModel] = useState('')
   const [showLlmKey, setShowLlmKey] = useState(false)
+
+  // Resultados de teste por provider (um dict — cada card tem o seu).
+  const [llmTestResults, setLlmTestResults] = useState<Record<string, TestResult>>({})
+  const [testingProvider, setTestingProvider] = useState<string | null>(null)
+  const [removingProvider, setRemovingProvider] = useState<string | null>(null)
+  const [settingDefault, setSettingDefault] = useState<string | null>(null)
 
   // SMTP form
   const [smtpHost, setSmtpHost] = useState('')
@@ -62,8 +83,6 @@ export function ProjectSettingsPage() {
 
   const [saving, setSaving] = useState(false)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
-  const [testingLlm, setTestingLlm] = useState(false)
-  const [llmTestResult, setLlmTestResult] = useState<TestResult>(null)
   const [testingSmtp, setTestingSmtp] = useState(false)
   const [smtpTestResult, setSmtpTestResult] = useState<TestResult>(null)
 
@@ -78,13 +97,7 @@ export function ProjectSettingsPage() {
       const res = await apiClient.get(`/projects/${projectId}/settings`)
       const data = res.data
       setSettings(data)
-
-      // Preencher LLM
-      if (data.llm) {
-        setLlmProvider(data.llm.provider || 'anthropic')
-        setLlmModel(data.llm.model || '')
-      }
-      // Preencher SMTP
+      // Preencher SMTP (LLM agora é multi — estado fica no settings.llm.providers)
       if (data.smtp) {
         setSmtpHost(data.smtp.host || '')
         setSmtpPort(String(data.smtp.port || 587))
@@ -97,25 +110,105 @@ export function ProjectSettingsPage() {
 
   useEffect(() => { loadSettings() }, [loadSettings])
 
-  const saveLlm = async () => {
-    if (!llmApiKey.trim() && !settings.llm?.api_key_configured) {
-      showToast('Informe a API Key do provedor de IA', 'error')
+  const addLlmProvider = async () => {
+    if (!newLlmApiKey.trim()) {
+      showToast('Informe a API Key do provedor', 'error')
       return
     }
     setSaving(true)
     try {
       await apiClient.post(`/projects/${projectId}/settings/llm`, {
-        provider: llmProvider,
-        api_key: llmApiKey.trim() || undefined,
-        model: llmModel.trim() || undefined,
+        provider: newLlmProvider,
+        api_key: newLlmApiKey.trim(),
+        model: newLlmModel.trim() || undefined,
       })
-      showToast('Provedor de IA configurado com sucesso', 'success')
-      setLlmApiKey('')
+      showToast(`Provedor ${newLlmProvider} adicionado`, 'success')
+      setNewLlmApiKey('')
+      setNewLlmModel('')
+      setAddingLlm(false)
       await loadSettings()
     } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao salvar', 'error')
+      showToast(err?.response?.data?.detail || 'Erro ao adicionar', 'error')
     }
     setSaving(false)
+  }
+
+  const testLlmProvider = async (provider: string) => {
+    if (!projectId) return
+    setTestingProvider(provider)
+    try {
+      const res: any = await apiClient.post(
+        `/projects/${projectId}/settings/llm/validate?provider=${encodeURIComponent(provider)}`,
+        {},
+      )
+      const data = res?.data || {}
+      let result: TestResult
+      if (data.valid === true) {
+        result = {
+          ok: true,
+          message: `Chave aceita. Modelo: ${data.model || '—'} · ${data.latency_ms ?? '?'}ms`,
+          provider: data.provider,
+          model: data.model,
+          latencyMs: data.latency_ms,
+        }
+      } else if (data.valid === false) {
+        result = {
+          ok: false,
+          message: data.detail || `Erro ao validar (${data.error || 'desconhecido'})`,
+          provider: data.provider,
+        }
+      } else {
+        result = {
+          ok: null,
+          message: data.detail || 'Teste automático não implementado.',
+          provider: data.provider,
+        }
+      }
+      setLlmTestResults(prev => ({ ...prev, [provider]: result }))
+      await loadSettings() // re-pega last_validated_at/ok atualizados
+    } catch (err: any) {
+      setLlmTestResults(prev => ({
+        ...prev,
+        [provider]: {
+          ok: false,
+          message: err?.response?.data?.detail || err?.message || 'Falha ao contatar o servidor',
+          provider,
+        },
+      }))
+    }
+    setTestingProvider(null)
+  }
+
+  const setDefaultLlmProvider = async (provider: string) => {
+    if (!projectId) return
+    setSettingDefault(provider)
+    try {
+      await apiClient.post(`/projects/${projectId}/settings/llm/providers/${provider}/default`, {})
+      showToast(`${provider} definido como padrão do projeto`, 'success')
+      await loadSettings()
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || 'Erro ao definir padrão', 'error')
+    }
+    setSettingDefault(null)
+  }
+
+  const removeLlmProvider = async (provider: string) => {
+    if (!projectId) return
+    if (!confirm(`Remover o provedor ${provider}? A chave será apagada do vault do projeto.`)) return
+    setRemovingProvider(provider)
+    try {
+      await apiClient.delete(`/projects/${projectId}/settings/llm/providers/${provider}`)
+      showToast(`Provedor ${provider} removido`, 'success')
+      setLlmTestResults(prev => {
+        const next = { ...prev }
+        delete next[provider]
+        return next
+      })
+      await loadSettings()
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || 'Erro ao remover', 'error')
+    }
+    setRemovingProvider(null)
   }
 
   const saveSmtp = async () => {
@@ -135,44 +228,6 @@ export function ProjectSettingsPage() {
       showToast(err?.response?.data?.detail || 'Erro ao salvar', 'error')
     }
     setSaving(false)
-  }
-
-  const testLlm = async () => {
-    if (!projectId) return
-    setTestingLlm(true)
-    setLlmTestResult(null)
-    try {
-      const res: any = await apiClient.post(`/projects/${projectId}/settings/llm/validate`, {})
-      const data = res?.data || {}
-      if (data.valid === true) {
-        setLlmTestResult({
-          ok: true,
-          message: `Chave aceita pelo ${data.provider}. Modelo: ${data.model || '—'} · ${data.latency_ms ?? '?'}ms`,
-          provider: data.provider,
-          model: data.model,
-          latencyMs: data.latency_ms,
-        })
-      } else if (data.valid === false) {
-        setLlmTestResult({
-          ok: false,
-          message: data.detail || `Erro ao validar (${data.error || 'desconhecido'})`,
-          provider: data.provider,
-        })
-      } else {
-        // valid === null (provider_supported=false)
-        setLlmTestResult({
-          ok: null,
-          message: data.detail || 'Teste automático não implementado para este provedor.',
-          provider: data.provider,
-        })
-      }
-    } catch (err: any) {
-      setLlmTestResult({
-        ok: false,
-        message: err?.response?.data?.detail || err?.message || 'Falha ao contatar o servidor',
-      })
-    }
-    setTestingLlm(false)
   }
 
   const testSmtp = async () => {
@@ -341,102 +396,223 @@ export function ProjectSettingsPage() {
         </button>
       </div>
 
-      {/* Tab: Provedor de IA */}
+      {/* Tab: Provedor de IA — lista multi-provider + form "adicionar" */}
       {activeTab === 'llm' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-          <h3 className="text-slate-200 text-sm font-semibold">Provedor de IA do Projeto</h3>
-          <p className="text-slate-500 text-xs">
-            Esta chave é usada pelo Arguidor, Geração de Código, QA e outros módulos do projeto.
-            É diferente da chave do Admin (usada apenas para avaliação do questionário externo).
-          </p>
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-1">
+            <h3 className="text-slate-200 text-sm font-semibold">Provedores de IA do Projeto</h3>
+            <p className="text-slate-500 text-xs">
+              Você pode configurar múltiplos provedores e trocar o padrão quando quiser.
+              O provedor marcado como <span className="text-violet-300 font-medium">Padrão</span> é
+              usado pelo Arguidor, Geração de Código, QA e demais módulos do projeto.
+              Estas chaves não se misturam com a chave da instância (Admin).
+            </p>
+          </div>
 
-          {settings.llm?.api_key_configured && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-emerald-900/20 border border-emerald-800/40 rounded-lg">
-              <Check className="w-4 h-4 text-emerald-400" />
-              <span className="text-emerald-300 text-xs">Chave configurada ({settings.llm.provider}) — {settings.llm.masked_key}</span>
+          {/* Lista de providers configurados */}
+          {(settings.llm?.providers?.length ?? 0) === 0 ? (
+            <div className="bg-slate-900 border border-dashed border-slate-700 rounded-xl p-6 text-center">
+              <Zap className="w-6 h-6 text-slate-600 mx-auto mb-2" />
+              <p className="text-slate-400 text-sm">Nenhum provedor configurado.</p>
+              <p className="text-slate-500 text-xs mt-1">Adicione o primeiro — ele vira o padrão automaticamente.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {settings.llm.providers.map((p: any) => {
+                const testResult = llmTestResults[p.provider]
+                const lastOk = p.last_validation_ok
+                const lastAt = p.last_validated_at
+                const isTesting = testingProvider === p.provider
+                const isRemoving = removingProvider === p.provider
+                const isSettingDef = settingDefault === p.provider
+                return (
+                  <div
+                    key={p.provider}
+                    className={`bg-slate-900 border rounded-xl p-4 space-y-3 ${
+                      p.is_default
+                        ? 'border-violet-600/50 ring-1 ring-violet-600/20'
+                        : 'border-slate-800'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3 flex-wrap">
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${
+                          p.is_default ? 'bg-violet-600/20 border border-violet-500/40' : 'bg-slate-800 border border-slate-700'
+                        }`}>
+                          <Cpu className={`w-4 h-4 ${p.is_default ? 'text-violet-300' : 'text-slate-400'}`} />
+                        </div>
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <p className="text-slate-100 text-sm font-semibold">{providerLabel(p.provider)}</p>
+                            {p.is_default && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-300 text-[10px] font-semibold uppercase tracking-wide">
+                                <Star className="w-3 h-3" /> Padrão
+                              </span>
+                            )}
+                            {p.api_key_configured
+                              ? <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300">
+                                  <Check className="w-3 h-3" /> chave no vault
+                                </span>
+                              : <span className="inline-flex items-center gap-1 text-[11px] text-amber-300">
+                                  <AlertCircle className="w-3 h-3" /> sem chave salva
+                                </span>}
+                          </div>
+                          <div className="text-xs text-slate-500 mt-0.5 flex items-center gap-2 flex-wrap">
+                            <span>Modelo: <span className="text-slate-300">{p.model || 'padrão do provedor'}</span></span>
+                            {lastAt && (
+                              <>
+                                <span>·</span>
+                                <span className={lastOk ? 'text-emerald-400' : lastOk === false ? 'text-red-400' : 'text-slate-500'}>
+                                  {lastOk ? '✓' : lastOk === false ? '✗' : '—'} última validação: {new Date(lastAt).toLocaleString('pt-BR')}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 flex-shrink-0">
+                        <button
+                          onClick={() => testLlmProvider(p.provider)}
+                          disabled={isTesting || !canEdit || !p.api_key_configured}
+                          title={!p.api_key_configured ? 'Salve a chave antes de testar' : 'Testar conexão'}
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-xs rounded-lg border border-slate-700 transition-colors"
+                        >
+                          {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Wifi className="w-3.5 h-3.5" />}
+                          Testar
+                        </button>
+                        {!p.is_default && (
+                          <button
+                            onClick={() => setDefaultLlmProvider(p.provider)}
+                            disabled={isSettingDef || !canEdit || !p.api_key_configured || lastOk === false}
+                            title={lastOk === false ? 'Corrija a chave antes de definir como padrão' : 'Definir como padrão do projeto'}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600/20 hover:bg-violet-600/30 disabled:opacity-40 text-violet-200 text-xs rounded-lg border border-violet-500/40 transition-colors"
+                          >
+                            {isSettingDef ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Star className="w-3.5 h-3.5" />}
+                            Padrão
+                          </button>
+                        )}
+                        <button
+                          onClick={() => removeLlmProvider(p.provider)}
+                          disabled={isRemoving || !canEdit}
+                          title="Remover provedor"
+                          className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800 hover:bg-red-600/20 hover:border-red-500/50 disabled:opacity-40 text-slate-400 hover:text-red-300 text-xs rounded-lg border border-slate-700 transition-colors"
+                        >
+                          {isRemoving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {testResult && (
+                      <div className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${
+                        testResult.ok === true
+                          ? 'bg-emerald-900/20 border-emerald-800/40 text-emerald-300'
+                          : testResult.ok === false
+                            ? 'bg-red-900/20 border-red-800/40 text-red-300'
+                            : 'bg-amber-900/20 border-amber-800/40 text-amber-300'
+                      }`}>
+                        {testResult.ok === true && <Wifi className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+                        {testResult.ok === false && <WifiOff className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+                        {testResult.ok === null && <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
+                        <span className="leading-snug">{testResult.message}</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="text-slate-400 text-xs block mb-1">Provedor</label>
-              <select value={llmProvider} onChange={e => setLlmProvider(e.target.value)}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600">
-                <option value="anthropic">Anthropic (Claude)</option>
-                <option value="openai">OpenAI (GPT)</option>
-                <option value="deepseek">DeepSeek</option>
-                <option value="grok">xAI (Grok)</option>
-                <option value="gemini">Google (Gemini)</option>
-              </select>
-            </div>
-            <div>
-              <label className="text-slate-400 text-xs block mb-1">Modelo (opcional)</label>
-              {/* autoComplete="off" + name="llm-model" + data-lpignore="true"
-                  bloqueia o Chrome de autopreencher o campo com email/senha
-                  por heurística (bug observado: autofill colocou email aqui). */}
-              <input
-                value={llmModel}
-                onChange={e => setLlmModel(e.target.value)}
-                placeholder="Ex: claude-opus-4-6, gpt-4o, deepseek-chat"
-                name="llm-model"
-                autoComplete="off"
-                spellCheck={false}
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
-            </div>
-          </div>
+          {/* Botão / Form de adicionar */}
+          {!addingLlm ? (
+            <button
+              onClick={() => setAddingLlm(true)}
+              disabled={!canEdit}
+              className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-slate-900 hover:bg-slate-800/80 border border-dashed border-slate-700 hover:border-violet-600/50 rounded-xl text-slate-300 hover:text-violet-300 text-sm transition-colors disabled:opacity-40"
+            >
+              <Plus className="w-4 h-4" />
+              Adicionar outro provedor
+            </button>
+          ) : (
+            <div className="bg-slate-900 border border-violet-800/40 rounded-xl p-5 space-y-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-slate-100 text-sm font-semibold">Adicionar provedor</h4>
+                <button
+                  onClick={() => { setAddingLlm(false); setNewLlmApiKey(''); setNewLlmModel('') }}
+                  className="text-slate-500 hover:text-slate-300 text-xs"
+                >
+                  Cancelar
+                </button>
+              </div>
 
-          <div>
-            <label className="text-slate-400 text-xs block mb-1">API Key {settings.llm?.api_key_configured ? '(deixe vazio para manter a atual)' : ''}</label>
-            <div className="relative">
-              <input
-                type={showLlmKey ? 'text' : 'password'}
-                value={llmApiKey}
-                onChange={e => setLlmApiKey(e.target.value)}
-                placeholder={settings.llm?.api_key_configured ? 'Manter chave atual...' : 'sk-...'}
-                name="llm-api-key"
-                autoComplete="new-password"
-                spellCheck={false}
-                data-lpignore="true"
-                data-1p-ignore="true"
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600" />
-              <button type="button" onClick={() => setShowLlmKey(!showLlmKey)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
-                {showLlmKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-            <p className="text-slate-600 text-xs mt-1">Armazenada criptografada no vault do projeto.</p>
-          </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-slate-400 text-xs block mb-1">Provedor</label>
+                  <select
+                    value={newLlmProvider}
+                    onChange={e => setNewLlmProvider(e.target.value)}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600"
+                  >
+                    <option value="anthropic">Anthropic (Claude)</option>
+                    <option value="openai">OpenAI (GPT)</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="grok">xAI (Grok)</option>
+                    <option value="gemini">Google (Gemini)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-slate-400 text-xs block mb-1">Modelo (opcional)</label>
+                  <input
+                    value={newLlmModel}
+                    onChange={e => setNewLlmModel(e.target.value)}
+                    placeholder="Ex: claude-opus-4-6, gpt-4o, deepseek-chat"
+                    name="llm-model"
+                    autoComplete="off"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600"
+                  />
+                </div>
+              </div>
 
-          {llmTestResult && (
-            <div className={`flex items-start gap-2 px-3 py-2 rounded-lg text-xs border ${
-              llmTestResult.ok === true
-                ? 'bg-emerald-900/20 border-emerald-800/40 text-emerald-300'
-                : llmTestResult.ok === false
-                  ? 'bg-red-900/20 border-red-800/40 text-red-300'
-                  : 'bg-amber-900/20 border-amber-800/40 text-amber-300'
-            }`}>
-              {llmTestResult.ok === true && <Wifi className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-              {llmTestResult.ok === false && <WifiOff className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-              {llmTestResult.ok === null && <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />}
-              <span className="leading-snug">{llmTestResult.message}</span>
+              <div>
+                <label className="text-slate-400 text-xs block mb-1">API Key</label>
+                <div className="relative">
+                  <input
+                    type={showLlmKey ? 'text' : 'password'}
+                    value={newLlmApiKey}
+                    onChange={e => setNewLlmApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    name="llm-api-key"
+                    autoComplete="new-password"
+                    spellCheck={false}
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 pr-10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowLlmKey(!showLlmKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                  >
+                    {showLlmKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+                <p className="text-slate-600 text-xs mt-1">Armazenada criptografada no vault do projeto.</p>
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  onClick={addLlmProvider}
+                  disabled={saving || !canEdit}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors"
+                >
+                  {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+                  Adicionar provedor
+                </button>
+              </div>
             </div>
           )}
-
-          <div className="flex justify-end gap-2">
-            <button onClick={testLlm} disabled={testingLlm || !settings.llm?.api_key_configured || !canEdit}
-              title={!settings.llm?.api_key_configured ? 'Salve uma chave antes de testar' : 'Testar conexão com o provedor'}
-              className="flex items-center gap-1.5 px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 text-slate-200 text-sm rounded-lg border border-slate-700 transition-colors">
-              {testingLlm ? <Loader2 className="w-4 h-4 animate-spin" /> : <Wifi className="w-4 h-4" />}
-              Testar conexão
-            </button>
-            <button onClick={saveLlm} disabled={saving || !canEdit}
-              className="flex items-center gap-1.5 px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-sm rounded-lg transition-colors">
-              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              Salvar Provedor de IA
-            </button>
-          </div>
         </div>
       )}
 
