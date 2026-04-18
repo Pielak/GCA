@@ -42,27 +42,31 @@ async def main(project_id_str: str) -> None:
         ocg_data = json.loads(ocg_data_raw)
 
         profile = ocg_data.get("PROJECT_PROFILE", {})
-        stack = ocg_data.get("STACK_RECOMMENDATION", {})
-        arch = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
-
         print(f"[OCG] id={ocg_id} version={version}")
-        print(f"[ANTES] STACK_RECOMMENDATION={'<vazio>' if not stack else 'presente'}")
-        print(f"[ANTES] ARCHITECTURE_OVERVIEW={'<vazio>' if not arch else 'presente'}")
 
-        changed = False
+        # Campos com fallback DT-046 + DT-047
+        fallbacks = [
+            ("STACK_RECOMMENDATION", AgentService._stack_from_metadata, (profile,)),
+            ("ARCHITECTURE_OVERVIEW", AgentService._architecture_from_metadata, (profile,)),
+            ("TESTING_REQUIREMENTS", AgentService._testing_from_metadata, (profile,)),
+            ("COMPLIANCE_CHECKLIST", AgentService._compliance_from_metadata, (profile,)),
+            ("DELIVERABLES", AgentService._deliverables_from_metadata, (profile,)),
+            ("RISK_ANALYSIS", AgentService._risk_from_metadata, (profile, None)),
+        ]
 
-        if not stack:
-            ocg_data["STACK_RECOMMENDATION"] = AgentService._stack_from_metadata(profile)
-            changed = True
-            print("[FIX] STACK_RECOMMENDATION reconstituído via fallback")
+        changed_fields = []
+        for field, helper, args in fallbacks:
+            current = ocg_data.get(field)
+            is_empty = current in (None, {}, [])
+            status = "<vazio>" if is_empty else "presente"
+            print(f"[ANTES] {field}={status}")
+            if is_empty:
+                ocg_data[field] = helper(*args)
+                changed_fields.append(field)
+                print(f"[FIX]   {field} reconstituído via fallback")
 
-        if not arch:
-            ocg_data["ARCHITECTURE_OVERVIEW"] = AgentService._architecture_from_metadata(profile)
-            changed = True
-            print("[FIX] ARCHITECTURE_OVERVIEW reconstituído via fallback")
-
-        if not changed:
-            print("[NOOP] OCG já tem STACK e ARCHITECTURE populados; nada a fazer.")
+        if not changed_fields:
+            print("[NOOP] OCG já tem todos os campos populados; nada a fazer.")
             return
 
         # 2. Salvar o OCG atualizado + gravar delta DT-046
@@ -80,10 +84,7 @@ async def main(project_id_str: str) -> None:
             },
         )
 
-        fields_updated = [
-            k for k in ("STACK_RECOMMENDATION", "ARCHITECTURE_OVERVIEW")
-            if ocg_data.get(k, {}).get("source") == "questionnaire_deterministic_fallback"
-        ]
+        fields_updated = changed_fields
 
         await db.execute(
             text("""

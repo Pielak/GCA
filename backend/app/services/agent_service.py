@@ -202,6 +202,97 @@ class AgentService:
 
         return text, tokens
 
+    # ========== DT-049: wrapper com retry quando LLM não devolve JSON ==========
+
+    async def _call_llm_expecting_json(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+        project_id=None,
+        operation: str = "ocg_generation",
+    ) -> tuple[dict, int]:
+        """DT-049: chama `_call_llm` + extrai JSON; retry 1x se inválido.
+
+        Alguns modelos (especialmente os menos novos) ignoram instruções de
+        formato e embrulham o JSON em prosa ou markdown — e custa $0,59
+        por chamada Anthropic do consolidator. Antes, o extrator devolvia
+        `{}` e o fluxo seguia silenciosamente com todos os campos em
+        fallback. Agora:
+
+        1. Tenta uma vez com o prompt original.
+        2. Se `_extract_json` retornar `{}` (e o texto não for vazio),
+           faz **uma** retentativa apendando diretiva dura pedindo JSON
+           puro. Essa tentativa usa o dobro do max_tokens base, porque
+           alguns modelos cortam JSON grande.
+        3. Se a segunda tentativa também vier vazia, devolve dict vazio
+           + log estruturado `agent.llm_json_retry_failed` com preview.
+
+        Retorno: `(ocg_json, tokens_totais_gastos)` — tokens somados das
+        duas chamadas quando houver retry.
+        """
+        response_text, tokens_used = await self._call_llm(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            max_tokens=max_tokens,
+            project_id=project_id,
+            operation=operation,
+        )
+        parsed = self._extract_json(response_text)
+
+        # Se o parser direto/fence/regex conseguiu, seguimos.
+        if parsed:
+            return parsed, tokens_used
+
+        # Só faz retry se o texto não for vazio (LLM respondeu mas fora de formato).
+        if not response_text or not response_text.strip():
+            logger.warning(
+                "agent.llm_empty_response",
+                operation=operation,
+                project_id=str(project_id) if project_id else None,
+            )
+            return {}, tokens_used
+
+        logger.warning(
+            "agent.llm_json_retry_attempt",
+            operation=operation,
+            project_id=str(project_id) if project_id else None,
+            raw_len=len(response_text),
+        )
+
+        retry_system = system_prompt + (
+            "\n\nIMPORTANTE (retry após JSON inválido): Responda APENAS com JSON puro, "
+            "sem markdown (nada de ```), sem prosa explicativa, sem texto antes ou depois. "
+            "O primeiro caractere da sua resposta DEVE ser `{` e o último DEVE ser `}`. "
+            "Se o conteúdo for extenso, resuma arrays e strings — nunca corte o JSON no meio."
+        )
+        response_text_retry, tokens_retry = await self._call_llm(
+            system_prompt=retry_system,
+            user_prompt=user_prompt,
+            max_tokens=max_tokens * 2,
+            project_id=project_id,
+            operation=f"{operation}_retry",
+        )
+        parsed_retry = self._extract_json(response_text_retry)
+        total_tokens = tokens_used + tokens_retry
+
+        if parsed_retry:
+            logger.info(
+                "agent.llm_json_retry_success",
+                operation=operation,
+                tokens_total=total_tokens,
+            )
+            return parsed_retry, total_tokens
+
+        logger.error(
+            "agent.llm_json_retry_failed",
+            operation=operation,
+            project_id=str(project_id) if project_id else None,
+            tokens_wasted=total_tokens,
+            preview_head=response_text_retry[:300] if response_text_retry else "",
+        )
+        return {}, total_tokens
+
     # ========== AGENT 0: ANALYZER ==========
 
     async def analyze_questionnaire(
@@ -243,7 +334,7 @@ class AgentService:
             # a partir do questionnaire_id para permitir billing correto.
             start_time = datetime.now(timezone.utc)
             pid = await self._project_id_for_questionnaire(req.questionnaire_id)
-            response_text, tokens_used = await self._call_llm(
+            ocg_json, tokens_used = await self._call_llm_expecting_json(
                 system_prompt=ANALYZER_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
@@ -251,7 +342,6 @@ class AgentService:
                 operation="analyzer",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-            ocg_json = self._extract_json(response_text)
 
             # Normalizar classification: extrair apenas question IDs
             classification = {}
@@ -348,7 +438,7 @@ Return complete JSON analysis with score, classification, findings, and recommen
             # evita IntegrityError que antes derrubava a transação do OCG.
             start_time = datetime.now(timezone.utc)
             pid = await self._project_id_for_questionnaire(req.questionnaire_id)
-            response_text, tokens_used = await self._call_llm(
+            ocg_json, tokens_used = await self._call_llm_expecting_json(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
@@ -356,9 +446,6 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 operation=f"pillar_p{pillar_id}",
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-
-            # Extrair JSON
-            ocg_json = self._extract_json(response_text)
 
             result = PillarAgentResponse(
                 pillar_id=pillar_id,
@@ -542,7 +629,7 @@ Return complete JSON analysis with score, classification, findings, and recommen
 
             # Chamar LLM
             start_time = datetime.now(timezone.utc)
-            response_text, tokens_used = await self._call_llm(
+            ocg_json, tokens_used = await self._call_llm_expecting_json(
                 system_prompt=CONSOLIDATOR_SYSTEM_PROMPT,
                 user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
@@ -551,12 +638,8 @@ Return complete JSON analysis with score, classification, findings, and recommen
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
 
-            # Extrair JSON
-            ocg_json = self._extract_json(response_text)
-
             logger.info("agent.consolidator_raw_keys",
-                       keys=list(ocg_json.keys())[:15] if isinstance(ocg_json, dict) else "NOT_DICT",
-                       raw_len=len(response_text))
+                       keys=list(ocg_json.keys())[:15] if isinstance(ocg_json, dict) else "NOT_DICT")
 
             # Se o JSON não tem as chaves esperadas, usar resposta bruta como contexto
             if not ocg_json.get("PROJECT_PROFILE") and not ocg_json.get("PILLAR_SCORES"):
@@ -599,16 +682,35 @@ Return complete JSON analysis with score, classification, findings, and recommen
                     or self._stack_from_metadata(req.project_metadata or {})
                 ),
                 CRITICAL_FINDINGS=ocg_json.get("CRITICAL_FINDINGS") or ocg_json.get("critical_findings") or [f for pr in req.pillar_results for f in pr.findings if f.get("severity") == "critical"],
-                TESTING_REQUIREMENTS=ocg_json.get("TESTING_REQUIREMENTS") or ocg_json.get("testing_requirements") or ocg_json.get("testing", {}),
-                COMPLIANCE_CHECKLIST=ocg_json.get("COMPLIANCE_CHECKLIST") or ocg_json.get("compliance_checklist") or ocg_json.get("compliance", []),
-                DELIVERABLES=ocg_json.get("DELIVERABLES") or ocg_json.get("deliverables", {}),
+                TESTING_REQUIREMENTS=(
+                    ocg_json.get("TESTING_REQUIREMENTS")
+                    or ocg_json.get("testing_requirements")
+                    or ocg_json.get("testing")
+                    or self._testing_from_metadata(req.project_metadata or {})
+                ),
+                COMPLIANCE_CHECKLIST=(
+                    ocg_json.get("COMPLIANCE_CHECKLIST")
+                    or ocg_json.get("compliance_checklist")
+                    or ocg_json.get("compliance")
+                    or self._compliance_from_metadata(req.project_metadata or {})
+                ),
+                DELIVERABLES=(
+                    ocg_json.get("DELIVERABLES")
+                    or ocg_json.get("deliverables")
+                    or self._deliverables_from_metadata(req.project_metadata or {})
+                ),
                 ARCHITECTURE_OVERVIEW=(
                     ocg_json.get("ARCHITECTURE_OVERVIEW")
                     or ocg_json.get("architecture_overview")
                     or ocg_json.get("architecture")
                     or self._architecture_from_metadata(req.project_metadata or {})
                 ),
-                RISK_ANALYSIS=ocg_json.get("RISK_ANALYSIS") or ocg_json.get("risk_analysis") or ocg_json.get("risks", {}),
+                RISK_ANALYSIS=(
+                    ocg_json.get("RISK_ANALYSIS")
+                    or ocg_json.get("risk_analysis")
+                    or ocg_json.get("risks")
+                    or self._risk_from_metadata(req.project_metadata or {}, req.pillar_results)
+                ),
                 APPROVAL_STATUS=ocg_json.get("APPROVAL_STATUS") or ocg_json.get("approval_status") or {"status": "NEEDS_REVIEW" if any_blocking else "APPROVED", "overall_score": overall_score},
             )
 
@@ -646,7 +748,22 @@ Return complete JSON analysis with score, classification, findings, and recommen
     # ========== UTILITIES ==========
 
     async def save_ocg(self, ocg_response: OCGResponse) -> OCG:
-        """Salvar OCG no banco de dados"""
+        """Salvar OCG no banco.
+
+        DT-048: UPSERT por `questionnaire_id` (UNIQUE no schema).
+        - Se já existe OCG para o questionário: UPDATE in-place, preserva
+          `id` (mantém FKs de `ocg_analysis_log`/`ocg_delta_log` íntegros),
+          incrementa `version`, marca `change_type=REGENERATED`.
+          `ocg_response.ocg_id` é sincronizado com o id existente para que
+          o caller (consolidate_ocg) use o id correto em log_analysis.
+        - Se não existe: INSERT como antes (path inicial).
+
+        Antes deste fix, Regenerate sempre morria com
+        `UniqueViolationError: ix_ocg_questionnaire_id` porque o código
+        tentava INSERT cego com novo uuid4.
+        """
+        from sqlalchemy import select as _select
+
         try:
             # Extrair scores dos pilares (flexível: P1, P1_Business, etc.)
             ps = ocg_response.PILLAR_SCORES
@@ -662,6 +779,56 @@ Return complete JSON analysis with score, classification, findings, and recommen
                         return val
                 return 0
 
+            # Campos comuns ao INSERT e ao UPDATE
+            overall_score = (
+                self._safe_get(ocg_response.COMPOSITE_SCORE, "overall")
+                or self._safe_get(ocg_response.COMPOSITE_SCORE, "value")
+                or (ocg_response.COMPOSITE_SCORE if isinstance(ocg_response.COMPOSITE_SCORE, (int, float)) else 0)
+            )
+            status = (
+                self._safe_get(ocg_response.COMPOSITE_SCORE, "status")
+                or ("BLOCKED" if self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking") else "NEEDS_REVIEW")
+            )
+            is_blocking = bool(self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking"))
+            ocg_data_json = json.dumps(ocg_response.dict(), ensure_ascii=False, cls=UUIDEncoder)
+
+            # DT-048: detectar OCG existente pra esse questionário
+            existing = (await self.db.execute(
+                _select(OCG).where(OCG.questionnaire_id == ocg_response.questionnaire_id)
+            )).scalar_one_or_none()
+
+            if existing is not None:
+                existing.project_id = ocg_response.project_id
+                existing.p1_business_score = _get_pillar_score(ps, 1)
+                existing.p2_rules_score = _get_pillar_score(ps, 2)
+                existing.p3_features_score = _get_pillar_score(ps, 3)
+                existing.p4_nfr_score = _get_pillar_score(ps, 4)
+                existing.p5_architecture_score = _get_pillar_score(ps, 5)
+                existing.p6_data_score = _get_pillar_score(ps, 6)
+                existing.p7_security_score = _get_pillar_score(ps, 7)
+                existing.overall_score = overall_score
+                existing.status = status
+                existing.is_blocking = is_blocking
+                existing.ocg_data = ocg_data_json
+                existing.version = (existing.version or 1) + 1
+                existing.change_type = "REGENERATED"
+                existing.updated_at = datetime.now(timezone.utc)
+                # Mantém generated_at inicial; regeneration não altera a origem.
+
+                # Sincroniza o ocg_response com o id efetivamente persistido,
+                # pra log_analysis/caller usarem o id correto.
+                ocg_response.ocg_id = existing.id
+
+                await self.db.commit()
+                logger.info(
+                    "agent.ocg_upserted",
+                    ocg_id=str(existing.id),
+                    version=existing.version,
+                    action="update",
+                )
+                return existing
+
+            # Path inicial: INSERT novo
             ocg = OCG(
                 id=ocg_response.ocg_id,
                 questionnaire_id=ocg_response.questionnaire_id,
@@ -673,10 +840,10 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 p5_architecture_score=_get_pillar_score(ps, 5),
                 p6_data_score=_get_pillar_score(ps, 6),
                 p7_security_score=_get_pillar_score(ps, 7),
-                overall_score=self._safe_get(ocg_response.COMPOSITE_SCORE, "overall") or self._safe_get(ocg_response.COMPOSITE_SCORE, "value") or (ocg_response.COMPOSITE_SCORE if isinstance(ocg_response.COMPOSITE_SCORE, (int, float)) else 0),
-                status=self._safe_get(ocg_response.COMPOSITE_SCORE, "status") or ("BLOCKED" if self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking") else "NEEDS_REVIEW"),
-                is_blocking=bool(self._safe_get(ocg_response.COMPOSITE_SCORE, "is_blocking")),
-                ocg_data=json.dumps(ocg_response.dict(), ensure_ascii=False, cls=UUIDEncoder),
+                overall_score=overall_score,
+                status=status,
+                is_blocking=is_blocking,
+                ocg_data=ocg_data_json,
                 generated_at=ocg_response.generated_at,
             )
 
@@ -791,6 +958,151 @@ Return complete JSON analysis with score, classification, findings, and recommen
         }
 
     @staticmethod
+    def _testing_from_metadata(meta: dict) -> dict:
+        """DT-047: fallback determinístico para TESTING_REQUIREMENTS.
+
+        Deriva de `test_types` (Q45), `quality_gate` (Q46), `qa_evidence`
+        (Q47) e `criticality` (Q5). Nunca deixa vazio quando o GP respondeu
+        esses campos no questionário.
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+        pick = AgentService._pick
+        test_types = pick(meta, "test_types") or []
+        return {
+            "test_types": test_types,
+            "has_unit_tests": "Unitários" in test_types,
+            "has_integration_tests": "Integração" in test_types,
+            "has_e2e_tests": "E2E" in test_types,
+            "has_security_tests": "Segurança" in test_types,
+            "has_performance_tests": "Performance" in test_types or "Carga" in test_types,
+            "quality_gate_enabled": bool(meta.get("quality_gate", False)),
+            "formal_qa_enabled": bool(meta.get("formal_qa", False) or meta.get("qa_evidence", False)),
+            "criticality": pick(meta, "criticality", default=""),
+            # Heurística simples de cobertura esperada por criticidade
+            "coverage_target_pct": {
+                "Alta": 80, "Média": 70, "Baixa": 60,
+            }.get(pick(meta, "criticality", default=""), 70),
+            "source": "questionnaire_deterministic_fallback",
+        }
+
+    @staticmethod
+    def _compliance_from_metadata(meta: dict) -> list:
+        """DT-047: fallback determinístico para COMPLIANCE_CHECKLIST.
+
+        Deriva de `security_controls` (Q43), `info_classification` (Q6),
+        `ai_restrictions` (Q42) e deliverables que contêm "Plano"
+        (segurança/testes/observabilidade). Retorna lista de itens no
+        formato `{control, source, question}` para auditabilidade.
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+        pick = AgentService._pick
+        items = []
+        controls = pick(meta, "security_controls") or []
+        for c in controls:
+            items.append({
+                "control": c,
+                "source": "Q43 — Controles de segurança obrigatórios",
+                "status": "declared",
+            })
+        info_class = pick(meta, "info_classification", default="")
+        if info_class:
+            items.append({
+                "control": f"Classificação da informação: {info_class}",
+                "source": "Q6 — Classificação da informação",
+                "status": "declared",
+            })
+        ai_restr = pick(meta, "ai_restrictions") or []
+        for r in ai_restr:
+            items.append({
+                "control": f"Restrição de IA: {r}",
+                "source": "Q42 — Restrições de IA",
+                "status": "declared",
+            })
+        # Planos declarados em Q48 (deliverables)
+        plans = pick(meta, "pipeline_deliverables", "expected_deliverables") or []
+        for p in plans:
+            if isinstance(p, str) and ("Plano" in p or "plano" in p):
+                items.append({
+                    "control": p,
+                    "source": "Q48 — Entregáveis esperados",
+                    "status": "declared",
+                })
+        return items
+
+    @staticmethod
+    def _deliverables_from_metadata(meta: dict) -> dict:
+        """DT-047: fallback determinístico para DELIVERABLES.
+
+        Deriva de `pipeline_deliverables` (Q48 — o que o GP espera que o
+        pipeline entregue) e `output_formats` (formatos de saída).
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+        pick = AgentService._pick
+        return {
+            "expected": pick(meta, "pipeline_deliverables", "expected_deliverables", "deliverables"),
+            "output_formats": pick(meta, "output_formats"),
+            "source": "questionnaire_deterministic_fallback",
+        }
+
+    @staticmethod
+    def _risk_from_metadata(meta: dict, pillar_results=None) -> dict:
+        """DT-047: fallback determinístico para RISK_ANALYSIS.
+
+        Combina: (a) findings de severidade `high`/`critical` agregados dos
+        pillar_results (quando disponíveis); (b) riscos estruturais
+        derivados da criticidade + HA + multi-tenant + uso de IA.
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+        pick = AgentService._pick
+        high_findings = []
+        if pillar_results:
+            for pr in pillar_results:
+                findings = getattr(pr, "findings", None) or []
+                if not isinstance(findings, list):
+                    continue
+                for f in findings:
+                    if isinstance(f, dict) and f.get("severity") in ("high", "critical"):
+                        high_findings.append({
+                            "pillar": f"P{getattr(pr, 'pillar_id', '?')}",
+                            "severity": f.get("severity"),
+                            "finding": f.get("finding") or f.get("description") or "",
+                            "recommendation": f.get("recommendation") or f.get("mitigation") or "",
+                        })
+
+        structural = []
+        criticality = pick(meta, "criticality", default="")
+        if criticality == "Alta":
+            structural.append({
+                "risk": "Criticidade alta — impacto de falha elevado",
+                "mitigation": "Monitoramento ativo, runbook, rollback plano",
+            })
+        if pick(meta, "high_availability", default="") in ("Não", "Futuramente"):
+            structural.append({
+                "risk": "Alta disponibilidade não planejada para a versão atual",
+                "mitigation": "Documentar janela de indisponibilidade aceitável e plano de DR",
+            })
+        if pick(meta, "multi_tenant", default="") == "Sim":
+            structural.append({
+                "risk": "Multi-tenant — isolamento entre clientes obrigatório",
+                "mitigation": "Revisar RBAC, auditar queries por tenant_id, testar cross-tenant",
+            })
+        if bool(meta.get("uses_ai")):
+            structural.append({
+                "risk": "Uso de IA — risco de alucinação, vazamento e custo variável",
+                "mitigation": "Validação humana em output crítico, anonimização, teto de custo",
+            })
+
+        return {
+            "high_findings": high_findings,
+            "structural_risks": structural,
+            "source": "questionnaire_deterministic_fallback",
+        }
+
+    @staticmethod
     def _normalize_composite_score(raw, fallback_score: float, fallback_blocking: bool) -> dict:
         """Normaliza COMPOSITE_SCORE para dict — LLMs podem retornar float, dict ou None"""
         if isinstance(raw, dict) and raw:
@@ -845,22 +1157,51 @@ Return complete JSON analysis with score, classification, findings, and recommen
         """
         Extrai JSON válido de resposta de modelo.
 
-        Procura por blocos JSON dentro do texto.
+        DT-049: parsing progressivo + logging verboso.
+        Estratégias (primeiro hit ganha):
+        1. `json.loads` direto
+        2. Extração de code fence markdown ```json ... ``` ou ``` ... ```
+        3. Regex greedy `\\{.*\\}` para bloco JSON solto no texto
+        4. Fallback `{}` com log de erro + preview de 500 chars + length total
         """
+        text = text or ""
+
+        # 1. Parse direto
         try:
-            # Tenta parse direto
             return json.loads(text)
         except json.JSONDecodeError:
             pass
 
-        # Procura por bloco JSON dentro do texto
+        # 2. Code fence markdown (comportamento comum em Anthropic/OpenAI
+        # quando o prompt pede JSON — eles embrulham em ```json ... ```)
+        fence_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+        if fence_match:
+            try:
+                return json.loads(fence_match.group(1))
+            except json.JSONDecodeError:
+                pass
+
+        # 3. Bloco JSON solto no texto (greedy — pega o maior bloco)
         match = re.search(r"\{.*\}", text, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group())
-            except json.JSONDecodeError:
-                pass
+            except json.JSONDecodeError as e:
+                # Tentar versão mais enxuta: cortar trailing commas comuns
+                cleaned = re.sub(r",(\s*[\]\}])", r"\1", match.group())
+                try:
+                    return json.loads(cleaned)
+                except json.JSONDecodeError:
+                    logger.warning(
+                        "agent.json_extraction_match_invalid",
+                        decode_error=str(e)[:200],
+                    )
 
-        # Fallback: retorna dict vazio
-        logger.warning("agent.json_extraction_failed", text_preview=text[:100])
+        # Fallback: log verboso pra destravar troubleshooting em produção
+        logger.error(
+            "agent.json_extraction_failed",
+            raw_len=len(text),
+            preview_head=text[:300] if text else "",
+            preview_tail=text[-200:] if len(text) > 200 else "",
+        )
         return {}
