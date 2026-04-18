@@ -61,6 +61,102 @@ if "gca_test" not in settings.DATABASE_URL:
 
 
 # ============================================================================
+# DT-045: patch AgentService._call_llm para evitar HTTP real nos testes
+# ============================================================================
+# Contrato CLAUDE.md §6.5: a suíte de desenvolvimento do GCA (Contexto A)
+# não deve depender das keys reais do cliente. O pipeline OCG de 8 agentes
+# chama `AgentService._call_llm` que faz HTTP real (httpx ou Anthropic SDK)
+# com timeout 120s. Sem mock, test_e2e_pipeline_fase6.py e test_ocg_e2e.py
+# travam por minutos esperando LLM real.
+#
+# A fixture é `autouse=True`, escopo função — aplicada a TODOS os testes.
+# Testes que não tocam AgentService são inertes ao patch. Testes que tocam
+# recebem JSON determinístico indexado por `operation`, preservando a
+# lógica de parsing/validação dos agents (`_extract_json`, construção de
+# AnalyzerResponse/PillarAgentResponse/OCGResponse).
+
+import json as _json
+
+
+def _dt045_analyzer_stub() -> str:
+    return _json.dumps({
+        "classification": {
+            "P1": ["Q1", "Q2"],
+            "P2": ["Q9"],
+            "P3": ["Q16"],
+            "P4": ["Q26"],
+            "P5": ["Q33"],
+            "P6": ["Q39"],
+            "P7": ["Q43"],
+        },
+        "extracted_info": {
+            "project_name": "Test Project",
+            "project_type": "web_app",
+            "stakeholders": ["CEO", "CFO"],
+            "timeline_months": 12,
+            "team_size": 5,
+        },
+        "anomalies": [],
+    })
+
+
+def _dt045_pillar_stub(pillar_id: int) -> str:
+    return _json.dumps({
+        "score": 80.0,
+        "adherence_level": "GOOD",
+        "classification": {"adherent": [], "partial": [], "missing": []},
+        "findings": [],
+        "stack_implications": {},
+        "checklist": [],
+        "is_blocking": False,
+    })
+
+
+def _dt045_consolidator_stub() -> str:
+    return _json.dumps({
+        "PROJECT_PROFILE": {"name": "Test Project", "type": "web_app"},
+        "PILLAR_SCORES": {f"P{i}": {"score": 80.0, "adherence_level": "GOOD"} for i in range(1, 8)},
+        "COMPOSITE_SCORE": {"overall": 80.0, "status": "READY", "blocking": False},
+        "STACK_RECOMMENDATION": {"backend": "FastAPI", "frontend": "React"},
+        "CRITICAL_FINDINGS": [],
+        "TESTING_REQUIREMENTS": {"coverage_target": 80},
+        "COMPLIANCE_CHECKLIST": [],
+        "DELIVERABLES": {"docs": [], "code": []},
+        "ARCHITECTURE_OVERVIEW": {},
+        "RISK_ANALYSIS": {},
+        "APPROVAL_STATUS": {"status": "READY"},
+    })
+
+
+async def _dt045_fake_call_llm(self, system_prompt, user_prompt, max_tokens=4096, project_id=None, operation="ocg_generation"):
+    """DT-045: substitui `AgentService._call_llm` por stub determinístico.
+    Retorno compatível com `_call_llm` real: tuple[str, int] (JSON, tokens).
+    Ramifica por `operation` para cobrir analyzer/pillar/consolidator.
+    """
+    if operation == "analyzer":
+        return _dt045_analyzer_stub(), 500
+    if operation.startswith("pillar_p"):
+        try:
+            pid = int(operation.replace("pillar_p", ""))
+        except ValueError:
+            pid = 0
+        return _dt045_pillar_stub(pid), 600
+    if operation == "consolidator":
+        return _dt045_consolidator_stub(), 700
+    return _json.dumps({"status": "ok"}), 100
+
+
+@pytest.fixture(autouse=True)
+def _dt045_patch_agent_llm(monkeypatch):
+    """Autouse: patcha AgentService._call_llm em todo teste.
+    Sem efeito em testes que não instanciam AgentService.
+    """
+    from app.services import agent_service as _agent_mod
+    monkeypatch.setattr(_agent_mod.AgentService, "_call_llm", _dt045_fake_call_llm)
+    yield
+
+
+# ============================================================================
 # Database Fixtures
 # ============================================================================
 

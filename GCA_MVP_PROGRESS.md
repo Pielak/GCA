@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 1.5  
+Versão: 1.8  
 Data-base: 2026-04-18  
-Status: **controle de avanço por fase** — Gate MVP 4 aberto para trabalho.
+Status: **controle de avanço por fase** — MVP 4 em andamento; suite 394/394 passing; DT-046 (STACK/ARCHITECTURE vazios no OCG real) quitada; gate MVP 4 FECHADO apenas pela validação dogfood E2E pendente.
 
 ---
 
@@ -160,6 +160,8 @@ Superfície já construída (auditada 2026-04-18):
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
 | DT-044 | **Critical** | RBAC ausente em endpoints de MVP 4 | Auditoria 2026-04-18: `qa_router.py` (12 endpoints) tem autenticação via `get_current_user_from_token` mas **zero `require_action`** — qualquer user autenticado edita testes, aprova/rejeita, exporta evidências. `livedocs_router.py` (5) idem. `deliverables_router.py` (8, inclui Release Bundle) idem. `roadmap_router.py` tem enforcement **parcial** — 4 writes com `backlog:manage`/`code:write` mas GETs sem enforcement. Violações: §4.1 (Tester edita testes mas QA aprova; não podem estar misturados), §2.2 (compartimentalização — não-membro não deve ver dados), §7 MVP 4 (Release Bundle é marco formal, precisa de gate). Matriz necessária (binário): `qa:approve` em approve/reject/verify-all/verify/attest; `pipeline:execute` em execute/tests edit; `project:view` em GETs; `docs:edit` em docs/refresh; `audit:export` em logs/export e releases/download; `qa:approve` em `POST /releases` (release é formal). | Gate MVP 4 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
+| DT-045 | **Critical** | Testes e2e que hangam silenciosamente | Gate revalidação 2026-04-18 contra `gca_test` isolado (DT-034) mostrou que 2 arquivos do teste travam sem fail explícito: (a) `test_ocg_e2e.py`; (b) `test_e2e_pipeline_fase6.py`. Conhecido como residual da DT-040 (ambos citados nos notes), não foi fechado na época. **Causa-raiz (teste de regressão com `pytest-timeout` + faulthandler):** testes não mockam `AgentService`; `submit_questionnaire` + `generate_ocg_from_questionnaire` disparam pipeline de 8 agentes nativos que invocam `AgentService._call_llm` (httpx ou Anthropic SDK real com timeout 120s). Container de teste herdava keys reais do `.env` — chamadas completavam de verdade, 10-30s cada, acumulando minutos por caso. Viola CLAUDE.md §6.5 (Contexto A vs B). | Gate MVP 4 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
+| DT-046 | **Critical** | OCG com STACK/ARCHITECTURE vazios no dogfood | Descoberto 2026-04-18 no dogfood do projeto real `Automação Jurídica Assistida` (ocg `89b0ec95…`): `STACK_RECOMMENDATION={}` e `ARCHITECTURE_OVERVIEW={}` apesar de `PROJECT_PROFILE` ter `frontend_stack=[React, Vite+React]`, `backend_language=Python`, `backend_framework=FastAPI`, `database=PostgreSQL`, `ai_provider=Anthropic`. UI mostra "Aguardando Documentação" na aba OCG. Causa: `consolidate_ocg` em `agent_service.py:595-600` fazia fallback `or {}` quando o LLM omitia essas chaves — nenhuma reconstituição a partir de `project_metadata`. Viola contrato §5 ("nenhum módulo deve assumir defaults invisíveis quando o OCG estiver incompleto"). **Fluxo do usuário quebrado**: GP respondeu stack no questionário, questionário aprovou com 96% aderência, mas OCG final não expunha a stack — como se a resposta tivesse sido perdida. | Dogfood MVP 4 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-030 | **Critical** | Storage efêmero / uploads | `STORAGE_PATH=/tmp/gca-storage` dentro do container `gca-backend` não tinha volume Docker mountado — `/tmp` é sistema de arquivos do container, zerado a cada `docker restart`. Resultado: todo upload de Ingestão (PDF, DOCX, XLSX, etc) ficava órfão no DB após qualquer restart (upgrade de backend, hot-reload heavy, deploy) — registro com `content_status` e `file_hash` válidos mas bytes fisicamente perdidos. Descoberto 2026-04-17 quando tentei rodar `_analyze_async` no PDF `smoke_mvp2_complemento_pilares.pdf` do user e o arquivo não existia mais. Violação da expectativa mínima de um sistema de ingestão. | Dogfood MVP 2 2026-04-17 | **Quitada 2026-04-17** — ver §4 |
 
 ---
@@ -204,6 +206,8 @@ Superfície já construída (auditada 2026-04-18):
 | DT-040 | 2026-04-18 | **Suite sincronizada em 4 ondas.** Onda 1 (commit `e0e6d7b`): fixture `test_project` + factory `create_test_project` passam `deliverable_type="new_system"` (NOT NULL desde DT-015); mock_db de `test_gatekeeper` fornece 3 results (items, modules, ocg) após DT-035/036/037 adicionarem consulta de OCG; `db_session` teardown suprime `RuntimeError: Event loop is closed` noise. Onda 2 (commit `11520bb`): deletado `test_e2e_fase3_5.py` (420 linhas, testava `mock_n8n_service` removido na deprecação do n8n); `pypdf`+`reportlab`+`esprima` instalados runtime no container (já em requirements.txt, ausentes da imagem por cache antigo — DT follow-up operacional é rebuild). Onda 3 (commit `1745a1b`): `test_build_prompt` passa `project_api_key="sk-test-dummy-key"` (DT-012 tornou ArguiderService exigente). Onda 4 (commit `822f139`): `test_ocg_generation_from_questionnaire` passa `project_id=test_questionnaire.project_id` (antes passava None → IntegrityError em ai_usage_log); `test_codegen_persistence.py` marcado com `pytest.skip(allow_module_level=True)` com razão explícita "escopo MVP 3 — contrato §7". | `backend/app/tests/conftest.py`, `backend/app/tests/factories.py`, `backend/app/tests/test_gatekeeper.py`, `backend/app/tests/test_ingestion.py`, `backend/app/tests/test_ocg_e2e.py`, `backend/app/tests/test_codegen_persistence.py` (+skip banner), deletado `backend/app/tests/test_e2e_fase3_5.py` | Suite antes: **312 passed / 20 failed / 11 errors / 2 collect errors**. Suite depois: **344+ passed / 0 failed** (rodada completa abaixo no veredito do gate). |
 | DT-038 | 2026-04-18 | **Compartimentalização de notificações** (contrato §2.2). **Schema**: migration `020_project_responsible_admin.sql` adiciona coluna `projects.responsible_admin_id UUID FK users(id) ON DELETE SET NULL`, nullable, com índice. Backfill seguro: na instância atual há 1 admin real (`pielak.ctba@gmail.com`), projetos existentes recebem esse id; projetos futuros recebem o admin que aprovou a criação via `admin_service`. **Model**: `Project.responsible_admin_id` + relacionamento `responsible_admin`. **Criação**: `admin_service.py` ao aprovar uma `ProjectRequest` agora seta `responsible_admin_id=admin_id` no Project recém-criado (o admin que aprovou assume a responsabilidade). **Notificação**: `_notify_admins_questionnaire_submitted` recebe `project_id` e aplica 3 regras: (1) project com `responsible_admin_id` setado → notifica **apenas** esse admin; (2) project sem responsible (legado/bug) → fallback pra todos admins + log `questionnaire.no_responsible_admin_fallback`; (3) fluxo externo sem project_id (solicitar-projeto) → todos admins (inbox pré-aprovação, não há relação ainda). Log `questionnaire.notification_scope` sempre registra `scope` + `recipients` pra auditoria. | `backend/migrations/020_project_responsible_admin.sql`, `backend/app/models/base.py` (+col+relation em `Project`), `backend/app/services/admin_service.py` (+1 linha no `Project(...)`), `backend/app/services/questionnaire_service.py` (+param `project_id` e lógica de scope) | Migration aplicada em `gca` e `gca_test`. Backfill: 1/1 projeto existente (Automação Jurídica Assistida) apontando para o admin real. Backend reload limpo; `Project.responsible_admin_id` visível via ORM. Instância atual (1 admin) mantém comportamento identical na prática — fallback cobre qualquer edge case. Efeito real aparece em instâncias futuras com multi-admin. |
 | DT-034 | 2026-04-18 | **Isolamento duro de DB pra testes** (CLAUDE.md §11.3 endereçada). (1) **Infra**: DB `gca_test` criado no container `gca-postgres` via `CREATE DATABASE gca_test OWNER gca`; schema clonado de `gca` com `pg_dump --schema-only` (54 tabelas, zero dados). (2) **Conftest**: `backend/app/tests/conftest.py` ganha prelúdio que seta `DATABASE_URL=postgresql+asyncpg://gca:gca_secret@localhost:5432/gca_test` e `TESTING=1` **antes** de qualquer `from app.*` (Pydantic Settings lê env no primeiro import de `app.core.config`, então ordem é crítica). Regex guard bloqueia com `RuntimeError` se a URL resolver pra `/gca` (produção) — pytest não consegue rodar contra prod mesmo que alguém tente forçar. (3) **Doc**: `CLAUDE.md §11.3` reescrita registrando o estado atual + regras operacionais (como re-sincronizar `gca_test` quando schema de `gca` mudar). Efeito: services que fazem `async with AsyncSessionLocal() as db` dentro de tasks assíncronas (factories, `_analyze_async`) agora commitam em `gca_test`, não contaminam mais dogfood. | `backend/app/tests/conftest.py` (prelúdio + guard), `CLAUDE.md §11.3`, DB `gca_test` (CREATE + schema clone) | Validação via `/tmp/dt034_verify.py`: confirma `settings.DATABASE_URL → gca_test`, `engine.url → gca_test`, `current_database() → gca_test`, 54 tables, 0 users, e que o regex guard bloqueia 2 URLs de prod e permite 2 de teste. Prod `gca` intacta: `SELECT COUNT(*) FROM users` = 3 (os 3 reais, sem fake). |
+| DT-046 | 2026-04-18 | **Fallback determinístico para STACK_RECOMMENDATION e ARCHITECTURE_OVERVIEW**. Em `agent_service.py`: (1) novos helpers estáticos `_pick(meta, *keys, default)` (leitura tolerante a variantes `architecture`/`architectural_profile`, `redis_purpose`/`redis_usage`, `ai_purpose`/`ai_use_cases`, `deliverables`/`main_deliverable`), `_stack_from_metadata(meta)` (monta frontend/backend/database/cache/messaging/ai com `source=questionnaire_deterministic_fallback`), `_architecture_from_metadata(meta)` (architectural_profile/execution_model/multi_tenant/HA/async/deliverables). (2) `consolidate_ocg` troca `or {}` por `or self._stack_from_metadata(req.project_metadata or {})` e equivalente para arquitetura — respeita LLM se vier preenchido, reconstitui se LLM omitir. (3) Script `scripts/dt046_reconsolidate_real_ocg.py` aplica o fallback a OCGs já persistidos sem gasto de LLM; grava delta `trigger_source=dt046_deterministic_fallback` em `ocg_delta_log`. Executado no projeto real `Automação Jurídica Assistida` (ocg `89b0ec95…`): STACK agora mostra React/Vite+React/TypeScript + Python/FastAPI + PostgreSQL + Anthropic/[Cache leitura, Sessões]/[Análise requisitos, Chat]; ARCHITECTURE mostra [Monólito modular, Clean Architecture] + [On-premises, Containerizado] + HA=Futuramente + async=Sim + deliverables=[Aplicação web, API]. (4) Teste novo `test_dt046_stack_fallback.py` com 8 casos (full metadata, empty, None, aliases de PROJECT_PROFILE, arquitetura, projeto real Automação Jurídica) — rodam **sem mock de LLM**, valida apenas os helpers puros. | `backend/app/services/agent_service.py` (+3 staticmethods +6 linhas no consolidate_ocg), `backend/app/tests/test_dt046_stack_fallback.py` (novo, 8 casos), `scripts/dt046_reconsolidate_real_ocg.py` (novo) | Suite 394 passed / 0 failed em 43.06s contra `gca_test`. OCG real do dogfood atualizado (verificado via `SELECT ocg_data…`). Atende contrato §5 e o fluxo do GP. |
+| DT-045 | 2026-04-18 | **Hang do pipeline OCG em pytest eliminado via patch em `_call_llm`**. Fixture `autouse=True` adicionada em `conftest.py` logo após o guard DT-034: `_dt045_patch_agent_llm` monkey-patcha `AgentService._call_llm` com `_dt045_fake_call_llm`, que retorna `(str, int)` determinístico indexado por `operation` (`analyzer` / `pillar_pN` / `consolidator`). Stubs JSON cobrem o schema que os próprios métodos high-level parseiam via `_extract_json` — logo `analyze_questionnaire`/`analyze_pillar`/`consolidate_ocg` continuam executando real, testando a lógica de normalização, construção de `AnalyzerResponse`/`PillarAgentResponse`/`OCGResponse`, billing skip e persistência. Boundary HTTP é o único ponto substituído. Ajuste secundário: `COMPOSITE_SCORE.status` e `APPROVAL_STATUS.status` do stub do consolidator ajustados para `READY` (valor válido esperado por `test_ocg_generation_from_questionnaire`). Fix da DT-041 aplicado em paralelo em runtime (`pip install esprima reportlab pypdf` dentro do container) para destravar os 2 testes que dependiam dessas libs. Resultado binário: suite completa (ignorando só `test_fluxo_completo.py` por playwright ausente) **386 passed / 0 failed / 0 errors em 42.72s** contra `gca_test`. Prod `gca` intacta. | `backend/app/tests/conftest.py` (+90 linhas: stubs + fixture autouse), container runtime (`esprima`, `reportlab`, `pypdf`) | 386/386 passing; antes da fixture: 2 arquivos travavam indefinidamente com pytest processes em state Sleeping. `test_mvp4_rbac.py` 29/29 ✅; features §7 MVP 4 verde. |
 | DT-020 | 2026-04-18 | Trace do PDF submetido via aba Questionário. **Schema**: migration `019_questionnaire_pdf_trace.sql` adiciona 4 colunas nullable à `questionnaires` (`uploaded_filename`, `file_hash`, `file_size_bytes`, `answered_questions`) — retrocompat total com questionários anteriores. **Backend**: `questionnaire_pdf_router.upload_questionnaire_pdf` grava filename/sha256/tamanho/contagem de respostas imediatamente após `submit_questionnaire` bem-sucedido (numa TX separada, erro de escrita não quebra o fluxo). `GET /projects/:id/questionnaire` expõe os 4 campos na resposta. **Frontend**: `ExistingQuestionnaire` e `StatusCard` mostram caption abaixo do status — "PDF recebido: Meu.pdf · 80 KB · 44/49 respostas extraídas · hash abc12345…" (hash completo no title). Resolve a confusão "onde foi parar meu arquivo?" que levou o user a tentar re-upload via aba Ingestão (origem da DT-021). Não ingere o PDF como documento — mantém DT-015 intacta. | `backend/migrations/019_questionnaire_pdf_trace.sql`, `backend/app/models/base.py` (+4 colunas em `Questionnaire`), `backend/app/routers/projects.py` (+4 campos no response), `backend/app/routers/questionnaire_pdf_router.py` (+25 linhas de trace-save), `frontend/src/pages/projects/QuestionnairePage.tsx` (+20 linhas no StatusCard) | Commit `d2bef62`. Migration aplicada no DB dogfood. Próxima submissão real de PDF vai popular os campos; submissões antigas permanecem com null (caption só aparece se `uploaded_filename` presente). |
 
 ### Resíduos conhecidos (fora do escopo do MVP 1; programados para MVPs posteriores)
@@ -252,21 +256,23 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (MVP 2)
-**NÃO AVANÇAR** (1 item do §10 ainda pendente — validação manual)
+### Situação atual do gate (MVP 4)
+**NÃO AVANÇAR** — validação dogfood E2E MVP 4 ainda não executada.
 
 ### Motivo
-Dívida de saneamento (DT-012, DT-013, DT-014) quitada em 2026-04-17.
-Features canônicas entregues em 2026-04-17:
+Base do MVP 4 instalada e testes verde:
 
-- ✅ **OCG versionado com deltas operacional (incluindo contração no delete)** — commit `3942f6a`. `IngestionService._contract_ocg_for_deleted_document` reverte campos tocados pelo doc, respeita deltas posteriores (fields_skipped), grava delta `trigger_source=document_removal`. 4 testes passando.
-- ✅ **Quarentena de PII estável e testada** — commit `3942f6a`. `_detect_pii` passa a validar CPF/CNPJ via mod-11 e cartão via Luhn, elimina falso-positivo de runs de 14 dígitos em xref de PDF que causava quarentena espúria do questionário. 33 testes passando.
-- ✅ **Arguidor sem resíduos de hardcode** — DT-012 (commit `1947340`, 2026-04-17) removeu o fallback a `ANTHROPIC_API_KEY` e agora o `__init__` levanta `RuntimeError` explícito se não houver chave do projeto. O SDK `AsyncAnthropic` direto na linha 184 é conhecido residual, mas cai em escopo MVP 3 (multi-provider adapter, §4 resíduos).
-- ✅ **Reavaliação do Gatekeeper após ingestão disparando corretamente** — commit `1a2e917`. `_reevaluate_gatekeeper_async` fire-and-forget adjacente ao `_propagate_async` grava evento `GATEKEEPER_REEVALUATED` no audit_log com `blocking_pillars`, `derived_status` e `ocg_version`. 3 testes passando.
-- ✅ **Backlog derivado do OCG consistente com o contexto atual** — commit `96eb131`. `_fire_ocg_change_hooks` centraliza o disparo de propagate + gatekeeper reeval nos 3 pontos onde OCG muda: ingestão (já existia), contração no delete (antes não disparava), e geração inicial via questionário (antes não disparava). Projeto novo agora tem backlog populado automaticamente. 4 testes passando.
-- ⏸️ **Ingestão madura end-to-end** — quarentena + contração + reavaliação + backlog seeding OK; falta validar integração no dogfood sem quebras.
+- ✅ **RBAC DT-044 aplicado** — 33 `require_action` nos 4 routers (qa 12 · deliverables 9 · roadmap 8 · livedocs 6). Matriz binária do contrato §4.1 auditada linha-a-linha: Admin sem membership = 403; GP = 403 em writes de teste e code; Dev/Tester/QA com scoping. `test_mvp4_rbac.py` — 29/29 passing.
+- ✅ **Features canônicas §7 MVP 4 presentes** — `qa_router` + `qa_service` + `QAReadinessPage` + `TesterReviewPage` (execução/revisão de testes com evidência exportável); `livedocs_router` + `livedocs_service` + `LiveDocsPage` (Documentação Viva refrescável); `roadmap_router` + `roadmap_service` + `RoadmapPage` (Roadmap coerente com backlog derivado do OCG — DT-037 guarda o consumidor); `deliverables_router` + `release_bundle_service` + surface em `ReadinessPage` (Release Bundle com gate de qa:approve em `POST /releases`).
+- ✅ **DT-045 quitada** — `AgentService._call_llm` patchado em `conftest.py` via autouse fixture. Hang eliminado; pipeline OCG continua validado via stubs determinísticos que alimentam o parsing real dos agents.
+- ✅ **Suite pytest 394/394 passing** em 43.06s contra `gca_test` isolado (DT-034). Prod `gca` intacta (3 users reais). Único `--ignore` restante: `test_fluxo_completo.py` (playwright não instalado — teste de GUI E2E fora do escopo MVP 4).
+- ✅ **DT-046 quitada** — `STACK_RECOMMENDATION` e `ARCHITECTURE_OVERVIEW` do OCG real do projeto `Automação Jurídica Assistida` populados via fallback determinístico. Fluxo real do GP agora aparece íntegro na UI.
+- ✅ **Containers rodando** — backend/frontend/postgres/redis/n8n up.
+- ⏸️ **Validação dogfood E2E MVP 4** — abrir QA/LiveDocs/Roadmap/Release Bundle na UI e atestar binariamente que cada um funciona ponta-a-ponta com projeto real. Pendente.
+- ⏸️ **DT-041 image drift** — paliativo aplicado em runtime (`pip install esprima reportlab pypdf` no container); correção definitiva continua sendo rebuild `--no-cache`.
 
-Gate abre apenas quando §10 estiver inteiramente atendido.
+Gate abre apenas quando a validação dogfood confirmar binário SIM em cada
+item §7 MVP 4 e nenhum critério §9 regredir.
 
 ### Histórico do gate
 - MVP 1 → **PODE AVANÇAR** em 2026-04-17 com todos os 5 Criticals quitados
@@ -284,18 +290,26 @@ Gate abre apenas quando §10 estiver inteiramente atendido.
 - MVP 2 → 5 de 6 itens canônicos entregues em 2026-04-17 (+ backlog
   consistente commit `96eb131` cobrindo os 3 pontos de mudança de OCG).
   Resta apenas validação ingestão end-to-end no dogfood.
-- MVP 2 → Sessão fim do dia 2026-04-17 (dogfood): DT-017 (`/novo-projeto`
-  redundante), DT-018 (PDF flattened silencioso), DT-019 (SMTP vazando
-  para admins fake + limpeza de 18 users/16 projetos/2 questionários
-  órfãos de factory), DT-022 (erro do Arguidor opaco) quitadas. DT-020
-  (trace do PDF na aba Questionário — requer migration) e DT-021
-  (bloquear upload de questionário via Ingestão) abertos, mas não são
-  blocker do gate. Refator de consolidação de Configurações (IA/SMTP/
-  Repo/Questionário como abas unificadas + Dashboard bloqueado por
-  `RequireProjectSetup`) entregue no commit `cda35fe`. Botões "Testar
-  conexão" (LLM) e "Enviar email de teste" (SMTP) agora presentes na
-  UI via commit `51ea5c2`. Gate permanece fechado apenas pela validação
-  end-to-end manual no dogfood.
+- MVP 2 → Sessão fim do dia 2026-04-17 (dogfood): DT-017, DT-018, DT-019,
+  DT-022 quitadas. DT-020, DT-021 abertas não-blocker. Consolidação da UI
+  de Configurações + botões "Testar conexão". Gate permanece fechado pela
+  validação end-to-end manual no dogfood.
+- MVP 2 → **ENCERRADO 2026-04-18** com DT-040 quitada (suite sincronizada).
+  Commit `5385faa` marca gate ABERTO (binário).
+- MVP 3 → Abertura 2026-04-18 (commit `dd32e20`). Escopo §7 MVP 3: CodeGen
+  controlado, preview, RBAC por papel, análise de adequação do provedor.
+- MVP 3 → **ENCERRADO 2026-04-18** com DT-042 e DT-043 quitadas (commits
+  `a502563` e `f05300c`). Suite: 357 passed / 0 failed / 0 errors (14:59
+  contra `gca_test`). 10/10 critérios §9 verde.
+- MVP 4 → Abertura 2026-04-18 (commit `d374a35`).
+- MVP 4 → DT-044 quitada (commit `c787dbb`, 29/29 tests RBAC). Gate
+  continua fechado na revalidação 2026-04-18 por DT-045 (hang em
+  `test_ocg_e2e.py` e `test_e2e_pipeline_fase6.py`) + validação dogfood
+  E2E MVP 4 ainda não executada.
+- MVP 4 → DT-045 quitada (autouse fixture patcha `AgentService._call_llm`
+  em `conftest.py`). Paliativo DT-041 em runtime (libs instaladas).
+  Suite 386/386 passing em 42.72s. Gate continua fechado **apenas** pela
+  validação dogfood E2E MVP 4 pendente.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -303,25 +317,35 @@ automaticamente a **NÃO AVANÇAR** até quitação.
 
 ---
 
-## 7. Ordem recomendada de saneamento (MVP 2)
+## 7. Ordem recomendada de saneamento (MVP 4)
 
-1. **Governança de IA nos serviços do escopo MVP 2** (DT-012, DT-013)
-   - remover fallback silencioso em `arguider_service.py` e `ingestion_service.py`;
-   - aplicar resolver canônico (`AIKeyResolver.get_project_key` sem fallback
-     ao `ANTHROPIC_API_KEY` global);
-   - toda chamada deve falhar explicitamente se o projeto não tem chave.
+1. **DT-045 — testes e2e que hangam** (Critical, bloqueador do gate)
+   - diagnosticar o hang de `test_ocg_e2e.py::TestConsolidator` e de
+     `test_e2e_pipeline_fase6.py` (já tem `LLMServiceFactory.create_client`
+     mockado mas alguma corotina não resolve — provável chamada direta a
+     `ai_service`/`agent_service` fora do patch);
+   - opção A: completar mocks / patching para todos os clientes AI
+     invocados pelos paths `submit_questionnaire` → `generate_ocg_*`;
+   - opção B: marcar os casos específicos como `pytest.mark.skip(reason=...)`
+     com justificativa até que os mocks sejam corrigidos, nunca remover
+     silenciosamente; revalidar gate.
 
-2. **OCG Updater alinhado à política** (DT-014)
-   - tratar uso de `DEFAULT_AI_PROVIDER` em `ocg_updater_service.py` com
-     classificação de criticidade;
-   - OCG updates = alta criticidade (consolidação → modelo premium).
+2. **Validação dogfood E2E MVP 4** (binária SIM/NÃO por item)
+   - QA Readiness: abrir `QAReadinessPage`, ver pilares com score, verificar
+     RBAC (Dev/Tester executa; QA aprova);
+   - Tester Review: editar teste como Tester, aprovar como QA, exportar log
+     via `GET /qa/logs/export`;
+   - LiveDocs: alterar OCG, confirmar `POST /docs/refresh` atualiza
+     documentação;
+   - Roadmap: regenerar backlog via `POST /roadmap/regenerate` sob
+     `backlog:manage`;
+   - Release Bundle: criar `POST /releases` (precisa `qa:approve`), baixar
+     via `GET /releases/download`.
 
-3. **Features do MVP 2** (ordem canônica do contrato §7)
-   - ingestão madura + quarentena de PII;
-   - OCG versionado com deltas + contração no delete (feedback do user);
-   - backlog derivado do OCG consistente;
-   - Arguidor funcional end-to-end;
-   - reavaliação do Gatekeeper após ingestão.
+3. **DT-041 — deploy image drift** (Minor, operacional)
+   - `docker compose build --no-cache gca-backend` e validar que `pypdf`,
+     `reportlab` e `esprima` ficam persistidos na imagem; fora do caminho
+     crítico do gate, mas evita retrabalho em CI.
 
 > Cada passo exige revalidação de testes e gate antes do próximo.
 
@@ -352,20 +376,29 @@ Antes de qualquer mudança:
 |---|---|---|---|
 | 2026-04-17 | Separação explícita entre Contexto A (IA de desenvolvimento do GCA) e Contexto B (IA operacional do cliente). Regra dura de não acoplamento: escolha de IA no desenvolvimento do produto não vira dependência obrigatória do cliente. | `GCA_CANONICAL_CONTRACT.md §6.6` (novo), `CLAUDE.md §6.5` (novo), `GCA_MVP_PROGRESS.md §5.3` (nota) | Prevenir que conveniência de desenvolvimento (ex.: usar Claude/Anthropic para construir o GCA) seja lida como obrigação do cliente final. Preserva flexibilidade multi-provedor por instância/projeto. Sem mudança de código. |
 | 2026-04-17 | Saneamento de working tree acumulada: 5 commits organizando 3 frentes (bugfixes, MVP 2 core, automação session 22). Trabalho anterior não commitado foi agrupado por coerência; senha em plaintext em `scripts/capturar_telas_gca.py` extraída para env var antes do commit. | commits `32e12a8`, `80d438d`, `3942f6a`, `f3db454`, `609ca1c` | Reduzir risco de rollback confuso. Trabalho de sessão anterior (contração OCG + PII + scripts manual/tutorial + bugfixes de aprovação GP e axios multipart) estava misturado na working tree sem trilha clara. |
+| 2026-04-18 | Saneamento do documento §6/§7/§10 para o MVP 4. Versões anteriores ainda descreviam gate, ordem de saneamento e marco de saída do MVP 2 apesar do cabeçalho anunciar MVP 4 ativo. Adicionado histórico das transições MVP 2 → 3 → 4. Registrada DT-045 (testes e2e que hangam) como novo Critical do MVP 4. | `GCA_MVP_PROGRESS.md §6`, `§7`, `§10`, `§3.2` (DT-045), cabeçalho (versão 1.6) | Eliminar contradição estrutural apontada pelo gate §9 critério 3. Garantir que futuras sessões partam do estado verdadeiro em vez de reinterpretar o MVP 2. Sem mudança de código. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
 ---
 
-## 10. Próximo marco de saída do MVP 2
+## 10. Próximo marco de saída do MVP 4
 
-O MVP 2 poderá ser considerado apto a encerrar quando:
-- [x] todos os Criticals da fase (DT-012, DT-013) estiverem quitados — 2026-04-17;
-- [x] OCG Updater aplicar a política de criticidade (DT-014) — 2026-04-17;
-- [~] ingestão + quarentena PII estiverem estáveis e testadas — quarentena OK (commit `3942f6a`, 33 testes); integração end-to-end falta validar no dogfood;
-- [x] OCG versionado com deltas operacional (incluindo contração no delete) — commit `3942f6a`, 4 testes;
-- [x] backlog derivado do OCG consistente com o contexto atual — commit `96eb131`, 4 testes; `_fire_ocg_change_hooks` centraliza o disparo nos 3 pontos: ingestão, contração no delete, geração inicial via questionário;
-- [x] Arguidor funcional sem resíduos de hardcode — DT-012 quitada em commit `1947340` (`arguider_service.py:174` agora é o guard `RuntimeError`, não o fallback). Multi-provider adapter permanece escopo MVP 3;
-- [x] reavaliação do Gatekeeper após ingestão disparando corretamente — commit `1a2e917`, 3 testes; emite evento `GATEKEEPER_REEVALUATED` com `{trigger, ocg_version, blocking_pillars, derived_status}`;
-- [x] testes da fase passando e nenhum Critical do MVP 1 tiver regredido — 313/336 passando; 23 failures pré-existentes inalteradas;
+O MVP 4 poderá ser considerado apto a encerrar quando:
+- [x] DT-044 — RBAC enforcement nos 4 routers (qa, livedocs, deliverables,
+  roadmap) — commit `c787dbb`, 29/29 testes em `test_mvp4_rbac.py`;
+- [x] features canônicas §7 MVP 4 presentes no código — QAService, LiveDocsService,
+  RoadmapService, ReleaseBundleService instanciados e surfaced nas páginas
+  respectivas;
+- [x] **DT-045 — testes e2e que hangam** — quitada 2026-04-18. Autouse
+  fixture patcha `AgentService._call_llm`. Suite 386 passed / 0 failed
+  em 42.72s contra `gca_test`;
+- [ ] **validação dogfood E2E MVP 4** — cada item §7 do contrato atestado
+  binariamente por execução manual no `gca.code-auditor.com.br`:
+  - [ ] QA Readiness com métricas por pilar rendering real;
+  - [ ] execução + revisão de testes + exportação de evidências;
+  - [ ] Documentação Viva atualizando pós-mudança do OCG;
+  - [ ] Roadmap coerente com backlog derivado do OCG (guard DT-037);
+  - [ ] Release Bundle com gate de `qa:approve` efetivo;
+- [ ] nenhum Critical dos MVPs anteriores tiver regredido;
 - [ ] gate mudar para **PODE AVANÇAR** com justificativa registrada.

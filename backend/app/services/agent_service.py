@@ -592,12 +592,22 @@ Return complete JSON analysis with score, classification, findings, and recommen
                     ocg_json.get("COMPOSITE_SCORE") or ocg_json.get("composite_score"),
                     overall_score, any_blocking
                 ),
-                STACK_RECOMMENDATION=ocg_json.get("STACK_RECOMMENDATION") or ocg_json.get("stack_recommendation") or ocg_json.get("stack", {}),
+                STACK_RECOMMENDATION=(
+                    ocg_json.get("STACK_RECOMMENDATION")
+                    or ocg_json.get("stack_recommendation")
+                    or ocg_json.get("stack")
+                    or self._stack_from_metadata(req.project_metadata or {})
+                ),
                 CRITICAL_FINDINGS=ocg_json.get("CRITICAL_FINDINGS") or ocg_json.get("critical_findings") or [f for pr in req.pillar_results for f in pr.findings if f.get("severity") == "critical"],
                 TESTING_REQUIREMENTS=ocg_json.get("TESTING_REQUIREMENTS") or ocg_json.get("testing_requirements") or ocg_json.get("testing", {}),
                 COMPLIANCE_CHECKLIST=ocg_json.get("COMPLIANCE_CHECKLIST") or ocg_json.get("compliance_checklist") or ocg_json.get("compliance", []),
                 DELIVERABLES=ocg_json.get("DELIVERABLES") or ocg_json.get("deliverables", {}),
-                ARCHITECTURE_OVERVIEW=ocg_json.get("ARCHITECTURE_OVERVIEW") or ocg_json.get("architecture_overview") or ocg_json.get("architecture", {}),
+                ARCHITECTURE_OVERVIEW=(
+                    ocg_json.get("ARCHITECTURE_OVERVIEW")
+                    or ocg_json.get("architecture_overview")
+                    or ocg_json.get("architecture")
+                    or self._architecture_from_metadata(req.project_metadata or {})
+                ),
                 RISK_ANALYSIS=ocg_json.get("RISK_ANALYSIS") or ocg_json.get("risk_analysis") or ocg_json.get("risks", {}),
                 APPROVAL_STATUS=ocg_json.get("APPROVAL_STATUS") or ocg_json.get("approval_status") or {"status": "NEEDS_REVIEW" if any_blocking else "APPROVED", "overall_score": overall_score},
             )
@@ -679,6 +689,106 @@ Return complete JSON analysis with score, classification, findings, and recommen
         except Exception as e:
             logger.error("agent.ocg_save_error", error=str(e))
             raise
+
+    @staticmethod
+    def _pick(meta: dict, *keys, default=None):
+        """DT-046: leitura tolerante a variantes de nome de campo.
+
+        `project_metadata` e `PROJECT_PROFILE` carregam os mesmos dados com
+        nomes parcialmente distintos (ex: `architecture` vs
+        `architectural_profile`, `redis_purpose` vs `redis_usage`,
+        `ai_purpose` vs `ai_use_cases`). O helper aceita lista de nomes e
+        retorna o primeiro valor truthy encontrado.
+        """
+        if default is None:
+            default = []
+        if not isinstance(meta, dict):
+            return default
+        for k in keys:
+            v = meta.get(k)
+            if v not in (None, "", [], {}):
+                return v
+        return default
+
+    @staticmethod
+    def _stack_from_metadata(meta: dict) -> dict:
+        """DT-046: fallback determinístico para STACK_RECOMMENDATION.
+
+        Contrato §5: "nenhum módulo deve assumir defaults invisíveis quando o
+        OCG estiver incompleto". Se o LLM consolidator não retorna
+        STACK_RECOMMENDATION (JSON mal formatado, truncation, omissão), o
+        sistema DEVE reconstituir a partir do que o GP já respondeu no
+        questionário — não pode ficar vazio e dar a impressão de que o OCG
+        não tem contexto.
+
+        Aceita tanto `project_metadata` (montado em `ocg_service`) quanto
+        `PROJECT_PROFILE` (salvo no OCG), cujos campos têm alguns nomes
+        distintos. Retorno tem `source: "questionnaire_deterministic_fallback"`
+        para auditar na UI/log que é fallback, não saída do LLM.
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+        pick = AgentService._pick
+        return {
+            "frontend": {
+                "enabled": bool(meta.get("has_frontend", False)),
+                "stack": pick(meta, "frontend_stack"),
+                "language": pick(meta, "frontend_language", default=""),
+                "type": pick(meta, "frontend_type"),
+                "requirements": pick(meta, "frontend_requirements"),
+            },
+            "backend": {
+                "enabled": bool(meta.get("has_backend", False)),
+                "language": pick(meta, "backend_language", default=""),
+                "framework": pick(meta, "backend_framework"),
+                "type": pick(meta, "backend_type"),
+                "requirements": pick(meta, "backend_requirements"),
+            },
+            "database": {
+                "engine": pick(meta, "database", default=""),
+                "profile": pick(meta, "database_profile"),
+            },
+            "cache": {
+                "enabled": bool(meta.get("uses_redis")),
+                # project_metadata usa `redis_purpose`; PROJECT_PROFILE usa `redis_usage`
+                "purpose": pick(meta, "redis_purpose", "redis_usage"),
+            },
+            "messaging": {
+                "enabled": bool(meta.get("uses_messaging")),
+                "purpose": pick(meta, "messaging_purpose", "messaging_usage"),
+            },
+            "ai": {
+                "enabled": bool(meta.get("uses_ai")),
+                "provider": pick(meta, "ai_provider"),
+                # project_metadata usa `ai_purpose`; PROJECT_PROFILE usa `ai_use_cases`
+                "purpose": pick(meta, "ai_purpose", "ai_use_cases"),
+                "restrictions": pick(meta, "ai_restrictions"),
+            },
+            "source": "questionnaire_deterministic_fallback",
+        }
+
+    @staticmethod
+    def _architecture_from_metadata(meta: dict) -> dict:
+        """DT-046: fallback determinístico para ARCHITECTURE_OVERVIEW.
+
+        Mesma motivação do `_stack_from_metadata`: o GP já respondeu Q16/Q17
+        (architecture + execution_model) e Q18/Q19/Q20 (multi-tenant/HA/async)
+        no questionário — não deve aparecer "vazio" na UI se o LLM omitir.
+        """
+        if not isinstance(meta, dict):
+            meta = {}
+        pick = AgentService._pick
+        return {
+            # project_metadata: `architecture`; PROJECT_PROFILE: `architectural_profile`
+            "architectural_profile": pick(meta, "architecture", "architectural_profile"),
+            "execution_model": pick(meta, "execution_model"),
+            "multi_tenant": pick(meta, "multi_tenant", default=""),
+            "high_availability": pick(meta, "high_availability", default=""),
+            "async_processing": pick(meta, "async_processing", default=""),
+            # project_metadata: `deliverables`; PROJECT_PROFILE: `main_deliverable`
+            "deliverables": pick(meta, "deliverables", "main_deliverable", "pipeline_deliverables"),
+            "source": "questionnaire_deterministic_fallback",
+        }
 
     @staticmethod
     def _normalize_composite_score(raw, fallback_score: float, fallback_blocking: bool) -> dict:
