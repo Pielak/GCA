@@ -32,6 +32,24 @@ services:
       timeout: 5s
       retries: 5
 
+  # Ollama (DT-023) — daemon LLM local acessível ao backend via DNS interna
+  # do Docker Compose. Mounta os modelos do host read-only para reusar o que
+  # o GP já tem instalado (qwen2.5-coder:7b, deepseek-r1:7b, etc) sem
+  # duplicar 4-8GB por modelo. Sem expose de porta — não conflita com o
+  # daemon Ollama do host (que continua escutando 127.0.0.1:11434).
+  # Acesso pelo backend: http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    container_name: gca-ollama
+    restart: unless-stopped
+    volumes:
+      - /usr/share/ollama/.ollama:/root/.ollama:ro
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   # FastAPI Backend
   backend:
     build:
