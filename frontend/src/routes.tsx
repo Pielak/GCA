@@ -114,6 +114,9 @@ export const router = createBrowserRouter([
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
           { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },
+          // Alias: URL antiga /code-generator redireciona pro path canônico /codegen.
+          // Mantido para não quebrar bookmarks/emails que ainda apontam pra cá.
+          { path: 'code-generator', element: <Navigate to="../codegen" replace /> },
           { path: 'qa', element: <RequireProjectSetup><QAReadinessPage /></RequireProjectSetup> },
           { path: 'tester-review', element: <RequireProjectSetup><TesterReviewPage /></RequireProjectSetup> },
           { path: 'backlog', element: <RequireProjectSetup><BacklogPage /></RequireProjectSetup> },
