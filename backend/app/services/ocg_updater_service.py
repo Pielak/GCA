@@ -179,6 +179,44 @@ class OCGUpdaterService:
         # 3. Parse da resposta (formato delta)
         deltas, change_type, context_health = self._parse_llm_response(llm_result)
 
+        # DT-037: auto-CONTRACT — contrato §5 ("ingestão ruim/conflitante contrai confiança")
+        # não pode depender só do LLM honrar o prompt imperativo (DT-035). Aqui forçamos
+        # a classificação quando sinais objetivos da análise indicam problema.
+        show_stoppers = arguider_analysis.get("show_stoppers") or []
+        gaps = arguider_analysis.get("gaps") or []
+        poor = arguider_analysis.get("poor_definitions") or []
+        ingestion_quality = (context_health or {}).get("quality", 0.5)
+
+        should_force_contract = False
+        contract_reasons = []
+        if len(show_stoppers) > 0:
+            should_force_contract = True
+            contract_reasons.append(f"{len(show_stoppers)} show_stopper(s)")
+        if isinstance(ingestion_quality, (int, float)) and ingestion_quality < 0.4:
+            should_force_contract = True
+            contract_reasons.append(f"context_health.quality={ingestion_quality:.2f} < 0.4")
+        # Se há muita lacuna (gaps) + muitas definições fracas, também é CONTRACT
+        if len(gaps) >= 3 and len(poor) >= 2:
+            should_force_contract = True
+            contract_reasons.append(f"{len(gaps)} gaps + {len(poor)} poor_definitions")
+
+        if should_force_contract and change_type != "CONTRACT":
+            logger.warning(
+                "ocg_updater.change_type_forced",
+                project_id=str(project_id),
+                original_type=change_type,
+                forced_to="CONTRACT",
+                reasons=contract_reasons,
+                message=(
+                    "LLM retornou change_type inconsistente com sinais de baixa qualidade "
+                    "da análise. Forçando CONTRACT para aderir ao contrato §5."
+                ),
+            )
+            change_type = "CONTRACT"
+            # Também força confidence a baixar se o LLM deixou acima de 0.5
+            if context_health.get("confidence", 0.5) > 0.5:
+                context_health["confidence"] = max(0.3, context_health.get("confidence", 0.5) - 0.2)
+
         # 4. Aplicar deltas localmente (deterministic, sem LLM, com optimistic concurrency)
         updated_ocg, applied, rejected = apply_deltas(current_ocg_data, deltas)
 

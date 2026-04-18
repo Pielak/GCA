@@ -49,6 +49,21 @@ class BacklogService:
         if not ocg or not ocg.ocg_data:
             return {"regenerated": 0, "message": "OCG não encontrado"}
 
+        # DT-037 / contrato §5: módulos não podem assumir defaults invisíveis
+        # quando OCG está incompleto. Se status=ocg_pending (update falhou,
+        # quarentena, etc), skip regeneração — backlog atual permanece.
+        if ocg.status == "ocg_pending":
+            return {
+                "regenerated": 0,
+                "skipped": True,
+                "reason": "ocg_pending",
+                "message": (
+                    "OCG está em estado 'ocg_pending' (última atualização não "
+                    "consolidou). Backlog não regenerado para não mascarar a "
+                    "inconsistência. Use 'Re-consolidar OCG' na aba OCG e tente novamente."
+                ),
+            }
+
         try:
             ocg_data = json.loads(ocg.ocg_data)
         except json.JSONDecodeError:
