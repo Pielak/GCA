@@ -209,6 +209,9 @@ class AdminService:
                 deliverable_type=request.deliverable_type or "new_system",
                 status="active",
                 provisioning_status="completed",
+                # DT-038: registra o admin que aprovou pra filtrar notificações
+                # futuras do projeto (contrato §2.2 — compartimentalização).
+                responsible_admin_id=admin_id,
             )
             self.db.add(project)
             await self.db.flush()

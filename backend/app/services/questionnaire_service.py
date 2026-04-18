@@ -128,12 +128,16 @@ class QuestionnaireService:
                     gp_email=gp_email,
                 )
 
-            # Notificar admins por email
+            # Notificar admin responsável (DT-038) ou fallback pra todos
+            # admins se projeto não tiver responsible_admin_id definido.
+            # Externo (sem project_id) sempre cai no fallback — ainda não há
+            # relação admin-projeto antes da aprovação.
             asyncio.create_task(
                 QuestionnaireService._notify_admins_questionnaire_submitted(
                     gp_email=gp_email,
                     project_name=project_name,
                     questionnaire_id=questionnaire_id,
+                    project_id=project_id,
                 )
             )
 
@@ -258,18 +262,66 @@ class QuestionnaireService:
         gp_email: str,
         project_name: str,
         questionnaire_id: str,
+        project_id: Optional[str] = None,
     ):
-        """Notifica todos os admins por email quando um questionário é submetido."""
+        """Notifica admin(s) por email quando um questionário é submetido.
+
+        DT-038 — compartimentalização de notificações (contrato §2.2).
+        Regra:
+        1. Se `project_id` existe E `Project.responsible_admin_id` está
+           setado → notifica **apenas** esse admin. É o caminho oficial
+           pós-aprovação do projeto.
+        2. Se `project_id` existe mas `responsible_admin_id` é NULL
+           (projeto legado sem backfill) → fallback pra todos admins +
+           log de warning pra alerta de gap arquitetural.
+        3. Se `project_id` é None (fluxo externo `/solicitar-projeto`,
+           projeto ainda não criado) → notifica todos admins ativos. Essa
+           submissão é o pré-gate da criação do projeto — admin precisa
+           decidir; não há relação admin-projeto ainda.
+        """
         try:
             from app.db.database import AsyncSessionLocal
-            from app.models.base import User
+            from app.models.base import User, Project
             from app.services.email_service import EmailService
 
             async with AsyncSessionLocal() as db:
-                result = await db.execute(
-                    select(User).where(User.is_admin == True, User.is_active == True)
+                admins: list = []
+                notification_scope = "all_admins"
+
+                if project_id:
+                    project = await db.get(Project, project_id)
+                    if project and project.responsible_admin_id:
+                        responsible = await db.get(User, project.responsible_admin_id)
+                        if responsible and responsible.is_active:
+                            admins = [responsible]
+                            notification_scope = "responsible_admin"
+                        else:
+                            logger.warning(
+                                "questionnaire.responsible_admin_inactive",
+                                project_id=str(project_id),
+                                admin_id=str(project.responsible_admin_id),
+                            )
+                    else:
+                        logger.warning(
+                            "questionnaire.no_responsible_admin_fallback",
+                            project_id=str(project_id),
+                            reason="project_not_found" if not project else "responsible_admin_id_null",
+                        )
+
+                # Fallback: nenhum admin responsável resolvido → todos admins ativos.
+                # (Fluxo externo sem project_id cai aqui; caminho legado também.)
+                if not admins:
+                    result = await db.execute(
+                        select(User).where(User.is_admin == True, User.is_active == True)
+                    )
+                    admins = list(result.scalars().all())
+
+                logger.info(
+                    "questionnaire.notification_scope",
+                    scope=notification_scope,
+                    recipients=len(admins),
+                    project_id=str(project_id) if project_id else None,
                 )
-                admins = result.scalars().all()
 
             subject = f"GCA — Novo questionário submetido: {project_name}"
             body = f"""

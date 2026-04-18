@@ -115,12 +115,19 @@ class Project(Base):
     provisioning_status = Column(String(50), default="pending")  # pending, in_progress, completed, failed
     provisioning_error = Column(String, nullable=True)
 
+    # DT-038: admin responsável pelo projeto (contrato §2.2). Notificações
+    # relacionadas ao projeto (questionário submetido, OCG gerado, etc)
+    # vão **apenas** para este admin. Nullable p/ retrocompat; fallback
+    # é notificar todos admins ativos com warning log de auditoria.
+    responsible_admin_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
     organization = relationship("Organization", back_populates="projects")
     members = relationship("ProjectMember", back_populates="project")
+    responsible_admin = relationship("User", foreign_keys=[responsible_admin_id])
 
     __table_args__ = (
         Index("idx_projects_org_id", organization_id),
