@@ -213,9 +213,27 @@ class ModuleCodegenService:
         """Pipeline completo de geração de código, testes e docs."""
         start_time = datetime.now(timezone.utc)
 
-        # Determinar linguagem a partir do OCG
-        stack = ocg_context.get("STACK_RECOMMENDATION", {})
-        language = stack.get("primary_language", "python").lower()
+        # Determinar linguagem a partir do OCG.
+        # DT-058 Sprint 2.0: ler `backend.language` (estrutura DT-046) com
+        # fallback ao legacy `primary_language`. Antes: lia só
+        # `primary_language` que NÃO existe na estrutura nova — toda chamada
+        # caía no fallback "python", IGNORANDO o que o GP escolheu no
+        # questionário (ex: GP marca Java + Spring Boot, módulo gera Python
+        # com pytest). Bug nunca apareceu em testes porque a maioria
+        # mockava `_generate_code_via_llm`.
+        stack = ocg_context.get("STACK_RECOMMENDATION", {}) or {}
+        language = "python"  # fallback determinístico
+        if isinstance(stack, dict):
+            backend = stack.get("backend") or {}
+            if isinstance(backend, dict):
+                lang_raw = backend.get("language")
+                if lang_raw and isinstance(lang_raw, str):
+                    language = lang_raw.lower().strip()
+            # Legacy: estruturas antigas de OCG têm `primary_language` no topo
+            if language == "python" and stack.get("primary_language"):
+                legacy = stack.get("primary_language")
+                if isinstance(legacy, str) and legacy.strip():
+                    language = legacy.lower().strip()
         test_framework = self.TEST_FRAMEWORK_MAP.get(language, "pytest")
 
         # Preparar dependências

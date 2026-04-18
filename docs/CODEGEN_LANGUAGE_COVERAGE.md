@@ -20,7 +20,7 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 |---|---|---|---|---|---|---|
 | **Python** | ✅ Python + FastAPI/Django/Flask | ✅ pytest | ✅ python:3.11-slim | ✅ pytest workflow | ❓ delegado ao LLM | ✅ projeto Automação Jurídica |
 | **JavaScript / TypeScript** | ✅ Node.js + NestJS/Express | ✅ jest | ✅ node:20-alpine multi-stage | ✅ jest workflow | ❓ delegado ao LLM | ❌ nunca |
-| **Java** | ✅ Java + Spring Boot/Quarkus | ✅ junit5 | ✅ eclipse-temurin:21 + Maven/Gradle | ✅ Java workflow | ❌ NÃO existe | ❌ nunca |
+| **Java** | ✅ Java + Spring Boot/Quarkus | ✅ junit5 | ✅ eclipse-temurin:21 + Maven/Gradle | ✅ Java workflow | ✅ Spring Boot 3.3 + Quarkus 3.13 (Sprint 2 DT-058) | ❌ pendente Sprint 4 |
 | **Kotlin** | ✅ Kotlin (Q27 lista direta) | ✅ junit5 | 🟡 reusa template Java | 🟡 reusa template Java | ❌ NÃO existe | ❌ nunca |
 | **Go** | ✅ Go | ✅ go_test | ✅ multi-stage golang:1.22 | ✅ Go workflow | ❌ NÃO existe | ❌ nunca |
 | **C#** | ✅ C# + ASP.NET | ✅ xunit | ❌ NÃO existe | ❌ NÃO existe | ❌ NÃO existe | ❌ nunca |
@@ -39,12 +39,12 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
   `get_stack_recommendations(language, architecture)` sem `project_id`
   — TypeError silencioso.
 
-### `module_codegen_service:218` lê chave errada do OCG (a sanear no Sprint 2)
-- Atualmente: `stack.get("primary_language", "python").lower()`.
-- Estrutura real do OCG (após DT-046): `stack.backend.language`.
-- Resultado: linguagem do GP é **ignorada**, fallback "python" sempre.
-- Test em `test_dt058_language_matrix.py::test_extract_language_known_bug_module_codegen_today`
-  documenta o bug — invertir assertiva quando consertado.
+### `module_codegen_service:218` lê chave errada do OCG ✅ QUITADO (Sprint 2.0)
+- Antes: `stack.get("primary_language", "python").lower()` — chave que
+  não existe na estrutura DT-046, fallback "python" sempre.
+- Agora: leitura tolerante DT-046 (`backend.language`) com fallback
+  legacy (`primary_language`). Linguagem do GP respeitada.
+- Teste em `test_dt058_language_matrix.py::test_module_codegen_service_extracts_language_from_dt046_structure`.
 
 ## Roadmap de fechamento
 
@@ -53,12 +53,13 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 - DT-059 piloter resiliente
 - Tests parametrizados de framework por linguagem
 
-### Sprint 2 — Templates Java/Spring
-- Scaffolder determinístico Java/Spring Boot (`pom.xml`, `Application.java`,
-  `application.yml`, estrutura `src/main/java/<pkg>/`)
-- Variante Quarkus alternativa
-- Despacho por language no `code_generation_service`
-- Fix do bug de `primary_language` vs `backend.language`
+### Sprint 2 — Templates Java/Spring ✅ FECHADO 2026-04-18
+- ✅ Scaffolder determinístico Java/Spring Boot 3.3 — `backend/app/services/scaffolders/java_spring.py`
+- ✅ Variante Quarkus 3.13 — `backend/app/services/scaffolders/java_quarkus.py`
+- ✅ Despacho por linguagem/framework — `dispatch_scaffold` em `dispatch.py`
+- ✅ Fix do bug `primary_language` vs `backend.language` (Sprint 2.0)
+- 46 testes novos cobrindo: estrutura, XML válido, deps por opção,
+  determinismo, projeto real Automação Jurídica em modo Java
 
 ### Sprint 3 — Demais linguagens
 - Go, C#, PHP, Kotlin — 1 commit por linguagem

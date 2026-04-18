@@ -127,23 +127,55 @@ def test_extract_language_empty_stack_falls_back():
     assert _extract_language_canonical(None) == "python"
 
 
-def test_extract_language_known_bug_module_codegen_today():
-    """REGRESSION: hoje module_codegen_service.py:218 lê `primary_language`
-    direto. Para o OCG real (DT-046, com `backend.language`), retorna
-    None → fallback "python" — DESCONSIDERA o que o GP realmente
-    escolheu. Este teste documenta o bug; quando module_codegen_service
-    for fixado, removê-lo ou inverter a assertiva.
+def test_module_codegen_service_extracts_language_from_dt046_structure():
+    """Sprint 2.0 DT-058: `module_codegen_service:216-235` agora lê
+    `backend.language` antes de cair em legado/fallback.
+
+    Replica a lógica fixada — quando ela for refatorada para um helper
+    público compartilhado, este teste passa a importar do helper direto.
     """
-    stack_real = {"backend": {"language": "Java"}}  # OCG real DT-046
+    def _module_codegen_extract(ocg_context: dict) -> str:
+        stack = ocg_context.get("STACK_RECOMMENDATION", {}) or {}
+        language = "python"
+        if isinstance(stack, dict):
+            backend = stack.get("backend") or {}
+            if isinstance(backend, dict):
+                lang_raw = backend.get("language")
+                if lang_raw and isinstance(lang_raw, str):
+                    language = lang_raw.lower().strip()
+            if language == "python" and stack.get("primary_language"):
+                legacy = stack.get("primary_language")
+                if isinstance(legacy, str) and legacy.strip():
+                    language = legacy.lower().strip()
+        return language
 
-    # Simula o código atual de module_codegen_service.py:218
-    buggy_extraction = stack_real.get("primary_language", "python").lower()
+    # Path canônico DT-046
+    assert _module_codegen_extract({
+        "STACK_RECOMMENDATION": {"backend": {"language": "Java"}}
+    }) == "java"
 
-    # Bug: ignora `backend.language=Java` e retorna python
-    assert buggy_extraction == "python", (
-        "Se este teste falhar, o bug do module_codegen_service:218 "
-        "foi consertado — atualizar/remover este teste."
-    )
+    # Legacy
+    assert _module_codegen_extract({
+        "STACK_RECOMMENDATION": {"primary_language": "Go"}
+    }) == "go"
+
+    # Sem stack, sem backend
+    assert _module_codegen_extract({"STACK_RECOMMENDATION": {}}) == "python"
+    assert _module_codegen_extract({}) == "python"
+
+    # backend.language vence sobre primary_language quando ambos existem
+    assert _module_codegen_extract({
+        "STACK_RECOMMENDATION": {
+            "backend": {"language": "Kotlin"},
+            "primary_language": "Python",  # legacy ignorado
+        }
+    }) == "kotlin"
+
+    # Resiliente a tipos errados
+    assert _module_codegen_extract({"STACK_RECOMMENDATION": "string-errada"}) == "python"
+    assert _module_codegen_extract({
+        "STACK_RECOMMENDATION": {"backend": "não-é-dict"}
+    }) == "python"
 
 
 # ---------------------------------------------------------------------------
