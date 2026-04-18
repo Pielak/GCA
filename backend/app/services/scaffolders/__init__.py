@@ -18,6 +18,8 @@ from .go_app import scaffold_go
 from .csharp_aspnet import scaffold_csharp_aspnet
 from .php_laravel import scaffold_php_laravel
 from .kotlin_spring import scaffold_kotlin_spring
+from .nodejs_nestjs import scaffold_nodejs_nestjs
+from .nodejs_express import scaffold_nodejs_express
 from .dispatch import dispatch_scaffold
 
 __all__ = [
@@ -29,5 +31,7 @@ __all__ = [
     "scaffold_csharp_aspnet",
     "scaffold_php_laravel",
     "scaffold_kotlin_spring",
+    "scaffold_nodejs_nestjs",
+    "scaffold_nodejs_express",
     "dispatch_scaffold",
 ]

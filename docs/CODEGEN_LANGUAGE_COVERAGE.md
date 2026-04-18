@@ -19,7 +19,7 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 | Linguagem | Q27/Q28 | Test framework | Dockerfile | CI workflow | Scaffold inicial | Validado em dogfood |
 |---|---|---|---|---|---|---|
 | **Python** | ✅ Python + FastAPI/Django/Flask | ✅ pytest | ✅ python:3.11-slim | ✅ pytest workflow | ❓ delegado ao LLM | ✅ projeto Automação Jurídica |
-| **JavaScript / TypeScript** | ✅ Node.js + NestJS/Express | ✅ jest | ✅ node:20-alpine multi-stage | ✅ jest workflow | ❓ delegado ao LLM | ❌ nunca |
+| **JavaScript / TypeScript** | ✅ Node.js + NestJS/Express | ✅ jest | ✅ node:20-alpine multi-stage | ✅ jest workflow | ✅ NestJS 10 + Express 4 (Sprint 3 ext DT-058) | ❌ pendente Sprint 4 |
 | **Java** | ✅ Java + Spring Boot/Quarkus | ✅ junit5 | ✅ eclipse-temurin:21 + Maven/Gradle | ✅ Java workflow | ✅ Spring Boot 3.3 + Quarkus 3.13 (Sprint 2 DT-058) | ❌ pendente Sprint 4 |
 | **Kotlin** | ✅ Kotlin (Q27 lista direta) | ✅ junit5 | 🟡 reusa template Java | 🟡 reusa template Java | ✅ Spring Boot 3.3 + Gradle KTS (Sprint 3 DT-058) | ❌ pendente Sprint 4 |
 | **Go** | ✅ Go | ✅ go_test | ✅ multi-stage golang:1.22 | ✅ Go workflow | ✅ chi/v5 + cmd/internal layout (Sprint 3 DT-058) | ❌ pendente Sprint 4 |
@@ -67,8 +67,18 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 - ✅ PHP: Laravel 11 + PHPUnit — `scaffolders/php_laravel.py`
 - ✅ Kotlin: Spring Boot 3.3 + Gradle KTS — `scaffolders/kotlin_spring.py`
 - 34 testes novos consolidados em `test_dt058_sprint3_scaffolders.py`
-- Dispatch atualizado: 5 linguagens com template (Java/Kotlin/Go/C#/PHP) +
-  Python LLM-only por design
+
+### Sprint 3 ext — Node.js/TypeScript ✅ FECHADO 2026-04-18
+- ✅ NestJS 10 + TypeScript 5 — `scaffolders/nodejs_nestjs.py` (default Node.js)
+- ✅ Express 4 + TypeScript 5 — `scaffolders/nodejs_express.py` (alternativa minimalista)
+- 22 testes em `test_dt058_sprint3_nodejs.py`
+- Dispatch: Node.js + framework=Express → Express; outro caso → NestJS
+- Aliases: TypeScript / JavaScript caem no mesmo path
+
+### Cobertura final do dispatcher (após Sprint 3 + ext)
+6 linguagens com scaffold determinístico (Java, Kotlin, Go, C#, PHP, Node.js).
+Python continua LLM-only por design (decisão de produto — ecossistema mais
+maduro pra LLM gerar FastAPI/Django).
 
 ### Sprint 4 — Validação E2E
 - 5 projetos-piloto no dogfood (1 por linguagem)

@@ -22,6 +22,8 @@ from .go_app import scaffold_go
 from .csharp_aspnet import scaffold_csharp_aspnet
 from .php_laravel import scaffold_php_laravel
 from .kotlin_spring import scaffold_kotlin_spring
+from .nodejs_nestjs import scaffold_nodejs_nestjs
+from .nodejs_express import scaffold_nodejs_express
 
 logger = structlog.get_logger(__name__)
 
@@ -165,6 +167,20 @@ def dispatch_scaffold(
         logger.info("scaffold.dispatch", scaffolder="php_laravel", **log_ctx)
         return "php_laravel", scaffold_php_laravel(spec)
 
-    # Linguagens sem template (Python ainda é LLM-only, Node.js, Ruby, etc.)
+    # Node.js / TypeScript — Q27 lista "Node.js" como linguagem. Aliases
+    # cobrem TypeScript puro também (frontends às vezes ficam aqui).
+    if language in ("node.js", "nodejs", "node", "typescript", "javascript"):
+        is_express = any("express" in fw for fw in frameworks)
+        is_nestjs = any("nest" in fw for fw in frameworks)
+        # Se framework explícito é Express E não é NestJS, vai pro minimalista
+        if is_express and not is_nestjs:
+            logger.info("scaffold.dispatch", scaffolder="nodejs_express", **log_ctx)
+            return "nodejs_express", scaffold_nodejs_express(spec)
+        # Default Node.js: NestJS (enterprise, mais opinionado, mais valor
+        # do template determinístico vs LLM solto)
+        logger.info("scaffold.dispatch", scaffolder="nodejs_nestjs", **log_ctx)
+        return "nodejs_nestjs", scaffold_nodejs_nestjs(spec)
+
+    # Linguagens sem template (Python ainda é LLM-only, Ruby, Rust, etc.)
     logger.info("scaffold.dispatch_no_template", **log_ctx)
     return None
