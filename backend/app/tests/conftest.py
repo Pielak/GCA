@@ -1,6 +1,29 @@
 """
-Pytest configuration and fixtures for GCA Admin Dashboard tests
+Pytest configuration and fixtures for GCA Admin Dashboard tests.
+
+DT-034: forçar DATABASE_URL pra `gca_test` **antes** de qualquer import de
+`app.*`. Pydantic Settings lê env na hora do import de `app.core.config`;
+services que importam `AsyncSessionLocal`/`engine` de `app.db.database`
+são bindados ao objeto criado com a URL vigente naquele momento. Por isso
+o override precisa rodar no topo do conftest, antes de `from app.main`.
+
+Guard adicional: se por qualquer motivo a URL resolver pra `gca`
+(produção/dogfood), levanta RuntimeError — pytest **não pode** tocar prod.
 """
+import os as _os
+import re as _re
+
+# ---------------------------------------------------------------------------
+# DT-034: isolamento duro de DB antes de carregar `app.*`
+# ---------------------------------------------------------------------------
+# Sobrescreve DATABASE_URL pra apontar pra `gca_test` (schema clonado de
+# produção mas sem dados). Pydantic Settings lê env no primeiro import de
+# `app.core.config`, então esta atribuição precisa ser a primeira coisa do
+# conftest — antes de qualquer `from app...`.
+_default_test_url = "postgresql+asyncpg://gca:gca_secret@localhost:5432/gca_test"
+_os.environ["DATABASE_URL"] = _os.environ.get("TEST_DATABASE_URL", _default_test_url)
+_os.environ.setdefault("TESTING", "1")
+
 import pytest
 import asyncio
 from typing import AsyncGenerator
@@ -19,6 +42,22 @@ from app.db.database import Base, get_db, AsyncSessionLocal
 from app.core.config import settings
 from app.core.security import create_access_token, hash_password
 from app.models.base import User, Organization, Project
+
+# Safety fuse: se settings.DATABASE_URL for a DB de produção (`/gca`), aborta
+# antes de qualquer fixture rodar. Evita que factories/services que fazem
+# `async with AsyncSessionLocal() as db` contaminem o dogfood.
+_prod_db_pattern = _re.compile(r"/gca(\?|$)")
+if _prod_db_pattern.search(settings.DATABASE_URL):
+    raise RuntimeError(
+        f"DT-034 BLOCK: DATABASE_URL aponta pra DB de produção ({settings.DATABASE_URL}). "
+        "pytest não pode rodar contra `gca`. Defina TEST_DATABASE_URL pra `gca_test` "
+        "ou confirme que o conftest está sendo carregado antes dos imports de app.*"
+    )
+if "gca_test" not in settings.DATABASE_URL:
+    raise RuntimeError(
+        f"DT-034 BLOCK: DATABASE_URL inesperada pra testes ({settings.DATABASE_URL}). "
+        "Esperado conter `gca_test`."
+    )
 
 
 # ============================================================================

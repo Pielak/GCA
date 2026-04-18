@@ -417,16 +417,17 @@ Toda leitura/escrita envolvendo dado de projeto **deve** incluir `project_id` no
 
 ### 11.3 Regra dura: nunca rodar pytest contra DB de produção
 
-O dogfood roda no mesmo Postgres usado por pytest. Fixtures tentam rollback mas serviços que abrem `async with AsyncSessionLocal() as db` dentro de tasks assíncronas (factories, `_analyze_async`, etc) bypassam o wrap e **commitam de verdade** — cada run de pytest polui o DB com usuários e projetos fake.
+Histórico: o dogfood roda no mesmo Postgres usado por pytest. Fixtures tentavam rollback mas serviços que abrem `async with AsyncSessionLocal() as db` dentro de tasks assíncronas (factories, `_analyze_async`, etc) bypassavam o wrap e **commitavam de verdade** — cada run de pytest poluía o DB com usuários e projetos fake.
 
-**Regra:** Claude **não deve** executar `pytest`, `python -m pytest` ou qualquer rota de teste que toque `AsyncSessionLocal` antes de DT-034 ser quitada (DB `gca_test` isolado). Se precisar validar código, use:
-- Sintaxe: `ast.parse` / `py_compile` / `tsc --noEmit`
-- Lógica pontual: script Python avulso com dados in-memory ou mockados
-- Runtime: reload via uvicorn (backend) / vite build (frontend) e validar via endpoint
+**Estado atual (DT-034 quitada em 2026-04-18)**: `backend/app/tests/conftest.py` agora força `DATABASE_URL` pra `postgresql+asyncpg://gca:gca_secret@localhost:5432/gca_test` **antes** de qualquer import de `app.*`, e aborta com `RuntimeError` se a URL resolver pra `/gca` (produção). DB `gca_test` foi criado com schema clonado de `gca` (via `pg_dump --schema-only`). pytest agora é seguro em relação a contaminação de prod.
 
-Se pytest for absolutamente necessário antes da DT-034, executar **apenas** arquivos que não dependam de `db_session` / `AsyncSessionLocal` (ex: `test_crypto.py`, `test_pii_validators.py`, testes unitários puros). Nunca rodar o suite inteiro.
+**Regras que permanecem mesmo após DT-034:**
+- NUNCA apontar testes pra `gca` manualmente (ex: `TEST_DATABASE_URL=...@gca`). O guard do conftest aborta, mas não passe por cima dele.
+- Se precisar rodar pytest, preferir validação incremental: teste específico primeiro (`pytest app/tests/test_X.py::test_Y`), suite inteira só quando necessário.
+- Para refactors estruturais em services que manipulam data (auth, ingestion, projects), manter validação via script avulso + endpoint reload como primeiro recurso; pytest vira segunda linha.
+- Se o schema de `gca` mudar (nova migration), re-sincronizar `gca_test`: `docker exec gca-postgres bash -c "pg_dump -U gca -d gca --schema-only --no-owner --no-privileges | psql -U gca -d gca_test"` após drop/recreate.
 
-Se acidentalmente poluir o DB, **limpar imediatamente** (delete dos registros criados) e atualizar o progress — não desativar, deletar.
+Se acidentalmente poluir o DB de produção (ex: algum path que escapa do conftest, ou execução manual via REPL), **limpar imediatamente** (delete dos registros criados) e atualizar o progress — não desativar, deletar.
 
 ---
 
