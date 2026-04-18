@@ -26,13 +26,34 @@ async def upload_document(
     _setup: dict = Depends(require_project_setup_complete),
 ):
     """Upload de documento para análise pelo Arguidor."""
+    filename = file.filename or "unnamed"
+
+    # DT-021: detectar PDF de questionário do GCA antes de ingerir como documento
+    # genérico. O PDF gerado pelo próprio sistema tem padrão de filename
+    # `Questionario_GCA_<project_uuid>_editavel...pdf` e o caminho oficial de
+    # submetê-lo é a aba Questionário (não Ingestão). Subir aqui joga o PDF no
+    # detector de PII + Arguidor genérico — caminho errado.
+    import re
+    if re.match(r"(?i)^Questionario_GCA_[0-9a-f-]+.*\.pdf$", filename):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Este arquivo é o PDF do questionário técnico gerado pelo GCA. "
+                "Ele deve ser submetido pela aba Questionário (não por Ingestão), "
+                "para ser tratado como transporte de respostas e alimentar o OCG "
+                "corretamente. Se este é um documento de complemento (não o "
+                "questionário em si), renomeie o arquivo para algo diferente "
+                "antes de subir aqui."
+            ),
+        )
+
     file_bytes = await file.read()
     service = IngestionService(db)
     result = await service.upload_document(
         project_id=project_id,
         uploaded_by=current_user_id,
         file_bytes=file_bytes,
-        original_filename=file.filename or "unnamed",
+        original_filename=filename,
         content_type=file.content_type or "",
     )
 
