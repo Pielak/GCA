@@ -28,6 +28,68 @@ logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/api/v1/code-generation", tags=["code-generation"])
 
 
+# DT-043 — adequação do provedor à criticidade do CodeGen (contrato §7 + §6.2).
+# CodeGen é **ALTA criticidade**: geração de código que vai virar commit + base
+# do projeto. Exige modelo premium (raciocínio). Providers média/baixa podem
+# produzir código sintaticamente OK mas com bugs sutis, falhas de compliance,
+# arquitetura fraca. Não bloqueamos (decisão fica do GP/Dev), mas emitimos
+# warning no log + no response pra audit trail, mesmo padrão de DT-036
+# (ocg_updater).
+
+_CODEGEN_PREMIUM_PROVIDERS = {"anthropic", "openai"}
+_CODEGEN_MEDIUM_LOW_PROVIDERS = {"deepseek", "grok", "gemini", "qwen", "ollama"}
+
+
+async def _check_codegen_provider_adequacy(
+    project_id: UUID,
+    db: AsyncSession,
+) -> Optional[Dict[str, Any]]:
+    """Retorna dict com warning se o provider do projeto é inadequado para
+    CodeGen (contrato §6.2 Alta criticidade). `None` se adequado ou não
+    configurado (neste caso o caller já levanta erro pelo gate de setup).
+
+    Shape do warning: {provider, recommended, reason}.
+    """
+    from sqlalchemy import text as _text
+    try:
+        row = (await db.execute(
+            _text("SELECT settings_json FROM project_settings WHERE project_id=:pid AND setting_type='llm'"),
+            {"pid": str(project_id)},
+        )).fetchone()
+        if not row or not row[0]:
+            return None
+        settings_dict = json.loads(row[0]) if isinstance(row[0], str) else row[0]
+    except Exception:
+        return None
+
+    provider = (settings_dict.get("provider") or "").lower()
+    if not provider:
+        return None
+
+    if provider in _CODEGEN_MEDIUM_LOW_PROVIDERS:
+        logger.warning(
+            "codegen.provider_criticality_mismatch",
+            project_id=str(project_id),
+            provider=provider,
+            task="codegen",
+        )
+        return {
+            "provider": provider,
+            "criticality": "medium_low",
+            "recommended": "anthropic | openai (premium reasoning)",
+            "reason": (
+                f"CodeGen é ALTA criticidade (contrato §6.2) e gera código que vira commit "
+                f"direto no Git do projeto. O provider '{provider}' é classificado como "
+                f"média/baixa criticidade — pode gerar código com bugs sutis ou arquitetura "
+                f"fraca. A decisão continua com você; considere reconfigurar um provider "
+                f"premium (Anthropic/OpenAI) em Configurações → Provedor de IA antes de "
+                f"aplicar o scaffold em produção."
+            ),
+        }
+    # Adequado — sem warning.
+    return None
+
+
 async def _require_code_action(
     action: str,
     project_id: UUID,
@@ -358,6 +420,10 @@ async def generate_scaffold(
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
+    # DT-043: análise de adequação do provedor ao CodeGen (contrato §7).
+    # Warning se provider é média/baixa criticidade. Não bloqueia.
+    provider_warning = await _check_codegen_provider_adequacy(project_id, db)
+
     # 1. Buscar projeto
     project = await db.get(Project, project_id)
     if not project:
@@ -649,6 +715,7 @@ Status possíveis:
             response_dict = response.model_dump()
             response_dict["commit_summary"] = None  # Explícito: nada commitado
             response_dict["dry_run"] = True
+            response_dict["provider_warning"] = provider_warning  # DT-043
             return JSONResponse(content=response_dict)
 
         # Legacy: dry_run=False commita direto (mantido pra scripts e
@@ -667,6 +734,7 @@ Status possíveis:
             "results": commit_results,
         }
         response_dict["dry_run"] = False
+        response_dict["provider_warning"] = provider_warning  # DT-043
         return JSONResponse(content=response_dict)
 
     except HTTPException:

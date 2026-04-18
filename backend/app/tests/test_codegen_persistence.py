@@ -623,6 +623,106 @@ async def test_scaffold_apply_rbac_blocks_gp():
         await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
 
 
+# ============================================================================
+# DT-043: adequação do provedor ao CodeGen (contrato §7 + §6.2).
+# CodeGen é ALTA criticidade → premium (anthropic/openai) recomendado;
+# média/baixa (deepseek/grok/gemini/qwen/ollama) dispara warning.
+# Decisão não-bloqueante — response traz `provider_warning` ou None.
+# ============================================================================
+
+
+async def _make_setup_with_provider(
+    project_name: str,
+    user_email_prefix: str,
+    provider: str,
+):
+    """Variante do full_setup que permite forçar o provider em ProjectSettings."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name=project_name,
+        user_email_prefix=user_email_prefix,
+        role="dev",
+    )
+    # Atualiza o provider do ProjectSettings (fixture default = anthropic).
+    from app.db.database import AsyncSessionLocal
+    from sqlalchemy import text as _text
+
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            await session.execute(
+                _text("UPDATE project_settings SET settings_json=:sj WHERE id=:sid"),
+                {
+                    "sj": json.dumps({"provider": provider, "model": f"{provider}-test"}),
+                    "sid": str(settings_id),
+                },
+            )
+    return uid, org_id, project_id, git_id, settings_id, q_id
+
+
+@pytest.mark.asyncio
+async def test_scaffold_premium_provider_has_no_warning():
+    """DT-043: provider anthropic (premium) → provider_warning=None."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_setup_with_provider(
+        project_name="P premium",
+        user_email_prefix="premium",
+        provider="anthropic",
+    )
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        with patch("anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/v1/code-generation/scaffold",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"project_id": str(project_id)},
+                )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["provider_warning"] is None
+
+    finally:
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
+@pytest.mark.asyncio
+async def test_scaffold_medium_provider_triggers_warning():
+    """DT-043: provider deepseek (média/baixa) → provider_warning preenchido, não bloqueia."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_setup_with_provider(
+        project_name="P deepseek",
+        user_email_prefix="deepseek",
+        provider="deepseek",
+    )
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        with patch("anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/v1/code-generation/scaffold",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"project_id": str(project_id)},
+                )
+
+        # 200 — não bloqueia, só avisa
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        warning = body["provider_warning"]
+        assert warning is not None
+        assert warning["provider"] == "deepseek"
+        assert warning["criticality"] == "medium_low"
+        assert "premium" in warning["recommended"].lower()
+        # Preview ainda funciona (files retornados)
+        assert len(body["files"]) == 3
+
+    finally:
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
 @pytest.mark.asyncio
 async def test_scaffold_rbac_blocks_non_member_non_admin():
     """DT-042: user não-membro e não-admin → 403 pelo resolve_user_roles."""

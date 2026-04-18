@@ -209,6 +209,11 @@ export function CodeGeneratorPage() {
   // não commitados (padrão novo desde backend /scaffold default=dry_run).
   const [scaffoldPendingApply, setScaffoldPendingApply] = useState(false)
   const [scaffoldApplying, setScaffoldApplying] = useState(false)
+  // DT-043: warning de adequação do provider (contrato §7 + §6.2).
+  // null = provider adequado; objeto = média/baixa criticidade.
+  const [providerWarning, setProviderWarning] = useState<
+    { provider: string; recommended: string; reason: string } | null
+  >(null)
 
   // OCG context para referência
   const [ocgContext, setOcgContext] = useState<any>(null)
@@ -255,6 +260,9 @@ export function CodeGeneratorPage() {
         paths.push(f.path)
       }
       setScaffoldFiles(newMap)
+
+      // DT-043: captura warning de adequação do provider (se houver)
+      setProviderWarning(data.provider_warning || null)
 
       const baseSummary = data.summary || `Gerados ${files.length} arquivos`
       if (data.dry_run) {
@@ -704,6 +712,18 @@ export function CodeGeneratorPage() {
             detail="Analisando OCG, documentos e regras de negócio para gerar código real..."
             status="running"
           />
+        </div>
+      )}
+
+      {/* DT-043: banner de adequação do provider */}
+      {providerWarning && !scaffoldGenerating && (
+        <div className="flex items-start gap-3 px-4 py-2 bg-amber-900/20 border-b border-amber-700/40">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1 text-xs text-amber-200 leading-snug">
+            <strong className="text-amber-300">Provider {providerWarning.provider} pode não ser adequado pra CodeGen.</strong>{' '}
+            {providerWarning.reason}{' '}
+            <span className="text-amber-400/80">Recomendado: {providerWarning.recommended}.</span>
+          </div>
         </div>
       )}
 
