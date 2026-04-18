@@ -59,6 +59,11 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      # DT-030: uploads de Ingestão persistem entre restarts do container.
+      # Antes: STORAGE_PATH=/tmp/gca-storage dentro do container, sem mount
+      # → todo restart apagava os bytes (DB mantinha registro, arquivo sumia).
+      # Volume nomeado mantém os arquivos em /var/lib/docker/volumes/.
+      - gca-uploads-storage:/tmp/gca-storage
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Frontend (React + Vite)
@@ -91,6 +96,7 @@ services:
 
 volumes:
   gca-postgres-data:
+  gca-uploads-storage:
 
 networks:
   default:
