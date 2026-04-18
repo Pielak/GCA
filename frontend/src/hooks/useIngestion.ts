@@ -11,6 +11,10 @@ export interface IngestedDocument {
   // DT-022: mensagem crua do provider/Arguidor quando arguider_status='error'.
   // A UI humaniza para o GP (ex: 401 → "chave IA rejeitada pelo provedor").
   arguider_error_message?: string | null
+  // DT-029: estado de quarentena + tipos PII detectados. GP usa pra decidir
+  // se é falso-positivo e clicar em "Liberar".
+  quarantine_status?: 'none' | 'quarantined' | 'released'
+  pii_fields?: string[]
   ocg_updated: boolean
   file_size_bytes: number
   created_at: string

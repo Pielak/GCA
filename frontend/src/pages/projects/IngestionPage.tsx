@@ -90,6 +90,37 @@ export function IngestionPage() {
     }
   }, [projectId, refetch]);
 
+  // DT-029: liberar documento da quarentena PII (falso-positivo)
+  const [releasing, setReleasing] = useState<Record<string, boolean>>({});
+  const handleRelease = useCallback(async (docId: string, piiFields: string[]) => {
+    if (!projectId) return;
+    const fieldsStr = piiFields.length ? piiFields.join(', ') : 'dados pessoais';
+    if (!confirm(`Liberar este documento da quarentena?\n\nO detector sinalizou: ${fieldsStr}.\n\nSe for falso-positivo (PDF técnico, coordenadas, IDs, timestamps que lembram telefone/CPF mas não são), confirmar libera o Arguidor a analisar normalmente. Se for dado pessoal real, clique Cancelar — o documento permanece seguro na quarentena.`)) return;
+    setReleasing(prev => ({ ...prev, [docId]: true }));
+    try {
+      await apiClient.post(`/projects/${projectId}/ingestion/${docId}/release`, {});
+      await refetch();
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Falha ao liberar';
+      alert(`Liberação falhou: ${detail}`);
+    } finally {
+      setReleasing(prev => ({ ...prev, [docId]: false }));
+    }
+  }, [projectId, refetch]);
+
+  // Tradutor dos tipos PII do backend pra texto humano
+  const describePiiFields = (fields: string[]): string => {
+    if (!fields || fields.length === 0) return 'dados pessoais detectados';
+    const map: Record<string, string> = {
+      cpf: 'CPF (com dígito verificador válido)',
+      cnpj: 'CNPJ (com dígito verificador válido)',
+      cartao_credito: 'cartão de crédito (passou na validação Luhn)',
+      email_pessoal: 'email pessoal (Gmail/Hotmail/Yahoo/Outlook)',
+      telefone_br: 'telefone BR em formato reconhecível',
+    };
+    return fields.map(f => map[f] || f).join(', ');
+  };
+
   const filtered = filter === 'all' ? documents : documents.filter(d => d.arguider_status === filter);
   const pendingCount = documents.filter(d => d.arguider_status === 'pending').length;
   const processingCount = documents.filter(d => d.arguider_status === 'processing').length;
@@ -249,6 +280,8 @@ export function IngestionPage() {
             {filtered.map(doc => {
               const st = STATUS_MAP[doc.arguider_status] ?? UNKNOWN_STATUS;
               const hasError = doc.arguider_status === 'error' && doc.arguider_error_message;
+              const isQuarantined = doc.arguider_status === 'quarantined';
+              const piiFields = doc.pii_fields || [];
               return (
               <div key={doc.id}>
                 <div className="grid grid-cols-[1fr_80px_80px_120px_140px_40px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
@@ -335,6 +368,26 @@ export function IngestionPage() {
                   >
                     <span className="inline-block w-8" />
                     ↳ {humanizeArguiderError(doc.arguider_error_message)}
+                  </div>
+                )}
+                {isQuarantined && (
+                  <div className="px-5 pb-3 -mt-1 flex items-start gap-3 flex-wrap">
+                    <span className="inline-block w-8" />
+                    <div className="flex-1 min-w-[280px] text-xs text-orange-300/90 leading-snug">
+                      <span className="font-semibold">Em quarentena por:</span>{' '}
+                      {describePiiFields(piiFields)}.
+                      <div className="text-[11px] text-orange-300/70 mt-0.5">
+                        Se for falso-positivo (PDF técnico com números que lembram telefone/CPF mas não são dados pessoais reais), clique em "Liberar" para o Arguidor analisar.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRelease(doc.id, piiFields)}
+                      disabled={releasing[doc.id]}
+                      className="flex items-center gap-1.5 px-3 py-1 text-xs rounded-md bg-orange-500/20 hover:bg-orange-500/30 border border-orange-500/40 text-orange-200 disabled:opacity-40 transition-colors"
+                    >
+                      {releasing[doc.id] ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                      Liberar (falso-positivo)
+                    </button>
                   </div>
                 )}
               </div>

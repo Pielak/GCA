@@ -745,6 +745,11 @@ class IngestionService:
                 # o motivo direto no row (sem precisar clicar pra ver detalhe).
                 # Só é preenchida quando arguider_status='error'.
                 "arguider_error_message": d.arguider_error_message,
+                # DT-029: expõe motivo da quarentena na listagem (tipos PII
+                # detectados) para o GP poder decidir se é falso-positivo
+                # e liberar via botão.
+                "quarantine_status": getattr(d, "quarantine_status", "none"),
+                "pii_fields": (json.loads(d.pii_fields) if d.pii_fields else []) if getattr(d, "pii_detected", False) else [],
                 "ocg_updated": d.ocg_updated,
                 "file_size_bytes": d.file_size_bytes,
                 "created_at": d.created_at.isoformat() if d.created_at else None,
