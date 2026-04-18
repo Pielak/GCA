@@ -9,16 +9,20 @@ import structlog
 
 from app.db.database import get_db
 from app.services.livedocs_service import LiveDocsService
-from app.middleware.auth import get_current_user_from_token
+from app.dependencies.require_action import require_action
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["livedocs"])
+
+# DT-044 — RBAC em LiveDocs (MVP 4 §7):
+#  - project:view para leitura (todo membro + admin_viewer)
+#  - docs:edit para refresh (GP, Dev — quem edita docs per contrato)
 
 
 @router.get("/projects/{project_id}/docs")
 async def get_doc_index(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Índice de todas as seções de documentação do projeto."""
@@ -31,7 +35,7 @@ async def get_doc_index(
 async def get_doc_content(
     project_id: UUID,
     path: str = Query(..., description="Caminho da seção (ex: docs/README.md)"),
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Conteúdo de uma seção específica de documentação."""
@@ -48,7 +52,7 @@ async def get_doc_content(
 @router.get("/projects/{project_id}/docs/ocg/history")
 async def get_ocg_history(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Histórico de versões do OCG e suas alterações na documentação."""
@@ -78,10 +82,10 @@ async def get_ocg_history(
 @router.post("/projects/{project_id}/docs/refresh")
 async def refresh_documentation(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("docs:edit")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Regenera toda a documentação a partir do OCG atual."""
+    """Regenera toda a documentação a partir do OCG atual (GP/Dev)."""
     service = LiveDocsService(db)
     result = await service.refresh_ocg_documentation(project_id)
     if not result.get("refreshed"):
@@ -95,7 +99,7 @@ async def refresh_documentation(
 @router.get("/projects/{project_id}/docs/changelog")
 async def get_changelog(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Changelog do projeto — eventos de documentação, ingestão e geração."""

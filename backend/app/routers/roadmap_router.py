@@ -20,7 +20,7 @@ router = APIRouter(tags=["roadmap"])
 @router.get("/projects/{project_id}/roadmap")
 async def get_roadmap(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Roadmap dinâmico — módulos agrupados por fase e prioridade."""
@@ -36,7 +36,7 @@ async def get_roadmap(
 async def get_backlog(
     project_id: UUID,
     category: str = None,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Lista o backlog vivo do projeto, opcionalmente filtrado por categoria."""
@@ -49,7 +49,7 @@ async def get_backlog(
 @router.post("/projects/{project_id}/backlog/regenerate")
 async def regenerate_backlog(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    perm: dict = Depends(require_action("backlog:manage")),
     db: AsyncSession = Depends(get_db),
 ):
     """Regenera o backlog a partir do OCG atual (spec seção 7.2).
@@ -65,7 +65,7 @@ async def regenerate_backlog(
     await audit.log_event(
         event_type=AuditEvents.BACKLOG_REGENERATED,
         resource_type="backlog",
-        actor_id=current_user_id,
+        actor_id=perm["user_id"],
         resource_id=project_id,
         details=result,
     )

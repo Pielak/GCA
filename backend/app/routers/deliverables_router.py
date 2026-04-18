@@ -23,13 +23,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
 from app.db.database import get_db
-from app.middleware.auth import get_current_user_from_token
+from app.dependencies.require_action import require_action
 from app.models.base import OCG, ProjectDeliverable
 from app.services.deliverable_registry import DeliverableRegistry
 from app.services.deliverable_verifiers import verify_kind
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["deliverables"])
+
+# DT-044 — RBAC em Deliverables + Release Bundle (MVP 4 §7):
+#  - project:view    → GETs (lista, status, releases)
+#  - qa:approve      → verify-all, verify/one, attest, POST /releases
+#                      (QA owns verificação; GP tbm tem qa:approve)
+#  - backlog:manage  → sync (GP owns backlog/sincronização com OCG)
+#  - audit:export    → releases/download (GP + Tester — evidências)
 
 
 # ──────────────────────────── Request models ─────────────────────────
@@ -45,7 +52,7 @@ class AttestRequest(BaseModel):
 @router.get("/projects/{project_id}/deliverables")
 async def get_deliverables_status(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Payload completo: lista + agregados por status/categoria + readiness%.
@@ -61,7 +68,7 @@ async def get_deliverables_status(
 @router.post("/projects/{project_id}/deliverables/verify-all")
 async def verify_all_deliverables(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    perm: dict = Depends(require_action("qa:approve")),
     db: AsyncSession = Depends(get_db),
 ):
     """Roda todos verifiers; atualiza status de cada deliverable; commita.
@@ -75,17 +82,17 @@ async def verify_all_deliverables(
     logger.info(
         "deliverables_router.verify_all",
         project_id=str(project_id),
-        actor=str(current_user_id),
+        actor=str(perm["user_id"]),
         **counters,
     )
-    return {"counters": counters, "actor": str(current_user_id)}
+    return {"counters": counters, "actor": str(perm["user_id"])}
 
 
 @router.post("/projects/{project_id}/deliverables/{deliverable_id}/verify")
 async def verify_one_deliverable(
     project_id: UUID,
     deliverable_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("qa:approve")),
     db: AsyncSession = Depends(get_db),
 ):
     """Re-verifica UM deliverable específico (mais rápido que verify-all)."""
@@ -137,15 +144,15 @@ async def attest_manual(
     project_id: UUID,
     deliverable_id: UUID,
     req: AttestRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    perm: dict = Depends(require_action("qa:approve")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Atestação humana — para business_case e outros sem verifier auto."""
+    """Atestação humana — para business_case e outros sem verifier auto (QA/GP)."""
     registry = DeliverableRegistry(db)
     updated = await registry.attest_manual(
         project_id=project_id,
         deliverable_id=deliverable_id,
-        user_id=current_user_id,
+        user_id=perm["user_id"],
         note=req.note,
         evidence_ref=req.evidence_ref,
     )
@@ -167,7 +174,7 @@ async def attest_manual(
 @router.post("/projects/{project_id}/deliverables/sync")
 async def resync_from_ocg(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("backlog:manage")),
     db: AsyncSession = Depends(get_db),
 ):
     """Força re-sync do OCG atual (caso projeto tenha rodado migration sem
@@ -197,17 +204,18 @@ from fastapi.responses import FileResponse
 async def create_release_bundle(
     project_id: UUID,
     threshold: float = 90.0,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    perm: dict = Depends(require_action("qa:approve")),
     db: AsyncSession = Depends(get_db),
 ):
     """Cria um Release Bundle (zip + MANIFEST + RELEASE_NOTES + docs).
 
+    Release é marco formal de entrega — exige `qa:approve` (QA/GP).
     Pré-condição: readiness do projeto >= ``threshold`` (default 90%).
     Falha o pré-check → 412 Precondition Failed com diagnóstico.
     """
     from app.services.release_bundle_service import ReleaseBundleService
     svc = ReleaseBundleService(db)
-    result = await svc.create_bundle(project_id, actor_id=current_user_id, threshold=threshold)
+    result = await svc.create_bundle(project_id, actor_id=perm["user_id"], threshold=threshold)
     if result.get("error") == "readiness_below_threshold":
         raise HTTPException(
             status_code=status.HTTP_412_PRECONDITION_FAILED,
@@ -227,7 +235,7 @@ async def create_release_bundle(
 @router.get("/projects/{project_id}/releases")
 async def list_releases(
     project_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Lista todas as releases do projeto (mais recentes primeiro)."""
@@ -241,10 +249,10 @@ async def list_releases(
 async def download_release(
     project_id: UUID,
     version: int,
-    current_user_id: UUID = Depends(get_current_user_from_token),
+    _perm: dict = Depends(require_action("audit:export")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Baixa o zip de um release específico.
+    """Baixa o zip de um release específico (gate `audit:export`: GP/Tester).
 
     Retorna 404 se release não existe, status != 'ready', ou arquivo
     sumiu do filesystem.
