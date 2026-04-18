@@ -1,7 +1,7 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 1.2  
-Data-base: 2026-04-17  
+Versão: 1.3  
+Data-base: 2026-04-18  
 Status: **controle de avanço por fase**
 
 ---
@@ -9,51 +9,58 @@ Status: **controle de avanço por fase**
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 2 — Contexto vivo e governança de conteúdo** (iniciado 2026-04-17)
+**MVP 3 — Geração assistida controlada** (iniciado 2026-04-18)
 
 ### MVP anterior
-MVP 1 — Base operacional e saneamento do núcleo — **ENCERRADO 2026-04-17**
-com todos os 5 Criticals quitados (ver §4). Gate do MVP 1 permaneceu aberto;
-nenhuma regressão observada até a abertura desta fase.
+MVP 2 — Contexto vivo e governança de conteúdo — **ENCERRADO 2026-04-18**
+com todos os 10 critérios §9 atendendo SIM (veredito binário). Suite
+pytest contra `gca_test` isolado: 346 passed, 1 skipped, 0 failed,
+0 errors em 15:11. Prod DB (`gca`) intacta — 0 contaminação. DTs
+restantes (DT-016 SMTP, DT-023 Ollama) explicitamente fora-de-escopo do
+MVP 2 por design.
 
 ### Objetivo do momento
-Ativar o fluxo de contexto vivo: ingestão de documentos, quarentena de PII,
-OCG versionado com deltas, backlog derivado do OCG, Arguidor, reavaliação do
-Gatekeeper após ingestão. Mantém o rigor do MVP 1: sem expansão além do
-escopo da fase; correção local preferível a refatoração sistêmica.
+Amadurecer o CodeGen para o padrão "geração assistida controlada":
+preview antes do commit, geração cirúrgica por arquivo (já presente),
+commits rastreáveis no Git do projeto, validação pós-geração com
+bloqueio por papel, docstrings obrigatórias, análise de adequação do
+provedor de IA ao uso pretendido. Mantém o rigor dos MVPs anteriores:
+correção local preferível a refatoração sistêmica; sem expansão além
+do escopo §7.
 
 ### Princípio desta fase
-Mesma do MVP 1:
+Mesmo dos MVPs anteriores:
 1. diagnosticar;
 2. classificar dívida;
 3. corrigir blockers e criticals antes de feature nova;
 4. revalidar após cada passo;
-5. só então considerar avanço para o MVP 3.
+5. só então considerar avanço para o MVP 4.
 
 ---
 
 ## 2. Escopo da fase atual
 
-### Em escopo agora (contrato §7, MVP 2)
-- ingestão de documentos;
-- quarentena de PII;
-- OCG versionado com deltas;
-- backlog derivado do OCG;
-- Arguidor;
-- consolidação de findings;
-- reavaliação do Gatekeeper após ingestão;
-- extensão da governança de IA para as camadas tocadas (Arguidor, Ingestão):
-  remover hardcodes residuais herdados do MVP 1 e aplicar a política de
-  criticidade (contrato §6.2).
+### Em escopo agora (contrato §7, MVP 3)
+- CodeGen controlado (gate de project-setup já presente — DT-040);
+- geração cirúrgica por arquivo (endpoint `/regenerate-file` ativo);
+- preview antes do commit;
+- integração com Git do projeto (commits via `GitService.commit_file`);
+- commits rastreáveis (pattern `feat(codegen): <path>`);
+- validação pós-geração (endpoint `/validate` com issues por linha/coluna);
+- bloqueios por papel (RBAC canônico: GP não escreve código; Dev sim);
+- docstrings obrigatórias (já aplicado via `_missing_required_docstring`);
+- análise de adequação do provedor IA ao CodeGen (endpoint
+  `/validate-provider` presente).
 
 ### Fora de escopo agora
-- expansão automática para features de entrega final;
-- Release Bundle;
-- Documentação Viva completa;
-- CodeGen controlado (MVP 3);
 - QA Readiness completo (MVP 4);
+- Documentação Viva automática (MVP 4);
+- Release Bundle (MVP 4);
 - hardening operacional avançado (MVP 5);
-- automações além do necessário para estabilizar contexto.
+- SMTP compartimentalizado (DT-016 — MVP 5);
+- Ollama como provedor (DT-023 — sprint próprio pós-MVP 3);
+- geração massiva sem revisão;
+- reescrita ampla de projeto por default.
 
 ---
 
@@ -126,6 +133,12 @@ Mesma do MVP 1:
 | DT-038 | Major | Compartimentalização — notificação cross-project | `_notify_admins_questionnaire_submitted` envia pra TODOS admins ativos (`is_admin=true AND is_active=true`). Projeto A comunica existência + nome + GP email a admin que pode não ter relação com ele. Numa única instância com 1 admin é aceitável; com instância futura multi-admin por área quebra compartimentalização §2.2. | Auditoria 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-039 | Major | UX de retry e regeneração do pipeline OCG | Pipeline OCG era "async one-shot": análise do Arguidor rodava 1x por doc, ocg_updater rodava 1x por análise, OCG era gerado 1x por questionário aprovado. Se qualquer etapa falhasse (401, parse, timeout), ficava travado — sem botão de retry. Quando prompts/providers mudam (ex: DT-035 reescreveu prompt imperativo), análises antigas continuam baseadas no prompt anterior. Ingestões travadas em `ocg_pending` precisavam UPDATE manual. | Dogfood MVP 2 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-040 | **Critical** | Suite de testes dessincronizada pós-saneamento | Após 30+ DTs quitadas (DT-001..DT-039), APIs de services mudaram (DT-012/013/032/033 exigem key; DT-024 mudou `exec_model`→`exec_models`), colunas viraram NOT NULL, módulos foram removidos (`mock_n8n_service` na deprecação n8n), e testes não foram sincronizados. Suite pytest contra `gca_test` (DT-034 isolado) deu 20 fails + 11 errors de coleta/execução em 2026-04-18. Gate §9 critério 7 ("testes da fase passando") não atende. Categorias: (a) **collection errors** (2) — `test_e2e_fase3_5.py` importa `app.services.mock_n8n_service` inexistente; `test_questionnaire_pdf_service.py` importa `pypdf` no topo (container não tem); (b) **fixture drift** — `conftest.py::test_project` cria `Project(...)` sem `deliverable_type` (que é NOT NULL desde DT-015); afeta `test_admin_service` (8 fails), `test_gatekeeper` (2), `test_setup_wizard` (4 errors); (c) **API drift** — `test_ingestion::test_build_prompt` espera `ArguiderService(db)` sem key (DT-012 fim do fallback); (d) **MVP 3 scope** — `test_codegen_persistence` (4), `test_ocg_codegen_integration` (2), `test_e2e_pipeline_fase6` (6 errors) testam CodeGen que está em evolução no MVP 3; (e) **misc** — `test_ocg_e2e::TestConsolidator`, `test_code_validation::test_javascript`, `test_pii_validators::test_detect_pii_does_not_flag_empty_questionnaire_pdf`. **Sem este fix, o gate MVP 2 fica fechado** (critério §9/7 falha). | Gate revalidação 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
+
+#### Abertas (MVP 3)
+
+| ID | Severidade | Tema | Descrição | Origem | Status |
+|---|---|---|---|---|---|
+| DT-041 | Minor | Deploy image drift (pypdf/reportlab/esprima) | Libs `pypdf`, `reportlab`, `esprima` estão em `pyproject.toml`/`requirements.txt` mas não foram instaladas na imagem do container `gca-backend` (cache de layer de Dockerfile antes da adição). Runtime install (via `pip install` direto) cobriu em 2026-04-18 para destravar DT-040, mas a correção é efêmera — um `docker compose build gca-backend` limpo volta a quebrar. Fix canônico: rebuild com `--no-cache` da imagem e garantir CI cobrindo o passo. | Dogfood 2026-04-18 | Aberto |
 | DT-030 | **Critical** | Storage efêmero / uploads | `STORAGE_PATH=/tmp/gca-storage` dentro do container `gca-backend` não tinha volume Docker mountado — `/tmp` é sistema de arquivos do container, zerado a cada `docker restart`. Resultado: todo upload de Ingestão (PDF, DOCX, XLSX, etc) ficava órfão no DB após qualquer restart (upgrade de backend, hot-reload heavy, deploy) — registro com `content_status` e `file_hash` válidos mas bytes fisicamente perdidos. Descoberto 2026-04-17 quando tentei rodar `_analyze_async` no PDF `smoke_mvp2_complemento_pilares.pdf` do user e o arquivo não existia mais. Violação da expectativa mínima de um sistema de ingestão. | Dogfood MVP 2 2026-04-17 | **Quitada 2026-04-17** — ver §4 |
 
 ---

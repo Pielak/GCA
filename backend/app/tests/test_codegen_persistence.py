@@ -1,7 +1,8 @@
-"""Testes de persistência do CodeGen — guard de ProjectGitConfig + happy-path.
+"""Testes de persistência do CodeGen — gate de project-setup + happy-path.
 
 Cobertura:
-- Guard estrutural: scaffold/regenerate-file → 400 sem ProjectGitConfig.
+- Gate estrutural: scaffold/regenerate-file → 412 sem setup completo
+  (repo git + llm + questionário), com `missing` contendo o que falta.
 - Happy-path scaffold: LLM mockado retorna N arquivos; cada um vira commit
   via GitService.commit_file mockado; resposta inclui commit_summary.
 - Happy-path regenerate-file: LLM mockado retorna conteúdo de 1 arquivo;
@@ -10,18 +11,11 @@ Cobertura:
 Estratégia de mock: patch `anthropic.AsyncAnthropic` (a classe que o
 endpoint importa lazy) e `app.services.git_service.GitService.commit_file`.
 
-DT-040: CodeGen é escopo do **MVP 3** (contrato §7 — "Geração assistida
-controlada"). No MVP 2, o project-setup-gate (DT-031) mudou respostas de
-400→412, e o contrato de CodeGen ainda vai evoluir. Estes testes ficam
-skipped até a abertura oficial do MVP 3. Remover o skip + adaptar aos
-novos contratos é tarefa do gate do MVP 3.
+Histórico: antes eram testes de "400 sem ProjectGitConfig". O gate foi
+generalizado — agora `require_project_setup_complete` checa os 3
+pré-requisitos juntos e devolve 412 com `missing=[...]`. Tests foram
+sincronizados em 2026-04-18 na abertura do MVP 3.
 """
-import pytest as _pytest
-_pytest.skip(
-    "CodeGen é escopo MVP 3 (contrato §7). Testes skipped até abertura "
-    "oficial do MVP 3 — ver DT-040 em GCA_MVP_PROGRESS.md.",
-    allow_module_level=True,
-)
 import json
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -40,8 +34,8 @@ def _client() -> httpx.AsyncClient:
 
 
 @pytest.mark.asyncio
-async def test_scaffold_400_when_no_git_config():
-    """Projeto sem ProjectGitConfig → 400 com mensagem clara."""
+async def test_scaffold_412_when_setup_incomplete():
+    """Projeto sem setup completo → 412 com `missing` listando o que falta."""
     from app.db.database import AsyncSessionLocal
     from app.models.base import User, Organization, Project
 
@@ -87,9 +81,10 @@ async def test_scaffold_400_when_no_git_config():
             json={"project_id": str(project.id)},
         )
 
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 412, resp.text
     body = resp.json()
-    assert "Git" in body["detail"]
+    assert body["detail"]["code"] == "project_setup_incomplete"
+    assert "repositorio_git" in body["detail"]["missing"]
 
     # Cleanup
     async with AsyncSessionLocal() as session:
@@ -100,8 +95,8 @@ async def test_scaffold_400_when_no_git_config():
 
 
 @pytest.mark.asyncio
-async def test_regenerate_file_400_when_no_git_config():
-    """Endpoint de regenerar arquivo único também exige ProjectGitConfig."""
+async def test_regenerate_file_412_when_setup_incomplete():
+    """Endpoint de regenerar arquivo único também é barrado pelo gate de setup."""
     from app.db.database import AsyncSessionLocal
     from app.models.base import User, Organization, Project
 
@@ -150,8 +145,10 @@ async def test_regenerate_file_400_when_no_git_config():
             },
         )
 
-    assert resp.status_code == 400, resp.text
-    assert "Git" in resp.json()["detail"]
+    assert resp.status_code == 412, resp.text
+    body = resp.json()
+    assert body["detail"]["code"] == "project_setup_incomplete"
+    assert "repositorio_git" in body["detail"]["missing"]
 
     # Cleanup
     async with AsyncSessionLocal() as session:
@@ -177,21 +174,32 @@ def _build_anthropic_mock(json_payload: dict, output_tokens: int = 100) -> Magic
     return client
 
 
-async def _make_user_org_project_with_git(
+async def _make_user_org_project_with_full_setup(
     project_name: str,
     user_email_prefix: str,
 ):
-    """Cria User + Organization + Project + ProjectGitConfig em uma única tx.
+    """Cria User + Org + Project + os 3 pré-requisitos do gate de setup:
+    ProjectGitConfig + ProjectSettings(llm) + Questionnaire (submetido).
 
-    Retorna (user_id, org_id, project_id, git_config_id) para cleanup posterior.
+    Abertura do MVP 3 (2026-04-18): `require_project_setup_complete` no
+    router do CodeGen exige os 3 juntos. Helper antigo criava só git;
+    tests caíam em 412. Agora satisfaz o gate completo.
+
+    Retorna (user_id, org_id, project_id, git_id, settings_id, q_id)
+    para cleanup.
     """
     from app.db.database import AsyncSessionLocal
-    from app.models.base import User, Organization, Project, ProjectGitConfig
+    from app.models.base import (
+        User, Organization, Project, ProjectGitConfig,
+        ProjectSettings, Questionnaire,
+    )
 
     uid = uuid4()
     org_id = uuid4()
     project_id = uuid4()
     git_id = uuid4()
+    settings_id = uuid4()
+    q_id = uuid4()
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -240,17 +248,50 @@ async def _make_user_org_project_with_git(
                     connection_verified=True,
                 )
             )
+            # Gate de setup: ProjectSettings com setting_type="llm"
+            session.add(
+                ProjectSettings(
+                    id=settings_id,
+                    project_id=project_id,
+                    setting_type="llm",
+                    settings_json=json.dumps({
+                        "provider": "anthropic",
+                        "model": "claude-sonnet-4-6",
+                    }),
+                )
+            )
+            # Gate de setup: Questionnaire submetido (com responses não-vazias)
+            session.add(
+                Questionnaire(
+                    id=q_id,
+                    project_id=project_id,
+                    gp_email=f"{user_email_prefix}-{uid.hex[:6]}@test.com",
+                    responses=json.dumps({"1": "Projeto Teste"}),
+                    status="pending",
+                    approved=True,
+                    submitted_at=datetime.utcnow(),
+                )
+            )
 
-    return uid, org_id, project_id, git_id
+    return uid, org_id, project_id, git_id, settings_id, q_id
 
 
-async def _cleanup_user_org_project_git(uid, org_id, project_id, git_id):
-    """Limpa fixture criado por _make_user_org_project_with_git."""
+async def _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id):
+    """Limpa fixture criado por _make_user_org_project_with_full_setup."""
     from app.db.database import AsyncSessionLocal
-    from app.models.base import User, Organization, Project, ProjectGitConfig
+    from app.models.base import (
+        User, Organization, Project, ProjectGitConfig,
+        ProjectSettings, Questionnaire,
+    )
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
+            await session.execute(
+                Questionnaire.__table__.delete().where(Questionnaire.id == q_id)
+            )
+            await session.execute(
+                ProjectSettings.__table__.delete().where(ProjectSettings.id == settings_id)
+            )
             await session.execute(
                 ProjectGitConfig.__table__.delete().where(ProjectGitConfig.id == git_id)
             )
@@ -262,7 +303,7 @@ async def _cleanup_user_org_project_git(uid, org_id, project_id, git_id):
 @pytest.mark.asyncio
 async def test_scaffold_happy_path_commits_files():
     """Scaffold gera N arquivos via LLM mockado e commita cada um (exceto nmi)."""
-    uid, org_id, project_id, git_id = await _make_user_org_project_with_git(
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
         project_name="P happy",
         user_email_prefix="scaffold-happy",
     )
@@ -327,13 +368,13 @@ async def test_scaffold_happy_path_commits_files():
             assert call["msg"].endswith(call["path"])
 
     finally:
-        await _cleanup_user_org_project_git(uid, org_id, project_id, git_id)
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
 
 
 @pytest.mark.asyncio
 async def test_regenerate_file_happy_path_commits():
     """Regenerar UM arquivo: LLM devolve conteúdo, vira commit individual no Git."""
-    uid, org_id, project_id, git_id = await _make_user_org_project_with_git(
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
         project_name="P regen",
         user_email_prefix="regen-happy",
     )
@@ -385,4 +426,4 @@ async def test_regenerate_file_happy_path_commits():
         assert commit_calls[0]["msg"] == "feat(codegen): regenerar src/hello.py"
 
     finally:
-        await _cleanup_user_org_project_git(uid, org_id, project_id, git_id)
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
