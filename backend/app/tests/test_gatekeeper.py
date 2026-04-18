@@ -21,7 +21,11 @@ class TestGatekeeperService:
         items_result.scalars.return_value.all.return_value = []
         modules_result = MagicMock()
         modules_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(side_effect=[items_result, modules_result])
+        # DT-040: get_project_gatekeeper agora também consulta OCG pra scores
+        # reais dos pilares (DT-035/036/037). Sem OCG → scalar_one_or_none=None.
+        ocg_result = MagicMock()
+        ocg_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(side_effect=[items_result, modules_result, ocg_result])
 
         service = GatekeeperService(mock_db)
         result = await service.get_project_gatekeeper(uuid4())
@@ -87,7 +91,11 @@ class TestGatekeeperService:
         items_result.scalars.return_value.all.return_value = []
         modules_result = MagicMock()
         modules_result.scalars.return_value.all.return_value = []
-        mock_db.execute = AsyncMock(side_effect=[items_result, modules_result])
+        # DT-040: generate_report_markdown delega a get_project_gatekeeper,
+        # que faz 3 queries (items, modules, OCG).
+        ocg_result = MagicMock()
+        ocg_result.scalar_one_or_none.return_value = None
+        mock_db.execute = AsyncMock(side_effect=[items_result, modules_result, ocg_result])
 
         service = GatekeeperService(mock_db)
         md = await service.generate_report_markdown(uuid4())

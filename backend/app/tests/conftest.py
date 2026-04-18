@@ -111,7 +111,17 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
         finally:
             session.commit = _original_commit  # type: ignore
             session.rollback = _original_rollback  # type: ignore
-            await trans.rollback()
+            # DT-040: teardown silencioso. asyncpg + NullPool + TestClient
+            # (que usa loop próprio) dispara `RuntimeError: Event loop is
+            # closed` ao cancelar tasks pendentes no close da conexão. O
+            # rollback em si já ocorreu no fluxo do teste; suprimir o
+            # ruído de cancelamento evita falsos errors em testes que só
+            # fazem request GET via sync_client (test_setup_wizard).
+            try:
+                await trans.rollback()
+            except RuntimeError as e:
+                if "Event loop is closed" not in str(e):
+                    raise
 
 
 # ============================================================================
@@ -180,6 +190,10 @@ async def test_project(db_session: AsyncSession, test_user: User, test_organizat
         name="Test Project",
         slug=f"test-project-{uuid4().hex[:8]}",
         description="A test project",
+        # DT-040: `deliverable_type` é NOT NULL desde DT-015. Fixture default
+        # pra "new_system" — testes que precisarem de outro tipo criam
+        # Project(...) manualmente.
+        deliverable_type="new_system",
         status="active",
         created_at=datetime.utcnow(),
     )

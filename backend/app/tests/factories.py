@@ -106,6 +106,8 @@ async def create_test_project(
         name=name,
         slug=slug,
         description="Test project",
+        # DT-040: deliverable_type NOT NULL desde DT-015.
+        deliverable_type="new_system",
         status=status,
         created_at=datetime.utcnow(),
     )
