@@ -426,8 +426,6 @@ class OCGUpdaterService:
         Retorna dict com: raw_text, tokens_input, tokens_output, provider, model.
         """
         # Resolve provider + chave DO PROJETO via AIKeyResolver.
-        # Fallback seguro: se projeto não tiver (cenário raro), falha
-        # explicitamente — nunca silenciosamente na chave admin.
         provider = await AIKeyResolver._resolve_project_provider(self.db, project_id)
         if not provider:
             raise ValueError(
@@ -439,6 +437,25 @@ class OCGUpdaterService:
             raise ValueError(
                 f"Chave do provider '{provider}' não encontrada no vault do "
                 f"projeto {project_id}."
+            )
+
+        # Guard de criticidade (contrato §6.2): atualização reativa do OCG
+        # é consolidação/arbitragem — ALTA criticidade. Contrato pede
+        # modelo premium. Logamos warning quando o GP usa provider
+        # classificado como média/baixa — a decisão fica dele, mas o
+        # audit trail fica visível no ai_usage_log + logs.
+        _HIGH_CRITICALITY_PROVIDERS = {"anthropic", "openai"}  # premium reasoning
+        _MEDIUM_LOW_PROVIDERS = {"deepseek", "grok", "gemini", "qwen", "ollama"}
+        if provider in _MEDIUM_LOW_PROVIDERS:
+            logger.warning(
+                "ocg_updater.criticality_mismatch",
+                project_id=str(project_id),
+                provider=provider,
+                message=(
+                    f"OCG update é ALTA criticidade (contrato §6.2) — provider "
+                    f"'{provider}' é classificado como média/baixa. GP pode reconfigurar "
+                    f"um provider premium (Anthropic/OpenAI) em Configurações → Provedor de IA."
+                ),
             )
 
         # Resolve modelo configurado (formato multi-provider ou legacy)
@@ -542,35 +559,67 @@ class OCGUpdaterService:
         }
 
     def _build_system_prompt(self) -> str:
+        """System prompt imperativo (DT-C1 da auditoria 2026-04-18).
+
+        Antes: linguagem permissiva ("pode alterar"). LLMs de média
+        criticidade pulavam a reavaliação de PILLAR_SCORES / context_health,
+        deixando contrato §5 ("boa ingestão expande, ruim contrai")
+        descumprido mesmo com o código suportando os deltas.
+
+        Agora: regras imperativas ("DEVE avaliar", "DEVE recalcular"),
+        com mapa gap→pilar como referência e obrigação de justificar
+        manter scores (não só alterar).
+        """
         return (
             "Você é o motor de atualização do OCG (Objeto de Contexto Global) do GCA.\n"
-            "Recebe o OCG atual e a análise do Arguidor; retorna **apenas um delta** "
-            "descrevendo o que mudar — NÃO reescreve o OCG inteiro.\n\n"
-            "## REGRAS\n"
+            "Recebe o OCG atual e a análise do Arguidor e DEVE retornar um delta que\n"
+            "cumpra o contrato canônico §5:\n"
+            "  • OCG EVOLUI a cada ingestão.\n"
+            "  • Boa ingestão DEVE EXPANDIR contexto (raise confidence, adicionar entregáveis).\n"
+            "  • Ingestão ruim ou conflitante DEVE CONTRAIR confiança (reduzir score, marcar findings críticos).\n"
+            "  • Neutralidade só é aceitável quando a análise não toca nenhum pilar ou recomendação — e mesmo assim você DEVE justificar por que nada muda.\n\n"
+            "## REGRAS IMPERATIVAS\n"
             "1. Use APENAS as operações 'replace' e 'append'.\n"
-            "2. Cada delta tem o formato:\n"
+            "2. Formato dos deltas:\n"
             "   - replace: {op:'replace', path, old_value, new_value, reasoning}\n"
-            "     * 'old_value' é OBRIGATÓRIO — se divergir do atual, o delta é rejeitado (optimistic concurrency).\n"
-            "     * 'path' em dot-notation: 'PILLAR_SCORES.P3_Scope_Management', 'STACK_RECOMMENDATION.backend.framework'.\n"
-            "     * Para item de lista por índice: 'RISK_ANALYSIS.high_risks.0.mitigation'.\n"
-            "   - append: {op:'append', path, value, reasoning}\n"
-            "     * path deve apontar para uma lista existente (DELIVERABLES, COMPLIANCE_CHECKLIST, RISK_ANALYSIS.high_risks, etc.).\n"
-            "3. Top-level keys permitidos: PROJECT_PROFILE, PILLAR_SCORES, COMPOSITE_SCORE, STACK_RECOMMENDATION, "
-            "CRITICAL_FINDINGS, TESTING_REQUIREMENTS, COMPLIANCE_CHECKLIST, DELIVERABLES, ARCHITECTURE_OVERVIEW, "
-            "RISK_ANALYSIS, APPROVAL_STATUS. Qualquer outra é rejeitada.\n"
-            "4. Se a análise não justifica nenhuma mudança real, devolva 'deltas': [] (vazio).\n"
-            "5. change_type:\n"
-            "   - EXPAND: informação nova positiva sendo adicionada (novo entregável, novo módulo).\n"
-            "   - CONTRACT: score reduzido ou informação descartada por GAP do Arguidor.\n"
-            "   - UPDATE: ajuste neutro (refinamento de descrição, etc.). Use UPDATE se deltas=[].\n"
-            "6. context_health: {depth, confidence, quality} valores entre 0.0 e 1.0.\n"
-            "7. Nunca remova informação consolidada sem justificativa explícita no 'reasoning'.\n"
-            "8. Retorne APENAS o JSON. Sem markdown, sem comentários, sem preamble.\n\n"
+            "     * 'old_value' é OBRIGATÓRIO (optimistic concurrency — divergência rejeita o delta).\n"
+            "     * 'path' em dot-notation. Exemplos válidos: 'PILLAR_SCORES.P3.score', 'PROJECT_PROFILE.frontend_stack', 'STACK_RECOMMENDATION.backend.framework', 'RISK_ANALYSIS.high_risks.0.mitigation'.\n"
+            "   - append: {op:'append', path, value, reasoning} — path aponta para lista existente.\n"
+            "3. Top-level keys permitidos: PROJECT_PROFILE, PILLAR_SCORES, COMPOSITE_SCORE, STACK_RECOMMENDATION, CRITICAL_FINDINGS, TESTING_REQUIREMENTS, COMPLIANCE_CHECKLIST, DELIVERABLES, ARCHITECTURE_OVERVIEW, RISK_ANALYSIS, APPROVAL_STATUS.\n\n"
+            "## PILLAR_SCORES — AVALIAÇÃO OBRIGATÓRIA POR INGESTÃO\n"
+            "Para CADA ingestão você DEVE:\n"
+            "  (a) Mapear cada gap/show_stopper/poor_definition da análise do Arguidor contra o pilar afetado (mapa abaixo).\n"
+            "  (b) Para cada pilar TOCADO pela análise, DECIDIR: EXPAND (+score), CONTRACT (-score) ou MANTER.\n"
+            "  (c) Gerar delta em PILLAR_SCORES.<Pn>.score quando a análise justificar — e explicar no 'reasoning' citando o gap/show_stopper específico.\n"
+            "  (d) Se decidir MANTER o score, incluir no 'reasoning' do change_type o motivo (ex: 'P4 não tocado pela análise').\n\n"
+            "### Mapa gap → pilar (referência obrigatória):\n"
+            "  - P1 Caso de Negócio: gaps sobre ROI, valor, stakeholders, escopo de negócio, cases de uso macro.\n"
+            "  - P2 Regras/Compliance: gaps sobre LGPD, GDPR, auditoria, retenção, consentimento, políticas regulatórias.\n"
+            "  - P3 Funcionalidades/Escopo: gaps sobre features faltantes, casos de uso, fronteiras do escopo.\n"
+            "  - P4 Requisitos Não-Funcionais: gaps sobre performance, disponibilidade, escalabilidade, observabilidade.\n"
+            "  - P5 Arquitetura/Design: gaps sobre stack técnica, perfil arquitetural, padrões, integrações.\n"
+            "  - P6 Dados/Persistência: gaps sobre banco, modelo de dados, cache, mensageria, backup, classificação.\n"
+            "  - P7 Segurança: gaps sobre auth, autorização, criptografia, secrets, auditoria, ameaças.\n\n"
+            "## context_health — RECÁLCULO OBRIGATÓRIO\n"
+            "Você DEVE recalcular {depth, confidence, quality} a cada ingestão conforme:\n"
+            "  • depth: cobertura do doc sobre pilares (0 = 1 pilar, 1 = todos os 7).\n"
+            "  • confidence: quão consistente o doc é com o OCG atual (1 = concorda, 0 = conflitante).\n"
+            "  • quality: clareza e especificidade do doc (0 = vago/genérico, 1 = concreto/implementável).\n"
+            "Se a ingestão for ruim (show_stoppers>0, informações vagas, conflitos), confidence DEVE baixar.\n\n"
+            "## change_type — CLASSIFICAÇÃO OBRIGATÓRIA\n"
+            "  - EXPAND: ingestão trouxe informação nova positiva; pelo menos 1 delta eleva algum score ou adiciona entregável.\n"
+            "  - CONTRACT: ingestão expôs lacuna ou conflito; pelo menos 1 delta reduz score OU adiciona CRITICAL_FINDING.\n"
+            "  - UPDATE: ajuste neutro (refinamento de texto). Use UPDATE somente quando nenhum pilar é tocado.\n"
+            "REGRA DURA: se a análise do Arguidor traz show_stoppers > 0, change_type DEVE ser CONTRACT (não pode ser UPDATE nem EXPAND).\n\n"
+            "## OUTRAS REGRAS\n"
+            "- Se deltas=[], use change_type=UPDATE e EXPLIQUE no reasoning do context_health.\n"
+            "- Nunca remova informação consolidada sem justificativa explícita.\n"
+            "- Retorne APENAS o JSON. Sem markdown, sem comentários, sem preamble.\n\n"
             "## FORMATO DE SAÍDA (JSON obrigatório)\n"
             "{\n"
             '  "deltas": [\n'
-            '    {"op":"replace", "path":"PILLAR_SCORES.P3_Scope_Management", "old_value":75, "new_value":65, "reasoning":"GAP G003: requisitos não-implementáveis"},\n'
-            '    {"op":"append", "path":"DELIVERABLES", "value":"SBOM inicial do projeto", "reasoning":"resposta ao GAP G002"}\n'
+            '    {"op":"replace", "path":"PILLAR_SCORES.P3.score", "old_value":75, "new_value":65, "reasoning":"GAP G003 (escopo ambíguo) reduz confiança em Funcionalidades/Escopo"},\n'
+            '    {"op":"append", "path":"DELIVERABLES", "value":"SBOM inicial", "reasoning":"resposta ao GAP G002"}\n'
             '  ],\n'
             '  "change_type": "EXPAND" | "CONTRACT" | "UPDATE",\n'
             '  "context_health": {"depth": 0.0, "confidence": 0.0, "quality": 0.0}\n'

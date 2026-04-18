@@ -399,6 +399,22 @@ Fluxo esperado:
 4. Revalidar
 5. Só então expandir
 
+### 11.1 Auditoria-contra-contrato obrigatória
+
+Toda mudança em módulo citado no contrato canônico (OCG, Gatekeeper, Arguidor, CodeGen, ingestão, RBAC, criticidade de IA, compartimentalização de projeto) **deve** ser validada linha-por-linha contra o contrato antes de marcar como quitada. Não é suficiente que o teste funcional do sintoma passe.
+
+Ao ler o contrato, interpretar "pode" como "deve" sempre que descrever capacidade do sistema. Exemplo: se o contrato diz "OCG expande com boa ingestão", o prompt do LLM **não pode** ser permissivo ("pode alterar PILLAR_SCORES") — tem que ser imperativo ("DEVE avaliar cada pilar afetado").
+
+Checklist antes de marcar quitada qualquer DT estrutural:
+1. Release notes do contrato + skill canônica da área foram relidos?
+2. Cada regra do contrato foi mapeada contra o código atual?
+3. Os GAPs entre "deve" do contrato e comportamento real estão identificados e registrados como DT?
+4. O teste funcional sintomático passa **e** o teste de conformidade contra o contrato também?
+
+### 11.2 Compartimentalização ponta-a-ponta (contrato §2.2)
+
+Toda leitura/escrita envolvendo dado de projeto **deve** incluir `project_id` no predicado. Nenhum canal lateral (vault, storage, cache, logs, notificações, git, n8n, SMTP) pode cruzar projetos sem autorização explícita no contrato. Ao tocar código que acessa tabela com `project_id`, verificar que toda query filtra por esse campo. Ao criar endpoint que retorna dado de projeto, o `project_id` deve estar no path ou no predicado de filtro — nunca inferido de sessão sem validação.
+
 ---
 
 ## 12. Convenções técnicas
