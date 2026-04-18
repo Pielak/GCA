@@ -156,9 +156,10 @@ class OCGUpdaterService:
         version_from = ocg.version
         current_ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
 
-        # 2. Chamar o LLM
+        # 2. Chamar o LLM (DT-033: agora usa chave DO PROJETO, não do admin —
+        # ingestão reativa é Camada Projeto, contrato §6.6 Contexto B).
         try:
-            llm_result = await self._call_llm(current_ocg_data, arguider_analysis)
+            llm_result = await self._call_llm(current_ocg_data, arguider_analysis, project_id)
         except Exception as exc:
             logger.error(
                 "ocg_updater.llm_failed",
@@ -409,53 +410,110 @@ class OCGUpdaterService:
         self,
         current_ocg_data: Dict[str, Any],
         arguider_analysis: Dict[str, Any],
+        project_id: UUID,
     ) -> Dict[str, Any]:
         """
         Chama o LLM com o OCG atual e a análise do Arguidor.
 
         Criticidade (contrato §6.2): **ALTA**. Atualização do OCG é
-        consolidação/arbitragem de contexto — exige modelo premium. A
-        resolução da chave é da CAMADA GCA (admin), pois o OCG evolui no
-        pipeline do produto; não usa chave do projeto aqui.
+        consolidação/arbitragem de contexto — exige modelo premium.
+
+        DT-033: Camada Projeto (contrato §6.6 Contexto B). Ingestão
+        reativa é operação diária do cliente, não desenvolvimento do
+        produto — usa chave do projeto (do GP), não chave global do
+        admin. Custo fica onde deve ficar.
 
         Retorna dict com: raw_text, tokens_input, tokens_output, provider, model.
         """
-        # Carregar chaves do banco (system_settings) antes de resolver
-        from app.routers.admin_gca_router import _load_ai_providers_from_db
-        await _load_ai_providers_from_db(self.db)
-
-        provider = settings.DEFAULT_AI_PROVIDER
-        api_key = await AIKeyResolver.get_gca_key(provider)
-
+        # Resolve provider + chave DO PROJETO via AIKeyResolver.
+        # Fallback seguro: se projeto não tiver (cenário raro), falha
+        # explicitamente — nunca silenciosamente na chave admin.
+        provider = await AIKeyResolver._resolve_project_provider(self.db, project_id)
+        if not provider:
+            raise ValueError(
+                f"Projeto {project_id} não tem provider LLM configurado. "
+                "GP deve configurar em Configurações → Provedor de IA."
+            )
+        api_key = await AIKeyResolver.get_project_key(self.db, project_id, provider=provider)
         if not api_key:
             raise ValueError(
-                f"Chave de IA não configurada para o provider '{provider}'. "
-                "O Admin deve configurar em Configurações > Provedores de IA."
+                f"Chave do provider '{provider}' não encontrada no vault do "
+                f"projeto {project_id}."
             )
+
+        # Resolve modelo configurado (formato multi-provider ou legacy)
+        from sqlalchemy import text as _text
+        model = None
+        try:
+            row = (await self.db.execute(
+                _text("SELECT settings_json FROM project_settings WHERE project_id=:pid AND setting_type='llm'"),
+                {"pid": str(project_id)},
+            )).fetchone()
+            if row and row[0]:
+                cfg = json.loads(row[0])
+                for p in cfg.get("providers", []) or []:
+                    if p.get("is_default") and p.get("provider") == provider:
+                        model = p.get("model")
+                        break
+                if not model and cfg.get("provider") == provider:
+                    model = cfg.get("model_preference")
+        except Exception:
+            pass
+
+        # Defaults por provider (match com _call_llm do Arguidor e agent_service)
+        _default_models = {
+            "anthropic": "claude-opus-4-6",
+            "openai": "gpt-4o",
+            "deepseek": "deepseek-chat",
+            "grok": "grok-2",
+            "gemini": "gemini-2.0-flash",
+        }
+        model = model or _default_models.get(provider, "deepseek-chat")
 
         system_prompt = self._build_system_prompt()
         user_prompt = self._build_user_prompt(current_ocg_data, arguider_analysis)
-
-        model = settings.DEFAULT_AI_MODEL
 
         logger.info(
             "ocg_updater.llm_call",
             provider=provider,
             model=model,
             prompt_len=len(user_prompt),
+            project_id=str(project_id),
         )
 
-        # Chamada unificada via httpx (mesmo padrão do agent_service._call_llm)
-        import httpx
+        # Dispatch por provider: Anthropic SDK nativo, resto via httpx
+        # OpenAI-compatible. DT-033 corrige o bug anterior onde provider=
+        # anthropic caía no fallback genérico de DeepSeek (URL errada).
+        if provider == "anthropic":
+            from anthropic import AsyncAnthropic
+            client = AsyncAnthropic(api_key=api_key)
+            response = await client.messages.create(
+                model=model,
+                max_tokens=8192,
+                temperature=0.3,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return {
+                "raw_text": response.content[0].text,
+                "tokens_input": response.usage.input_tokens,
+                "tokens_output": response.usage.output_tokens,
+                "provider": provider,
+                "model": model,
+            }
 
+        import httpx
         provider_urls = {
             "deepseek": "https://api.deepseek.com/chat/completions",
             "openai": "https://api.openai.com/v1/chat/completions",
             "grok": "https://api.x.ai/v1/chat/completions",
-            "openrouter": "https://openrouter.ai/api/v1/chat/completions",
-            "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
         }
-        url = provider_urls.get(provider, "https://api.deepseek.com/chat/completions")
+        url = provider_urls.get(provider)
+        if not url:
+            raise ValueError(
+                f"Provider '{provider}' não suportado no ocg_updater. "
+                f"Suportados: anthropic, openai, deepseek, grok."
+            )
 
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, headers={
@@ -472,7 +530,7 @@ class OCGUpdaterService:
             })
 
         if resp.status_code not in (200, 201):
-            raise ValueError(f"LLM API error ({resp.status_code}): {resp.text[:300]}")
+            raise ValueError(f"LLM API error ({resp.status_code}) no provider {provider}: {resp.text[:300]}")
 
         data = resp.json()
         return {
