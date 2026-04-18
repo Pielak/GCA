@@ -470,11 +470,80 @@ class IngestionService:
         if re.search(r"\b[a-zA-Z0-9._%+-]+@(gmail|hotmail|yahoo|outlook)\.[a-zA-Z]{2,}\b", text):
             detected.append("email_pessoal")
 
-        # Telefone BR: regex é suficiente
-        if re.search(r"\b\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b", text):
+        # Telefone BR: regex antigo (`\b\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b`)
+        # era promíscuo — matchava qualquer sequência 2+4-5+4 dígitos sem
+        # contexto, dando falso-positivo em PDFs com métricas, IDs,
+        # coordenadas, timestamps. DT-028 quitada: agora exige padrão
+        # formatado inequívoco OU contexto explícito ("tel"/"fone"/
+        # "whatsapp" nas proximidades), e valida DDD como 11-99.
+        if IngestionService._has_br_phone(text):
             detected.append("telefone_br")
 
         return len(detected) > 0, detected
+
+    @staticmethod
+    def _has_br_phone(text: str) -> bool:
+        """Detecção estrita de telefone BR.
+
+        Aceita apenas padrões inequívocos:
+          (a) "(DD) 9NNNN-NNNN" ou "(DD) NNNN-NNNN"  — parênteses no DDD
+          (b) "+55 DD 9NNNN-NNNN"                    — E.164
+          (c) "DD 9NNNN-NNNN" / "DD NNNN-NNNN"       — hífen obrigatório
+          (d) qualquer match acima com contexto "tel"/"fone"/"telefone"/
+              "whatsapp"/"celular"/"cel." numa janela de 40 chars antes.
+
+        Rejeita:
+          - sequências sem hífen nem parênteses (lookout de PDF binário);
+          - DDs fora de 11-99 (faixa válida dos DDDs no Brasil);
+          - números com todos dígitos iguais (1111111111) ou sentinelas.
+        """
+        import re as _re
+
+        # Padrões inequívocos — exige pelo menos 1 separador (parêntese
+        # ou hífen) no formato esperado do Brasil.
+        patterns = [
+            # (DD) NNNNN-NNNN ou (DD) NNNN-NNNN — parênteses obrigatórios
+            r"\((\d{2})\)\s?9?\d{4}-\d{4}\b",
+            # +55 DD NNNNN-NNNN — E.164
+            r"\+55\s?(\d{2})\s?9?\d{4}-?\d{4}\b",
+            # DD NNNNN-NNNN — hífen final obrigatório (elimina runs crus)
+            r"\b(\d{2})\s\d{4,5}-\d{4}\b",
+        ]
+
+        def _valid_ddd(ddd_str: str) -> bool:
+            try:
+                ddd = int(ddd_str)
+                return 11 <= ddd <= 99
+            except ValueError:
+                return False
+
+        def _not_sentinel(raw: str) -> bool:
+            digits = _re.sub(r"\D", "", raw)
+            # Rejeita só "todos iguais" (1111111111, 0000000000).
+            # Ter 2 dígitos distintos (ex.: "1199999999") é normal em
+            # telefone real.
+            if len(set(digits)) < 2:
+                return False
+            return True
+
+        for pat in patterns:
+            for m in _re.finditer(pat, text):
+                if _valid_ddd(m.group(1)) and _not_sentinel(m.group(0)):
+                    return True
+
+        # Fallback com contexto: se o texto tem "tel"/"fone"/"celular"/
+        # "whatsapp" próximo a uma sequência plausível, também conta.
+        ctx_re = _re.compile(
+            r"(?:tel|telefone|fone|cel(?:ular)?|whats?app|contato)"
+            r"[^\n]{0,40}?(\d{2}[\s().-]{0,3}9?\d{4}[\s.-]?\d{4})",
+            _re.IGNORECASE,
+        )
+        for m in ctx_re.finditer(text):
+            digits = _re.sub(r"\D", "", m.group(1))
+            if len(digits) in (10, 11) and _not_sentinel(digits):
+                return True
+
+        return False
 
     async def _analyze_async(
         self,

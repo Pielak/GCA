@@ -2,8 +2,9 @@
 
 Plataforma **instalável por cliente** para governança de projetos de TI assistida por IA.
 
-> **Status atual:** MVP 1 em saneamento (base operacional).
-> Estado canônico em [`GCA_MVP_PROGRESS.md`](GCA_MVP_PROGRESS.md).
+> **Status atual:** MVP 2 em andamento (contexto vivo e governança de conteúdo).
+> MVP 1 (base operacional) encerrado em 2026-04-17.
+> Estado canônico e dívidas abertas em [`GCA_MVP_PROGRESS.md`](GCA_MVP_PROGRESS.md).
 
 ---
 
@@ -28,6 +29,17 @@ Documentos históricos explicam contexto mas **não autorizam implementação** 
 - Isolamento principal por **projeto** dentro da instância.
 - Não é, nesta versão, um SaaS multi-tenant compartilhado entre clientes.
 - Cada cliente usa seus próprios provedores de IA e chaves.
+
+### Glossário — termos que causam confusão
+
+| Termo | Significado nesta versão |
+|---|---|
+| **Cliente** | Organização que instala o GCA na sua infraestrutura. Paga e administra a própria instância. |
+| **Instância** | Deployment único de GCA rodando para um cliente. Tem seu próprio banco, seu próprio admin, suas próprias chaves. |
+| **Admin** | Papel dentro da instância (contratos §4.1) — configura provedores de IA, SMTP, usuários, aprovações. Não atua dentro dos projetos. |
+| **Projeto** | Unidade isolada dentro da instância. Cada projeto tem seu próprio OCG, repo, questionário, chaves de IA (ver §2.2). |
+| **GP** | Gerente do Projeto — conduz um projeto específico, aprova módulos, convida time. Não escreve código. |
+| **Tenant (interno)** | Sinônimo de **projeto** nesta versão. Cada projeto é um "tenant" isolado dentro da instância do cliente. Não confundir com multi-tenant SaaS compartilhado — isso não existe aqui. |
 
 ---
 

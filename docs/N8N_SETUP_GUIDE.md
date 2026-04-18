@@ -1,5 +1,14 @@
 # Phase 4: n8n + Qwen AI Integration Setup Guide
 
+> ⚠️ **DOCUMENTO HISTÓRICO — fase descontinuada.**
+> Este guia descreve a integração n8n + Qwen de uma fase que **foi
+> substituída** pelos agentes nativos (pipeline de 8 agentes de OCG em
+> `backend/app/services/agent_service.py`). O container n8n ainda roda
+> por compatibilidade, mas o fluxo oficial de validação de questionário
+> não passa mais por ele — usa `TechnologyVerificationService` diretamente.
+>
+> Para arquitetura atual de IA, ver [`../GCA_CANONICAL_CONTRACT.md §6`](../GCA_CANONICAL_CONTRACT.md).
+
 ## Overview
 
 This guide covers setting up n8n with Qwen AI for intelligent validation of external project questionnaires. **Qwen is a free, open-source LLM by Alibaba** that can be used locally or via API.

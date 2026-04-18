@@ -3,6 +3,16 @@
 # Especificação Técnica e Funcional — Fases 0 a 5
 # Versão: 1.0 | Data: 08/04/2026 | Autor: Luiz Carlos Pielak
 
+> ⚠️ **DOCUMENTO HISTÓRICO — NÃO É CONTRATO DE IMPLEMENTAÇÃO.**
+> Especificação original das Fases 0–5, datada de 2026-04-08. Descreve
+> capacidades de todo o pipeline como se estivessem uniformemente maduras —
+> **não reflete o estado atual**. MVP 2 em andamento (contexto vivo);
+> CodeGen (MVP 3), QA/entrega (MVP 4) e hardening (MVP 5) não estão
+> completos. Placeholders listados aqui **não foram promovidos** a entregas
+> automaticamente.
+>
+> **Fonte soberana:** [`GCA_CANONICAL_CONTRACT.md`](GCA_CANONICAL_CONTRACT.md) · estado operacional: [`GCA_MVP_PROGRESS.md`](GCA_MVP_PROGRESS.md).
+
 ---
 
 ## LEITURA OBRIGATÓRIA ANTES DE QUALQUER AÇÃO

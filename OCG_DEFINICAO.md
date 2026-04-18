@@ -1,5 +1,11 @@
 # OCG — Objeto de Contexto Global
 
+> ⚠️ **DOCUMENTO DE REFERÊNCIA — precede o contrato canônico.**
+> Descreve a definição teórica do OCG. O **contrato canônico vigente**
+> ([`GCA_CANONICAL_CONTRACT.md §5`](GCA_CANONICAL_CONTRACT.md)) e a skill
+> `gca-ocg-engine` são as fontes soberanas sobre comportamento do OCG na
+> implementação atual. Em caso de divergência, o contrato vence.
+
 ## Definição Central
 
 O **OCG (Objeto de Contexto Global)** é a fonte única de verdade do projeto no GCA.

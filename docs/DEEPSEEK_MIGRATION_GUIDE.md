@@ -1,5 +1,17 @@
 # 🔄 Guia de Migração: Claude → DeepSeek
 
+> ⚠️ **DOCUMENTO HISTÓRICO — substituído pelo multi-provider.**
+> Este guia descreve uma migração única Claude→DeepSeek que era a solução
+> no início de abril/2026. O sistema agora suporta **multi-provider nativo
+> por projeto** (commits `dd7f8f3` e `c93d2b8`) — o GP configura vários
+> provedores na aba Configurações → Provedor de IA e define qual é o
+> padrão, com troca sem migração. Não há mais "migrar a instância toda"
+> de um provedor pro outro.
+>
+> Para usar DeepSeek hoje: adicione o provider na aba Provedor de IA do
+> projeto e marque como padrão. Admin também pode trocar `DEFAULT_AI_
+> PROVIDER` no `.env` (camada GCA, pipeline pré-OCG).
+
 **Data**: 6 de Abril, 2026  
 **Economia**: ~80% em custos de API  
 **Status**: ✅ Pronto para ativar

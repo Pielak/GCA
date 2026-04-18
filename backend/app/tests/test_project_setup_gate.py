@@ -58,10 +58,12 @@ async def _seed_project(db: AsyncSession, name: str) -> uuid.UUID:
 async def test_setup_status_fresh_project_has_nothing_configured(db_session: AsyncSession):
     pid = await _seed_project(db_session, "fresh")
     status = await _check_setup_status(db_session, pid)
+    # questionnaire_approved adicionado em 2026-04-17 (badge ⚠/✓ na aba).
     assert status == {
         "repo_configured": False,
         "llm_configured": False,
         "questionnaire_submitted": False,
+        "questionnaire_approved": False,
         "ready_to_activate": False,
     }
 
