@@ -499,6 +499,12 @@ async def get_project_questionnaire(
             "restrictions": q.restrictions,
             "submitted_at": q.submitted_at.isoformat() if q.submitted_at else None,
             "analyzed_at": q.analyzed_at.isoformat() if q.analyzed_at else None,
+            # DT-020: trace do PDF submetido (nullable para questionários
+            # antigos submetidos antes da migration 019).
+            "uploaded_filename": getattr(q, "uploaded_filename", None),
+            "file_hash": getattr(q, "file_hash", None),
+            "file_size_bytes": getattr(q, "file_size_bytes", None),
+            "answered_questions": getattr(q, "answered_questions", None),
         }
     }
 

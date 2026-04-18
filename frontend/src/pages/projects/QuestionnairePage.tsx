@@ -43,6 +43,11 @@ interface ExistingQuestionnaire {
   // Respostas atuais (q_id → string ou lista). Usadas para pré-preencher
   // o painel de correção inline sem exigir novo upload de PDF.
   responses?: Record<string, string | string[]>
+  // DT-020: trace do PDF recebido (nullable — questionários antigos não têm)
+  uploaded_filename?: string | null
+  file_hash?: string | null
+  file_size_bytes?: number | null
+  answered_questions?: number | null
 }
 
 // ─── Component ─────────────────────────────────────────────────────
@@ -242,6 +247,24 @@ function StatusCard({ q }: { q: ExistingQuestionnaire }) {
                   <>
                     {' · '}Aderência: <span className="font-semibold">{q.adherence_score}%</span>
                   </>
+                )}
+              </p>
+            )}
+            {/* DT-020: trace do PDF recebido */}
+            {q.uploaded_filename && (
+              <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5 flex-wrap">
+                <span className="text-slate-400">PDF recebido:</span>
+                <span className="font-mono text-slate-300 break-all">{q.uploaded_filename}</span>
+                {q.file_size_bytes && (
+                  <span>· {(q.file_size_bytes / 1024).toFixed(0)} KB</span>
+                )}
+                {q.answered_questions != null && (
+                  <span>· {q.answered_questions}/49 respostas extraídas</span>
+                )}
+                {q.file_hash && (
+                  <span title={`SHA-256: ${q.file_hash}`} className="font-mono">
+                    · hash {q.file_hash.slice(0, 8)}…
+                  </span>
                 )}
               </p>
             )}

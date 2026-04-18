@@ -710,6 +710,13 @@ class Questionnaire(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), index=True)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    # DT-020: trace do PDF recebido via aba Questionário (migration 019).
+    # Todos nullable para retrocompat com submissions anteriores à migration.
+    uploaded_filename = Column(String(500), nullable=True)
+    file_hash = Column(String(64), nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    answered_questions = Column(Integer, nullable=True)
+
     # Relationships
     project = relationship("Project", foreign_keys=[project_id])
 

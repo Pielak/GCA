@@ -169,6 +169,35 @@ async def upload_questionnaire_pdf(
     total_questions = 49
     percentage = round(answered_count / total_questions * 100, 1)
 
+    # DT-020: grava trace do PDF no próprio Questionnaire (não ingere
+    # como documento — mantém DT-015 intacta). O GP vê na aba Questionário
+    # "PDF recebido: <nome> (N KB · hash …)" em vez de "status sumiu".
+    if success and questionnaire_id:
+        import hashlib
+        from sqlalchemy import text as _text
+        try:
+            file_hash = hashlib.sha256(pdf_bytes).hexdigest()
+            await db.execute(
+                _text("""
+                    UPDATE questionnaires
+                    SET uploaded_filename = :fn,
+                        file_hash = :h,
+                        file_size_bytes = :sz,
+                        answered_questions = :aq
+                    WHERE id = :qid
+                """),
+                {
+                    "fn": (file.filename or "unnamed")[:500],
+                    "h": file_hash,
+                    "sz": len(pdf_bytes),
+                    "aq": answered_count,
+                    "qid": questionnaire_id,
+                },
+            )
+            await db.commit()
+        except Exception as e:
+            logger.warning("questionnaire_pdf.trace_save_failed", error=str(e))
+
     if not success:
         logger.warning(
             "questionnaire_pdf.submit_failed",
