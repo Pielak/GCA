@@ -107,8 +107,11 @@ class TestIngestionService:
 
 class TestArguiderService:
     def test_build_prompt(self):
+        # DT-040: DT-012 tornou ArguiderService exigente quanto à chave do
+        # projeto (Arguidor é ALTA criticidade §6.2 — sem fallback pra chave
+        # global do admin). Teste unitário passa chave fake.
         db = AsyncMock()
-        service = ArguiderService(db)
+        service = ArguiderService(db, project_api_key="sk-test-dummy-key")
         prompt = service._build_prompt(
             doc_text="Conteúdo do documento",
             ocg={"PROJECT_PROFILE": {"name": "Test"}},
