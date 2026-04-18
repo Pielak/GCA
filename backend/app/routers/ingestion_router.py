@@ -122,6 +122,85 @@ async def release_from_quarantine(
     return {"message": "Documento liberado da quarentena. Análise será iniciada.", "document_id": str(document_id)}
 
 
+@router.post("/projects/{project_id}/ingestion/{document_id}/reanalyze")
+async def reanalyze_document(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-executa o Arguidor em um documento já ingerido (DT-039).
+
+    Casos de uso:
+      - doc ficou em `error` (401, parse, timeout, etc) — quer tentar de novo
+      - projeto trocou de provider (ex: DeepSeek → OpenAI) e quer re-analisar
+        com o provider novo
+      - prompt do Arguidor mudou (upgrade de versão) e quer re-analisar com
+        novo comportamento
+
+    Pré-requisitos:
+      - `content_status='available'` (bytes do arquivo ainda no storage);
+        se `lost` (ex: arquivo ingerido antes da DT-030 ser aplicada), este
+        endpoint retorna 409 — user precisa reuploadar.
+    """
+    import os
+    from app.models.base import IngestedDocument
+    from app.core.config import settings as cfg
+
+    doc = await db.get(IngestedDocument, document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    if doc.content_status == "lost":
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Arquivo original foi perdido (storage ephemeral antes da DT-030). "
+                "Reenvie o arquivo via aba Ingestão — não é possível reanalisar sem os bytes."
+            ),
+        )
+
+    fullpath = os.path.join(cfg.STORAGE_PATH, doc.filename)
+    if not os.path.exists(fullpath):
+        # Marca como lost pro frontend parar de oferecer retry
+        doc.content_status = "lost"
+        await db.commit()
+        raise HTTPException(
+            status_code=409,
+            detail="Arquivo não encontrado no storage. Marcado como 'lost' — reenvie.",
+        )
+
+    with open(fullpath, "rb") as f:
+        file_bytes = f.read()
+
+    # Reset status antes do retry
+    doc.arguider_status = "pending"
+    doc.arguider_error_message = None
+    doc.arguider_started_at = None
+    doc.arguider_completed_at = None
+    doc.ocg_updated = False
+    await db.commit()
+
+    # Dispara análise em background (não bloqueia a resposta)
+    import asyncio
+    from app.services.ingestion_service import IngestionService
+    svc = IngestionService(db)
+    asyncio.create_task(svc._analyze_async(document_id, project_id, file_bytes, doc.file_type))
+
+    logger.info(
+        "ingestion.reanalyze_dispatched",
+        document_id=str(document_id),
+        project_id=str(project_id),
+        filename=doc.original_filename,
+    )
+
+    return {
+        "success": True,
+        "message": "Reanálise disparada. Status será atualizado em segundo plano.",
+        "document_id": str(document_id),
+    }
+
+
 @router.get("/projects/{project_id}/ingestion/{document_id}/content")
 async def get_document_content(
     project_id: UUID,

@@ -4,6 +4,7 @@ import { Upload, FileText, Trash2, Play, Terminal, Loader2, RefreshCw } from 'lu
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useDocuments, useUploadDocument, useDeleteDocument, type IngestedDocument } from '@/hooks/useIngestion';
 import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
+import { apiClient } from '@/lib/api';
 
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
 
@@ -72,6 +73,22 @@ export function IngestionPage() {
   const { data: documents = [], isLoading, refetch } = useDocuments(projectId);
   const uploadMutation = useUploadDocument(projectId);
   const deleteMutation = useDeleteDocument(projectId);
+  // DT-039: retry por documento. Estado local por doc pra loading no botão.
+  const [reanalyzing, setReanalyzing] = useState<Record<string, boolean>>({});
+
+  const handleReanalyze = useCallback(async (docId: string) => {
+    if (!projectId) return;
+    setReanalyzing(prev => ({ ...prev, [docId]: true }));
+    try {
+      await apiClient.post(`/projects/${projectId}/ingestion/${docId}/reanalyze`, {});
+      await refetch();
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Falha ao disparar reanálise';
+      alert(`Reanálise falhou: ${detail}`);
+    } finally {
+      setReanalyzing(prev => ({ ...prev, [docId]: false }));
+    }
+  }, [projectId, refetch]);
 
   const filtered = filter === 'all' ? documents : documents.filter(d => d.arguider_status === filter);
   const pendingCount = documents.filter(d => d.arguider_status === 'pending').length;
@@ -289,6 +306,19 @@ export function IngestionPage() {
                     <span className={st.color}>{st.label}</span>
                     {doc.ocg_updated && <span className="text-emerald-600 text-[10px]">(OCG)</span>}
                   </div>
+                  {/* DT-039: botão re-analisar (só quando relevante e content_status!='lost') */}
+                  {(doc.arguider_status === 'error' || doc.arguider_status === 'completed') && doc.content_status !== 'lost' && (
+                    <button
+                      onClick={() => handleReanalyze(doc.id)}
+                      disabled={reanalyzing[doc.id]}
+                      className="p-1 rounded text-slate-600 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      title={doc.arguider_status === 'error' ? 'Tentar analisar novamente' : 'Re-analisar com config atual (novo provider/prompt)'}
+                    >
+                      {reanalyzing[doc.id]
+                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        : <RefreshCw className="w-3.5 h-3.5" />}
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDelete(doc.id, doc.original_filename)}
                     disabled={doc.arguider_status === 'processing' || deleteMutation.isPending}

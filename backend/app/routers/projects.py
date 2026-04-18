@@ -632,6 +632,160 @@ async def correct_project_questionnaire(
     }
 
 
+@router.post("/{project_id}/ocg/reconsolidate")
+async def reconsolidate_ocg(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Re-executa o `ocg_updater` sobre as análises Arguidor existentes (DT-039).
+
+    Útil quando:
+      - o prompt do `ocg_updater` mudou (ex: DT-035) e quer re-aplicar
+        aos docs já analisados sem re-executar o Arguidor (que custa tokens)
+      - o `ocg_updater` falhou em alguma ingestão (deixou `ocg_pending`)
+        e quer tentar de novo agora que a config foi corrigida
+      - o provider/chave do projeto mudou e quer reconsolidar com o novo
+
+    Itera por TODAS as análises Arguidor do projeto na ordem cronológica
+    e aplica deltas acumulados. Não re-chama o Arguidor (mais barato).
+    """
+    from sqlalchemy import select, text
+    from app.models.base import ArguiderAnalysis, OCG
+    from app.services.ocg_updater_service import OCGUpdaterService
+    import json as _json
+
+    # Verifica se tem OCG
+    ocg = (await db.execute(
+        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    if not ocg:
+        raise HTTPException(
+            status_code=400,
+            detail="Projeto não tem OCG. Aprove o questionário primeiro para gerar o OCG inicial.",
+        )
+
+    # Busca todas as análises Arguidor do projeto (ordem cronológica)
+    analyses = (await db.execute(
+        select(ArguiderAnalysis)
+        .where(ArguiderAnalysis.project_id == project_id)
+        .order_by(ArguiderAnalysis.created_at.asc())
+    )).scalars().all()
+
+    if not analyses:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhuma análise do Arguidor encontrada — reingerir documentos antes.",
+        )
+
+    svc = OCGUpdaterService(db)
+    applied = 0
+    failures = []
+    for a in analyses:
+        try:
+            analysis_dict = {
+                "document_classification": _json.loads(a.document_classification) if a.document_classification else {},
+                "gaps": _json.loads(a.gaps) if a.gaps else [],
+                "show_stoppers": _json.loads(a.show_stoppers) if a.show_stoppers else [],
+                "poor_definitions": _json.loads(a.poor_definitions) if a.poor_definitions else [],
+                "improvement_suggestions": _json.loads(a.improvement_suggestions) if a.improvement_suggestions else [],
+                "module_candidates": _json.loads(a.module_candidates) if a.module_candidates else [],
+                "ocg_fields_to_update": _json.loads(a.ocg_fields_to_update) if a.ocg_fields_to_update else [],
+            }
+            await svc.update_ocg_from_arguider(
+                project_id=project_id,
+                arguider_analysis=analysis_dict,
+                document_id=a.document_id,
+                trigger_source="manual_reconsolidate",
+            )
+            applied += 1
+        except Exception as e:
+            failures.append({"analysis_id": str(a.id), "error": str(e)[:200]})
+            logger.warning("ocg.reconsolidate_analysis_failed", analysis_id=str(a.id), error=str(e))
+
+    return {
+        "success": True,
+        "analyses_processed": applied,
+        "analyses_total": len(analyses),
+        "failures": failures,
+        "message": f"Reconsolidação aplicada a {applied}/{len(analyses)} análise(s).",
+    }
+
+
+@router.post("/{project_id}/ocg/regenerate")
+async def regenerate_ocg(
+    project_id: UUID,
+    confirm: bool = False,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Regenera o OCG do zero a partir do questionário aprovado (DT-039).
+
+    **Operação destrutiva:** roda o pipeline de 8 agentes IA de novo (custa
+    tokens do projeto). Preserva `ocg_delta_log` como histórico. Requer
+    `?confirm=true` explícito no query param — sem ele, retorna 400 com
+    aviso.
+
+    Quando usar:
+      - configuração de IA mudou drasticamente (novo provider/modelo
+        premium), quer re-gerar OCG inicial
+      - o OCG está inconsistente e o GP quer reset
+      - debug/troubleshooting em dev
+    """
+    from sqlalchemy import select
+    from app.models.base import Questionnaire, Project
+    from app.services.questionnaire_service import QuestionnaireService
+
+    if not confirm:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Operação destrutiva — chama 8 agentes IA e gera OCG novo "
+                "(custo em tokens). Adicione ?confirm=true ao fazer a requisição "
+                "para confirmar."
+            ),
+        )
+
+    proj = await db.get(Project, project_id)
+    if not proj:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    # Pega o questionário aprovado mais recente
+    q = (await db.execute(
+        select(Questionnaire)
+        .where(Questionnaire.project_id == project_id, Questionnaire.approved == True)
+        .order_by(Questionnaire.submitted_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    if not q:
+        raise HTTPException(
+            status_code=400,
+            detail="Projeto não tem questionário aprovado. Aprove um questionário primeiro.",
+        )
+
+    # Dispara geração em background
+    import asyncio
+    asyncio.create_task(
+        QuestionnaireService._generate_ocg(
+            questionnaire_id=q.id,
+            project_id=project_id,
+            gp_email=q.gp_email,
+        )
+    )
+
+    logger.info(
+        "ocg.regenerate_dispatched",
+        project_id=str(project_id),
+        questionnaire_id=str(q.id),
+    )
+
+    return {
+        "success": True,
+        "message": "Regeneração do OCG disparada em background. Verifique em alguns minutos.",
+        "questionnaire_id": str(q.id),
+    }
+
+
 @router.get("/{project_id}/ocg")
 async def get_project_ocg(
     project_id: UUID,

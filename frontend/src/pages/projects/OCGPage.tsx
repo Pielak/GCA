@@ -169,6 +169,9 @@ export function OCGPage() {
   const [currentVersion, setCurrentVersion] = useState<number>(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // DT-039: estados pras 2 ações manuais (reconsolidate + regenerate)
+  const [reconsolidating, setReconsolidating] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
   const [expanded, setExpanded] = useState<string | null>('composite')
 
   useEffect(() => {
@@ -437,15 +440,60 @@ export function OCGPage() {
           <h2 className="text-lg font-semibold text-slate-100">OCG — Objeto de Contexto Global</h2>
           <p className="text-slate-500 text-sm mt-0.5">Nenhum módulo opera sobre um projeto sem antes ler seu OCG.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="flex items-center gap-1.5 text-emerald-400 text-sm">
             <Check className="w-4 h-4" /> OCG Gerado
           </span>
           <button
             onClick={loadData}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-600/30 text-indigo-400 text-sm hover:bg-indigo-600/30 transition-colors"
+            title="Busca a versão mais recente do OCG no servidor (não dispara regeneração)"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm hover:bg-slate-700 transition-colors"
           >
-            <RefreshCw className="w-3.5 h-3.5" /> Atualizar
+            <RefreshCw className="w-3.5 h-3.5" /> Recarregar
+          </button>
+          <button
+            onClick={async () => {
+              if (!id || reconsolidating) return
+              if (!confirm('Re-aplicar deltas de TODAS as análises Arguidor existentes? Não chama o Arguidor de novo (sem custo extra). Útil quando o prompt mudou ou o ocg_updater falhou.')) return
+              setReconsolidating(true)
+              try {
+                const res: any = await apiClient.post(`/projects/${id}/ocg/reconsolidate`, {})
+                alert(res?.data?.message || 'Reconsolidação disparada')
+                await loadData()
+              } catch (err: any) {
+                alert(`Falha: ${err?.response?.data?.detail || err?.message}`)
+              } finally {
+                setReconsolidating(false)
+              }
+            }}
+            disabled={reconsolidating || regenerating}
+            title="Re-aplica deltas das análises Arguidor existentes (sem chamar Arguidor de novo)"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-600/30 text-indigo-300 text-sm hover:bg-indigo-600/30 disabled:opacity-40 transition-colors"
+          >
+            {reconsolidating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Re-consolidar OCG
+          </button>
+          <button
+            onClick={async () => {
+              if (!id || regenerating) return
+              if (!confirm('REGENERAR o OCG do zero a partir do questionário aprovado? ATENÇÃO: chama os 8 agentes IA novamente (custo em tokens). O histórico de deltas é preservado. Continuar?')) return
+              setRegenerating(true)
+              try {
+                const res: any = await apiClient.post(`/projects/${id}/ocg/regenerate?confirm=true`, {})
+                alert(res?.data?.message || 'Regeneração disparada em background. Verifique em alguns minutos.')
+                await loadData()
+              } catch (err: any) {
+                alert(`Falha: ${err?.response?.data?.detail || err?.message}`)
+              } finally {
+                setRegenerating(false)
+              }
+            }}
+            disabled={reconsolidating || regenerating}
+            title="Regenera OCG do zero a partir do questionário aprovado (custo em tokens — confirmação dupla)"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/10 border border-red-600/30 text-red-300 text-sm hover:bg-red-600/20 disabled:opacity-40 transition-colors"
+          >
+            {regenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+            Regenerar OCG
           </button>
         </div>
       </div>
