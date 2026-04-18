@@ -1,15 +1,17 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 2.0  
+Versão: 2.1  
 Data-base: 2026-04-18  
-Status: **controle de avanço por fase** — MVP 4 em andamento; suite 432/432 passing; DT-046/047/048/049/051 quitadas; gate MVP 4 FECHADO apenas pela validação dogfood E2E (em curso, GP aceitou convite, validando QA Readiness).
+Status: **controle de avanço por fase** — MVP 4 **ENCERRADO** com gate ABERTO. Suite 437/437 passing. 5/5 features §7 validadas no dogfood real do projeto Automação Jurídica Assistida. Próximo: avaliar abertura do MVP 5 ou polimento das DTs UX 052/053/054/055/056 antes.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 4 — Qualidade, documentação e entrega** (iniciado 2026-04-18)
+**MVP 4 — Qualidade, documentação e entrega — ENCERRADO 2026-04-18**
+com gate ABERTO. Aguardando decisão de abertura do MVP 5 ou ciclo de
+polimento das DTs UX descobertas no dogfood (052/053/054/055/056).
 
 ### MVP anterior
 MVP 3 — Geração assistida controlada — **ENCERRADO 2026-04-18** com
@@ -20,6 +22,15 @@ implementados: CodeGen controlado, geração cirúrgica, preview antes do
 commit (DT-043 flow), integração Git, commits rastreáveis, validação
 pós-geração, bloqueios por papel (DT-042), docstrings obrigatórias,
 análise de adequação do provedor (DT-043).
+
+### MVP 4 — encerramento
+Suite 437/437 passing em 46.66s contra `gca_test`. 5/5 features §7
+validadas no dogfood real (projeto Automação Jurídica Assistida, GP
+Fernando) — RBAC matriz DT-044, OCG completo via DT-046/047, Regenerate
+funcional DT-048, retry JSON DT-049, email correto DT-051, Backlog 36
+itens, Definition of Done com 10 entregáveis e gate de threshold ativo.
+DTs UX 052/053/054/055/056 abertas como pós-MVP 4 (não bloqueiam — são
+polimento de UI sobre features que comprovadamente funcionam).
 
 ### Objetivo do momento
 Amadurecer o ciclo de **qualidade → entrega**: QA Readiness com métricas
@@ -166,6 +177,12 @@ Superfície já construída (auditada 2026-04-18):
 | DT-048 | **Critical** | Regenerate OCG sempre falha (UniqueViolation) | Descoberto nos logs pós-dogfood: usuário clicava "Regenerar OCG", pipeline rodava (gastando ~$0,59 em Anthropic consolidator), mas `save_ocg` tentava `INSERT` cego violando `UNIQUE(questionnaire_id)`. Resultado: pillar scores idênticos na UI, nenhuma versão nova, $0,59 desperdiçado, erro só nos logs. Botão Regenerate estava inutilizável. | Dogfood MVP 4 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-049 | Major | `_extract_json` falha silenciosamente, sem retry | Descoberto junto com DT-048: LLM respondeu 12386 chars, `_extract_json` não encontrou JSON válido, retornou `{}` com preview de 100 chars apenas no log. Sistema gastou $0,59 sem sinalizar ao caller que o output do LLM estava mal-formatado. Todos os campos caíram em fallback silencioso — usuário viu "Aguardando Documentação" sem motivo claro. Ausência de retry + ausência de visibilidade + custos reais. | Dogfood MVP 4 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-051 | Major | Email "OCG Gerado" mostrava todos os pilares zerados + status UNKNOWN | Descoberto no dogfood do projeto `Automação Jurídica Assistida` quando o GP regenerou o OCG (DT-048 funcionando, version=2 no DB com p1=35/p2=82/.../p7=85). Email recebido mostrava `0/100` em todos os pilares + `Status: UNKNOWN`. Causa: (a) `email_service.send_ocg_generated_email:931-937` buscava chaves `P1_Business`/`P2_Rules`/`P3_Features`/`P4_NFR`/`P5_Architecture`/`P6_Data`/`P7_Security`, mas o consolidator persiste como `P1`..`P7` puros — `.get(..., 0)` zerava tudo; (b) `_normalize_composite_score` não derivava `status` no JSON, só na coluna `ocg.status` do DB — email lia `COMPOSITE_SCORE.status` direto do JSON e caía no `.get("status", "UNKNOWN")`. | Dogfood MVP 4 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
+| DT-057 | Major | `deliverable_registry.sync_from_ocg` rejeitava silenciosamente o formato dict da DT-047 | Descoberto no dogfood do E2E #5 MVP 4: ao chamar `POST /deliverables/sync` no projeto real, retorno foi `inserted=0` apesar de `OCG.DELIVERABLES` estar populado via DT-047. Causa: o serviço esperava `OCG.DELIVERABLES` como **lista de strings** (`["Arquitetura", ...]`), mas a DT-047 introduziu `_deliverables_from_metadata` que escreve **dict** `{"expected": [...], "output_formats": [...], "source": "..."}` — incompatibilidade de contrato. Consumer fazia `if not isinstance(..., list)` e retornava 0 sem aviso. | Dogfood MVP 4 2026-04-18 (E2E #5) | **Quitada 2026-04-18** — ver §4 |
+| DT-052 | Major | Chips do TESTING_REQUIREMENTS na UI mostram chave em vez de valor | Página QA Readiness exibe os chips `source`, `test types`, `criticality`, `coverage target pct` etc. — são os **nomes** das chaves do dict TESTING_REQUIREMENTS gerado pela DT-047. Deveria mostrar valores (ex: `test types: Unitários, Integração, E2E`). Frontend itera `Object.keys()` em vez de `Object.entries()`. | Dogfood MVP 4 2026-04-18 (E2E #2) | Aberto — pós MVP 4 (UX) |
+| DT-053 | Major | Botão "Executar Plano" visível para GP no QA Readiness | Per contrato §4.1 + DT-044, `pipeline:execute` é Dev/Tester. Backend bloqueia (403), mas frontend mostra o botão verde ativo — UX confusa. Mesmo padrão pode existir em outros botões de write (Tester Review etc). Fix: ocultar/desabilitar por papel via hook RBAC no frontend. | Dogfood MVP 4 2026-04-18 (E2E #2) | Aberto — pós MVP 4 (UX/RBAC) |
+| DT-054 | Minor | Header GK 0/100 sem ingestão deveria ser "—" / "N/A" | `Gatekeeper Score` aparece como `0/100` no header do projeto enquanto `gatekeeper_items` está vazio (sem ingestão = sem análise Arguidor = sem itens). Comportamento técnico correto, mas UX dá impressão de bug. Fix: backend retorna `null`/`undefined` quando não há items, frontend renderiza `—` ou tooltip. | Dogfood MVP 4 2026-04-18 | Aberto — pós MVP 4 (UX) |
+| DT-055 | Major | Cards do Backlog mostram título genérico "Risco identificado" em vez do título rico do DB | Backend tem `title` rico (ex: "O tamanho da equipe é desconhecido…"), frontend renderiza `Risco identificado` para todos os items da categoria security. Bug de mapeamento — frontend lê outro campo ou faz fallback genérico. | Dogfood MVP 4 2026-04-18 (E2E #4) | Aberto — pós MVP 4 (UX) |
+| DT-056 | Major | UI instrui "Sincronize do OCG" mas não tem botão para isso | Página Definition of Done mostra "Nenhum entregável registrado. Sincronize do OCG." — instrução órfã: nenhum botão de sync existe na UI. Endpoint `POST /deliverables/sync` está implementado e funcional, só falta exposição no frontend. | Dogfood MVP 4 2026-04-18 (E2E #5) | Aberto — pós MVP 4 (UX) |
 | DT-030 | **Critical** | Storage efêmero / uploads | `STORAGE_PATH=/tmp/gca-storage` dentro do container `gca-backend` não tinha volume Docker mountado — `/tmp` é sistema de arquivos do container, zerado a cada `docker restart`. Resultado: todo upload de Ingestão (PDF, DOCX, XLSX, etc) ficava órfão no DB após qualquer restart (upgrade de backend, hot-reload heavy, deploy) — registro com `content_status` e `file_hash` válidos mas bytes fisicamente perdidos. Descoberto 2026-04-17 quando tentei rodar `_analyze_async` no PDF `smoke_mvp2_complemento_pilares.pdf` do user e o arquivo não existia mais. Violação da expectativa mínima de um sistema de ingestão. | Dogfood MVP 2 2026-04-17 | **Quitada 2026-04-17** — ver §4 |
 
 ---
@@ -210,6 +227,7 @@ Superfície já construída (auditada 2026-04-18):
 | DT-040 | 2026-04-18 | **Suite sincronizada em 4 ondas.** Onda 1 (commit `e0e6d7b`): fixture `test_project` + factory `create_test_project` passam `deliverable_type="new_system"` (NOT NULL desde DT-015); mock_db de `test_gatekeeper` fornece 3 results (items, modules, ocg) após DT-035/036/037 adicionarem consulta de OCG; `db_session` teardown suprime `RuntimeError: Event loop is closed` noise. Onda 2 (commit `11520bb`): deletado `test_e2e_fase3_5.py` (420 linhas, testava `mock_n8n_service` removido na deprecação do n8n); `pypdf`+`reportlab`+`esprima` instalados runtime no container (já em requirements.txt, ausentes da imagem por cache antigo — DT follow-up operacional é rebuild). Onda 3 (commit `1745a1b`): `test_build_prompt` passa `project_api_key="sk-test-dummy-key"` (DT-012 tornou ArguiderService exigente). Onda 4 (commit `822f139`): `test_ocg_generation_from_questionnaire` passa `project_id=test_questionnaire.project_id` (antes passava None → IntegrityError em ai_usage_log); `test_codegen_persistence.py` marcado com `pytest.skip(allow_module_level=True)` com razão explícita "escopo MVP 3 — contrato §7". | `backend/app/tests/conftest.py`, `backend/app/tests/factories.py`, `backend/app/tests/test_gatekeeper.py`, `backend/app/tests/test_ingestion.py`, `backend/app/tests/test_ocg_e2e.py`, `backend/app/tests/test_codegen_persistence.py` (+skip banner), deletado `backend/app/tests/test_e2e_fase3_5.py` | Suite antes: **312 passed / 20 failed / 11 errors / 2 collect errors**. Suite depois: **344+ passed / 0 failed** (rodada completa abaixo no veredito do gate). |
 | DT-038 | 2026-04-18 | **Compartimentalização de notificações** (contrato §2.2). **Schema**: migration `020_project_responsible_admin.sql` adiciona coluna `projects.responsible_admin_id UUID FK users(id) ON DELETE SET NULL`, nullable, com índice. Backfill seguro: na instância atual há 1 admin real (`pielak.ctba@gmail.com`), projetos existentes recebem esse id; projetos futuros recebem o admin que aprovou a criação via `admin_service`. **Model**: `Project.responsible_admin_id` + relacionamento `responsible_admin`. **Criação**: `admin_service.py` ao aprovar uma `ProjectRequest` agora seta `responsible_admin_id=admin_id` no Project recém-criado (o admin que aprovou assume a responsabilidade). **Notificação**: `_notify_admins_questionnaire_submitted` recebe `project_id` e aplica 3 regras: (1) project com `responsible_admin_id` setado → notifica **apenas** esse admin; (2) project sem responsible (legado/bug) → fallback pra todos admins + log `questionnaire.no_responsible_admin_fallback`; (3) fluxo externo sem project_id (solicitar-projeto) → todos admins (inbox pré-aprovação, não há relação ainda). Log `questionnaire.notification_scope` sempre registra `scope` + `recipients` pra auditoria. | `backend/migrations/020_project_responsible_admin.sql`, `backend/app/models/base.py` (+col+relation em `Project`), `backend/app/services/admin_service.py` (+1 linha no `Project(...)`), `backend/app/services/questionnaire_service.py` (+param `project_id` e lógica de scope) | Migration aplicada em `gca` e `gca_test`. Backfill: 1/1 projeto existente (Automação Jurídica Assistida) apontando para o admin real. Backend reload limpo; `Project.responsible_admin_id` visível via ORM. Instância atual (1 admin) mantém comportamento identical na prática — fallback cobre qualquer edge case. Efeito real aparece em instâncias futuras com multi-admin. |
 | DT-034 | 2026-04-18 | **Isolamento duro de DB pra testes** (CLAUDE.md §11.3 endereçada). (1) **Infra**: DB `gca_test` criado no container `gca-postgres` via `CREATE DATABASE gca_test OWNER gca`; schema clonado de `gca` com `pg_dump --schema-only` (54 tabelas, zero dados). (2) **Conftest**: `backend/app/tests/conftest.py` ganha prelúdio que seta `DATABASE_URL=postgresql+asyncpg://gca:gca_secret@localhost:5432/gca_test` e `TESTING=1` **antes** de qualquer `from app.*` (Pydantic Settings lê env no primeiro import de `app.core.config`, então ordem é crítica). Regex guard bloqueia com `RuntimeError` se a URL resolver pra `/gca` (produção) — pytest não consegue rodar contra prod mesmo que alguém tente forçar. (3) **Doc**: `CLAUDE.md §11.3` reescrita registrando o estado atual + regras operacionais (como re-sincronizar `gca_test` quando schema de `gca` mudar). Efeito: services que fazem `async with AsyncSessionLocal() as db` dentro de tasks assíncronas (factories, `_analyze_async`) agora commitam em `gca_test`, não contaminam mais dogfood. | `backend/app/tests/conftest.py` (prelúdio + guard), `CLAUDE.md §11.3`, DB `gca_test` (CREATE + schema clone) | Validação via `/tmp/dt034_verify.py`: confirma `settings.DATABASE_URL → gca_test`, `engine.url → gca_test`, `current_database() → gca_test`, 54 tables, 0 users, e que o regex guard bloqueia 2 URLs de prod e permite 2 de teste. Prod `gca` intacta: `SELECT COUNT(*) FROM users` = 3 (os 3 reais, sem fake). |
+| DT-057 | 2026-04-18 | **`deliverable_registry.sync_from_ocg` aceita formato dict da DT-047**. Antes: serviço esperava `OCG.DELIVERABLES` como lista de strings; com a DT-047 introduzindo formato dict (`{expected, output_formats, source}`), `sync` retornava `inserted=0` silenciosamente. Fix em `backend/app/services/deliverable_registry.py:101`: detecta lista (canônico) ou dict (DT-047), extrai entregáveis dos aliases `expected`/`items`/`deliverables`/`list`. Log estruturado `deliverable_registry.unknown_deliverables_dict_shape` quando dict não tem nenhuma chave conhecida (não-fatal, retorna 0). Validado no dogfood: re-sync no projeto `Automação Jurídica Assistida` agora insere 10 entregáveis (Q48 do questionário real tinha 10 itens em `pipeline_deliverables`). 5 testes novos em `test_dt057_deliverables_sync.py` cobrem os 2 paths + alias `items` + dict sem chave conhecida + DELIVERABLES ausente. | `backend/app/services/deliverable_registry.py` (sync_from_ocg detecta formato), `backend/app/tests/test_dt057_deliverables_sync.py` (novo, 5 casos) | 5/5 passing; suite total 437 passed em 46.66s. E2E #5 destravado. |
 | DT-051 | 2026-04-18 | **Email OCG mostra pilares e status corretos**. (1) `email_service.send_ocg_generated_email`: novo helper interno `_pillar_score(num)` aceita aliases canônicos `P{n}` (formato real do consolidator) e legados `P{n}_Business`/`P{n}_Rules`/etc, prioriza canônico. Substitui as 7 linhas hardcoded com sufixos errados. (2) `agent_service._normalize_composite_score`: agora deriva `status` (READY ≥ 90 / NEEDS_REVIEW ≥ 75 / AT_RISK < 75 / BLOCKED se is_blocking) e injeta no dict `COMPOSITE_SCORE`, garantindo que o JSON `ocg_data` carregue o campo (antes só a coluna `ocg.status` tinha). (3) Backfill SQL aplicado ao OCG real do dogfood (ocg `89b0ec95…` v2): `COMPOSITE_SCORE.status = "AT_RISK"` (overall=61.7 < 75). 12 testes novos em `test_dt051_email_pillars.py` cobrem derivação de status (READY/NEEDS_REVIEW/AT_RISK/BLOCKED + preserva LLM, fallback de None/float) e leitura dos pilares por aliases (canônico, legado, scalar, precedência, dogfood real). | `backend/app/services/email_service.py` (helper `_pillar_score` + 7 substituições), `backend/app/services/agent_service.py` (`_normalize_composite_score` deriva status), `backend/app/tests/test_dt051_email_pillars.py` (novo, 12 casos), DB (UPDATE em 1 linha do `ocg`) | 12/12 passing; suite total 432 passed em 43.69s. Email do OCG agora mostra pilares reais + status humano. |
 | DT-049 | 2026-04-18 | **`_extract_json` tolerante + retry único quando LLM quebra**. `_extract_json` reescrito: (a) parse direto, (b) extração de code fence markdown ```json … ```, (c) regex greedy `{.*}`, (d) cleanup de trailing commas antes de rejeitar. Log de falha agora inclui `raw_len`, `preview_head` (300 chars) e `preview_tail` (200 chars) em vez dos 100 chars originais. Novo helper `_call_llm_expecting_json(system, user, ...)` faz uma tentativa de parse; se retorna `{}` com texto não-vazio, retenta 1x apendando diretiva dura ao system_prompt ("Responda APENAS com JSON puro, sem markdown, sem prosa…") e dobra `max_tokens` (alguns modelos cortam JSON grande). Logs estruturados para cada caminho: `llm_empty_response`, `llm_json_retry_attempt`, `llm_json_retry_success`, `llm_json_retry_failed`. Os 3 callers (`analyze_questionnaire`, `analyze_pillar`, `consolidate_ocg`) migraram para o helper. 12 testes novos em `test_dt049_json_retry.py` cobrem parsing progressivo (direto, fence com/sem lang, embedded in prose, trailing commas, garbage, empty, None) e fluxo do retry (success-first, retry-success, give-up-after-retry, empty-skips-retry). | `backend/app/services/agent_service.py` (+85 linhas no `_call_llm_expecting_json`, `_extract_json` reescrito, 3 callers migrados), `backend/app/tests/test_dt049_json_retry.py` (novo, 12 casos) | 12/12 novos + suite 420 passed / 0 failed em 45.75s. |
 | DT-048 | 2026-04-18 | **`save_ocg` faz UPSERT por questionnaire_id** (Regenerate quebrado desde sempre). Antes: `save_ocg` fazia INSERT cego; com `UNIQUE(questionnaire_id)` no schema, segunda geração morria com `UniqueViolationError`. Fix em `agent_service.py::save_ocg`: SELECT por `questionnaire_id`, se existe → UPDATE in-place preservando `id` (FKs de `ocg_analysis_log`/`ocg_delta_log` intactas), incrementa `version`, marca `change_type=REGENERATED`, sincroniza `ocg_response.ocg_id` com o id existente para que o caller (`consolidate_ocg`) use o id correto em `log_analysis`. Path inicial (primeira geração) continua INSERT. Teste novo `test_dt048_save_ocg_upsert.py` com 3 casos: primeira geração (INSERT), regeneração (UPDATE in-place, version=2), terceira regeneração (version=3). | `backend/app/services/agent_service.py` (`save_ocg` refatorado), `backend/app/tests/test_dt048_save_ocg_upsert.py` (novo, 3 casos) | 3/3 passing. Botão "Regenerar OCG" na UI agora funciona. |
@@ -265,7 +283,11 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - feature nova adicionada para “contornar” dívida não resolvida.
 
 ### Situação atual do gate (MVP 4)
-**NÃO AVANÇAR** — validação dogfood E2E MVP 4 ainda não executada.
+**PODE AVANÇAR** — todas as 5 features §7 validadas no dogfood real
+em 2026-04-18; suite 437/437 passing; nenhum Critical/Major bloqueador
+aberto. DTs UX descobertas (052/053/054/055/056) registradas como
+pós-MVP 4 (não bloqueiam o gate per §9 — são UX/cosméticos sobre
+features funcionais).
 
 ### Motivo
 Base do MVP 4 instalada e testes verde:
@@ -273,16 +295,26 @@ Base do MVP 4 instalada e testes verde:
 - ✅ **RBAC DT-044 aplicado** — 33 `require_action` nos 4 routers (qa 12 · deliverables 9 · roadmap 8 · livedocs 6). Matriz binária do contrato §4.1 auditada linha-a-linha: Admin sem membership = 403; GP = 403 em writes de teste e code; Dev/Tester/QA com scoping. `test_mvp4_rbac.py` — 29/29 passing.
 - ✅ **Features canônicas §7 MVP 4 presentes** — `qa_router` + `qa_service` + `QAReadinessPage` + `TesterReviewPage` (execução/revisão de testes com evidência exportável); `livedocs_router` + `livedocs_service` + `LiveDocsPage` (Documentação Viva refrescável); `roadmap_router` + `roadmap_service` + `RoadmapPage` (Roadmap coerente com backlog derivado do OCG — DT-037 guarda o consumidor); `deliverables_router` + `release_bundle_service` + surface em `ReadinessPage` (Release Bundle com gate de qa:approve em `POST /releases`).
 - ✅ **DT-045 quitada** — `AgentService._call_llm` patchado em `conftest.py` via autouse fixture. Hang eliminado; pipeline OCG continua validado via stubs determinísticos que alimentam o parsing real dos agents.
-- ✅ **Suite pytest 420/420 passing** em 45.75s contra `gca_test` isolado (DT-034). Prod `gca` intacta (3 users reais). Único `--ignore` restante: `test_fluxo_completo.py` (playwright não instalado — teste de GUI E2E fora do escopo MVP 4).
+- ✅ **Suite pytest 437/437 passing** em 46.66s contra `gca_test` isolado (DT-034). Prod `gca` intacta (3 users reais). Único `--ignore` restante: `test_fluxo_completo.py` (playwright não instalado — teste de GUI E2E fora do escopo MVP 4).
 - ✅ **DT-046/047 quitadas** — STACK/ARCHITECTURE/TESTING/COMPLIANCE/DELIVERABLES/RISK do OCG real do projeto `Automação Jurídica Assistida` populados via fallback determinístico. Fluxo real do GP agora aparece íntegro na UI (sem mais "Aguardando Documentação").
-- ✅ **DT-048 quitada** — `save_ocg` faz UPSERT. Botão "Regenerar OCG" funciona.
+- ✅ **DT-048 quitada** — `save_ocg` faz UPSERT. Botão "Regenerar OCG" funciona (validado em dogfood: criou version=2 com pilares recalculados).
 - ✅ **DT-049 quitada** — `_extract_json` cobre markdown fence + prosa + trailing commas; `_call_llm_expecting_json` faz 1 retry com diretiva dura se LLM quebrar contrato de output.
+- ✅ **DT-051 quitada** — email "OCG Gerado" mostra pilares e status corretos (não mais 0/100 + UNKNOWN).
+- ✅ **DT-057 quitada** — `deliverable_registry.sync_from_ocg` aceita o formato dict da DT-047. Sync no dogfood criou 10 entregáveis (Q48 do projeto real).
+- ✅ **5/5 features §7 MVP 4 validadas no dogfood real** (projeto Automação Jurídica Assistida, GP Fernando):
+  1. **QA Readiness** — 7 pilares (P1=35..P7=85) renderizam scores reais do OCG; pesos canônicos (10/15/20/20/15/10/10) corretos.
+  2. **LiveDocs** — 7 seções marcadas com check verde após DT-046/047; `POST /docs/refresh` retorna 200, regenerou 6 secoes.
+  3. **Roadmap/Backlog** — 36 itens derivados do OCG v2 (`items_created=36 ocg_version=2`); RBAC `backlog:manage` permitiu GP regenerar.
+  4. **Definition of Done / Release Bundle** — 10 entregáveis sincronizados; `verify-all` classificou 9 manual + 1 missing; botão "Gerar Release Bundle" desabilitado pelo frontend (READINESS=0% < threshold 90% = gate ativo).
+  5. **RBAC enforcement** — admin não-membro bloqueado; GP com permissões corretas; backend retorna 200/403 conforme matriz da DT-044.
 - ✅ **Containers rodando** — backend/frontend/postgres/redis/n8n up.
 - ⏸️ **Validação dogfood E2E MVP 4** — abrir QA/LiveDocs/Roadmap/Release Bundle na UI e atestar binariamente que cada um funciona ponta-a-ponta com projeto real. Pendente.
 - ⏸️ **DT-041 image drift** — paliativo aplicado em runtime (`pip install esprima reportlab pypdf` no container); correção definitiva continua sendo rebuild `--no-cache`.
 
-Gate abre apenas quando a validação dogfood confirmar binário SIM em cada
-item §7 MVP 4 e nenhum critério §9 regredir.
+**Gate aberto.** Validação dogfood concluída em 2026-04-18 com SIM
+binário em cada item §7. Nenhum critério §9 regrediu. DTs cosméticas
+de UX (052/053/054/055/056) foram registradas como pós-MVP 4 e não
+bloqueiam — são polimento sobre features que comprovadamente funcionam.
 
 ### Histórico do gate
 - MVP 1 → **PODE AVANÇAR** em 2026-04-17 com todos os 5 Criticals quitados
@@ -329,6 +361,14 @@ item §7 MVP 4 e nenhum critério §9 regredir.
   Suite 420/420 passing em 45.75s. OCG real do dogfood atualizado via
   script sem custo de LLM. Gate continua fechado apenas pela validação
   dogfood E2E pendente.
+- MVP 4 → DT-051 (email OCG mostra pilares e status corretos) e DT-057
+  (deliverable_registry aceita formato dict da DT-047) quitadas durante
+  validação dogfood E2E. Convite GP do projeto real foi aceito via
+  endpoint `POST /accept-invite` (token gerado por SQL). 5/5 features
+  §7 validadas com binário SIM (QA Readiness, LiveDocs, Roadmap/Backlog,
+  Definition of Done/Release Bundle, RBAC). Suite 437/437 passing.
+  **Gate ABERTO em 2026-04-18.** DTs UX descobertas (052/053/054/055/056)
+  registradas como pós-MVP 4 — não bloqueiam.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta

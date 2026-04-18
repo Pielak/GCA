@@ -98,8 +98,31 @@ class DeliverableRegistry:
         if not isinstance(ocg_data, dict):
             return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
 
-        deliverables_list = ocg_data.get("DELIVERABLES", []) or []
-        if not isinstance(deliverables_list, list):
+        # DT-057: aceita 2 formatos pra OCG.DELIVERABLES.
+        # (a) Histórico/canônico: lista de strings ["Arquitetura", ...]
+        # (b) DT-047 fallback: dict {"expected": [...], "output_formats": [...],
+        #     "source": "..."} — populado via `_deliverables_from_metadata`
+        #     quando o LLM consolidator não devolve a chave.
+        # Em ambos os casos os entregáveis ficam em uma lista de strings; a
+        # variante (b) usa `expected` (Q48 = pipeline_deliverables) como
+        # fonte canônica dos itens.
+        raw_deliverables = ocg_data.get("DELIVERABLES", []) or []
+        if isinstance(raw_deliverables, list):
+            deliverables_list = raw_deliverables
+        elif isinstance(raw_deliverables, dict):
+            for key in ("expected", "items", "deliverables", "list"):
+                v = raw_deliverables.get(key)
+                if isinstance(v, list):
+                    deliverables_list = v
+                    break
+            else:
+                logger.warning(
+                    "deliverable_registry.unknown_deliverables_dict_shape",
+                    project_id=str(project_id),
+                    keys=list(raw_deliverables.keys())[:10],
+                )
+                return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
+        else:
             return {"inserted": 0, "reactivated": 0, "waived": 0, "kept": 0, "skipped": 0}
 
         # Existing rows
