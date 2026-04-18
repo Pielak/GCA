@@ -296,9 +296,14 @@ class TestOCGE2E:
         test_questionnaire: Questionnaire,
     ):
         """Complete pipeline: questionnaire → OCG"""
+        # DT-040: `ai_usage_log.project_id` é NOT NULL. Pipeline real
+        # sempre passa project_id (admin_service + questionnaire_service
+        # após aprovação). Teste passava None — criava IntegrityError
+        # silencioso no billing log. O fixture já cria um project e
+        # linka o questionnaire; uso o mesmo id.
         ocg = await ocg_service.generate_ocg_from_questionnaire(
             questionnaire_id=test_questionnaire.id,
-            project_id=None,
+            project_id=test_questionnaire.project_id,
         )
 
         # Should produce valid OCG
