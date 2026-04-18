@@ -19,10 +19,45 @@ from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
 from app.models.base import Project, ProjectGitConfig
 from app.core.config import settings as app_settings
 from app.dependencies.require_project_setup import assert_project_setup_complete
+from app.dependencies.require_action import resolve_user_roles_in_project
+from app.middleware.auth import get_current_user_from_token
+from app.core.permissions import has_action_any
 
 logger = structlog.get_logger(__name__)
 
 router = APIRouter(prefix="/api/v1/code-generation", tags=["code-generation"])
+
+
+async def _require_code_action(
+    action: str,
+    project_id: UUID,
+    user_id: UUID,
+    db: AsyncSession,
+) -> dict:
+    """MVP 3 / DT-042 — enforcement RBAC em endpoints de CodeGen cujo
+    `project_id` vem no corpo (não no path — `require_action` assume path).
+
+    Valida que o user tem `action` (ex: "code:write", "git:commit") em pelo
+    menos um dos papéis no projeto. GP é barrado (contrato §4.1: GP não
+    escreve código). Dev tem `code:write`, `code:review`, `git:commit`.
+    Admin sem membership vira `admin_viewer` — não tem `code:*`.
+
+    Retorna dict com user_id, roles, project_id pra logging e audit.
+    """
+    roles = await resolve_user_roles_in_project(user_id, project_id, db)
+    if not has_action_any(roles, action):
+        logger.warning(
+            "codegen.rbac_denied",
+            user_id=str(user_id),
+            project_id=str(project_id),
+            action=action,
+            roles=roles,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Acesso negado: seus papéis {roles} não têm permissão para '{action}'. CodeGen exige papel Dev (contrato §4.1).",
+        )
+    return {"user_id": user_id, "roles": roles, "project_id": project_id}
 
 
 def _missing_required_docstring(path: str, content: str) -> bool:
@@ -302,7 +337,11 @@ async def _load_ocg_context(db: AsyncSession, project_id: UUID) -> Dict[str, Any
     summary="Gerar scaffold completo do projeto",
     description="Gera estrutura de código real baseada no OCG, documentos ingeridos e análises do Arguidor",
 )
-async def generate_scaffold(request: ScaffoldRequest, db: AsyncSession = Depends(get_db)):
+async def generate_scaffold(
+    request: ScaffoldRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
     """
     Gera scaffold completo do projeto com código fonte real.
 
@@ -312,8 +351,11 @@ async def generate_scaffold(request: ScaffoldRequest, db: AsyncSession = Depends
     3. Constrói prompt abrangente com stack, arquitetura e regras de negócio
     4. Chama LLM pedindo JSON com arquivos de código
     5. Retorna lista de arquivos com status (complete/todo/nmi)
+
+    DT-042: exige `code:write` (Dev). GP é barrado com 403.
     """
     project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
     # 1. Buscar projeto
@@ -736,14 +778,20 @@ async def _notify_scaffold_completion(
     summary="Aplicar (commitar) scaffold gerado previamente",
     description="Aceita a lista de arquivos revisada pelo GP (após POST /scaffold com dry_run=True) e commita cada um no repositório Git do projeto. Re-valida docstrings e gate de setup.",
 )
-async def apply_scaffold(request: ScaffoldApplyRequest, db: AsyncSession = Depends(get_db)):
+async def apply_scaffold(
+    request: ScaffoldApplyRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
     """Fluxo oficial MVP 3 do CodeGen:
 
       1. `POST /scaffold {project_id}` → recebe `files[]` + `summary` (dry_run default).
-      2. GP revisa no frontend.
+      2. Dev revisa no frontend.
       3. `POST /scaffold/apply {project_id, files}` → commits.
 
     O backend **não confia** no payload do cliente:
+    - RBAC: exige `git:commit` (Dev). GP é barrado (§4.1 — GP revisa mas
+      não commita código);
     - gate `require_project_setup_complete` executa de novo (coerência com
       /scaffold; se setup foi revertido entre preview e apply, barra);
     - docstrings são re-validadas por arquivo (commit é barrado por
@@ -753,6 +801,7 @@ async def apply_scaffold(request: ScaffoldApplyRequest, db: AsyncSession = Depen
     Retorna resumo dos commits + lista de results por arquivo.
     """
     project_id = request.project_id
+    await _require_code_action("git:commit", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
     project = await db.get(Project, project_id)
@@ -791,7 +840,11 @@ async def apply_scaffold(request: ScaffoldApplyRequest, db: AsyncSession = Depen
     summary="Generate complete project code",
     description="Generate full project codebase using evaluated artifacts and stack recommendations",
 )
-async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSession = Depends(get_db)):
+async def generate_project_code(
+    request: GenerateProjectCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
     """
     Generate complete project code
 
@@ -801,8 +854,11 @@ async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSe
     - **architecture**: Architecture pattern (default: microservices)
     - **llm_provider**: LLM provider (anthropic, openai, grok, deepseek)
     - **api_key**: Optional API key (uses env variable if not provided)
+
+    DT-042: exige `code:write` (Dev).
     """
     project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
     try:
@@ -857,7 +913,11 @@ async def generate_project_code(request: GenerateProjectCodeRequest, db: AsyncSe
     summary="Generate specific module code",
     description="Generate code for a specific module or component",
 )
-async def generate_module_code(request: GenerateModuleCodeRequest, db: AsyncSession = Depends(get_db)):
+async def generate_module_code(
+    request: GenerateModuleCodeRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
     """
     Generate code for a specific module
 
@@ -867,8 +927,11 @@ async def generate_module_code(request: GenerateModuleCodeRequest, db: AsyncSess
     - **language**: Programming language
     - **requirements**: Module-specific requirements
     - **llm_provider**: LLM provider to use
+
+    DT-042: exige `code:write` (Dev).
     """
     project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
     try:
@@ -1098,9 +1161,16 @@ async def validate_code_endpoint(request: ValidateCodeRequest) -> ValidateCodeRe
 async def regenerate_single_file(
     request: RegenerateFileRequest,
     db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
 ):
-    """Gera apenas o arquivo indicado (não toca nos outros) e commita no Git."""
+    """Gera apenas o arquivo indicado (não toca nos outros) e commita no Git.
+
+    DT-042: exige `code:write` (Dev). Também envolve commit — mas é fluxo
+    atômico (geração + commit no mesmo endpoint), então `code:write` basta;
+    Dev por contrato §4.1 já tem `git:commit` também.
+    """
     project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
     project = await db.get(Project, project_id)

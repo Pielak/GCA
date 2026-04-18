@@ -33,6 +33,26 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
 
+async def _add_project_member(db_session, uid, project_id, role="dev"):
+    """DT-042: user precisa ser membro com papel que tenha a permissão.
+
+    Testes de gate de setup (412) e happy-path (200) todos precisam passar
+    pelo RBAC de CodeGen primeiro. Helper adiciona a membership mínima.
+    """
+    from app.models.base import ProjectMember
+    db_session.add(
+        ProjectMember(
+            id=uuid4(),
+            project_id=project_id,
+            user_id=uid,
+            role=role,
+            is_active=True,
+            invited_at=datetime.utcnow(),
+            joined_at=datetime.utcnow(),
+        )
+    )
+
+
 @pytest.mark.asyncio
 async def test_scaffold_412_when_setup_incomplete():
     """Projeto sem setup completo → 412 com `missing` listando o que falta."""
@@ -72,6 +92,8 @@ async def test_scaffold_412_when_setup_incomplete():
                 created_at=datetime.utcnow(),
             )
             session.add(project)
+            await session.flush()
+            await _add_project_member(session, uid, project.id, role="dev")
 
     token = create_access_token(data={"sub": str(user.id)})
     async with _client() as client:
@@ -87,8 +109,10 @@ async def test_scaffold_412_when_setup_incomplete():
     assert "repositorio_git" in body["detail"]["missing"]
 
     # Cleanup
+    from app.models.base import ProjectMember
     async with AsyncSessionLocal() as session:
         async with session.begin():
+            await session.execute(ProjectMember.__table__.delete().where(ProjectMember.project_id == project.id))
             await session.execute(Project.__table__.delete().where(Project.id == project.id))
             await session.execute(Organization.__table__.delete().where(Organization.id == org.id))
             await session.execute(User.__table__.delete().where(User.id == user.id))
@@ -133,6 +157,8 @@ async def test_regenerate_file_412_when_setup_incomplete():
                 created_at=datetime.utcnow(),
             )
             session.add(project)
+            await session.flush()
+            await _add_project_member(session, uid, project.id, role="dev")
 
     token = create_access_token(data={"sub": str(user.id)})
     async with _client() as client:
@@ -151,8 +177,10 @@ async def test_regenerate_file_412_when_setup_incomplete():
     assert "repositorio_git" in body["detail"]["missing"]
 
     # Cleanup
+    from app.models.base import ProjectMember
     async with AsyncSessionLocal() as session:
         async with session.begin():
+            await session.execute(ProjectMember.__table__.delete().where(ProjectMember.project_id == project.id))
             await session.execute(Project.__table__.delete().where(Project.id == project.id))
             await session.execute(Organization.__table__.delete().where(Organization.id == org.id))
             await session.execute(User.__table__.delete().where(User.id == user.id))
@@ -177,13 +205,16 @@ def _build_anthropic_mock(json_payload: dict, output_tokens: int = 100) -> Magic
 async def _make_user_org_project_with_full_setup(
     project_name: str,
     user_email_prefix: str,
+    role: str = "dev",
 ):
-    """Cria User + Org + Project + os 3 pré-requisitos do gate de setup:
-    ProjectGitConfig + ProjectSettings(llm) + Questionnaire (submetido).
+    """Cria User + Org + Project + ProjectMember(role) + os 3 pré-requisitos
+    do gate de setup: ProjectGitConfig + ProjectSettings(llm) + Questionnaire.
 
     Abertura do MVP 3 (2026-04-18): `require_project_setup_complete` no
-    router do CodeGen exige os 3 juntos. Helper antigo criava só git;
-    tests caíam em 412. Agora satisfaz o gate completo.
+    router do CodeGen exige os 3 juntos. DT-042 adicionou RBAC por ação —
+    helper cria membership com `role` (default dev) pra satisfazer ambos.
+
+    Parametrizar `role` permite testar RBAC denial (role="gp" → 403).
 
     Retorna (user_id, org_id, project_id, git_id, settings_id, q_id)
     para cleanup.
@@ -191,7 +222,7 @@ async def _make_user_org_project_with_full_setup(
     from app.db.database import AsyncSessionLocal
     from app.models.base import (
         User, Organization, Project, ProjectGitConfig,
-        ProjectSettings, Questionnaire,
+        ProjectSettings, Questionnaire, ProjectMember,
     )
 
     uid = uuid4()
@@ -272,6 +303,18 @@ async def _make_user_org_project_with_full_setup(
                     submitted_at=datetime.utcnow(),
                 )
             )
+            # RBAC (DT-042): membership com papel que tem code:write/git:commit.
+            session.add(
+                ProjectMember(
+                    id=uuid4(),
+                    project_id=project_id,
+                    user_id=uid,
+                    role=role,
+                    is_active=True,
+                    invited_at=datetime.utcnow(),
+                    joined_at=datetime.utcnow(),
+                )
+            )
 
     return uid, org_id, project_id, git_id, settings_id, q_id
 
@@ -281,11 +324,14 @@ async def _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settin
     from app.db.database import AsyncSessionLocal
     from app.models.base import (
         User, Organization, Project, ProjectGitConfig,
-        ProjectSettings, Questionnaire,
+        ProjectSettings, Questionnaire, ProjectMember,
     )
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
+            await session.execute(
+                ProjectMember.__table__.delete().where(ProjectMember.project_id == project_id)
+            )
             await session.execute(
                 Questionnaire.__table__.delete().where(Questionnaire.id == q_id)
             )
@@ -509,3 +555,118 @@ async def test_regenerate_file_happy_path_commits():
 
     finally:
         await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
+# ============================================================================
+# DT-042: RBAC enforcement — GP é barrado, Dev permitido.
+# Contrato §4.1: GP não escreve código; Dev implementa.
+# ============================================================================
+
+
+@pytest.mark.asyncio
+async def test_scaffold_rbac_blocks_gp():
+    """DT-042: GP não tem code:write → /scaffold retorna 403."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name="P gp-blocked",
+        user_email_prefix="scaffold-gp",
+        role="gp",  # GP não tem code:write
+    )
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/code-generation/scaffold",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"project_id": str(project_id)},
+            )
+
+        assert resp.status_code == 403, resp.text
+        body = resp.json()
+        assert "code:write" in body["detail"]
+        assert "gp" in body["detail"].lower()
+
+    finally:
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
+@pytest.mark.asyncio
+async def test_scaffold_apply_rbac_blocks_gp():
+    """DT-042: GP não tem git:commit → /scaffold/apply retorna 403."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name="P gp-apply",
+        user_email_prefix="apply-gp",
+        role="gp",
+    )
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/code-generation/scaffold/apply",
+                headers={"Authorization": f"Bearer {token}"},
+                json={
+                    "project_id": str(project_id),
+                    "files": [{"path": "x.py", "content": '"""x"""\n', "status": "complete"}],
+                },
+            )
+
+        assert resp.status_code == 403, resp.text
+        body = resp.json()
+        assert "git:commit" in body["detail"]
+
+    finally:
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
+@pytest.mark.asyncio
+async def test_scaffold_rbac_blocks_non_member_non_admin():
+    """DT-042: user não-membro e não-admin → 403 pelo resolve_user_roles."""
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import User
+
+    # User avulso, sem membership, sem is_admin
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            uid = uuid4()
+            user = User(
+                id=uid,
+                email=f"stranger-{uid.hex[:6]}@test.com",
+                password_hash=hash_password("Test@1234"),
+                full_name="Stranger",
+                is_active=True,
+                is_admin=False,  # não-admin
+                created_at=datetime.utcnow(),
+            )
+            session.add(user)
+
+    # Projeto de outra pessoa (com setup completo)
+    uid_owner, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name="P other",
+        user_email_prefix="owner-other",
+        role="dev",
+    )
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/v1/code-generation/scaffold",
+                headers={"Authorization": f"Bearer {token}"},
+                json={"project_id": str(project_id)},
+            )
+
+        # resolve_user_roles_in_project levanta 403 antes de bater em _require_code_action
+        assert resp.status_code == 403, resp.text
+
+    finally:
+        async with AsyncSessionLocal() as session:
+            async with session.begin():
+                await session.execute(User.__table__.delete().where(User.id == uid))
+        await _cleanup_user_org_project_full(uid_owner, org_id, project_id, git_id, settings_id, q_id)
