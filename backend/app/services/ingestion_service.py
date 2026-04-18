@@ -556,13 +556,43 @@ class IngestionService:
         try:
             from app.db.database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
-                # Resolver chave do provedor configurado pelo GP (contrato §6.2).
+                # Resolver provedor + chave + modelo do projeto (contrato §6.2).
                 # Análise do Arguidor é alta criticidade — sem fallback silencioso.
+                # DT-032: Arguidor passa a rotear pelo provider configurado
+                # (anthropic/openai/deepseek/grok), não mais hardcoded.
                 from app.services.ai_key_resolver import AIKeyResolver
-                project_api_key = await AIKeyResolver.get_project_key(db, project_id)
+                provider = await AIKeyResolver._resolve_project_provider(db, project_id)
+                project_api_key = await AIKeyResolver.get_project_key(db, project_id, provider=provider)
+
+                # Resolver modelo configurado (se houver) no project_settings.
+                import json as _json
+                from sqlalchemy import text as _text
+                model = None
+                try:
+                    row = (await db.execute(
+                        _text("SELECT settings_json FROM project_settings WHERE project_id=:pid AND setting_type='llm'"),
+                        {"pid": str(project_id)},
+                    )).fetchone()
+                    if row and row[0]:
+                        cfg = _json.loads(row[0])
+                        # Formato multi-provider (DT-026 backend): lista com is_default
+                        for p in cfg.get("providers", []) or []:
+                            if p.get("is_default") and p.get("provider") == provider:
+                                model = p.get("model")
+                                break
+                        # Retrocompat formato antigo
+                        if not model and cfg.get("provider") == provider:
+                            model = cfg.get("model_preference")
+                except Exception:
+                    pass
 
                 extractor = DocumentExtractor()
-                arguider = ArguiderService(db, project_api_key=project_api_key)
+                arguider = ArguiderService(
+                    db,
+                    project_api_key=project_api_key,
+                    provider=provider,
+                    model=model,
+                )
 
                 # Extrair texto
                 doc_text = await extractor.extract_text(file_bytes, file_type)

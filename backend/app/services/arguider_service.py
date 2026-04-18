@@ -171,9 +171,24 @@ class ArguiderService:
     do admin — se o projeto não tem chave, levanta `RuntimeError` claro.
     """
 
-    def __init__(self, db: AsyncSession, project_api_key: str = None):
+    def __init__(
+        self,
+        db: AsyncSession,
+        project_api_key: str = None,
+        provider: str = None,
+        model: str = None,
+    ):
+        """Arguidor multi-provider (DT-032).
+
+        Aceita:
+          - `project_api_key`: chave do projeto (obrigatória).
+          - `provider`: "anthropic"|"openai"|"deepseek"|"grok"|"gemini".
+            Default `"anthropic"` para retrocompat com callers antigos.
+          - `model`: modelo específico. Se None, usa default do provider.
+
+        Contrato §6.4: nenhum fallback para chave global do admin.
+        """
         self.db = db
-        # Contrato §6.4: nenhum fallback para ANTHROPIC_API_KEY global.
         if not project_api_key:
             raise RuntimeError(
                 "Arguidor não pode operar sem chave IA do projeto. "
@@ -181,8 +196,93 @@ class ArguiderService:
                 "Arguidor é tarefa de ALTA criticidade (contrato §6.2) e "
                 "não aceita fallback para chave global do admin."
             )
-        self.client = AsyncAnthropic(api_key=project_api_key)
+        self.api_key = project_api_key
+        self.provider = (provider or "anthropic").lower()
+        # Model default por provider (match com o que `/settings/llm/validate`
+        # testa em settings_router.py).
+        _default_models = {
+            "anthropic": "claude-haiku-4-5-20251001",
+            "openai": "gpt-4o-mini",
+            "deepseek": "deepseek-chat",
+            "grok": "grok-2",
+            "gemini": "gemini-2.0-flash",
+        }
+        self.model = model or _default_models.get(self.provider, "deepseek-chat")
+        # Client Anthropic só quando for o provider — para o resto, httpx.
+        self.client = AsyncAnthropic(api_key=project_api_key) if self.provider == "anthropic" else None
+        # DocumentExtractor ainda recebe o client Anthropic por compatibilidade
+        # com o pipeline de extração de texto. Quando provider é outro, passa
+        # None — extração fallback usa pypdf local sem LLM.
         self.extractor = DocumentExtractor(client=self.client)
+
+    async def _call_llm(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        max_tokens: int = 4096,
+    ) -> tuple[str, int]:
+        """Chamada unificada ao LLM do projeto (DT-032).
+
+        Replica o padrão de `agent_service._call_llm` + `ocg_updater_service`:
+          - Anthropic: SDK nativo AsyncAnthropic.
+          - OpenAI/DeepSeek/Grok: httpx POST em `/v1/chat/completions`
+            (endpoint OpenAI-compatible).
+          - Gemini: escopo futuro (requer formato próprio, fora da DT-032
+            que mira o caminho já usado pelo user dogfood).
+
+        Retorna `(text, tokens_used)`.
+        """
+        if self.provider == "anthropic" and self.client:
+            response = await self.client.messages.create(
+                model=self.model,
+                max_tokens=max_tokens,
+                temperature=0.2,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            text = response.content[0].text
+            tokens = response.usage.input_tokens + response.usage.output_tokens
+            return text, tokens
+
+        import httpx
+        provider_urls = {
+            "openai": "https://api.openai.com/v1/chat/completions",
+            "deepseek": "https://api.deepseek.com/chat/completions",
+            "grok": "https://api.x.ai/v1/chat/completions",
+        }
+        url = provider_urls.get(self.provider)
+        if not url:
+            raise ValueError(
+                f"Provider '{self.provider}' ainda não suportado pelo Arguidor. "
+                f"Suportados hoje: anthropic, openai, deepseek, grok."
+            )
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            resp = await client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": self.model,
+                    "max_tokens": max_tokens,
+                    "temperature": 0.2,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                },
+            )
+        if resp.status_code not in (200, 201):
+            raise ValueError(
+                f"LLM API error ({resp.status_code}) no provider {self.provider}: "
+                f"{resp.text[:300]}"
+            )
+        data = resp.json()
+        text = data["choices"][0]["message"]["content"]
+        usage = data.get("usage", {})
+        tokens = usage.get("prompt_tokens", 0) + usage.get("completion_tokens", 0)
+        return text, tokens
 
     @gca_retry()
     async def analyze_document(
@@ -208,20 +308,17 @@ class ArguiderService:
             # Construir prompt
             user_prompt = self._build_prompt(document_text, current_ocg, previous_analyses or [])
 
-            # Chamar Claude
+            # Chamar LLM do projeto (multi-provider, DT-032)
             start_time = datetime.now(timezone.utc)
-            response = await self.client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+            response_text, tokens_used = await self._call_llm(
+                system_prompt=ARGUIDER_SYSTEM_PROMPT,
+                user_prompt=user_prompt,
                 max_tokens=settings.ANTHROPIC_MAX_TOKENS,
-                temperature=0.2,
-                system=ARGUIDER_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
             )
             latency_ms = int((datetime.now(timezone.utc) - start_time).total_seconds() * 1000)
-            tokens_used = response.usage.input_tokens + response.usage.output_tokens
 
             # Parsear JSON
-            result_json = self._extract_json(response.content[0].text)
+            result_json = self._extract_json(response_text)
 
             # Salvar análise
             analysis = ArguiderAnalysis(
@@ -234,7 +331,9 @@ class ArguiderService:
                 improvement_suggestions=json.dumps(result_json.get("improvement_suggestions", []), ensure_ascii=False),
                 module_candidates=json.dumps(result_json.get("module_candidates", []), ensure_ascii=False),
                 ocg_fields_to_update=json.dumps(result_json.get("ocg_fields_to_update", []), ensure_ascii=False),
-                llm_model=settings.ANTHROPIC_MODEL,
+                # DT-032: label reflete o modelo real usado, não mais hardcoded
+                # ANTHROPIC_MODEL. Ex: "deepseek-chat", "claude-haiku-4-5-*".
+                llm_model=f"{self.provider}:{self.model}",
                 tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
