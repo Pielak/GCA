@@ -41,8 +41,19 @@ class PiloterService:
                 "stack": {...},
                 "recommendations": [...],
                 "alternatives": [...],
-                "cached": bool
+                "cached": bool,
+                "degraded": bool  # True quando rodou em modo degradado (sem key/API)
             }
+
+        DT-059: degradação graciosa quando `PILOTER_API_KEY` não está
+        configurada. Antes: caía em `_call_piloter_api` → 401 → exception
+        propagava → `code_generation_service.generate_project_code`
+        crashava antes de qualquer geração de código. Agora: detecta key
+        ausente, retorna stack vazio + warn estruturado, deixa o caller
+        seguir com prompt sem recomendações específicas (LLM ainda
+        consegue gerar código baseado em PROJECT_PROFILE do OCG).
+        Cache continua válido — se houver hit, retorna cache antes de
+        verificar a key.
         """
         try:
             cache_key = f"{language}_{architecture}"
@@ -61,6 +72,25 @@ class PiloterService:
                         "cached": True,
                         "cached_at": cached.created_at.isoformat()
                     }
+
+            # DT-059: degradação graciosa quando key não está configurada.
+            # Sem isso, qualquer scaffold (Python ou outras linguagens) crashava.
+            if not self.api_key:
+                logger.warning(
+                    "piloter.degraded_no_key",
+                    project_id=str(project_id),
+                    language=language,
+                    architecture=architecture,
+                    note="PILOTER_API_KEY ausente — stack vazio retornado, scaffold continua sem recomendações específicas",
+                )
+                return {
+                    "stack": None,
+                    "recommendations": [],
+                    "alternatives": [],
+                    "cached": False,
+                    "degraded": True,
+                    "degraded_reason": "PILOTER_API_KEY not configured",
+                }
 
             # 2. Call Piloter API
             logger.info("piloter.api_call_start",

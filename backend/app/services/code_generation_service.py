@@ -211,7 +211,11 @@ class CodeGenerationService:
                 raise ValueError("No artifacts found for project")
 
             # 3. Get stack recommendations
+            # DT-059: passar project_id (era omitido — TypeError silencioso porque
+            # testes mockavam piloter_service). Sem project_id, billing/quota não
+            # rastreava por projeto e a chamada real crashava.
             stack_recommendations = await self.piloter_service.get_stack_recommendations(
+                project_id=project_id,
                 language=language,
                 architecture=architecture
             )
