@@ -10,6 +10,10 @@ interface GitStatus {
   branch: string | null
   last_verified: string | null
   last_commit_at: string | null
+  // DT-026: outros projetos apontando para o mesmo repo. Se preenchido,
+  // há violação de compartimentalização (contrato §2.2) — GP deve
+  // desconectar ou apontar para repo isolado.
+  shared_with?: string[]
 }
 
 const PROVIDER_OPTIONS = [
@@ -137,6 +141,34 @@ export function RepositoryPage() {
             <p className="text-red-400/80 text-xs mt-1">
               O projeto não pode avançar sem um repositório configurado. Configure abaixo para desbloquear
               as seções de Ingestão, Gatekeeper, Arguidor e Geração de Código.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Alerta de compartilhamento — viola compartimentalização §2.2.
+          Só aparece quando o repo deste projeto também está conectado em
+          outros projetos. Casos existentes (criados antes do fix DT-026). */}
+      {isConnected && (status?.shared_with?.length ?? 0) > 0 && (
+        <div className="bg-amber-900/20 border border-amber-500/40 rounded-xl p-4 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div>
+            <p className="text-amber-200 text-sm font-semibold">
+              Repositório compartilhado com outro projeto — compartimentalização quebrada
+            </p>
+            <p className="text-amber-200/80 text-xs mt-1 leading-snug">
+              Este repositório também está conectado ao(s) projeto(s):{' '}
+              <span className="font-semibold text-amber-100">
+                {status!.shared_with!.join(', ')}
+              </span>.
+              Isso viola o contrato §2.2 (isolamento entre projetos) — código, docs e
+              deliverables gerados por um projeto ficam visíveis para a equipe do outro
+              via commits do GCA.
+            </p>
+            <p className="text-amber-200/80 text-xs mt-2 leading-snug">
+              <span className="font-semibold">Correção:</span> desconecte este projeto do repositório
+              (botão lixeira ao lado) e aponte para um repositório dedicado,
+              ou desconecte o outro projeto se este for o dono correto.
             </p>
           </div>
         </div>

@@ -52,6 +52,35 @@ def _parse_bitbucket_url(url: str) -> tuple[str, str] | None:
     return None
 
 
+def _normalize_repo_url(url: Optional[str]) -> str:
+    """Normaliza URL para comparação de "mesmo repo".
+
+    Remove variações comuns que apontam pro mesmo lugar:
+      - protocolo (https:// vs git://)
+      - sufixo .git
+      - trailing slash
+      - case do host
+      - "git@host:owner/repo" vs "https://host/owner/repo"
+
+    Retorna string canônica `host/owner/repo` em lowercase, sem variações.
+    """
+    if not url:
+        return ""
+    s = url.strip()
+    # git@github.com:owner/repo(.git) → github.com/owner/repo
+    m = re.match(r"^git@([^:]+):(.+?)$", s)
+    if m:
+        s = f"https://{m.group(1)}/{m.group(2)}"
+    # remove protocolo
+    s = re.sub(r"^[a-z]+://", "", s, flags=re.I)
+    # remove user@host prefix (ex.: user@github.com)
+    s = re.sub(r"^[^@/]+@", "", s)
+    # remove sufixo .git e trailing slash
+    s = re.sub(r"\.git/?$", "", s)
+    s = s.rstrip("/")
+    return s.lower()
+
+
 class GitService:
     """Serviço de integração Git por projeto."""
 
@@ -83,6 +112,35 @@ class GitService:
         project = result.scalar_one_or_none()
         if not project:
             return {"success": False, "message": "Projeto não encontrado"}
+
+        # Compartimentalização (contrato §2.2): dois projetos não podem
+        # apontar para o mesmo repositório. Seria vazamento — a equipe de
+        # um projeto veria/commitaria no outro via pipeline do GCA.
+        # Normaliza URL pra comparação (trim + strip .git + lowercase host).
+        normalized_new = _normalize_repo_url(repository_url)
+        conflict_result = await self.db.execute(
+            select(ProjectGitConfig, Project.name)
+            .join(Project, Project.id == ProjectGitConfig.project_id)
+            .where(ProjectGitConfig.project_id != project_id)
+        )
+        for other_cfg, other_name in conflict_result.all():
+            if _normalize_repo_url(other_cfg.repository_url) == normalized_new:
+                logger.warning(
+                    "git.connect_rejected_shared_repo",
+                    project_id=str(project_id),
+                    other_project=other_name,
+                    repository_url=repository_url,
+                )
+                return {
+                    "success": False,
+                    "message": (
+                        f"Este repositório já está conectado ao projeto '{other_name}'. "
+                        f"Cada projeto precisa do seu próprio repositório — compartilhar "
+                        f"viola a compartimentalização (contrato §2.2). Desconecte do outro "
+                        f"projeto primeiro ou use outro repositório."
+                    ),
+                    "conflict_with": other_name,
+                }
 
         # Testar conexão com o provider
         test_result = await self._test_connection(provider, repository_url, pat)
@@ -137,7 +195,7 @@ class GitService:
         """Testa a conexão atual do projeto com o repositório."""
         config = await self._get_config(project_id)
         if not config:
-            return {"connected": False}
+            return {"connected": False, "shared_with": []}
 
         test_result = await self._test_connection(
             config.provider, config.repository_url, decrypt_pat(config.pat_encrypted)
@@ -148,6 +206,12 @@ class GitService:
             config.connection_verified_at = datetime.now(timezone.utc)
             await self.db.commit()
 
+        # Compartimentalização (contrato §2.2): detectar outros projetos que
+        # apontam pro mesmo repositório. Hoje é só aviso — a constraint no
+        # connect_repository bloqueia NOVOS conflitos. Casos existentes
+        # (como os criados antes deste fix) precisam ser resolvidos pelo GP.
+        shared_with = await self._find_shared_projects(project_id, config.repository_url)
+
         return {
             "connected": test_result["connected"],
             "provider": config.provider,
@@ -155,7 +219,24 @@ class GitService:
             "branch": config.default_branch,
             "last_verified": config.connection_verified_at.isoformat() if config.connection_verified_at else None,
             "last_commit_at": config.last_commit_at.isoformat() if config.last_commit_at else None,
+            "shared_with": shared_with,  # Lista de nomes dos outros projetos (vazio = ok).
         }
+
+    async def _find_shared_projects(self, project_id: UUID, repository_url: str) -> list[str]:
+        """Retorna nomes de outros projetos com o mesmo repo (normalizado)."""
+        if not repository_url:
+            return []
+        target = _normalize_repo_url(repository_url)
+        result = await self.db.execute(
+            select(ProjectGitConfig, Project.name)
+            .join(Project, Project.id == ProjectGitConfig.project_id)
+            .where(ProjectGitConfig.project_id != project_id)
+        )
+        out = []
+        for other_cfg, other_name in result.all():
+            if _normalize_repo_url(other_cfg.repository_url) == target:
+                out.append(other_name)
+        return out
 
     async def disconnect(self, project_id: UUID) -> bool:
         """Remove configuração Git do projeto."""

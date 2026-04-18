@@ -39,6 +39,9 @@ class GitStatusResponse(BaseModel):
     branch: str | None = None
     last_verified: str | None = None
     last_commit_at: str | None = None
+    # Outros projetos que apontam para o mesmo repositório. Vazio = ok.
+    # Presença aqui = violação de compartimentalização (contrato §2.2).
+    shared_with: list[str] = []
 
 
 @router.post(
