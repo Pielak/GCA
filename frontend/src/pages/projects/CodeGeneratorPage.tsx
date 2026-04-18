@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import {
-  Code2, Play, Save, GitBranch, Loader2, CheckCircle2, AlertTriangle,
+  Code2, Play, Save, GitBranch, GitCommit, Loader2, CheckCircle2, AlertTriangle,
   FolderTree, ChevronRight, ChevronDown, FileCode, FileText, File,
   PanelRightOpen, PanelRightClose, Plus, FolderPlus, TestTube2,
   Shield, RefreshCw, X, Eye
@@ -205,6 +205,10 @@ export function CodeGeneratorPage() {
   const [scaffoldFiles, setScaffoldFiles] = useState<Map<string, { content: string; status: string }>>(new Map())
   const [scaffoldGenerating, setScaffoldGenerating] = useState(false)
   const [scaffoldSummary, setScaffoldSummary] = useState<string | null>(null)
+  // MVP 3: preview-apply. pendingApply=true quando há files gerados ainda
+  // não commitados (padrão novo desde backend /scaffold default=dry_run).
+  const [scaffoldPendingApply, setScaffoldPendingApply] = useState(false)
+  const [scaffoldApplying, setScaffoldApplying] = useState(false)
 
   // OCG context para referência
   const [ocgContext, setOcgContext] = useState<any>(null)
@@ -232,11 +236,13 @@ export function CodeGeneratorPage() {
 
   const handleGenerateScaffold = async () => {
     if (!projectId) return
-    if (scaffoldFiles.size > 0 && !confirm('Isso substituirá o scaffold atual. Continuar?')) return
+    if (scaffoldFiles.size > 0 && !confirm('Isso substituirá o preview atual. Continuar?')) return
 
     setScaffoldGenerating(true)
     setScaffoldSummary(null)
     try {
+      // MVP 3: /scaffold default é preview (dry_run=true). Não commita.
+      // GP revisa e clica "Aplicar no Git" pra commitar.
       const res = await apiClient.post('/code-generation/scaffold', { project_id: projectId })
       const data = res.data
       const files: { path: string; content: string; status: string }[] = data.files || []
@@ -250,13 +256,20 @@ export function CodeGeneratorPage() {
       }
       setScaffoldFiles(newMap)
 
-      // Sumário combinando geração e commits
-      const cs = data.commit_summary as { committed?: number; failed?: number } | undefined
       const baseSummary = data.summary || `Gerados ${files.length} arquivos`
-      const commitPart = cs
-        ? ` — Consolidados ${cs.committed || 0} no repositório${cs.failed ? `, ${cs.failed} falharam` : ''}`
-        : ''
-      setScaffoldSummary(baseSummary + commitPart)
+      if (data.dry_run) {
+        const committable = files.filter(f => f.status !== 'nmi').length
+        setScaffoldSummary(`${baseSummary} — Preview: ${committable} arquivo(s) prontos para commit. Revise e clique em "Aplicar no Git".`)
+        setScaffoldPendingApply(committable > 0)
+      } else {
+        // Legacy path (dry_run=false) — mantido pra scripts, não esperado na UI.
+        const cs = data.commit_summary as { committed?: number; failed?: number } | undefined
+        const commitPart = cs
+          ? ` — Consolidados ${cs.committed || 0} no repositório${cs.failed ? `, ${cs.failed} falharam` : ''}`
+          : ''
+        setScaffoldSummary(baseSummary + commitPart)
+        setScaffoldPendingApply(false)
+      }
 
       // Construir árvore a partir dos caminhos gerados, propagando status
       const tree = buildTreeWithStatus(files)
@@ -278,6 +291,41 @@ export function CodeGeneratorPage() {
       alert(`Falha na geração: ${detail}`)
     } finally {
       setScaffoldGenerating(false)
+    }
+  }
+
+  // MVP 3: aplicar preview — manda files pré-gerados/editados para /scaffold/apply,
+  // que re-valida docstrings e commita cada um no Git.
+  const handleApplyScaffold = async () => {
+    if (!projectId || scaffoldFiles.size === 0) return
+    const committable = Array.from(scaffoldFiles.values()).filter(v => v.status !== 'nmi').length
+    if (!confirm(`Aplicar ${committable} arquivo(s) no Git? Cada um vira um commit individual.`)) return
+
+    setScaffoldApplying(true)
+    try {
+      const filesPayload = Array.from(scaffoldFiles.entries()).map(([path, v]) => ({
+        path,
+        content: v.content,
+        status: v.status,
+      }))
+      const res = await apiClient.post('/code-generation/scaffold/apply', {
+        project_id: projectId,
+        files: filesPayload,
+      })
+      const data = res.data
+      const committed = data.committed ?? 0
+      const failed = data.failed ?? 0
+      const skipped = data.skipped_nmi ?? 0
+      setScaffoldSummary(
+        `Aplicado: ${committed} commitado(s)${failed ? `, ${failed} falharam` : ''}${skipped ? `, ${skipped} NMI pulado(s)` : ''}.`
+      )
+      setScaffoldPendingApply(false)
+      loadTree()
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Erro ao aplicar scaffold'
+      alert(`Falha ao aplicar: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
+    } finally {
+      setScaffoldApplying(false)
     }
   }
 
@@ -698,19 +746,35 @@ export function CodeGeneratorPage() {
           </div>
 
           <div className="flex items-center gap-2">
-            {/* Gerar Scaffold */}
+            {/* MVP 3: Gerar preview (dry_run) */}
             <button
               onClick={handleGenerateScaffold}
-              disabled={scaffoldGenerating}
+              disabled={scaffoldGenerating || scaffoldApplying}
               className="flex items-center gap-1 px-3 py-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
-              title="Gerar scaffold completo do projeto via IA"
+              title="Gerar preview do scaffold via IA (não commita — revise e clique em Aplicar)"
             >
               {scaffoldGenerating ? (
                 <><Loader2 className="w-3.5 h-3.5 animate-spin" />Gerando...</>
               ) : (
-                <><Code2 className="w-3.5 h-3.5" />Gerar Código</>
+                <><Code2 className="w-3.5 h-3.5" />Gerar Preview</>
               )}
             </button>
+
+            {/* MVP 3: Aplicar no Git — só aparece com preview pendente */}
+            {scaffoldPendingApply && (
+              <button
+                onClick={handleApplyScaffold}
+                disabled={scaffoldApplying || scaffoldGenerating}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                title="Commitar os arquivos do preview no repositório Git do projeto"
+              >
+                {scaffoldApplying ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Aplicando...</>
+                ) : (
+                  <><GitCommit className="w-3.5 h-3.5" />Aplicar no Git</>
+                )}
+              </button>
+            )}
 
             {/* New file */}
             <button
@@ -962,7 +1026,7 @@ export function CodeGeneratorPage() {
                 <p className="text-slate-600 text-xs mt-1">
                   {scaffoldFiles.size > 0
                     ? 'Selecione um arquivo na árvore à direita para visualizar o código gerado'
-                    : <>Clique em <strong className="text-emerald-400">"Gerar Código"</strong> para criar o scaffold do projeto<br />ou selecione um arquivo na árvore do repositório</>
+                    : <>Clique em <strong className="text-emerald-400">"Gerar Preview"</strong> para criar o scaffold do projeto<br />ou selecione um arquivo na árvore do repositório</>
                   }
                 </p>
                 {scaffoldFiles.size === 0 && (
@@ -972,7 +1036,7 @@ export function CodeGeneratorPage() {
                     className="mt-4 px-4 py-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white rounded-lg transition-colors inline-flex items-center gap-2"
                   >
                     {scaffoldGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Code2 className="w-4 h-4" />}
-                    Gerar Código do Projeto
+                    Gerar Preview do Scaffold
                   </button>
                 )}
               </div>
