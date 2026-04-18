@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 1.3  
+Versão: 1.4  
 Data-base: 2026-04-18  
-Status: **controle de avanço por fase**
+Status: **controle de avanço por fase** — Gate MVP 3 ABERTO (binário).
 
 ---
 
