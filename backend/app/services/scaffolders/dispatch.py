@@ -18,6 +18,10 @@ import structlog
 from .types import ScaffoldFile, ScaffoldSpec
 from .java_spring import scaffold_java_spring
 from .java_quarkus import scaffold_java_quarkus
+from .go_app import scaffold_go
+from .csharp_aspnet import scaffold_csharp_aspnet
+from .php_laravel import scaffold_php_laravel
+from .kotlin_spring import scaffold_kotlin_spring
 
 logger = structlog.get_logger(__name__)
 
@@ -143,6 +147,24 @@ def dispatch_scaffold(
         logger.info("scaffold.dispatch", scaffolder="java_spring", **log_ctx)
         return "java_spring", scaffold_java_spring(spec)
 
-    # Outras linguagens — Sprint 3 cobrirá Go, C#, PHP, Kotlin
+    if language == "kotlin":
+        # Kotlin tem só Spring Boot por enquanto (Ktor é candidato futuro)
+        logger.info("scaffold.dispatch", scaffolder="kotlin_spring", **log_ctx)
+        return "kotlin_spring", scaffold_kotlin_spring(spec)
+
+    if language == "go":
+        logger.info("scaffold.dispatch", scaffolder="go_app", **log_ctx)
+        return "go_app", scaffold_go(spec)
+
+    if language in ("csharp", "c#", "cs", ".net", "dotnet"):
+        logger.info("scaffold.dispatch", scaffolder="csharp_aspnet", **log_ctx)
+        return "csharp_aspnet", scaffold_csharp_aspnet(spec)
+
+    if language == "php":
+        # PHP tem só Laravel (Symfony fica como candidato futuro)
+        logger.info("scaffold.dispatch", scaffolder="php_laravel", **log_ctx)
+        return "php_laravel", scaffold_php_laravel(spec)
+
+    # Linguagens sem template (Python ainda é LLM-only, Node.js, Ruby, etc.)
     logger.info("scaffold.dispatch_no_template", **log_ctx)
     return None

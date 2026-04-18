@@ -80,18 +80,14 @@ def test_dispatch_java_propagates_db_and_redis():
 # ---------------------------------------------------------------------------
 
 def test_dispatch_python_returns_none():
-    """Python ainda não tem scaffolder determinístico — caller cai no LLM."""
+    """Python ainda não tem scaffolder determinístico — caller cai no LLM.
+
+    Decisão de produto: Python é o ecossistema mais maduro pro LLM (vasto
+    corpo de FastAPI/Django no treino). Sprint 3 cobriu Go/C#/PHP/Kotlin
+    porque essas têm convenções de layout mais rígidas que o LLM erra
+    com mais frequência. Python continua LLM-only.
+    """
     stack = {"backend": {"language": "Python", "framework": "FastAPI"}}
-    assert dispatch_scaffold(stack, "Demo", "demo") is None
-
-
-def test_dispatch_go_returns_none():
-    stack = {"backend": {"language": "Go"}}
-    assert dispatch_scaffold(stack, "Demo", "demo") is None
-
-
-def test_dispatch_csharp_returns_none():
-    stack = {"backend": {"language": "C#"}}
     assert dispatch_scaffold(stack, "Demo", "demo") is None
 
 

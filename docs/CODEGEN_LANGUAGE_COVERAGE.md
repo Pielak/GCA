@@ -21,10 +21,10 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 | **Python** | ✅ Python + FastAPI/Django/Flask | ✅ pytest | ✅ python:3.11-slim | ✅ pytest workflow | ❓ delegado ao LLM | ✅ projeto Automação Jurídica |
 | **JavaScript / TypeScript** | ✅ Node.js + NestJS/Express | ✅ jest | ✅ node:20-alpine multi-stage | ✅ jest workflow | ❓ delegado ao LLM | ❌ nunca |
 | **Java** | ✅ Java + Spring Boot/Quarkus | ✅ junit5 | ✅ eclipse-temurin:21 + Maven/Gradle | ✅ Java workflow | ✅ Spring Boot 3.3 + Quarkus 3.13 (Sprint 2 DT-058) | ❌ pendente Sprint 4 |
-| **Kotlin** | ✅ Kotlin (Q27 lista direta) | ✅ junit5 | 🟡 reusa template Java | 🟡 reusa template Java | ❌ NÃO existe | ❌ nunca |
-| **Go** | ✅ Go | ✅ go_test | ✅ multi-stage golang:1.22 | ✅ Go workflow | ❌ NÃO existe | ❌ nunca |
-| **C#** | ✅ C# + ASP.NET | ✅ xunit | ❌ NÃO existe | ❌ NÃO existe | ❌ NÃO existe | ❌ nunca |
-| **PHP** | ✅ PHP (sem framework no Q28) | ✅ phpunit | ❌ NÃO existe | ❌ NÃO existe | ❌ NÃO existe | ❌ nunca |
+| **Kotlin** | ✅ Kotlin (Q27 lista direta) | ✅ junit5 | 🟡 reusa template Java | 🟡 reusa template Java | ✅ Spring Boot 3.3 + Gradle KTS (Sprint 3 DT-058) | ❌ pendente Sprint 4 |
+| **Go** | ✅ Go | ✅ go_test | ✅ multi-stage golang:1.22 | ✅ Go workflow | ✅ chi/v5 + cmd/internal layout (Sprint 3 DT-058) | ❌ pendente Sprint 4 |
+| **C#** | ✅ C# + ASP.NET | ✅ xunit | ❌ NÃO existe | ❌ NÃO existe | ✅ .NET 8 Minimal API + xUnit (Sprint 3 DT-058) | ❌ pendente Sprint 4 |
+| **PHP** | ✅ PHP (sem framework no Q28) | ✅ phpunit | ❌ NÃO existe | ❌ NÃO existe | ✅ Laravel 11 + PHPUnit (Sprint 3 DT-058) | ❌ pendente Sprint 4 |
 | **Outra** (Q27) | ✅ texto livre | ❌ sem mapeamento | ❌ sem template | ❌ sem template | ❓ LLM tenta | ❌ nunca |
 
 ## Bugs estruturais conhecidos (Sprint 1 cobre)
@@ -61,9 +61,14 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 - 46 testes novos cobrindo: estrutura, XML válido, deps por opção,
   determinismo, projeto real Automação Jurídica em modo Java
 
-### Sprint 3 — Demais linguagens
-- Go, C#, PHP, Kotlin — 1 commit por linguagem
-- Templates de scaffold + Dockerfile/CI faltantes (C#, PHP)
+### Sprint 3 — Demais linguagens ✅ FECHADO 2026-04-18
+- ✅ Go: chi/v5 + cmd/internal layout — `scaffolders/go_app.py`
+- ✅ C#: .NET 8 Minimal API + xUnit — `scaffolders/csharp_aspnet.py`
+- ✅ PHP: Laravel 11 + PHPUnit — `scaffolders/php_laravel.py`
+- ✅ Kotlin: Spring Boot 3.3 + Gradle KTS — `scaffolders/kotlin_spring.py`
+- 34 testes novos consolidados em `test_dt058_sprint3_scaffolders.py`
+- Dispatch atualizado: 5 linguagens com template (Java/Kotlin/Go/C#/PHP) +
+  Python LLM-only por design
 
 ### Sprint 4 — Validação E2E
 - 5 projetos-piloto no dogfood (1 por linguagem)
