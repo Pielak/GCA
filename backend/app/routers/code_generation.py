@@ -616,7 +616,11 @@ Status possíveis:
                     message=message,
                     project_id=project_id,
                     resource_type="scaffold",
-                    link=f"/projects/{project_id}/code-generator",
+                    # Path canônico do frontend é /codegen. Havia desalinhamento
+                    # que levava a 404 ao clicar na notificação — redirect foi
+                    # adicionado como rede de segurança, mas aqui já usamos o
+                    # path certo na origem.
+                    link=f"/projects/{project_id}/codegen",
                     severity=severity,
                 )
         except Exception as notif_err:
