@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   ClipboardList, Download, FileUp, Loader2, CheckCircle2,
   AlertTriangle, AlertCircle, Clock, Lightbulb, ShieldAlert, Wand2,
@@ -48,6 +49,12 @@ interface ExistingQuestionnaire {
 
 export function QuestionnairePage() {
   const { id: projectId } = useParams<{ id: string }>()
+  // Invalidação do setup-status ao submeter/corrigir questionário —
+  // o badge da tab e o hero refletem imediatamente.
+  const queryClient = useQueryClient()
+  const invalidateSetup = () => {
+    queryClient.invalidateQueries({ queryKey: ['project-setup-status', projectId] })
+  }
   const [existing, setExisting] = useState<ExistingQuestionnaire | null>(null)
   const [loading, setLoading] = useState(true)
   const [uploading, setUploading] = useState(false)
@@ -99,6 +106,7 @@ export function QuestionnairePage() {
         form,
       )
       alert(res?.data?.message || 'Questionário submetido para análise.')
+      invalidateSetup()
       window.location.reload()
     } catch (err: any) {
       const detail = err?.data?.detail || err?.message || 'Erro ao processar PDF'
@@ -143,7 +151,7 @@ export function QuestionnairePage() {
           projectId={projectId}
           issues={existing.blocking_issues ?? []}
           currentResponses={existing.responses ?? {}}
-          onSaved={fetchExisting}
+          onSaved={async () => { await fetchExisting(); invalidateSetup() }}
         />
       )}
 

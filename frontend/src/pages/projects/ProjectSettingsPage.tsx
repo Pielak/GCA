@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle, Plus, Trash2, Star } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
@@ -41,6 +42,12 @@ export function ProjectSettingsPage() {
   const currentUserEmail = useAuthStore((s) => s.user?.email || '')
   const [loading, setLoading] = useState(true)
   const { data: setupStatus } = useSetupStatus(projectId)
+  // Invalidação explícita do setup-status ao mudar config de LLM —
+  // senão os badges ✓/○ das tabs e o hero ficam stale (staleTime 30s).
+  const queryClient = useQueryClient()
+  const invalidateSetup = () => {
+    queryClient.invalidateQueries({ queryKey: ['project-setup-status', projectId] })
+  }
 
   // A aba ativa vem de ?tab=... para suportar deep-links da SetupChecklist
   // (passos IA / Repo / Questionário) e dos redirects de /repository, /questionnaire.
@@ -127,6 +134,7 @@ export function ProjectSettingsPage() {
       setNewLlmModel('')
       setAddingLlm(false)
       await loadSettings()
+      invalidateSetup()
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Erro ao adicionar', 'error')
     }
@@ -186,6 +194,7 @@ export function ProjectSettingsPage() {
       await apiClient.post(`/projects/${projectId}/settings/llm/providers/${provider}/default`, {})
       showToast(`${provider} definido como padrão do projeto`, 'success')
       await loadSettings()
+      invalidateSetup()
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Erro ao definir padrão', 'error')
     }
@@ -205,6 +214,7 @@ export function ProjectSettingsPage() {
         return next
       })
       await loadSettings()
+      invalidateSetup()
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Erro ao remover', 'error')
     }
@@ -224,6 +234,7 @@ export function ProjectSettingsPage() {
       showToast('SMTP configurado com sucesso', 'success')
       setSmtpPass('')
       await loadSettings()
+      invalidateSetup()
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Erro ao salvar', 'error')
     }

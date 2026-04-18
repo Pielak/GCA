@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { GitBranch, Check, AlertTriangle, Loader2, RefreshCw, Trash2, Eye, EyeOff, Shield } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 
@@ -24,6 +25,14 @@ const PROVIDER_OPTIONS = [
 
 export function RepositoryPage() {
   const { id: projectId } = useParams<{ id: string }>()
+  // O badge ✓/○ da aba Questionário + barra de progresso em Configurações
+  // dependem de `useSetupStatus`. React Query faz cache por 30s — quando
+  // conectamos/desconectamos repo, temos que invalidar explicitamente,
+  // senão o GP vê "2/3 passos" mesmo após configurar.
+  const queryClient = useQueryClient()
+  const invalidateSetup = () => {
+    queryClient.invalidateQueries({ queryKey: ['project-setup-status', projectId] })
+  }
   const [status, setStatus] = useState<GitStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -77,6 +86,7 @@ export function RepositoryPage() {
       showToast('Repositório conectado com sucesso', 'success')
       setPat('')
       await loadStatus()
+      invalidateSetup()
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Erro ao conectar repositório', 'error')
     }
@@ -108,6 +118,7 @@ export function RepositoryPage() {
       setPat('')
       setBranch('main')
       await loadStatus()
+      invalidateSetup()
     } catch (err: any) {
       showToast(err?.response?.data?.detail || 'Erro ao desconectar', 'error')
     }
