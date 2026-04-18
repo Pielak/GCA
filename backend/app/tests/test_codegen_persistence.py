@@ -300,34 +300,35 @@ async def _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settin
             await session.execute(User.__table__.delete().where(User.id == uid))
 
 
-@pytest.mark.asyncio
-async def test_scaffold_happy_path_commits_files():
-    """Scaffold gera N arquivos via LLM mockado e commita cada um (exceto nmi)."""
-    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
-        project_name="P happy",
-        user_email_prefix="scaffold-happy",
-    )
+_SCAFFOLD_LLM_PAYLOAD = {
+    "files": [
+        {
+            "path": "src/main.py",
+            "content": '"""Entry point."""\n\n\ndef main() -> None:\n    """Run the app."""\n    pass\n',
+            "status": "complete",
+        },
+        {
+            "path": "src/todo.py",
+            "content": '"""TODO module."""\n\n# TODO: implementar\n',
+            "status": "todo",
+        },
+        {
+            "path": "src/skip_me.py",
+            "content": "# [NMI] precisa de mais info do projeto\n",
+            "status": "nmi",
+        },
+    ],
+    "summary": "Gerados 3 arquivos para P happy",
+}
 
-    llm_payload = {
-        "files": [
-            {
-                "path": "src/main.py",
-                "content": '"""Entry point."""\n\n\ndef main() -> None:\n    """Run the app."""\n    pass\n',
-                "status": "complete",
-            },
-            {
-                "path": "src/todo.py",
-                "content": '"""TODO module."""\n\n# TODO: implementar\n',
-                "status": "todo",
-            },
-            {
-                "path": "src/skip_me.py",
-                "content": "# [NMI] precisa de mais info do projeto\n",
-                "status": "nmi",
-            },
-        ],
-        "summary": "Gerados 3 arquivos para P happy",
-    }
+
+@pytest.mark.asyncio
+async def test_scaffold_preview_returns_files_no_commits():
+    """MVP 3: POST /scaffold (dry_run default=True) retorna files mas NÃO commita."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name="P preview",
+        user_email_prefix="scaffold-preview",
+    )
 
     commit_calls = []
 
@@ -339,7 +340,7 @@ async def test_scaffold_happy_path_commits_files():
 
     try:
         with patch(
-            "anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(llm_payload)
+            "anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)
         ), patch(
             "app.services.git_service.GitService.commit_file", new=fake_commit
         ):
@@ -348,24 +349,105 @@ async def test_scaffold_happy_path_commits_files():
                 resp = await client.post(
                     "/api/v1/code-generation/scaffold",
                     headers={"Authorization": f"Bearer {token}"},
-                    json={"project_id": str(project_id)},
+                    json={"project_id": str(project_id)},  # dry_run default = True
                 )
 
         assert resp.status_code == 200, resp.text
         body = resp.json()
+        assert body["dry_run"] is True
+        assert body["commit_summary"] is None
         assert len(body["files"]) == 3, body
         assert body["summary"] == "Gerados 3 arquivos para P happy"
+        # Zero commits — preview não toca no Git
+        assert commit_calls == []
 
-        # nmi não é commitado; complete + todo sim
+    finally:
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
+@pytest.mark.asyncio
+async def test_scaffold_apply_commits_reviewed_files():
+    """MVP 3: POST /scaffold/apply commita files pré-gerados (no-LLM path)."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name="P apply",
+        user_email_prefix="scaffold-apply",
+    )
+
+    commit_calls = []
+
+    async def fake_commit(self, project_id, file_path, content, commit_message):
+        commit_calls.append({"path": file_path, "msg": commit_message})
+        return {"success": True, "sha": "deadbeef", "message": "ok"}
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        with patch("app.services.git_service.GitService.commit_file", new=fake_commit):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/v1/code-generation/scaffold/apply",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={
+                        "project_id": str(project_id),
+                        "files": _SCAFFOLD_LLM_PAYLOAD["files"],
+                    },
+                )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["committed"] == 2  # complete + todo
+        assert body["failed"] == 0
+        assert body["skipped_nmi"] == 1
+        committed_paths = {c["path"] for c in commit_calls}
+        assert committed_paths == {"src/main.py", "src/todo.py"}
+
+        # Pattern de commit mantido
+        for call in commit_calls:
+            assert call["msg"].startswith("feat(codegen): ")
+            assert call["msg"].endswith(call["path"])
+
+    finally:
+        await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
+
+
+@pytest.mark.asyncio
+async def test_scaffold_legacy_dry_run_false_commits_directly():
+    """Legacy: POST /scaffold dry_run=False ainda commita direto (scripts)."""
+    uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
+        project_name="P legacy",
+        user_email_prefix="scaffold-legacy",
+    )
+
+    commit_calls = []
+
+    async def fake_commit(self, project_id, file_path, content, commit_message):
+        commit_calls.append({"path": file_path, "msg": commit_message})
+        return {"success": True, "sha": "deadbeef", "message": "ok"}
+
+    token = create_access_token(data={"sub": str(uid)})
+
+    try:
+        with patch(
+            "anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)
+        ), patch(
+            "app.services.git_service.GitService.commit_file", new=fake_commit
+        ):
+            transport = httpx.ASGITransport(app=app)
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/api/v1/code-generation/scaffold",
+                    headers={"Authorization": f"Bearer {token}"},
+                    json={"project_id": str(project_id), "dry_run": False},
+                )
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["dry_run"] is False
         assert body["commit_summary"]["committed"] == 2
         assert body["commit_summary"]["failed"] == 0
         committed_paths = {c["path"] for c in commit_calls}
         assert committed_paths == {"src/main.py", "src/todo.py"}
-
-        # Mensagem de commit segue padrão feat(codegen): <path>
-        for call in commit_calls:
-            assert call["msg"].startswith("feat(codegen): ")
-            assert call["msg"].endswith(call["path"])
 
     finally:
         await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)

@@ -157,9 +157,18 @@ class GenerationHistoryItem(BaseModel):
 
 
 class ScaffoldRequest(BaseModel):
-    """Request para gerar scaffold completo do projeto"""
+    """Request para gerar scaffold completo do projeto.
+
+    MVP 3: `dry_run` controla preview-vs-commit. Default `True` — geração
+    não toca o Git. Contrato §7 exige preview antes do commit. O GP decide
+    aplicar via `POST /scaffold/apply` depois de revisar a lista.
+    """
 
     project_id: UUID = Field(..., description="ID do projeto")
+    dry_run: bool = Field(
+        default=True,
+        description="Se True (default), só gera e retorna arquivos. Se False, commita direto (legado — mantido pra scripts; UX oficial é preview + apply).",
+    )
 
 
 class ScaffoldFileItem(BaseModel):
@@ -175,6 +184,31 @@ class ScaffoldResponse(BaseModel):
 
     files: List[ScaffoldFileItem]
     summary: str
+
+
+class ScaffoldApplyRequest(BaseModel):
+    """Request para aplicar (commitar) arquivos gerados por `POST /scaffold` com dry_run=True.
+
+    Fluxo oficial MVP 3:
+      1. POST /scaffold {project_id} → recebe files[]
+      2. GP revisa no frontend
+      3. POST /scaffold/apply {project_id, files} → commits
+
+    O backend re-valida docstrings e docpath antes de commitar — não
+    confia cegamente no payload do cliente.
+    """
+
+    project_id: UUID = Field(..., description="ID do projeto")
+    files: List[ScaffoldFileItem] = Field(..., description="Arquivos gerados no preview, revisados pelo GP")
+
+
+class ScaffoldApplyResponse(BaseModel):
+    """Response do /scaffold/apply — resumo dos commits."""
+
+    committed: int
+    failed: int
+    skipped_nmi: int
+    results: List[Dict[str, Any]]
 
 
 class ValidateCodeRequest(BaseModel):
@@ -556,75 +590,29 @@ Status possíveis:
             nmi=sum(1 for f in files if f["status"] == "nmi"),
         )
 
-        # Persistir cada arquivo no repositório Git do projeto
-        from app.services.git_service import GitService
         from fastapi.responses import JSONResponse
 
-        git_service = GitService(db)
-
-        commit_results = []
-        committed = 0
-        failed = 0
-        for f in files:
-            if f.get("status") == "nmi":
-                continue
-            path = f.get("path") or f.get("file_path")
-            content = f.get("content") or ""
-            if not path or not content:
-                continue
-            result = await git_service.commit_file(
-                project_id=project_id,
-                file_path=path,
-                content=content,
-                commit_message=f"feat(codegen): {path}",
+        # MVP 3: modo preview é o default. Retorna files sem tocar no Git.
+        # O GP revisa no frontend e clica "Aplicar" → POST /scaffold/apply.
+        if request.dry_run:
+            logger.info(
+                "scaffold.preview_returned",
+                project_id=str(project_id),
+                files_count=len(files),
             )
-            if result.get("success"):
-                committed += 1
-                commit_results.append({"path": path, "status": "ok"})
-            else:
-                failed += 1
-                commit_results.append({"path": path, "status": "error", "error": result.get("message")})
-
-        logger.info(
-            "scaffold.commits_finished",
-            project_id=str(project_id),
-            committed=committed,
-            failed=failed,
-        )
-
-        # Notificar GPs do projeto: sucesso ou falha parcial
-        try:
-            from app.services.notification_inapp_service import InAppNotificationService
-            from app.models.base import ProjectMember
-
-            gps_result = await db.execute(
-                select(ProjectMember).where(
-                    ProjectMember.project_id == project_id,
-                    ProjectMember.role == "gp",
-                    ProjectMember.is_active == True,
-                )
+            response = ScaffoldResponse(
+                files=[ScaffoldFileItem(**f) for f in files],
+                summary=summary,
             )
-            notif_svc = InAppNotificationService(db)
-            severity = "warning" if failed > 0 else "success"
-            title = "Geração de código concluída" + (f" com {failed} falha(s)" if failed > 0 else "")
-            message = f"{committed} arquivo(s) commitado(s) em {project.name}."
-            for gp in gps_result.scalars().all():
-                await notif_svc.notify(
-                    user_id=gp.user_id,
-                    event_type="codegen_completed",
-                    title=title,
-                    message=message,
-                    project_id=project_id,
-                    resource_type="scaffold",
-                    # Path canônico do frontend é /codegen. Havia desalinhamento
-                    # que levava a 404 ao clicar na notificação — redirect foi
-                    # adicionado como rede de segurança, mas aqui já usamos o
-                    # path certo na origem.
-                    link=f"/projects/{project_id}/codegen",
-                    severity=severity,
-                )
-        except Exception as notif_err:
-            logger.warning("scaffold.notify_failed", error=str(notif_err))
+            response_dict = response.model_dump()
+            response_dict["commit_summary"] = None  # Explícito: nada commitado
+            response_dict["dry_run"] = True
+            return JSONResponse(content=response_dict)
+
+        # Legacy: dry_run=False commita direto (mantido pra scripts e
+        # retrocompat; UX oficial usa preview + apply).
+        committed, failed, commit_results = await _commit_scaffold_files(db, project_id, files)
+        await _notify_scaffold_completion(db, project_id, project.name, committed, failed)
 
         response = ScaffoldResponse(
             files=[ScaffoldFileItem(**f) for f in files],
@@ -636,6 +624,7 @@ Status possíveis:
             "failed": failed,
             "results": commit_results,
         }
+        response_dict["dry_run"] = False
         return JSONResponse(content=response_dict)
 
     except HTTPException:
@@ -645,6 +634,155 @@ Status possíveis:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Falha na geração do scaffold: {str(e)}"
         )
+
+
+# Helpers para commit — usados por /scaffold (dry_run=False) e /scaffold/apply.
+
+
+async def _commit_scaffold_files(db: AsyncSession, project_id: UUID, files: List[Dict[str, Any]]):
+    """Commita a lista de files no Git do projeto. Re-valida docstrings
+    (preview-apply pode ter gap de tempo; arquivo editado no frontend
+    pode ter perdido docstring).
+
+    Retorna (committed, failed, results).
+    """
+    from app.services.git_service import GitService
+
+    git_service = GitService(db)
+
+    commit_results = []
+    committed = 0
+    failed = 0
+    for f in files:
+        if f.get("status") == "nmi":
+            continue
+        path = f.get("path") or f.get("file_path")
+        content = f.get("content") or ""
+        if not path or not content:
+            continue
+        # Re-checa docstring no momento do commit — impede que um frontend
+        # bugado ou malicioso mande conteúdo sem docstring.
+        if _missing_required_docstring(path, content):
+            failed += 1
+            commit_results.append({
+                "path": path,
+                "status": "error",
+                "error": "Docstring obrigatória ausente (re-validação no apply).",
+            })
+            continue
+        result = await git_service.commit_file(
+            project_id=project_id,
+            file_path=path,
+            content=content,
+            commit_message=f"feat(codegen): {path}",
+        )
+        if result.get("success"):
+            committed += 1
+            commit_results.append({"path": path, "status": "ok"})
+        else:
+            failed += 1
+            commit_results.append({"path": path, "status": "error", "error": result.get("message")})
+
+    logger.info(
+        "scaffold.commits_finished",
+        project_id=str(project_id),
+        committed=committed,
+        failed=failed,
+    )
+    return committed, failed, commit_results
+
+
+async def _notify_scaffold_completion(
+    db: AsyncSession,
+    project_id: UUID,
+    project_name: str,
+    committed: int,
+    failed: int,
+):
+    """Notifica GPs do projeto após o apply concluir."""
+    try:
+        from app.services.notification_inapp_service import InAppNotificationService
+        from app.models.base import ProjectMember
+
+        gps_result = await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.role == "gp",
+                ProjectMember.is_active == True,
+            )
+        )
+        notif_svc = InAppNotificationService(db)
+        severity = "warning" if failed > 0 else "success"
+        title = "Geração de código concluída" + (f" com {failed} falha(s)" if failed > 0 else "")
+        message = f"{committed} arquivo(s) commitado(s) em {project_name}."
+        for gp in gps_result.scalars().all():
+            await notif_svc.notify(
+                user_id=gp.user_id,
+                event_type="codegen_completed",
+                title=title,
+                message=message,
+                project_id=project_id,
+                resource_type="scaffold",
+                link=f"/projects/{project_id}/codegen",
+                severity=severity,
+            )
+    except Exception as notif_err:
+        logger.warning("scaffold.notify_failed", error=str(notif_err))
+
+
+@router.post(
+    "/scaffold/apply",
+    response_model=ScaffoldApplyResponse,
+    summary="Aplicar (commitar) scaffold gerado previamente",
+    description="Aceita a lista de arquivos revisada pelo GP (após POST /scaffold com dry_run=True) e commita cada um no repositório Git do projeto. Re-valida docstrings e gate de setup.",
+)
+async def apply_scaffold(request: ScaffoldApplyRequest, db: AsyncSession = Depends(get_db)):
+    """Fluxo oficial MVP 3 do CodeGen:
+
+      1. `POST /scaffold {project_id}` → recebe `files[]` + `summary` (dry_run default).
+      2. GP revisa no frontend.
+      3. `POST /scaffold/apply {project_id, files}` → commits.
+
+    O backend **não confia** no payload do cliente:
+    - gate `require_project_setup_complete` executa de novo (coerência com
+      /scaffold; se setup foi revertido entre preview e apply, barra);
+    - docstrings são re-validadas por arquivo (commit é barrado por
+      arquivo que falhar, não rejeita o batch inteiro);
+    - arquivos com `status=nmi` são pulados (marcador do preview).
+
+    Retorna resumo dos commits + lista de results por arquivo.
+    """
+    project_id = request.project_id
+    await assert_project_setup_complete(db, project_id)
+
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    await _require_git_config(db, project_id)
+
+    # Converte lista tipada Pydantic pra dicts (formato esperado pelo helper).
+    files_dict = [f.model_dump() for f in request.files]
+
+    skipped_nmi = sum(1 for f in files_dict if f.get("status") == "nmi")
+
+    committed, failed, results = await _commit_scaffold_files(db, project_id, files_dict)
+    await _notify_scaffold_completion(db, project_id, project.name, committed, failed)
+
+    logger.info(
+        "scaffold.apply_completed",
+        project_id=str(project_id),
+        committed=committed,
+        failed=failed,
+        skipped_nmi=skipped_nmi,
+    )
+
+    return ScaffoldApplyResponse(
+        committed=committed,
+        failed=failed,
+        skipped_nmi=skipped_nmi,
+        results=results,
+    )
 
 
 @router.post(
