@@ -1,32 +1,33 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 1.4  
+Versão: 1.5  
 Data-base: 2026-04-18  
-Status: **controle de avanço por fase** — Gate MVP 3 ABERTO (binário).
+Status: **controle de avanço por fase** — Gate MVP 4 aberto para trabalho.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 3 — Geração assistida controlada** (iniciado 2026-04-18)
+**MVP 4 — Qualidade, documentação e entrega** (iniciado 2026-04-18)
 
 ### MVP anterior
-MVP 2 — Contexto vivo e governança de conteúdo — **ENCERRADO 2026-04-18**
-com todos os 10 critérios §9 atendendo SIM (veredito binário). Suite
-pytest contra `gca_test` isolado: 346 passed, 1 skipped, 0 failed,
-0 errors em 15:11. Prod DB (`gca`) intacta — 0 contaminação. DTs
-restantes (DT-016 SMTP, DT-023 Ollama) explicitamente fora-de-escopo do
-MVP 2 por design.
+MVP 3 — Geração assistida controlada — **ENCERRADO 2026-04-18** com
+todos os 10 critérios §9 atendendo SIM (veredito binário). Suite pytest
+contra `gca_test` isolado: 357 passed, 0 failed, 0 errors em 14:59.
+Prod DB (`gca`) intacta — 0 contaminação. Todos os 9 itens do §7 MVP 3
+implementados: CodeGen controlado, geração cirúrgica, preview antes do
+commit (DT-043 flow), integração Git, commits rastreáveis, validação
+pós-geração, bloqueios por papel (DT-042), docstrings obrigatórias,
+análise de adequação do provedor (DT-043).
 
 ### Objetivo do momento
-Amadurecer o CodeGen para o padrão "geração assistida controlada":
-preview antes do commit, geração cirúrgica por arquivo (já presente),
-commits rastreáveis no Git do projeto, validação pós-geração com
-bloqueio por papel, docstrings obrigatórias, análise de adequação do
-provedor de IA ao uso pretendido. Mantém o rigor dos MVPs anteriores:
-correção local preferível a refatoração sistêmica; sem expansão além
-do escopo §7.
+Amadurecer o ciclo de **qualidade → entrega**: QA Readiness com métricas
+por pilar, execução e revisão de testes com evidência exportável,
+Documentação Viva atualizando a cada mudança, Roadmap coerente com
+backlog derivado do OCG, e Release Bundle empacotando artefatos
+verificáveis. Mantém o rigor dos MVPs anteriores: correção local
+preferível a refatoração sistêmica; sem expansão além do §7.
 
 ### Princípio desta fase
 Mesmo dos MVPs anteriores:
@@ -34,33 +35,45 @@ Mesmo dos MVPs anteriores:
 2. classificar dívida;
 3. corrigir blockers e criticals antes de feature nova;
 4. revalidar após cada passo;
-5. só então considerar avanço para o MVP 4.
+5. só então considerar avanço para o MVP 5.
 
 ---
 
 ## 2. Escopo da fase atual
 
-### Em escopo agora (contrato §7, MVP 3)
-- CodeGen controlado (gate de project-setup já presente — DT-040);
-- geração cirúrgica por arquivo (endpoint `/regenerate-file` ativo);
-- preview antes do commit;
-- integração com Git do projeto (commits via `GitService.commit_file`);
-- commits rastreáveis (pattern `feat(codegen): <path>`);
-- validação pós-geração (endpoint `/validate` com issues por linha/coluna);
-- bloqueios por papel (RBAC canônico: GP não escreve código; Dev sim);
-- docstrings obrigatórias (já aplicado via `_missing_required_docstring`);
-- análise de adequação do provedor IA ao CodeGen (endpoint
-  `/validate-provider` presente).
+### Em escopo agora (contrato §7, MVP 4)
+- QA Readiness (endpoints `/qa/*` + página QAReadinessPage ativos);
+- execução e revisão de testes (TesterReviewPage + approve/reject já
+  presentes; auditar RBAC);
+- Documentação Viva (endpoints `/docs/*` + LiveDocsPage; auditar
+  refresh automático pós-mudança no OCG);
+- Roadmap coerente (backlog derivado do OCG — DT-037 já implementa
+  guard; RoadmapPage ativa);
+- Release Bundle (`POST /releases`, listagem, download já presentes;
+  validar gate de threshold);
+- evidências e relatórios (`GET /qa/logs/export`, `releases/download`
+  já presentes).
+
+### Estado de entrada (baseline)
+Superfície já construída (auditada 2026-04-18):
+- **QA**: 12 endpoints (`qa_router.py`, 213 LOC) + `qa_service.py`
+  (312 LOC) + `QAReadinessPage.tsx` (279 LOC) + `TesterReviewPage.tsx`
+  (391 LOC). Autenticação presente; **RBAC ausente** (DT-044 abaixo).
+- **LiveDocs**: 5 endpoints (`livedocs_router.py`, 141 LOC) +
+  `livedocs_service.py` (331 LOC) + `LiveDocsPage.tsx` (207 LOC).
+  **RBAC ausente** (DT-044).
+- **Roadmap/Backlog**: 6 endpoints (`roadmap_router.py`, 246 LOC) +
+  `roadmap_service.py` (98 LOC) + `RoadmapPage.tsx` (181 LOC). RBAC
+  **parcial** — backlog:manage nos writes, GETs sem enforcement.
+- **Release Bundle**: 3 endpoints (em `deliverables_router.py`, 252
+  LOC) + `release_bundle_service.py` (417 LOC), surfaced em
+  `ReadinessPage.tsx`. **RBAC ausente** (DT-044).
 
 ### Fora de escopo agora
-- QA Readiness completo (MVP 4);
-- Documentação Viva automática (MVP 4);
-- Release Bundle (MVP 4);
 - hardening operacional avançado (MVP 5);
 - SMTP compartimentalizado (DT-016 — MVP 5);
-- Ollama como provedor (DT-023 — sprint próprio pós-MVP 3);
-- geração massiva sem revisão;
-- reescrita ampla de projeto por default.
+- Ollama como provedor (DT-023 — sprint próprio);
+- rebuild de imagem (DT-041 — follow-up operacional).
 
 ---
 
@@ -141,6 +154,12 @@ Mesmo dos MVPs anteriores:
 | DT-041 | Minor | Deploy image drift (pypdf/reportlab/esprima) | Libs `pypdf`, `reportlab`, `esprima` estão em `pyproject.toml`/`requirements.txt` mas não foram instaladas na imagem do container `gca-backend` (cache de layer de Dockerfile antes da adição). Runtime install (via `pip install` direto) cobriu em 2026-04-18 para destravar DT-040, mas a correção é efêmera — um `docker compose build gca-backend` limpo volta a quebrar. Fix canônico: rebuild com `--no-cache` da imagem e garantir CI cobrindo o passo. | Dogfood 2026-04-18 | Aberto |
 | DT-042 | **Critical** | RBAC ausente em endpoints de CodeGen | Antes: `/scaffold`, `/scaffold/apply`, `/regenerate-file`, `/project`, `/module` aceitavam qualquer request autenticada, sem enforcement de papel. Contrato §4.1 é claro: GP conduz projeto mas NÃO escreve código; Dev implementa. Sem RBAC, GP podia disparar CodeGen, admin sem membership podia commitar, qualquer user autenticado vazava recurso entre projetos. Violação direta de §2.2 (compartimentalização) e §4.1 (responsabilidades canônicas). | Gate MVP 3 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-043 | Major | Ausência de análise de adequação do provedor | Contrato §7 MVP 3 exige "análise de adequação do provedor de IA ao uso pretendido no CodeGen". Antes: `/scaffold` usava silenciosamente qualquer provider do projeto, inclusive DeepSeek/Grok/Gemini que são média/baixa criticidade per §6.2 (CodeGen é ALTA). Sem aviso. Risco: código sintaticamente OK mas com bugs sutis, arquitetura fraca, falhas de compliance — especialmente crítico no scaffold inicial que vira base do projeto. | Gate MVP 3 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
+
+#### Abertas (MVP 4)
+
+| ID | Severidade | Tema | Descrição | Origem | Status |
+|---|---|---|---|---|---|
+| DT-044 | **Critical** | RBAC ausente em endpoints de MVP 4 | Auditoria 2026-04-18: `qa_router.py` (12 endpoints) tem autenticação via `get_current_user_from_token` mas **zero `require_action`** — qualquer user autenticado edita testes, aprova/rejeita, exporta evidências. `livedocs_router.py` (5) idem. `deliverables_router.py` (8, inclui Release Bundle) idem. `roadmap_router.py` tem enforcement **parcial** — 4 writes com `backlog:manage`/`code:write` mas GETs sem enforcement. Violações: §4.1 (Tester edita testes mas QA aprova; não podem estar misturados), §2.2 (compartimentalização — não-membro não deve ver dados), §7 MVP 4 (Release Bundle é marco formal, precisa de gate). Matriz necessária (binário): `qa:approve` em approve/reject/verify-all/verify/attest; `pipeline:execute` em execute/tests edit; `project:view` em GETs; `docs:edit` em docs/refresh; `audit:export` em logs/export e releases/download; `qa:approve` em `POST /releases` (release é formal). | Gate MVP 4 2026-04-18 | Aberto |
 | DT-030 | **Critical** | Storage efêmero / uploads | `STORAGE_PATH=/tmp/gca-storage` dentro do container `gca-backend` não tinha volume Docker mountado — `/tmp` é sistema de arquivos do container, zerado a cada `docker restart`. Resultado: todo upload de Ingestão (PDF, DOCX, XLSX, etc) ficava órfão no DB após qualquer restart (upgrade de backend, hot-reload heavy, deploy) — registro com `content_status` e `file_hash` válidos mas bytes fisicamente perdidos. Descoberto 2026-04-17 quando tentei rodar `_analyze_async` no PDF `smoke_mvp2_complemento_pilares.pdf` do user e o arquivo não existia mais. Violação da expectativa mínima de um sistema de ingestão. | Dogfood MVP 2 2026-04-17 | **Quitada 2026-04-17** — ver §4 |
 
 ---
