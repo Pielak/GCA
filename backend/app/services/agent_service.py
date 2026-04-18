@@ -62,6 +62,12 @@ class AgentService:
         # Detectar provider configurado pelo admin (camada GCA).
         self.provider = settings.DEFAULT_AI_PROVIDER or "anthropic"
         self.api_key = getattr(settings, f"{self.provider.upper()}_API_KEY", None)
+        # DT-023: Ollama (camada GCA) usa env var OLLAMA_BASE_URL.
+        self.base_url = (
+            (settings.OLLAMA_BASE_URL or "").rstrip("/")
+            if self.provider == "ollama" and settings.OLLAMA_BASE_URL
+            else None
+        )
         # Modelo: prefere `{PROVIDER}_MODEL` explícito do admin; se ausente,
         # usa `DEFAULT_AI_MODEL` global (consistente com ocg_updater_service
         # e ai_service). Sem isso, admin precisava setar uma env var por
@@ -70,6 +76,9 @@ class AgentService:
             getattr(settings, f"{self.provider.upper()}_MODEL", None)
             or settings.DEFAULT_AI_MODEL
         )
+        # Default específico pro Ollama (admin pode override via env).
+        if self.provider == "ollama" and not self.model:
+            self.model = "llama3.1:8b"
 
         # Cliente SDK nativo apenas para Anthropic. Outros providers usam httpx
         # em `_call_llm` (rota OpenAI-compatible).
@@ -103,8 +112,17 @@ class AgentService:
     def _ensure_key(self) -> None:
         """Garante que o provider configurado tem chave. Falha explícita se
         não tiver — evita fallback silencioso (contrato §6.4).
+
+        DT-023: Ollama dispensa chave (URL local) mas exige `OLLAMA_BASE_URL`.
         """
-        if not self.api_key:
+        if self.provider == "ollama":
+            if not self.base_url:
+                raise RuntimeError(
+                    "Provider 'ollama' configurado (DEFAULT_AI_PROVIDER=ollama) "
+                    "mas OLLAMA_BASE_URL ausente. Admin deve definir o endpoint "
+                    "do daemon Ollama (ex: http://host.docker.internal:11434)."
+                )
+        elif not self.api_key:
             raise RuntimeError(
                 f"Provider de IA '{self.provider}' configurado (DEFAULT_AI_PROVIDER) "
                 f"mas {self.provider.upper()}_API_KEY está ausente. "
@@ -145,25 +163,29 @@ class AgentService:
             tokens_out = response.usage.output_tokens
             tokens = tokens_in + tokens_out
         else:
-            # OpenAI-compatible (DeepSeek, Grok, OpenAI)
+            # OpenAI-compatible (DeepSeek, Grok, OpenAI, Ollama via /v1/chat/completions)
             provider_urls = {
                 "deepseek": "https://api.deepseek.com/chat/completions",
                 "openai": "https://api.openai.com/v1/chat/completions",
                 "grok": "https://api.x.ai/v1/chat/completions",
                 "openrouter": "https://openrouter.ai/api/v1/chat/completions",
                 "qwen": "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+                # DT-023: Ollama do admin (camada GCA) via OLLAMA_BASE_URL.
+                "ollama": f"{self.base_url}/v1/chat/completions" if self.base_url else None,
             }
             url = provider_urls.get(self.provider)
             if not url:
                 raise ValueError(f"Provider '{self.provider}' não suportado para OCG pipeline")
 
+            # Ollama típico não exige Authorization. Bearer só se houver api_key.
+            headers = {"Content-Type": "application/json"}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+
             async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(
                     url,
-                    headers={
-                        "Authorization": f"Bearer {self.api_key}",
-                        "Content-Type": "application/json",
-                    },
+                    headers=headers,
                     json={
                         "model": self.model,
                         "max_tokens": max_tokens,

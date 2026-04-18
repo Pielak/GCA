@@ -170,6 +170,43 @@ class AIKeyResolver:
             return None
 
     @staticmethod
+    async def get_project_base_url(
+        db: AsyncSession,
+        project_id: UUID,
+        provider: str,
+    ) -> Optional[str]:
+        """DT-023: lê `base_url` do provider record no settings_json.
+
+        Apenas Ollama persiste base_url (ver settings_router); demais
+        retornam None aqui. Caller usa pra montar o endpoint HTTP do
+        Ollama do GP (ex: http://host.docker.internal:11434).
+        """
+        from sqlalchemy import text
+        result = await db.execute(
+            text("""
+                SELECT settings_json FROM project_settings
+                WHERE project_id = :pid AND setting_type = 'llm'
+            """),
+            {"pid": str(project_id)},
+        )
+        row = result.fetchone()
+        if not row or not row[0]:
+            return None
+        import json as _json
+        try:
+            data = _json.loads(row[0])
+        except (ValueError, TypeError):
+            return None
+        if isinstance(data.get("providers"), list):
+            for p in data["providers"]:
+                if p.get("provider") == provider:
+                    bu = p.get("base_url")
+                    if isinstance(bu, str) and bu.strip():
+                        return bu.strip().rstrip("/")
+                    return None
+        return None
+
+    @staticmethod
     async def get_project_key_or_fail(
         db: AsyncSession,
         project_id: UUID,

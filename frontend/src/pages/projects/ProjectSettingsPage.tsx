@@ -73,7 +73,9 @@ export function ProjectSettingsPage() {
   const [newLlmProvider, setNewLlmProvider] = useState('anthropic')
   const [newLlmApiKey, setNewLlmApiKey] = useState('')
   const [newLlmModel, setNewLlmModel] = useState('')
+  const [newLlmBaseUrl, setNewLlmBaseUrl] = useState('')  // DT-023: só usado quando provider=ollama
   const [showLlmKey, setShowLlmKey] = useState(false)
+  const isOllamaSelected = newLlmProvider === 'ollama'
 
   // Resultados de teste por provider (um dict — cada card tem o seu).
   const [llmTestResults, setLlmTestResults] = useState<Record<string, TestResult>>({})
@@ -118,20 +120,39 @@ export function ProjectSettingsPage() {
   useEffect(() => { loadSettings() }, [loadSettings])
 
   const addLlmProvider = async () => {
-    if (!newLlmApiKey.trim()) {
+    // DT-023: validações específicas por provider — Ollama exige base_url,
+    // demais exigem api_key. Erro local antes de bater no backend.
+    if (isOllamaSelected) {
+      const url = newLlmBaseUrl.trim()
+      if (!url) {
+        showToast('Informe a Base URL do daemon Ollama (ex: http://host.docker.internal:11434)', 'error')
+        return
+      }
+      if (!url.startsWith('http://') && !url.startsWith('https://')) {
+        showToast('Base URL deve começar com http:// ou https://', 'error')
+        return
+      }
+    } else if (!newLlmApiKey.trim()) {
       showToast('Informe a API Key do provedor', 'error')
       return
     }
     setSaving(true)
     try {
-      await apiClient.post(`/projects/${projectId}/settings/llm`, {
+      const payload: Record<string, unknown> = {
         provider: newLlmProvider,
-        api_key: newLlmApiKey.trim(),
-        model: newLlmModel.trim() || undefined,
-      })
+        model_preference: newLlmModel.trim() || undefined,
+      }
+      if (newLlmApiKey.trim()) {
+        payload.api_key = newLlmApiKey.trim()
+      }
+      if (isOllamaSelected && newLlmBaseUrl.trim()) {
+        payload.base_url = newLlmBaseUrl.trim()
+      }
+      await apiClient.post(`/projects/${projectId}/settings/llm`, payload)
       showToast(`Provedor ${newLlmProvider} adicionado`, 'success')
       setNewLlmApiKey('')
       setNewLlmModel('')
+      setNewLlmBaseUrl('')
       setAddingLlm(false)
       await loadSettings()
       invalidateSetup()
@@ -568,6 +589,7 @@ export function ProjectSettingsPage() {
                     <option value="deepseek">DeepSeek</option>
                     <option value="grok">xAI (Grok)</option>
                     <option value="gemini">Google (Gemini)</option>
+                    <option value="ollama">Ollama (local)</option>
                   </select>
                 </div>
                 <div>
@@ -575,7 +597,7 @@ export function ProjectSettingsPage() {
                   <input
                     value={newLlmModel}
                     onChange={e => setNewLlmModel(e.target.value)}
-                    placeholder="Ex: claude-opus-4-6, gpt-4o, deepseek-chat"
+                    placeholder={isOllamaSelected ? 'Ex: llama3.1:8b, qwen2.5-coder:7b' : 'Ex: claude-opus-4-6, gpt-4o, deepseek-chat'}
                     name="llm-model"
                     autoComplete="off"
                     spellCheck={false}
@@ -586,14 +608,39 @@ export function ProjectSettingsPage() {
                 </div>
               </div>
 
+              {/* DT-023: Ollama é local — exige Base URL e dispensa API Key. */}
+              {isOllamaSelected && (
+                <div>
+                  <label className="text-slate-400 text-xs block mb-1">
+                    Base URL <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    value={newLlmBaseUrl}
+                    onChange={e => setNewLlmBaseUrl(e.target.value)}
+                    placeholder="http://host.docker.internal:11434"
+                    name="llm-base-url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600"
+                  />
+                  <p className="text-slate-600 text-xs mt-1">
+                    Endpoint do daemon Ollama. Como o GCA roda em Docker, o host típico é{' '}
+                    <code className="bg-slate-800 px-1 py-0.5 rounded text-slate-400">http://host.docker.internal:11434</code>
+                    {' '}(macOS/Windows) ou IP da máquina (Linux).
+                  </p>
+                </div>
+              )}
+
               <div>
-                <label className="text-slate-400 text-xs block mb-1">API Key</label>
+                <label className="text-slate-400 text-xs block mb-1">
+                  API Key {isOllamaSelected && <span className="text-slate-500">(opcional para Ollama)</span>}
+                </label>
                 <div className="relative">
                   <input
                     type={showLlmKey ? 'text' : 'password'}
                     value={newLlmApiKey}
                     onChange={e => setNewLlmApiKey(e.target.value)}
-                    placeholder="sk-..."
+                    placeholder={isOllamaSelected ? 'Bearer token (só se houver reverse proxy)' : 'sk-...'}
                     name="llm-api-key"
                     autoComplete="new-password"
                     spellCheck={false}
@@ -609,7 +656,11 @@ export function ProjectSettingsPage() {
                     {showLlmKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                <p className="text-slate-600 text-xs mt-1">Armazenada criptografada no vault do projeto.</p>
+                <p className="text-slate-600 text-xs mt-1">
+                  {isOllamaSelected
+                    ? 'Ollama típico não exige autenticação. Use só se houver Bearer token de reverse proxy.'
+                    : 'Armazenada criptografada no vault do projeto.'}
+                </p>
               </div>
 
               <div className="flex justify-end">

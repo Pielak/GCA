@@ -98,8 +98,14 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: Optional[str] = None
     QWEN_API_KEY: Optional[str] = None  # Alibaba DashScope (alias: DASHSCOPE_API_KEY)
     DASHSCOPE_API_KEY: Optional[str] = None  # alternativo ao QWEN_API_KEY
-    DEFAULT_AI_PROVIDER: str = "grok"  # grok, anthropic, openai, gemini, deepseek, qwen
+    DEFAULT_AI_PROVIDER: str = "grok"  # grok, anthropic, openai, gemini, deepseek, qwen, ollama
     DEFAULT_AI_MODEL: str = "grok-3-mini"
+    # DT-023: Ollama (local) — admin pode configurar Ollama como camada GCA
+    # apontando pra `host.docker.internal:11434` (Docker) ou IP da máquina.
+    # Sem chave por default; OLLAMA_API_KEY opcional pra reverse proxy com Bearer.
+    OLLAMA_BASE_URL: Optional[str] = None  # ex: http://host.docker.internal:11434
+    OLLAMA_API_KEY: Optional[str] = None
+    OLLAMA_MODEL: Optional[str] = None  # default no _default_models
 
     # Slack
     SLACK_BOT_TOKEN: Optional[str] = None

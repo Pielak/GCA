@@ -11,9 +11,11 @@ export interface SMTPSettings {
 }
 
 export interface IAProviderSettings {
-  provider: 'anthropic' | 'openai' | 'grok' | 'deepseek'
-  api_key: string
-  model: string
+  // DT-023: gemini e ollama adicionados; api_key opcional pra ollama; base_url opcional (só ollama).
+  provider: 'anthropic' | 'openai' | 'grok' | 'deepseek' | 'gemini' | 'ollama'
+  api_key?: string
+  model?: string
+  base_url?: string
   enabled: boolean
 }
 

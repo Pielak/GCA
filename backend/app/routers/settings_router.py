@@ -37,9 +37,16 @@ class SmtpSettingsRequest(BaseModel):
 
 
 class LlmSettingsRequest(BaseModel):
-    provider: str  # anthropic, openai, grok, deepseek
-    api_key: str
+    """Payload pra adicionar/atualizar provedor LLM no projeto.
+
+    DT-023: aceita Ollama (local) — `api_key` opcional e `base_url`
+    obrigatório quando `provider == "ollama"`. Demais provedores
+    continuam exigindo `api_key` e ignoram `base_url`.
+    """
+    provider: str  # anthropic, openai, grok, deepseek, gemini, ollama
+    api_key: str | None = None  # opcional para ollama (sem auth ou com proxy externo)
     model_preference: str | None = None
+    base_url: str | None = None  # obrigatório para ollama; ignorado pelos demais
 
 
 class N8nSettingsRequest(BaseModel):
@@ -324,18 +331,41 @@ async def save_llm_settings(
       POST /settings/llm/providers/{provider}/default.
     """
     user_id = permissions["user_id"]
-    valid_providers = ("anthropic", "openai", "grok", "deepseek", "gemini")
+    valid_providers = ("anthropic", "openai", "grok", "deepseek", "gemini", "ollama")
     if req.provider not in valid_providers:
         raise HTTPException(status_code=400, detail=f"Provider inválido. Aceitos: {', '.join(valid_providers)}")
 
+    # DT-023: regras específicas por provider para chave/URL
+    is_ollama = req.provider == "ollama"
+    if is_ollama:
+        if not req.base_url or not req.base_url.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Ollama exige `base_url` (ex: http://host.docker.internal:11434 quando o GCA roda em Docker e Ollama no host).",
+            )
+        # Sanity: deve começar com http(s) — evita configuração silenciosamente errada
+        bu = req.base_url.strip()
+        if not (bu.startswith("http://") or bu.startswith("https://")):
+            raise HTTPException(
+                status_code=400,
+                detail="`base_url` deve começar com http:// ou https://.",
+            )
+    else:
+        if not req.api_key or not req.api_key.strip():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provedor '{req.provider}' exige `api_key`.",
+            )
+
     # Model deve ser um identificador técnico — o Chrome às vezes autofilla
     # esse campo com email/nome do usuário por heurística de contexto.
+    # DT-023: Ollama usa modelos com `:` (ex: `llama3.1:8b`) — permitir esse char.
     if req.model_preference:
         m = req.model_preference.strip()
         if "@" in m or " " in m or len(m) > 120:
             raise HTTPException(
                 status_code=400,
-                detail="Modelo parece inválido (contém @, espaço ou é longo demais). Exemplos válidos: claude-opus-4-6, gpt-4o, deepseek-chat, gemini-2.0-flash. Deixe vazio para usar o padrão do provedor.",
+                detail="Modelo parece inválido (contém @, espaço ou é longo demais). Exemplos válidos: claude-opus-4-6, gpt-4o, deepseek-chat, gemini-2.0-flash, llama3.1:8b. Deixe vazio para usar o padrão do provedor.",
             )
 
     data = await _load_llm_providers(db, project_id)
@@ -344,28 +374,37 @@ async def save_llm_settings(
 
     if existing:
         # Update do mesmo provider: modelo novo (se veio), invalida validação
-        # anterior se a chave mudou.
+        # anterior se a chave/URL mudou.
         existing["model"] = req.model_preference
+        if is_ollama and req.base_url:
+            existing["base_url"] = req.base_url.strip()
+            existing["last_validated_at"] = None
+            existing["last_validation_ok"] = None
         if req.api_key:
             existing["last_validated_at"] = None
             existing["last_validation_ok"] = None
     else:
         is_first = len(providers) == 0
-        providers.append({
+        new_entry = {
             "provider": req.provider,
             "model": req.model_preference,
             "is_default": is_first,
             "last_validated_at": None,
             "last_validation_ok": None,
-        })
+        }
+        # DT-023: persiste base_url só pro Ollama (demais ignoram pra
+        # não vazar config errada se alguém preencher por engano).
+        if is_ollama and req.base_url:
+            new_entry["base_url"] = req.base_url.strip()
+        providers.append(new_entry)
         if is_first:
             data["default_provider"] = req.provider
 
     await _save_llm_providers(db, project_id, user_id, data)
 
-    # Salvar API key no vault se veio. Vazio = manter a atual.
-    if req.api_key:
-        await vault.store_secret(db, project_id, "llm_api_key", req.provider, req.api_key, user_id)
+    # Salvar API key no vault. Vazio/None = manter a atual (ou nenhuma pro Ollama).
+    if req.api_key and req.api_key.strip():
+        await vault.store_secret(db, project_id, "llm_api_key", req.provider, req.api_key.strip(), user_id)
 
     return {"success": True}
 
@@ -459,6 +498,8 @@ async def validate_llm_settings(
         raise HTTPException(status_code=404, detail=f"Provedor '{target}' não está configurado neste projeto.")
 
     api_key = await vault.get_secret(db, project_id, "llm_api_key", target)
+    is_ollama = target == "ollama"
+    base_url = (target_item.get("base_url") or "").rstrip("/")
 
     async def _persist_validation(ok: Optional[bool]) -> None:
         """Atualiza last_validated_at e last_validation_ok no provider testado."""
@@ -469,11 +510,22 @@ async def validate_llm_settings(
                 break
         await _save_llm_providers(db, project_id, user_id, {"providers": providers, "default_provider": data["default_provider"]})
 
-    if not api_key:
+    # DT-023: Ollama não exige chave (URL local), demais sim.
+    if not is_ollama and not api_key:
         await _persist_validation(False)
         raise HTTPException(status_code=400, detail=f"Chave do provedor '{target}' não encontrada no vault.")
+    if is_ollama and not base_url:
+        await _persist_validation(False)
+        raise HTTPException(status_code=400, detail="Provedor 'ollama' está sem `base_url` configurado. Edite o provedor e informe a URL (ex: http://host.docker.internal:11434).")
 
     # Endpoints /v1/models (ou equivalente) aceitos por provider.
+    # DT-023: Ollama usa GET /api/tags (lista modelos locais instalados).
+    # Auth opcional via Bearer quando o GP configurar uma chave (ex: reverse
+    # proxy na frente do daemon).
+    ollama_headers: dict = {}
+    if api_key:
+        ollama_headers["Authorization"] = f"Bearer {api_key}"
+
     provider_config = {
         "anthropic": {
             "url": "https://api.anthropic.com/v1/models",
@@ -499,6 +551,11 @@ async def validate_llm_settings(
             "url": f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}",
             "headers": {},
             "default_model": "gemini-2.0-flash",
+        },
+        "ollama": {
+            "url": f"{base_url}/api/tags",
+            "headers": ollama_headers,
+            "default_model": "llama3.1:8b",
         },
     }
 

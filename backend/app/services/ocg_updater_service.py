@@ -471,11 +471,27 @@ class OCGUpdaterService:
                 "GP deve configurar em Configurações → Provedor de IA."
             )
         api_key = await AIKeyResolver.get_project_key(self.db, project_id, provider=provider)
-        if not api_key:
+        # DT-023: Ollama dispensa api_key (URL local). Demais ainda exigem.
+        is_ollama = provider == "ollama"
+        if not is_ollama and not api_key:
             raise ValueError(
                 f"Chave do provider '{provider}' não encontrada no vault do "
                 f"projeto {project_id}."
             )
+
+        # DT-023: Ollama precisa do base_url (endpoint do daemon local do GP).
+        base_url = None
+        if is_ollama:
+            base_url = await AIKeyResolver.get_project_base_url(
+                self.db, project_id, provider=provider
+            )
+            if not base_url:
+                raise ValueError(
+                    f"Provider 'ollama' configurado no projeto {project_id} sem "
+                    "`base_url`. GP deve informar o endpoint do daemon Ollama "
+                    "em Configurações → Provedor de IA (ex: "
+                    "http://host.docker.internal:11434)."
+                )
 
         # Guard de criticidade (contrato §6.2): atualização reativa do OCG
         # é consolidação/arbitragem — ALTA criticidade. Contrato pede
@@ -522,6 +538,7 @@ class OCGUpdaterService:
             "deepseek": "deepseek-chat",
             "grok": "grok-2",
             "gemini": "gemini-2.0-flash",
+            "ollama": "llama3.1:8b",
         }
         model = model or _default_models.get(provider, "deepseek-chat")
 
@@ -558,23 +575,27 @@ class OCGUpdaterService:
             }
 
         import httpx
+        # DT-023: Ollama via OpenAI-compatible no daemon local do GP.
         provider_urls = {
             "deepseek": "https://api.deepseek.com/chat/completions",
             "openai": "https://api.openai.com/v1/chat/completions",
             "grok": "https://api.x.ai/v1/chat/completions",
+            "ollama": f"{base_url}/v1/chat/completions" if base_url else None,
         }
         url = provider_urls.get(provider)
         if not url:
             raise ValueError(
                 f"Provider '{provider}' não suportado no ocg_updater. "
-                f"Suportados: anthropic, openai, deepseek, grok."
+                f"Suportados: anthropic, openai, deepseek, grok, ollama."
             )
 
+        # Ollama típico não exige Authorization. Bearer só se houver api_key.
+        headers = {"Content-Type": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+
         async with httpx.AsyncClient(timeout=120.0) as client:
-            resp = await client.post(url, headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            }, json={
+            resp = await client.post(url, headers=headers, json={
                 "model": model,
                 "max_tokens": 8192,
                 "temperature": 0.3,

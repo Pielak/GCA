@@ -177,27 +177,41 @@ class ArguiderService:
         project_api_key: str = None,
         provider: str = None,
         model: str = None,
+        base_url: str = None,
     ):
-        """Arguidor multi-provider (DT-032).
+        """Arguidor multi-provider (DT-032 + DT-023).
 
         Aceita:
-          - `project_api_key`: chave do projeto (obrigatória).
-          - `provider`: "anthropic"|"openai"|"deepseek"|"grok"|"gemini".
+          - `project_api_key`: chave do projeto. Obrigatória para todos
+            os providers exceto **ollama** (local, sem auth por default).
+          - `provider`: "anthropic"|"openai"|"deepseek"|"grok"|"gemini"|"ollama".
             Default `"anthropic"` para retrocompat com callers antigos.
           - `model`: modelo específico. Se None, usa default do provider.
+          - `base_url`: **obrigatório quando provider=ollama**. Endpoint
+            do daemon Ollama do GP (ex: http://host.docker.internal:11434).
+            Ignorado pelos demais providers.
 
         Contrato §6.4: nenhum fallback para chave global do admin.
         """
         self.db = db
-        if not project_api_key:
+        self.provider = (provider or "anthropic").lower()
+        is_ollama = self.provider == "ollama"
+
+        if not is_ollama and not project_api_key:
             raise RuntimeError(
                 "Arguidor não pode operar sem chave IA do projeto. "
                 "GP deve configurar provedor e chave em Settings > LLM. "
                 "Arguidor é tarefa de ALTA criticidade (contrato §6.2) e "
                 "não aceita fallback para chave global do admin."
             )
-        self.api_key = project_api_key
-        self.provider = (provider or "anthropic").lower()
+        if is_ollama and not base_url:
+            raise RuntimeError(
+                "Arguidor com provider=ollama exige `base_url`. "
+                "GP deve informar o endpoint do daemon Ollama em Settings > LLM "
+                "(ex: http://host.docker.internal:11434)."
+            )
+        self.api_key = project_api_key  # pode ser None pro ollama
+        self.base_url = (base_url or "").rstrip("/") if base_url else None
         # Model default por provider (match com o que `/settings/llm/validate`
         # testa em settings_router.py).
         _default_models = {
@@ -206,6 +220,7 @@ class ArguiderService:
             "deepseek": "deepseek-chat",
             "grok": "grok-2",
             "gemini": "gemini-2.0-flash",
+            "ollama": "llama3.1:8b",
         }
         self.model = model or _default_models.get(self.provider, "deepseek-chat")
         # Client Anthropic só quando for o provider — para o resto, httpx.
@@ -245,24 +260,30 @@ class ArguiderService:
             return text, tokens
 
         import httpx
+        # DT-023: Ollama usa endpoint OpenAI-compatible (`/v1/chat/completions`)
+        # do daemon local. URL base vem do project_settings (campo base_url).
         provider_urls = {
             "openai": "https://api.openai.com/v1/chat/completions",
             "deepseek": "https://api.deepseek.com/chat/completions",
             "grok": "https://api.x.ai/v1/chat/completions",
+            "ollama": f"{self.base_url}/v1/chat/completions" if self.base_url else None,
         }
         url = provider_urls.get(self.provider)
         if not url:
             raise ValueError(
                 f"Provider '{self.provider}' ainda não suportado pelo Arguidor. "
-                f"Suportados hoje: anthropic, openai, deepseek, grok."
+                f"Suportados hoje: anthropic, openai, deepseek, grok, ollama."
             )
+
+        # Ollama típico não exige Authorization. Caller só inclui Bearer
+        # se houver api_key (ex: reverse proxy na frente do daemon).
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(
                 url,
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json={
                     "model": self.model,
                     "max_tokens": max_tokens,

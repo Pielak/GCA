@@ -563,6 +563,10 @@ class IngestionService:
                 from app.services.ai_key_resolver import AIKeyResolver
                 provider = await AIKeyResolver._resolve_project_provider(db, project_id)
                 project_api_key = await AIKeyResolver.get_project_key(db, project_id, provider=provider)
+                # DT-023: Ollama precisa do base_url do daemon local. Demais ignoram.
+                base_url = None
+                if provider == "ollama":
+                    base_url = await AIKeyResolver.get_project_base_url(db, project_id, provider)
 
                 # Resolver modelo configurado (se houver) no project_settings.
                 import json as _json
@@ -592,6 +596,7 @@ class IngestionService:
                     project_api_key=project_api_key,
                     provider=provider,
                     model=model,
+                    base_url=base_url,
                 )
 
                 # Extrair texto
