@@ -86,7 +86,14 @@ export function ProjectDetailLayout() {
     )
   }
 
-  const score = project.gatekeeperScore || 0
+  // DT-054: distingue "score calculado = 0" (raro) de "sem dado ainda" (comum
+  // quando o projeto não tem ingestão e portanto nenhum item de Gatekeeper).
+  // Backend retorna 0/null nos dois casos hoje; aqui tratamos `null|undefined|0`
+  // como "não calculado" e exibimos `—`. Acompanha a mesma convenção do
+  // ProjectListPage.tsx (linha 188), que omite o GK quando score=0.
+  const rawScore = project.gatekeeperScore
+  const hasScore = typeof rawScore === 'number' && rawScore > 0
+  const score = hasScore ? rawScore : 0
   const scoreColor = score >= 90 ? '#34d399' : score >= 70 ? '#fbbf24' : '#f87171'
 
   return (
@@ -126,12 +133,16 @@ export function ProjectDetailLayout() {
               Painel Admin
             </Link>
           )}
-          <span className="text-slate-500 text-xs">GK:</span>
+          <span className="text-slate-500 text-xs" title="Gatekeeper Score — agregado das checagens do Arguidor sobre documentos ingeridos">GK:</span>
           <div className="flex items-center gap-1.5">
             <div className="w-20 bg-slate-700 rounded-full h-1.5">
               <div className="h-1.5 rounded-full transition-all" style={{ width: `${score}%`, backgroundColor: scoreColor }} />
             </div>
-            <span className="text-slate-400 text-xs">{score}/100</span>
+            {hasScore ? (
+              <span className="text-slate-400 text-xs">{score}/100</span>
+            ) : (
+              <span className="text-slate-500 text-xs italic" title="Sem dados do Gatekeeper. Suba documentos na aba Ingestão para o Arguidor analisar.">—</span>
+            )}
           </div>
         </div>
       </div>

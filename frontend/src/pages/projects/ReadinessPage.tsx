@@ -143,6 +143,30 @@ export function ReadinessPage() {
     }
   }
 
+  // DT-056: botão Sync para popular o registry a partir de OCG.DELIVERABLES.
+  // Antes a UI dizia "Sincronize do OCG" sem botão — instrução órfã.
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+  const syncFromOCG = async () => {
+    if (!projectId || syncing) return
+    setSyncing(true)
+    setSyncMsg(null)
+    try {
+      const res = await apiClient.post(`/projects/${projectId}/deliverables/sync`, {})
+      const c = res.data?.counters || {}
+      const inserted = c.inserted ?? 0
+      const reactivated = c.reactivated ?? 0
+      const waived = c.waived ?? 0
+      const kept = c.kept ?? 0
+      setSyncMsg(`Sync: +${inserted} novo(s), ${reactivated} reativado(s), ${waived} arquivado(s), ${kept} mantido(s).`)
+      await load()
+    } catch (e: any) {
+      setSyncMsg(e?.response?.data?.detail || e?.message || 'Falha ao sincronizar.')
+    } finally {
+      setSyncing(false)
+    }
+  }
+
   const verifyOne = async (deliverableId: string) => {
     if (!projectId) return
     setVerifyingOne(deliverableId)
@@ -191,6 +215,16 @@ export function ReadinessPage() {
                 Threshold para Release Bundle: <span className="text-slate-300">90%</span>.
               </p>
               <div className="mt-4 flex flex-wrap gap-2">
+                {/* DT-056: botão Sync — extrai DELIVERABLES do OCG e popula o registry */}
+                <button
+                  onClick={syncFromOCG}
+                  disabled={syncing}
+                  title="Sincroniza a lista de entregáveis a partir de OCG.DELIVERABLES (Q48 do questionário). Necessário antes do primeiro 'Verificar tudo'."
+                  className="flex items-center gap-2 px-3 py-1.5 text-xs bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-slate-100 rounded-lg transition-colors"
+                >
+                  {syncing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                  {syncing ? 'Sincronizando…' : 'Sincronizar do OCG'}
+                </button>
                 <button
                   onClick={verifyAll}
                   disabled={verifying}
@@ -216,6 +250,11 @@ export function ReadinessPage() {
               {releaseError && (
                 <div className="mt-3 px-3 py-2 bg-red-900/30 border border-red-700 rounded text-xs text-red-300">
                   ⚠ {releaseError}
+                </div>
+              )}
+              {syncMsg && (
+                <div className="mt-3 px-3 py-2 bg-slate-800/50 border border-slate-700 rounded text-xs text-slate-300">
+                  {syncMsg}
                 </div>
               )}
             </div>

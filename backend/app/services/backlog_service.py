@@ -158,10 +158,25 @@ class BacklogService:
                     priority = "critical" if "high" in level.lower() else "high" if "medium" in level.lower() else "medium"
                     for r in risk_list[:3]:
                         if isinstance(r, dict):
+                            # DT-055: aceita 2 formatos. RISK_ANALYSIS pode
+                            # carregar `structural_risks` (campo `risk` +
+                            # `mitigation` — DT-047) ou `high_findings`
+                            # (campo `finding` + `recommendation` — DT-047
+                            # e formato típico de findings de pilares).
+                            title = (
+                                r.get("risk")
+                                or r.get("finding")
+                                or "Risco identificado"
+                            )
+                            mit = (
+                                r.get("mitigation")
+                                or r.get("recommendation")
+                                or "—"
+                            )
                             items_created.append(self._create_item(
                                 project_id, "agile",
-                                r.get("risk", "Risco identificado")[:200],
-                                f"Mitigação: {r.get('mitigation', '—')[:150]}",
+                                str(title)[:200],
+                                f"Mitigação: {str(mit)[:150]}",
                                 priority, "ocg", version,
                             ))
 

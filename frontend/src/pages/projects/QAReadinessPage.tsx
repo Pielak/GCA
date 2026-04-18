@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress';
+import { useProjectPermissions } from '@/hooks/useProjectPermissions';
 
 interface CoverageCategory {
   type: string;
@@ -45,6 +46,11 @@ const statusIcon = (status: string) => {
 export function QAReadinessPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { can } = useProjectPermissions();
+  // DT-053: GP não tem `pipeline:execute` (só Dev/Tester per contrato §4.1).
+  // Sem o hook, frontend mostrava botão verde ativo e o backend retornava
+  // 403 — UX confusa. Agora ocultamos quem não pode executar.
+  const canExecutePlan = can('pipeline:execute');
   const [coverage, setCoverage] = useState<QACoverageData | null>(null);
   const [results, setResults] = useState<TestExecution[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,19 +145,38 @@ export function QAReadinessPage() {
         </div>
       </div>
 
-      {/* Requisitos de testes do OCG */}
+      {/* Requisitos de testes do OCG (DT-052) */}
       {ocgTesting && Object.keys(ocgTesting).length > 0 && (
         <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl p-4">
           <p className="text-slate-400 text-xs font-semibold mb-2">Requisitos de Testes (OCG)</p>
           <div className="flex flex-wrap gap-2">
-            {Object.entries(ocgTesting).map(([key, val]: [string, any]) => (
-              <div key={key} className="px-2.5 py-1.5 rounded-lg bg-slate-800/60 border border-slate-700/40">
-                <span className="text-violet-400 text-xs font-medium">{key.replace(/_/g, ' ')}</span>
-                {typeof val === 'object' && val?.coverage_target && (
-                  <span className="text-slate-500 text-xs ml-1.5">({val.coverage_target})</span>
-                )}
-              </div>
-            ))}
+            {Object.entries(ocgTesting)
+              .filter(([key]) => key !== 'source') // metadado interno do fallback determinístico
+              .map(([key, val]: [string, any]) => {
+                const label = key.replace(/_/g, ' ')
+                let display: string | null = null
+                if (typeof val === 'boolean') {
+                  display = val ? 'sim' : 'não'
+                } else if (Array.isArray(val)) {
+                  display = val.length > 0 ? val.join(', ') : '—'
+                } else if (val !== null && val !== undefined && val !== '') {
+                  display = String(val)
+                }
+                if (display === null) return null
+                return (
+                  <div
+                    key={key}
+                    className={`px-2.5 py-1.5 rounded-lg border ${
+                      typeof val === 'boolean' && !val
+                        ? 'bg-slate-800/30 border-slate-700/30 opacity-60'
+                        : 'bg-slate-800/60 border-slate-700/40'
+                    }`}
+                  >
+                    <span className="text-violet-400 text-xs font-medium">{label}:</span>
+                    <span className="text-slate-300 text-xs ml-1.5">{display}</span>
+                  </div>
+                )
+              })}
           </div>
         </div>
       )}
@@ -166,6 +191,8 @@ export function QAReadinessPage() {
             <ExternalLink className="w-4 h-4" />
             Ver Tester Review
           </button>
+          {/* DT-053: oculta botão para quem não tem pipeline:execute (GP, QA, Admin sem membership) */}
+          {canExecutePlan && (
           <span className="relative inline-flex items-center">
             <button
               onClick={handleExecute}
@@ -181,6 +208,7 @@ export function QAReadinessPage() {
               position="left"
             />
           </span>
+          )}
         </div>
       </div>
 
