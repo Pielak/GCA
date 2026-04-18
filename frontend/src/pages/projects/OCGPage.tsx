@@ -6,6 +6,7 @@ import {
   Loader2, AlertTriangle, RefreshCw
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { pillarMeta, pillarKey, PILLAR_ORDER } from '@/data/pillarMeta'
 
 interface OCGData {
   ocg_id: string
@@ -277,19 +278,78 @@ export function OCGPage() {
           </div>
         )
       case 'pillars':
-        return ocg.PILLAR_SCORES ? (
-          <div className="space-y-3">
-            {Object.entries(ocg.PILLAR_SCORES).map(([pillar, data]: [string, any]) => (
-              <div key={pillar} className="p-3 rounded-lg bg-slate-800/40">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-slate-200 text-sm font-medium">{pillar}</span>
-                  <span className="text-xs text-slate-500">{typeof data === 'object' ? data.status || '' : ''}</span>
+        if (!ocg.PILLAR_SCORES) return <p className="text-slate-500 text-sm">Dados de pilares não disponíveis.</p>
+        {
+          // Reorganiza os pillars por P1..P7 independente da ordem que o
+          // OCG entregue (agents podem embaralhar). Mantém pilares
+          // desconhecidos ao final para não sumir com dados.
+          const raw = Object.entries(ocg.PILLAR_SCORES) as [string, any][]
+          const byKey = new Map<string, { raw_key: string, data: any }>()
+          for (const [k, d] of raw) {
+            const pk = pillarKey(k)
+            if (pk && !byKey.has(pk)) byKey.set(pk, { raw_key: k, data: d })
+          }
+          const ordered = PILLAR_ORDER
+            .filter(id => byKey.has(id))
+            .map(id => ({ id, ...byKey.get(id)! }))
+          const unknown = raw.filter(([k]) => !pillarKey(k))
+          return (
+            <div className="space-y-3">
+              {ordered.map(({ id, data }) => {
+                const meta = pillarMeta(id)!
+                const score = typeof data === 'object' ? (data.score ?? 0) : (data ?? 0)
+                const status = typeof data === 'object' ? data.status || '' : ''
+                const belowBlocking = meta.blocking && score < 70
+                return (
+                  <div key={id} className="p-4 rounded-lg bg-slate-800/40 border border-slate-800">
+                    <div className="flex items-start justify-between gap-3 mb-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-slate-200 text-sm font-semibold">
+                            <span className="text-violet-400 font-bold mr-1">{id}</span>
+                            {meta.name}
+                          </span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-400 uppercase tracking-wide">
+                            peso {meta.weight}%
+                          </span>
+                          {meta.blocking && (
+                            <span
+                              className={`text-[10px] px-1.5 py-0.5 rounded uppercase tracking-wide ${
+                                belowBlocking
+                                  ? 'bg-red-500/20 text-red-300 border border-red-500/40'
+                                  : 'bg-amber-500/10 text-amber-400 border border-amber-500/30'
+                              }`}
+                              title="Este pilar bloqueia a aprovação do OCG se score < 70"
+                            >
+                              {belowBlocking ? 'BLOQUEANTE ' : ''}bloqueante{belowBlocking ? '!' : ' (<70)'}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500 mt-1 leading-snug">{meta.description}</p>
+                      </div>
+                      {status && <span className="text-xs text-slate-500 flex-shrink-0">{status}</span>}
+                    </div>
+                    <ScoreBar score={score} />
+                  </div>
+                )
+              })}
+              {unknown.length > 0 && (
+                <div className="mt-4 pt-3 border-t border-slate-800">
+                  <p className="text-[11px] uppercase tracking-wide text-slate-500 mb-2">Outros pilares</p>
+                  {unknown.map(([pillar, data]: [string, any]) => (
+                    <div key={pillar} className="p-3 rounded-lg bg-slate-800/40 mb-2">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-slate-200 text-sm font-medium">{pillar}</span>
+                        <span className="text-xs text-slate-500">{typeof data === 'object' ? data.status || '' : ''}</span>
+                      </div>
+                      <ScoreBar score={typeof data === 'object' ? (data.score ?? 0) : (data ?? 0)} />
+                    </div>
+                  ))}
                 </div>
-                <ScoreBar score={typeof data === 'object' ? (data.score ?? 0) : (data ?? 0)} />
-              </div>
-            ))}
-          </div>
-        ) : <p className="text-slate-500 text-sm">Dados de pilares não disponíveis.</p>
+              )}
+            </div>
+          )
+        }
       case 'stack':
         return (ocg.STACK_RECOMMENDATION || ocg.STACK_RECOMMENDATIONS) ? renderObject(ocg.STACK_RECOMMENDATION || ocg.STACK_RECOMMENDATIONS) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'architecture':
