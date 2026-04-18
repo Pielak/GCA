@@ -927,14 +927,36 @@ GCA — Gestão de Codificação Assistida
             status_ocg = ocg_data.get("COMPOSITE_SCORE", {}).get("status", "UNKNOWN")
             is_blocking = ocg_data.get("COMPOSITE_SCORE", {}).get("is_blocking", False)
 
-            pillar_scores = ocg_data.get("PILLAR_SCORES", {})
-            p1 = pillar_scores.get("P1_Business", {}).get("score", 0)
-            p2 = pillar_scores.get("P2_Rules", {}).get("score", 0)
-            p3 = pillar_scores.get("P3_Features", {}).get("score", 0)
-            p4 = pillar_scores.get("P4_NFR", {}).get("score", 0)
-            p5 = pillar_scores.get("P5_Architecture", {}).get("score", 0)
-            p6 = pillar_scores.get("P6_Data", {}).get("score", 0)
-            p7 = pillar_scores.get("P7_Security", {}).get("score", 0)
+            pillar_scores = ocg_data.get("PILLAR_SCORES", {}) or {}
+
+            def _pillar_score(num: int) -> float:
+                """DT-051: o consolidator persiste pilares como `P1`..`P7`
+                (ver `agent_service.consolidate_ocg`), mas este template
+                buscava `P1_Business`/`P2_Rules`/.../`P7_Security` — chaves
+                inexistentes — e todo `.get(..., 0)` zerava. Aceita ambos
+                os formatos por defesa, prioriza o canônico `P{n}`.
+                """
+                aliases = [
+                    f"P{num}",
+                    {1: "P1_Business", 2: "P2_Rules", 3: "P3_Features",
+                     4: "P4_NFR", 5: "P5_Architecture", 6: "P6_Data",
+                     7: "P7_Security"}[num],
+                ]
+                for k in aliases:
+                    v = pillar_scores.get(k)
+                    if isinstance(v, dict) and "score" in v:
+                        return v["score"]
+                    if isinstance(v, (int, float)):
+                        return v
+                return 0
+
+            p1 = _pillar_score(1)
+            p2 = _pillar_score(2)
+            p3 = _pillar_score(3)
+            p4 = _pillar_score(4)
+            p5 = _pillar_score(5)
+            p6 = _pillar_score(6)
+            p7 = _pillar_score(7)
 
             blocked_warning = ""
             if is_blocking or p7 < 70:

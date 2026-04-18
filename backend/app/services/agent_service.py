@@ -1104,17 +1104,44 @@ Return complete JSON analysis with score, classification, findings, and recommen
 
     @staticmethod
     def _normalize_composite_score(raw, fallback_score: float, fallback_blocking: bool) -> dict:
-        """Normaliza COMPOSITE_SCORE para dict — LLMs podem retornar float, dict ou None"""
+        """Normaliza COMPOSITE_SCORE para dict — LLMs podem retornar float, dict ou None.
+
+        DT-051: garante também `status` derivado das mesmas regras do
+        `CONSOLIDATOR_SYSTEM_PROMPT` (READY ≥ 90, NEEDS_REVIEW ≥ 75,
+        AT_RISK < 75, BLOCKED se is_blocking). Antes esse campo só era
+        gravado na coluna `ocg.status` do DB; o JSON `ocg_data` ficava sem
+        ele e o email do OCG renderizava `UNKNOWN`.
+        """
+        def _derive_status(score: float, blocking: bool) -> str:
+            if blocking:
+                return "BLOCKED"
+            if score >= 90:
+                return "READY"
+            if score >= 75:
+                return "NEEDS_REVIEW"
+            return "AT_RISK"
+
         if isinstance(raw, dict) and raw:
-            # Garantir que tem 'overall'
             if 'overall' not in raw and 'value' in raw:
                 raw['overall'] = raw['value']
             if 'overall' not in raw:
                 raw['overall'] = fallback_score
+            if 'is_blocking' not in raw:
+                raw['is_blocking'] = fallback_blocking
+            if 'status' not in raw or not raw.get('status'):
+                raw['status'] = _derive_status(raw['overall'], raw['is_blocking'])
             return raw
         if isinstance(raw, (int, float)):
-            return {"overall": raw, "is_blocking": fallback_blocking}
-        return {"overall": fallback_score, "is_blocking": fallback_blocking}
+            return {
+                "overall": raw,
+                "is_blocking": fallback_blocking,
+                "status": _derive_status(raw, fallback_blocking),
+            }
+        return {
+            "overall": fallback_score,
+            "is_blocking": fallback_blocking,
+            "status": _derive_status(fallback_score, fallback_blocking),
+        }
 
     @staticmethod
     def _safe_get(obj, key, default=None):
