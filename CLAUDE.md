@@ -415,6 +415,19 @@ Checklist antes de marcar quitada qualquer DT estrutural:
 
 Toda leitura/escrita envolvendo dado de projeto **deve** incluir `project_id` no predicado. Nenhum canal lateral (vault, storage, cache, logs, notificações, git, n8n, SMTP) pode cruzar projetos sem autorização explícita no contrato. Ao tocar código que acessa tabela com `project_id`, verificar que toda query filtra por esse campo. Ao criar endpoint que retorna dado de projeto, o `project_id` deve estar no path ou no predicado de filtro — nunca inferido de sessão sem validação.
 
+### 11.3 Regra dura: nunca rodar pytest contra DB de produção
+
+O dogfood roda no mesmo Postgres usado por pytest. Fixtures tentam rollback mas serviços que abrem `async with AsyncSessionLocal() as db` dentro de tasks assíncronas (factories, `_analyze_async`, etc) bypassam o wrap e **commitam de verdade** — cada run de pytest polui o DB com usuários e projetos fake.
+
+**Regra:** Claude **não deve** executar `pytest`, `python -m pytest` ou qualquer rota de teste que toque `AsyncSessionLocal` antes de DT-034 ser quitada (DB `gca_test` isolado). Se precisar validar código, use:
+- Sintaxe: `ast.parse` / `py_compile` / `tsc --noEmit`
+- Lógica pontual: script Python avulso com dados in-memory ou mockados
+- Runtime: reload via uvicorn (backend) / vite build (frontend) e validar via endpoint
+
+Se pytest for absolutamente necessário antes da DT-034, executar **apenas** arquivos que não dependam de `db_session` / `AsyncSessionLocal` (ex: `test_crypto.py`, `test_pii_validators.py`, testes unitários puros). Nunca rodar o suite inteiro.
+
+Se acidentalmente poluir o DB, **limpar imediatamente** (delete dos registros criados) e atualizar o progress — não desativar, deletar.
+
 ---
 
 ## 12. Convenções técnicas
