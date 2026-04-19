@@ -80,10 +80,16 @@ no questionário Q27/Q28, em cada camada do pipeline de geração. É *vivo*
 Python continua LLM-only por design (decisão de produto — ecossistema mais
 maduro pra LLM gerar FastAPI/Django).
 
-### Sprint 4 — Validação E2E
-- 5 projetos-piloto no dogfood (1 por linguagem)
-- Critério binário SIM/NÃO por projeto
-- Requer autorização explícita do user para cada projeto criado
+### Sprint 4 — Validação E2E ✅ FECHADA 2026-04-18 (via simulação isolada)
+- 7 perfis (Java/Spring + Java/Quarkus + Kotlin/Spring + Go + C# + PHP + Node/NestJS) parametrizados
+- 2 modos por linguagem:
+  - `dispatch` puro: stack via DT-047 helper → `dispatch_scaffold` → arquivos
+  - E2E persistido: cria projeto + Questionnaire + OCG sintético em
+    `gca_test` (isolado), valida que `dispatch_scaffold` resolve a partir
+    do OCG persistido. Rollback automático no fim de cada teste.
+- 1 sumário global fail-fast pra cobertura
+- 15 testes em `test_dt058_sprint4_dogfood_simulation.py`
+- **Sem tocar em `gca` (prod)** — autorização explícita do user pra mockar
 
 ## Como atualizar este doc
 
