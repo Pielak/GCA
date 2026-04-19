@@ -4,9 +4,46 @@ import { Clock, CheckCircle, Circle, GitCommit, Loader2, RefreshCw, AlertTriangl
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
 
+// MVP 9 Fase 9.1 — categorias canônicas de módulos no Roadmap.
+// Mantido em sync com `backend/app/constants/module_categories.py`.
+type ModuleCategory =
+  | 'infrastructure'
+  | 'observability'
+  | 'middleware'
+  | 'backend_service'
+  | 'feature'
+  | 'deploy_pipeline'
+
+const CATEGORY_LABEL: Record<ModuleCategory, string> = {
+  infrastructure: 'Infraestrutura',
+  observability: 'Observabilidade',
+  middleware: 'Middleware',
+  backend_service: 'Serviço de Backend',
+  feature: 'Funcionalidade',
+  deploy_pipeline: 'Pipeline de Deploy',
+}
+
+const CATEGORY_STYLE: Record<ModuleCategory, string> = {
+  infrastructure: 'bg-slate-700/40 text-slate-200 border-slate-600',
+  observability: 'bg-sky-900/30 text-sky-300 border-sky-700/50',
+  middleware: 'bg-amber-900/20 text-amber-300 border-amber-700/40',
+  backend_service: 'bg-violet-900/30 text-violet-300 border-violet-700/50',
+  feature: 'bg-emerald-900/20 text-emerald-300 border-emerald-700/40',
+  deploy_pipeline: 'bg-fuchsia-900/20 text-fuchsia-300 border-fuchsia-700/40',
+}
+
+const CATEGORY_ORDER: ModuleCategory[] = [
+  'infrastructure', 'observability', 'middleware',
+  'backend_service', 'feature', 'deploy_pipeline',
+]
+
 interface RoadmapModule {
+  id?: string
   name: string
   status: string
+  module_type?: ModuleCategory | string
+  description?: string
+  priority?: string
   created_at: string | null
 }
 
@@ -49,6 +86,8 @@ export function RoadmapPage() {
   const [data, setData] = useState<RoadmapData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // MVP 9 Fase 9.1 — filtro por categoria. null = todas.
+  const [categoryFilter, setCategoryFilter] = useState<ModuleCategory | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -90,6 +129,25 @@ export function RoadmapPage() {
   const { phases, total_modules, completed_modules, progress_percent, next_action } = data
   const hasModules = total_modules > 0
 
+  // MVP 9 Fase 9.1 — contagem por categoria (todas as fases somadas) +
+  // filtragem aplicada. Sem mexer nas fases em si: a fase só some da
+  // tela se todos seus módulos forem filtrados.
+  const categoryCounts: Record<ModuleCategory, number> = {
+    infrastructure: 0, observability: 0, middleware: 0,
+    backend_service: 0, feature: 0, deploy_pipeline: 0,
+  }
+  for (const phase of phases) {
+    for (const m of phase.modules) {
+      const mt = (m.module_type || 'feature') as ModuleCategory
+      if (mt in categoryCounts) categoryCounts[mt] += 1
+    }
+  }
+
+  const matchesFilter = (m: RoadmapModule) => {
+    if (!categoryFilter) return true
+    return (m.module_type || 'feature') === categoryFilter
+  }
+
   return (
     <div className="p-6 space-y-6">
       <div className="flex items-start justify-between flex-wrap gap-4">
@@ -114,6 +172,43 @@ export function RoadmapPage() {
           )}
         </div>
       </div>
+
+      {/* MVP 9 Fase 9.1 — barra de filtros por categoria */}
+      {hasModules && (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] text-slate-500 uppercase tracking-wide mr-1">
+            Filtrar:
+          </span>
+          <button
+            onClick={() => setCategoryFilter(null)}
+            className={`text-xs px-2 py-1 rounded border transition-colors ${
+              categoryFilter === null
+                ? 'bg-violet-600/30 border-violet-500/60 text-violet-100'
+                : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Todas ({total_modules})
+          </button>
+          {CATEGORY_ORDER.map(cat => {
+            const count = categoryCounts[cat]
+            if (count === 0) return null
+            const active = categoryFilter === cat
+            return (
+              <button
+                key={cat}
+                onClick={() => setCategoryFilter(active ? null : cat)}
+                className={`text-xs px-2 py-1 rounded border transition-colors ${
+                  active
+                    ? CATEGORY_STYLE[cat].replace('/20', '/40').replace('/30', '/50')
+                    : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                {CATEGORY_LABEL[cat]} ({count})
+              </button>
+            )
+          })}
+        </div>
+      )}
 
       {!hasModules ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center">
@@ -146,19 +241,42 @@ export function RoadmapPage() {
                         {isDone ? 'Concluída' : isActive ? 'Em andamento' : 'Pendente'}
                       </span>
                     </div>
-                    {phase.modules.length > 0 ? (
-                      <div className="flex flex-wrap gap-1.5">
-                        {phase.modules.map((mod, mi) => (
-                          <span key={mi} className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${moduleStatusStyle(mod.status)}`}>
-                            <GitCommit className="w-3 h-3" />
-                            {mod.name}
-                            <span className="opacity-60">({moduleStatusLabel(mod.status)})</span>
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-slate-600 text-xs italic">Nenhum módulo nesta fase</p>
-                    )}
+                    {(() => {
+                      const visibleModules = phase.modules.filter(matchesFilter)
+                      if (visibleModules.length === 0) {
+                        return (
+                          <p className="text-slate-600 text-xs italic">
+                            {categoryFilter
+                              ? `Nenhum módulo desta fase é "${CATEGORY_LABEL[categoryFilter]}"`
+                              : 'Nenhum módulo nesta fase'}
+                          </p>
+                        )
+                      }
+                      return (
+                        <div className="flex flex-wrap gap-1.5">
+                          {visibleModules.map((mod, mi) => {
+                            const cat = (mod.module_type || 'feature') as ModuleCategory
+                            const knownCat = cat in CATEGORY_LABEL
+                            return (
+                              <span
+                                key={mod.id || mi}
+                                title={mod.description || undefined}
+                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${moduleStatusStyle(mod.status)}`}
+                              >
+                                <GitCommit className="w-3 h-3" />
+                                {mod.name}
+                                {knownCat && (
+                                  <span className={`ml-1 px-1 rounded border text-[10px] ${CATEGORY_STYLE[cat]}`}>
+                                    {CATEGORY_LABEL[cat]}
+                                  </span>
+                                )}
+                                <span className="opacity-60">({moduleStatusLabel(mod.status)})</span>
+                              </span>
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
                   </div>
                 </div>
               )

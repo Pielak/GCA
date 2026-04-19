@@ -482,13 +482,19 @@ class ArguiderService:
             await self.db.commit()
 
             # Promover module_candidates
+            # MVP 9 Fase 9.1 — normaliza module_type pra uma das 6
+            # categorias canônicas. LLM pode emitir variações ou valores
+            # legados (`component`); o normalizador força retrocompat.
+            from app.constants.module_categories import normalize_module_type
             for mc in result_json.get("module_candidates", []):
+                raw_type = mc.get("module_type", "feature")
+                canonical_type = normalize_module_type(raw_type)
                 candidate = ModuleCandidate(
                     project_id=project_id,
                     arguider_analysis_id=analysis.id,
                     name=mc.get("name", "Unnamed"),
                     description=mc.get("description", ""),
-                    module_type=mc.get("module_type", "feature"),
+                    module_type=canonical_type,
                     priority=mc.get("priority", "medium"),
                     dependencies=json.dumps(mc.get("dependencies", []), ensure_ascii=False),
                     source_document_ids=json.dumps([str(document_id)], ensure_ascii=False),
@@ -607,10 +613,39 @@ DT-069 — LIMITE DE VERBOSIDADE (evita truncamento do LLM):
   `text`/`description` até 300 chars; sem campos narrativos extras além
   do schema.
 - `improvement_suggestions`: máximo 8 itens.
-- `module_candidates`: máximo 15 itens.
+- `module_candidates`: máximo 20 itens TOTAIS (ver MVP 9 abaixo).
 - `document_classification`: máximo 500 chars total.
 - Se houver mais achados do que o limite, priorize os mais críticos e
-  cite no `summary` que existem outros não listados."""
+  cite no `summary` que existem outros não listados.
+
+MVP 9 Fase 9.1 — CATEGORIAS CANÔNICAS DE MÓDULOS (obrigatório):
+Cada item de `module_candidates` DEVE ter `module_type` em UMA das 6
+categorias canônicas:
+
+  1. `infrastructure`     — Docker/K8s/IaC, provisionamento, rede,
+                            secrets storage, volumes persistentes.
+  2. `observability`      — Métricas, traces, logs estruturados,
+                            dashboards, alertas, health checks.
+  3. `middleware`         — Auth/RBAC, rate-limit, CORS, request
+                            logging, validação, tratamento de erro.
+  4. `backend_service`    — API endpoints, jobs async, workers,
+                            integração com DB/cache/fila, conectores
+                            externos (sem UI).
+  5. `feature`            — Funcionalidade de negócio com valor direto
+                            pro usuário final (tela + backend + regras).
+  6. `deploy_pipeline`    — CI/CD, testes automatizados em pipeline,
+                            release, rollback, migrations gates.
+
+Regras duras:
+- Distribua os até 20 itens cobrindo as 6 categorias quando o OCG
+  indicar cada camada (ex: se `STACK_RECOMMENDATION.backend.enabled=true`,
+  inclua `backend_service` e `middleware`; se `ARCHITECTURE_OVERVIEW.
+  execution_model` inclui "Containerizado", inclua `infrastructure` e
+  `deploy_pipeline`).
+- NÃO devolva `module_type='component'` nem outros valores fora da
+  lista — o backend rejeita e força `feature` por default.
+- Preencha `description` com 1-2 frases técnicas sobre o QUE o módulo
+  faz e QUE PARTE do sistema cobre — não repita o `name`."""
 
     @staticmethod
     def _extract_json(text: str) -> dict:

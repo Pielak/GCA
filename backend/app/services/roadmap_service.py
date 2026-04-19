@@ -56,9 +56,15 @@ class RoadmapService:
                 if module_status == "completed":
                     completed_modules += 1
 
+                # MVP 9 Fase 9.1 — expõe categoria canônica + descrição
+                # pra UI agrupar/filtrar por camada (feature/backend/infra/etc).
                 module_info = {
+                    "id": str(c.id),
                     "name": c.name,
                     "status": module_status,
+                    "description": c.description or "",
+                    "module_type": c.module_type or "feature",
+                    "priority": c.priority or "medium",
                     "created_at": c.created_at.isoformat() if c.created_at else None,
                 }
 
