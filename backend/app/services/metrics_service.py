@@ -1,0 +1,186 @@
+"""DT-060 — Métricas operacionais agregadas.
+
+Fonte primária:
+- ai_usage_log (provider, operation, tokens, cost)
+- audit_log_global (eventos de governança)
+- projects (status, contagem)
+- users (papel, atividade)
+
+Saída em 2 formatos:
+- `as_dashboard_dict()` — agregação por janela temporal pra render UI
+- `as_prometheus_text()` — formato texto Prometheus pra scrape externo
+
+Sem dependência de prometheus_client — texto montado manualmente.
+Mantém o footprint do GCA pequeno; observabilidade externa fica como
+candidato pra clientes que querem Grafana real.
+"""
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List
+
+import structlog
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models.base import (
+    AIUsageLog,
+    GlobalAuditLog,
+    Project,
+    User,
+)
+
+logger = structlog.get_logger(__name__)
+
+
+class MetricsService:
+    """Service que agrega ai_usage_log + audit_log_global + projects + users
+    em métricas operacionais."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+
+    async def _ai_usage_aggregations(self, since: datetime) -> Dict[str, Any]:
+        """Agrupa AIUsageLog por provider/operation desde `since`."""
+        stmt = (
+            select(
+                AIUsageLog.provider,
+                AIUsageLog.operation,
+                func.count(AIUsageLog.id).label("calls"),
+                func.coalesce(func.sum(AIUsageLog.tokens_input), 0).label("tokens_in"),
+                func.coalesce(func.sum(AIUsageLog.tokens_output), 0).label("tokens_out"),
+                func.coalesce(func.sum(AIUsageLog.cost_usd), 0.0).label("cost_usd"),
+            )
+            .where(AIUsageLog.created_at >= since)
+            .group_by(AIUsageLog.provider, AIUsageLog.operation)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return {
+            "since": since.isoformat(),
+            "rows": [
+                {
+                    "provider": r.provider,
+                    "operation": r.operation,
+                    "calls": int(r.calls),
+                    "tokens_in": int(r.tokens_in),
+                    "tokens_out": int(r.tokens_out),
+                    "cost_usd": float(round(r.cost_usd, 6)),
+                }
+                for r in rows
+            ],
+        }
+
+    async def _audit_aggregations(self, since: datetime) -> Dict[str, Any]:
+        """Conta eventos de audit por event_type desde `since`."""
+        stmt = (
+            select(
+                GlobalAuditLog.event_type,
+                func.count(GlobalAuditLog.id).label("count"),
+            )
+            .where(GlobalAuditLog.created_at >= since)
+            .group_by(GlobalAuditLog.event_type)
+            .order_by(func.count(GlobalAuditLog.id).desc())
+            .limit(20)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return {
+            "since": since.isoformat(),
+            "events": [{"event_type": r.event_type, "count": int(r.count)} for r in rows],
+        }
+
+    async def _project_summary(self) -> Dict[str, Any]:
+        """Contagem de projetos por status (ativo, pausado, etc)."""
+        stmt = (
+            select(Project.status, func.count(Project.id).label("count"))
+            .group_by(Project.status)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return {"by_status": [{"status": r.status, "count": int(r.count)} for r in rows]}
+
+    async def _user_summary(self) -> Dict[str, Any]:
+        """Contagem de users ativos vs inativos vs admin."""
+        total_active = (await self.db.execute(
+            select(func.count(User.id)).where(User.is_active == True)
+        )).scalar_one()
+        total_admin = (await self.db.execute(
+            select(func.count(User.id)).where(User.is_admin == True, User.is_active == True)
+        )).scalar_one()
+        total_inactive = (await self.db.execute(
+            select(func.count(User.id)).where(User.is_active == False)
+        )).scalar_one()
+        return {
+            "active": int(total_active),
+            "admin_active": int(total_admin),
+            "inactive": int(total_inactive),
+        }
+
+    async def as_dashboard_dict(self, hours: int = 24) -> Dict[str, Any]:
+        """Snapshot agregado para a UI — janela default 24h."""
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "window_hours": hours,
+            "ai_usage": await self._ai_usage_aggregations(since),
+            "audit": await self._audit_aggregations(since),
+            "projects": await self._project_summary(),
+            "users": await self._user_summary(),
+        }
+
+    async def as_prometheus_text(self, hours: int = 24) -> str:
+        """Métricas em formato texto Prometheus (sem prometheus_client).
+
+        Convenção:
+        - Counters terminam em `_total`
+        - Labels entre `{}` ordenados alfabeticamente
+        - HELP + TYPE antes de cada métrica
+        """
+        d = await self.as_dashboard_dict(hours=hours)
+        lines: List[str] = []
+        lines.append(f"# Auto-gerado pelo GCA — janela {hours}h")
+
+        # AI usage
+        lines.append("# HELP gca_ai_calls_total Chamadas de LLM agregadas")
+        lines.append("# TYPE gca_ai_calls_total counter")
+        for r in d["ai_usage"]["rows"]:
+            lines.append(
+                f'gca_ai_calls_total{{operation="{r["operation"]}",provider="{r["provider"]}"}} {r["calls"]}'
+            )
+
+        lines.append("# HELP gca_ai_tokens_total Tokens consumidos por direção")
+        lines.append("# TYPE gca_ai_tokens_total counter")
+        for r in d["ai_usage"]["rows"]:
+            lines.append(
+                f'gca_ai_tokens_total{{direction="in",operation="{r["operation"]}",provider="{r["provider"]}"}} {r["tokens_in"]}'
+            )
+            lines.append(
+                f'gca_ai_tokens_total{{direction="out",operation="{r["operation"]}",provider="{r["provider"]}"}} {r["tokens_out"]}'
+            )
+
+        lines.append("# HELP gca_ai_cost_usd_total Custo agregado em USD")
+        lines.append("# TYPE gca_ai_cost_usd_total counter")
+        for r in d["ai_usage"]["rows"]:
+            lines.append(
+                f'gca_ai_cost_usd_total{{operation="{r["operation"]}",provider="{r["provider"]}"}} {r["cost_usd"]}'
+            )
+
+        # Audit events
+        lines.append("# HELP gca_audit_events_total Eventos de audit por tipo")
+        lines.append("# TYPE gca_audit_events_total counter")
+        for ev in d["audit"]["events"]:
+            lines.append(
+                f'gca_audit_events_total{{event_type="{ev["event_type"]}"}} {ev["count"]}'
+            )
+
+        # Projects
+        lines.append("# HELP gca_projects_total Projetos por status")
+        lines.append("# TYPE gca_projects_total gauge")
+        for p in d["projects"]["by_status"]:
+            status = p["status"] or "unknown"
+            lines.append(f'gca_projects_total{{status="{status}"}} {p["count"]}')
+
+        # Users
+        lines.append("# HELP gca_users_total Usuários por categoria")
+        lines.append("# TYPE gca_users_total gauge")
+        lines.append(f'gca_users_total{{category="active"}} {d["users"]["active"]}')
+        lines.append(f'gca_users_total{{category="admin_active"}} {d["users"]["admin_active"]}')
+        lines.append(f'gca_users_total{{category="inactive"}} {d["users"]["inactive"]}')
+
+        return "\n".join(lines) + "\n"

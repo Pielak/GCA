@@ -16,6 +16,7 @@ from app.routers.pipeline_quality_router import router as pipeline_quality_route
 from app.routers.pipeline_audit_router import router as pipeline_audit_router
 from app.routers.pipeline_orchestration_router import router as pipeline_orchestration_router
 from app.routers.questionnaire_pdf_router import router as questionnaire_pdf_router
+from app.routers.metrics_router import router as metrics_router
 
 logger = structlog.get_logger(__name__)
 
@@ -96,6 +97,7 @@ app.include_router(pipeline_quality_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_audit_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_orchestration_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(questionnaire_pdf_router, prefix=f"{settings.API_PREFIX}", tags=["questionnaire-pdf"])
+app.include_router(metrics_router, prefix=f"{settings.API_PREFIX}", tags=["metrics"])
 
 
 @app.get("/health")
