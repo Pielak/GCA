@@ -156,6 +156,16 @@ async def get_pending_projects(
         service = AdminService(db)
         projects = await service.get_pending_projects()
 
+        # Batch: slugs dos requests aprovados → projeto real em `projects`
+        # (se existir). Permite detectar órfãos (request APPROVED sem projeto).
+        from app.models.base import Project as _Project
+        slugs = [p.project_slug for p in projects if p.project_slug]
+        proj_rows = (await db.execute(
+            select(_Project.slug, _Project.id, _Project.status)
+            .where(_Project.slug.in_(slugs))
+        )).all() if slugs else []
+        proj_by_slug = {r.slug: {"id": str(r.id), "status": r.status} for r in proj_rows}
+
         result = []
         for p in projects:
             # Buscar dados do GP
@@ -169,6 +179,17 @@ async def get_pending_projects(
             except (ValueError, TypeError):
                 requirements = {}
 
+            request_status = p.status.value if hasattr(p.status, 'value') else str(p.status)
+            linked = proj_by_slug.get(p.project_slug)
+            # Derivar project_status (vindo de `projects`) quando APPROVED.
+            # Se APPROVED mas projeto não existe → órfão (deletado hard no passado).
+            if request_status.lower() == "approved":
+                project_lifecycle_status = linked["status"] if linked else "orphan"
+                project_real_id = linked["id"] if linked else None
+            else:
+                project_lifecycle_status = None
+                project_real_id = None
+
             result.append({
                 "id": str(p.id),
                 "gp_id": str(p.gp_id),
@@ -178,7 +199,10 @@ async def get_pending_projects(
                 "deliverable_type": p.deliverable_type.value if hasattr(p.deliverable_type, 'value') else (p.deliverable_type or "new_system"),
                 "custom_deliverable_type": p.custom_deliverable_type or "",
                 "requirements": requirements,
-                "status": p.status.value if hasattr(p.status, 'value') else str(p.status),
+                "status": request_status,
+                # Novos campos — lifecycle do projeto real (active|paused|inactive|archived|orphan|None)
+                "project_lifecycle_status": project_lifecycle_status,
+                "project_id": project_real_id,
                 "gp_name": gp.full_name if gp else "",
                 "gp_email": gp.email if gp else "",
                 "requested_at": p.requested_at.isoformat() if p.requested_at else "",
@@ -1418,3 +1442,85 @@ async def invite_admin_endpoint(
     except PermissionError as e:
         raise HTTPException(status_code=403, detail=str(e))
     return result
+
+
+# ─── Lifecycle de projeto (2026-04-19) ───────────────────────────────────
+
+class ProjectStatusRequest(BaseModel):
+    status: str
+    reason: str | None = None
+
+
+@router.patch("/projects/{project_id}/status")
+async def set_project_lifecycle_status(
+    project_id: UUID,
+    payload: ProjectStatusRequest,
+    actor_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Altera lifecycle do projeto: active | paused | inactive.
+
+    Nunca deleta dados — projetos inativos/pausados preservam OCG,
+    questionário, backlog, documentos, backups, tickets. Scheduler de
+    backup (DT-063) só roda em 'active'; paused/inactive para o
+    auto-backup mas mantém os existentes.
+    """
+    from app.services import admin_management_service as svc
+    try:
+        project = await svc.set_project_status(
+            db,
+            project_id=project_id,
+            new_status=payload.status,
+            actor_id=actor_id,
+            reason=payload.reason,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return {
+        "id": str(project.id),
+        "slug": project.slug,
+        "name": project.name,
+        "status": project.status,
+    }
+
+
+@router.post("/projects/requests/{request_id}/cleanup-orphan")
+async def cleanup_orphan_project_request(
+    request_id: UUID,
+    _actor_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove `project_requests` APPROVED cuja linha em `projects` não
+    existe mais (órfão — efeito colateral de deleção hard feita no
+    passado). Valida antes de deletar: se o projeto existe, recusa.
+    """
+    from app.models.base import Project as _Project
+    from app.models.onboarding import ProjectRequest
+
+    req = (await db.execute(
+        select(ProjectRequest).where(ProjectRequest.id == request_id)
+    )).scalar_one_or_none()
+    if not req:
+        raise HTTPException(status_code=404, detail="Solicitação não encontrada.")
+
+    # Confirma que é órfão: projeto real não existe
+    linked = (await db.execute(
+        select(_Project).where(_Project.slug == req.project_slug)
+    )).scalar_one_or_none()
+    if linked is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Projeto ainda existe em 'projects' — não é órfão. "
+                "Use PATCH /admin/projects/{id}/status com 'inactive' para "
+                "desativar preservando os dados."
+            ),
+        )
+
+    project_name = req.project_name
+    await db.delete(req)
+    await db.commit()
+    logger.info("admin.orphan_request_cleaned", request_id=str(request_id), name=project_name)
+    return {"success": True, "cleaned": project_name}

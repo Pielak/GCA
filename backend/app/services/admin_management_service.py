@@ -1,4 +1,5 @@
-"""Gestão da camada administrativa: promoção / rebaixamento / convite.
+"""Gestão da camada administrativa: promoção / rebaixamento / convite /
+lifecycle de projeto.
 
 Extensão autorizada em 2026-04-19 pelo stakeholder-soberano — até aqui só
 existia `auth_service.bootstrap_admin` (primeiro admin no setup).
@@ -11,6 +12,12 @@ Regras duras:
   (reusa email_service.send_admin_invitation_email). Se SMTP não
   configurado, a senha é retornada no response pra Admin comunicar
   manualmente.
+- Status de projeto: active | paused | inactive.
+  * active   = operacional normal
+  * paused   = suspenso temporariamente; dados preservados; sem backup auto
+  * inactive = encerrado sem deleção; dados preservados para consulta
+  Admin é soberano para alterar entre os 3; nunca deleta hard o projeto
+  por este fluxo — quando a intenção era deletar, usar 'inactive'.
 """
 from __future__ import annotations
 
@@ -24,7 +31,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import hash_password
-from app.models.base import User
+from app.models.base import Project, User
 from app.services.email_service import EmailService
 
 logger = structlog.get_logger(__name__)
@@ -191,3 +198,60 @@ async def invite_admin(
         # foi enviado (admin precisa comunicar manualmente).
         "temp_password": temp_password if (created and not sent) else None,
     }
+
+
+# ─── Lifecycle de projeto ─────────────────────────────────────────────────
+
+PROJECT_LIFECYCLE_STATES: tuple[str, ...] = ("active", "paused", "inactive")
+
+
+async def set_project_status(
+    db: AsyncSession,
+    *,
+    project_id: UUID,
+    new_status: str,
+    actor_id: UUID,
+    reason: Optional[str] = None,
+) -> Project:
+    """Altera o status do projeto entre active|paused|inactive.
+
+    Não deleta nada — dados do projeto (OCG, questionário, backlog,
+    documentos, backups, tickets) permanecem intactos em qualquer estado.
+    Scheduler de backup (DT-063) já filtra por status='active', então
+    projetos paused/inactive param de receber snapshots automáticos mas
+    os existentes continuam acessíveis.
+
+    Apenas Admin pode. Validação do valor é dura (whitelist).
+    """
+    actor = await _require_admin_actor(db, actor_id)
+
+    if new_status not in PROJECT_LIFECYCLE_STATES:
+        raise ValueError(
+            f"Status inválido: {new_status}. "
+            f"Válidos: {', '.join(PROJECT_LIFECYCLE_STATES)}"
+        )
+
+    project = (await db.execute(
+        select(Project).where(Project.id == project_id)
+    )).scalar_one_or_none()
+    if not project:
+        raise ValueError("Projeto não encontrado.")
+
+    prev = project.status
+    if prev == new_status:
+        return project
+
+    project.status = new_status
+    await db.commit()
+    await db.refresh(project)
+
+    logger.info(
+        "project_status_changed",
+        project_id=str(project.id),
+        slug=project.slug,
+        previous=prev,
+        new=new_status,
+        actor_id=str(actor.id),
+        reason=(reason or "")[:200],
+    )
+    return project

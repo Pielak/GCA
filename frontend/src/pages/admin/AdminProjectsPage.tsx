@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink, Package, UserCog, FileText, MessageSquareWarning } from 'lucide-react'
+import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye, Users, ExternalLink, Package, UserCog, FileText, MessageSquareWarning, Pause, Play, Ban, AlertOctagon } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
 import { getQuestionsForType } from '@/data/projectRequestQuestions'
@@ -14,10 +14,22 @@ interface PendingProject {
   custom_deliverable_type?: string
   requirements?: Record<string, string>
   status: string
+  // Lifecycle do projeto real em `projects` (só quando request.status=APPROVED)
+  // Valores: 'active' | 'paused' | 'inactive' | 'archived' | 'orphan' | null
+  project_lifecycle_status?: string | null
+  project_id?: string | null
   gp_name: string
   gp_email: string
   requested_at: string
   rejection_reason: string
+}
+
+const LIFECYCLE_META: Record<string, { label: string; bg: string; text: string; icon?: any }> = {
+  active:   { label: 'Ativo',       bg: 'bg-emerald-500/10', text: 'text-emerald-300', icon: CheckCircle },
+  paused:   { label: 'Pausado',     bg: 'bg-amber-500/10',   text: 'text-amber-300',   icon: Pause },
+  inactive: { label: 'Desativado',  bg: 'bg-slate-500/10',   text: 'text-slate-400',   icon: Ban },
+  archived: { label: 'Arquivado',   bg: 'bg-slate-500/10',   text: 'text-slate-400',   icon: Ban },
+  orphan:   { label: 'Excluído (órfão)', bg: 'bg-red-500/10', text: 'text-red-300',    icon: AlertOctagon },
 }
 
 const DELIVERABLE_LABELS: Record<string, { label: string; color: string }> = {
@@ -200,6 +212,40 @@ export function AdminProjectsPage() {
     }
   }
 
+  const handleSetLifecycle = async (p: PendingProject, newStatus: 'active' | 'paused' | 'inactive') => {
+    if (!p.project_id) {
+      showToast('Projeto ainda não provisionado.', 'error')
+      return
+    }
+    const label = newStatus === 'active' ? 'reativar' : newStatus === 'paused' ? 'pausar' : 'desativar'
+    if (!confirm(`Confirma ${label} o projeto "${p.project_name}"? Os dados serão preservados em qualquer estado.`)) return
+    setActionLoading(p.id)
+    try {
+      await apiClient.patch(`/admin/projects/${p.project_id}/status`, { status: newStatus })
+      showToast(`"${p.project_name}" — status: ${newStatus}`, 'success')
+      await loadData()
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || err?.message || 'Erro ao mudar status', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCleanupOrphan = async (p: PendingProject) => {
+    const msg = `A solicitação "${p.project_name}" está APROVADA mas o projeto correspondente não existe mais em 'projects' (foi deletado em algum momento passado). Remover esta solicitação órfã?\n\nAlternativa: se você quer manter o histórico mesmo sem o projeto, deixe como está — a badge vai continuar indicando "Excluído (órfão)".`
+    if (!confirm(msg)) return
+    setActionLoading(p.id)
+    try {
+      await apiClient.post(`/admin/projects/requests/${p.id}/cleanup-orphan`)
+      showToast(`Solicitação órfã "${p.project_name}" removida`, 'success')
+      await loadData()
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || err?.message || 'Erro ao limpar órfão', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
   const handleReject = async () => {
     if (!rejectModal || rejectReason.trim().length < 10) return
     setRejecting(true)
@@ -341,7 +387,23 @@ export function AdminProjectsPage() {
                       })()}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`text-xs px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
+                      {(() => {
+                        // Quando a request é APPROVED, mostrar o lifecycle do
+                        // projeto real (active/paused/inactive/orphan) em vez
+                        // do estático "Aprovado" — é a informação útil aqui.
+                        const lc = proj.project_lifecycle_status
+                        if (proj.status === 'approved' && lc && LIFECYCLE_META[lc]) {
+                          const meta = LIFECYCLE_META[lc]
+                          const Icon = meta.icon
+                          return (
+                            <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${meta.bg} ${meta.text}`}>
+                              {Icon && <Icon className="w-3 h-3" />}
+                              {meta.label}
+                            </span>
+                          )
+                        }
+                        return <span className={`text-xs px-2 py-0.5 rounded-full ${st.bg} ${st.text}`}>{st.label}</span>
+                      })()}
                     </td>
                     <td className="px-4 py-3">
                       <a
@@ -358,6 +420,21 @@ export function AdminProjectsPage() {
                         <span className="flex items-center gap-1.5 text-amber-400 text-xs">
                           <Clock className="w-3.5 h-3.5" />
                           Aguardando aprovação
+                        </span>
+                      ) : proj.project_lifecycle_status === 'orphan' ? (
+                        <span className="flex items-center gap-1.5 text-red-400 text-xs" title="Solicitação APROVADA mas o projeto correspondente não existe mais em 'projects'. Deleção hard feita em algum momento passado.">
+                          <AlertOctagon className="w-3.5 h-3.5" />
+                          Projeto inexistente — limpar órfão?
+                        </span>
+                      ) : proj.project_lifecycle_status === 'paused' ? (
+                        <span className="flex items-center gap-1.5 text-amber-400 text-xs">
+                          <Pause className="w-3.5 h-3.5" />
+                          Pausado — sem backup automático
+                        </span>
+                      ) : (proj.project_lifecycle_status === 'inactive' || proj.project_lifecycle_status === 'archived') ? (
+                        <span className="flex items-center gap-1.5 text-slate-400 text-xs">
+                          <Ban className="w-3.5 h-3.5" />
+                          Desativado — dados preservados
                         </span>
                       ) : proj.status === 'approved' ? (
                         <span className="flex items-center gap-1.5 text-emerald-400 text-xs">
@@ -385,6 +462,7 @@ export function AdminProjectsPage() {
 
                         {proj.status === 'approved' && (() => {
                           const realProj = realProjects.find(rp => rp.slug === proj.project_slug)
+                          const lc = proj.project_lifecycle_status
                           return realProj ? (
                             <>
                               <button
@@ -401,8 +479,49 @@ export function AdminProjectsPage() {
                               >
                                 <UserCog className="w-4 h-4" />
                               </button>
+                              {/* Lifecycle de projeto (2026-04-19) */}
+                              {lc === 'active' && (
+                                <>
+                                  <button
+                                    onClick={() => handleSetLifecycle(proj, 'paused')}
+                                    disabled={actionLoading === proj.id}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-amber-400 hover:bg-amber-900/20 disabled:opacity-30 transition-colors"
+                                    title="Pausar projeto (preserva dados, suspende backup automático)"
+                                  >
+                                    <Pause className="w-4 h-4" />
+                                  </button>
+                                  <button
+                                    onClick={() => handleSetLifecycle(proj, 'inactive')}
+                                    disabled={actionLoading === proj.id}
+                                    className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 disabled:opacity-30 transition-colors"
+                                    title="Desativar projeto (encerramento sem deleção; dados preservados)"
+                                  >
+                                    <Ban className="w-4 h-4" />
+                                  </button>
+                                </>
+                              )}
+                              {(lc === 'paused' || lc === 'inactive' || lc === 'archived') && (
+                                <button
+                                  onClick={() => handleSetLifecycle(proj, 'active')}
+                                  disabled={actionLoading === proj.id}
+                                  className="p-1.5 rounded-lg text-slate-500 hover:text-emerald-400 hover:bg-emerald-900/20 disabled:opacity-30 transition-colors"
+                                  title="Reativar projeto"
+                                >
+                                  <Play className="w-4 h-4" />
+                                </button>
+                              )}
                             </>
-                          ) : null
+                          ) : (
+                            // Request APPROVED mas sem projeto real em 'projects' → órfão
+                            <button
+                              onClick={() => handleCleanupOrphan(proj)}
+                              disabled={actionLoading === proj.id}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 disabled:opacity-30 transition-colors"
+                              title="Limpar solicitação órfã (projeto não existe mais)"
+                            >
+                              {actionLoading === proj.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertOctagon className="w-4 h-4" />}
+                            </button>
+                          )
                         })()}
                         <button
                           onClick={() => { setMessageModal(proj); setMessageText('') }}
