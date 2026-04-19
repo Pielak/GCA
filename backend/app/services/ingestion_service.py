@@ -578,6 +578,11 @@ class IngestionService:
         from app.models.base import IngestedDocument as _Doc
         doc = await db.get(_Doc, document_id)
         if not doc:
+            logger.warning(
+                "ingestion.update_stage_doc_not_found",
+                document_id=str(document_id),
+                stage=stage,
+            )
             return
         doc.arguider_stage = stage
         if percent is None:
@@ -586,7 +591,46 @@ class IngestionService:
         if percent >= doc.arguider_progress_percent or stage == "failed":
             doc.arguider_progress_percent = percent
         doc.arguider_stage_updated_at = _dt.now(_tz.utc)
-        await db.commit()
+        try:
+            await db.commit()
+        except Exception as _commit_exc:
+            # DT-072: session pode estar em estado ambíguo depois de
+            # fluxos longos (ex: OCGUpdaterService faz múltiplos commits
+            # na mesma session). Loga e propaga pro caller decidir se
+            # tenta de novo com session fresca.
+            logger.warning(
+                "ingestion.update_stage_commit_failed",
+                document_id=str(document_id),
+                stage=stage,
+                error=str(_commit_exc),
+            )
+            raise
+
+    @classmethod
+    async def _update_stage_fresh(
+        cls,
+        document_id: UUID,
+        stage: str,
+        *,
+        percent: int | None = None,
+    ) -> None:
+        """DT-072 — versão de `_update_stage` que SEMPRE usa session
+        nova. Usar nos pontos finais do pipeline, onde a session
+        corrente pode ter sido corrompida por serviços que fazem
+        commits internos (OCGUpdaterService). Evita o estado "stage
+        parado em updating_ocg/70%" visto no dogfood 2026-04-19.
+        """
+        from app.db.database import AsyncSessionLocal as _ASL
+        try:
+            async with _ASL() as _fresh:
+                await cls._update_stage(_fresh, document_id, stage, percent=percent)
+        except Exception as exc:
+            logger.warning(
+                "ingestion.update_stage_fresh_failed",
+                document_id=str(document_id),
+                stage=stage,
+                error=str(exc),
+            )
 
     async def _notify_provider_fallback(
         self,
@@ -984,7 +1028,11 @@ class IngestionService:
                         # e libera o caller para retornar imediatamente.
                         if update_result and update_result.get("changes"):
                             # MVP 8 Fase 1 — estágio "regenerating_backlog"
-                            await IngestionService._update_stage(db, document_id, "regenerating_backlog")
+                            # DT-072: session fresca. A session `db` passou pelo
+                            # OCGUpdaterService que faz múltiplos commits
+                            # internos; depois dele, `db.commit()` direto
+                            # silenciou sem persistir stage.
+                            await IngestionService._update_stage_fresh(document_id, "regenerating_backlog")
                             asyncio.create_task(
                                 _propagate_async(
                                     project_id=project_id,
@@ -1010,7 +1058,8 @@ class IngestionService:
 
                         # MVP 8 Fase 1 — marcar estágio "completed" após
                         # sucesso completo do pipeline (arguider + ocg + propagação disparada).
-                        await IngestionService._update_stage(db, document_id, "completed", percent=100)
+                        # DT-072: session fresca (mesmo motivo de _update_stage_fresh acima).
+                        await IngestionService._update_stage_fresh(document_id, "completed", percent=100)
 
                     except Exception as e:
                         import traceback
@@ -1025,7 +1074,9 @@ class IngestionService:
                         # completou — marcamos completed mas com porcentagem
                         # ligeiramente menor pro frontend mostrar o alerta
                         # via arguider_error_message (que vem do caller).
-                        await IngestionService._update_stage(db, document_id, "completed", percent=95)
+                        # DT-072: session fresca (a original pode ter
+                        # rollbackado com a exception).
+                        await IngestionService._update_stage_fresh(document_id, "completed", percent=95)
 
         except Exception as e:
             logger.error("ingestion.analysis_async_error", document_id=str(document_id), error=str(e))
