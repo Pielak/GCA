@@ -1,0 +1,19 @@
+stateDiagram-v2
+    [*] --> Aberto: Dev/Tester/QA cria ticket
+    [*] --> Aberto: GP cria ticket (escala p/ Admin)
+    Aberto --> EmAndamento: GP/Admin assume
+    EmAndamento --> Resolvido: correção entregue
+    Resolvido --> EmAndamento: reabertura (bug volta)
+    Resolvido --> Fechado: confirmado pelo autor
+    Fechado --> [*]
+    note right of Aberto
+        target_scope automático:
+        Dev/Tester/QA → gp
+        GP → admin
+        Admin → admin
+    end note
+    note right of Resolvido
+        resolved_at + resolved_by
+        preenchidos. Rastreável
+        na release seguinte.
+    end note

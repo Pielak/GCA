@@ -1,0 +1,22 @@
+sequenceDiagram
+    autonumber
+    actor U as Usuário (Dev/Tester/QA/GP)
+    participant UI as Frontend
+    participant API as Backend
+    participant DB as PostgreSQL
+
+    U->>UI: Acessa /p/{slug} (URL do projeto)
+    UI->>API: GET /projects/by-slug/{slug}
+    API->>DB: SELECT project WHERE slug
+    DB-->>API: Project (id, name, status)
+    API-->>UI: Project resumo
+    UI-->>U: Form de login contextualizado
+    U->>UI: Digita credenciais
+    UI->>API: POST /api/v1/auth/login
+    API->>DB: SELECT user
+    DB-->>API: User
+    API->>DB: SELECT project_members WHERE user AND project
+    DB-->>API: Membership (role)
+    API->>API: Verifica role ∈ {gp, dev, tester, qa}
+    API-->>UI: 200 { token, memberships }
+    UI-->>U: Dashboard do Projeto (respeitando RBAC)

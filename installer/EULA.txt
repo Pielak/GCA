@@ -1,0 +1,78 @@
+CONTRATO DE LICENÇA DE USO — GCA
+Gestão de Codificação Assistida (versão 1.0.0)
+
+Autor e titular dos direitos: Luiz Carlos Pielak
+Data desta versão: 2026-04-19
+
+1. NATUREZA DA LICENÇA
+
+   1.1 Este software é fornecido sob licença comercial pelo titular,
+       mediante pagamento e vinculado à chave de ativação
+       (GCA-PROD-*).
+   1.2 A chave define: data de expiração da licença; número máximo
+       de projetos simultâneos; número máximo de usuários ativos;
+       nível de suporte contratado.
+   1.3 A licença é intransferível sem autorização por escrito do
+       titular.
+
+2. PROPRIEDADE INTELECTUAL
+
+   2.1 Todo o código-fonte, documentação, ícones, diagramas e demais
+       artefatos do GCA são propriedade de Luiz Carlos Pielak.
+   2.2 É proibido: descompilar, reverter, analisar o bytecode com
+       intenção de reconstruir o código-fonte, modificar a
+       aplicação para burlar a verificação de licença ou integridade.
+   2.3 Violações de propriedade intelectual sujeitam o infrator às
+       penalidades previstas na legislação aplicável.
+
+3. RESPONSABILIDADES DO CLIENTE
+
+   3.1 Custódia segura da chave mestra de instância (GCA_MASTER_KEY),
+       credenciais de provedores de IA e da chave de ativação.
+   3.2 Realização e validação periódica de backups (o GCA gera
+       backup automático diário — a responsabilidade de armazenagem
+       segura do volume gca-backups é do cliente).
+   3.3 Conformidade com leis locais aplicáveis (LGPD no Brasil,
+       GDPR na União Europeia, etc.) ao processar dados pessoais de
+       terceiros.
+
+4. ISOLAMENTO DE INSTÂNCIAS
+
+   4.1 O GCA não compartilha dados entre instâncias de clientes
+       diferentes. Cada instância é soberana sobre seus próprios
+       dados.
+   4.2 O titular não tem acesso aos dados da instância do cliente,
+       salvo solicitação expressa para fins de suporte e com
+       autorização escrita.
+
+5. ATUALIZAÇÕES
+
+   5.1 Atualizações são entregues via release versionada e respeitam
+       o contrato de preservação de dados do MVP 7: o default é
+       não-destrutivo; quando destrutivo, snapshot automático
+       prévio é gerado por projeto.
+   5.2 O cliente é responsável por aplicar as atualizações em tempo
+       razoável — ultrapassar a data de expiração da licença
+       suspende o acesso até renovação.
+
+6. LIMITAÇÃO DE RESPONSABILIDADE
+
+   6.1 O GCA é fornecido "no estado em que se encontra", sem
+       garantias expressas ou implícitas.
+   6.2 O titular não se responsabiliza por perda de dados
+       decorrente de falha do cliente em seguir as rotinas de
+       backup, upgrade e operação documentadas.
+
+7. SUPORTE
+
+   7.1 O suporte é prestado conforme contrato comercial separado.
+
+8. FORO
+
+   8.1 Fica eleito o foro da comarca do domicílio do titular para
+       dirimir qualquer controvérsia.
+
+──────────────────────────────────────────────────────────────────
+Ao clicar em "Aceito" durante a instalação, o usuário declara que
+leu, entendeu e aceita integralmente os termos deste contrato.
+──────────────────────────────────────────────────────────────────

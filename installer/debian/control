@@ -1,0 +1,16 @@
+Package: gca
+Version: 1.0.0
+Section: misc
+Priority: optional
+Architecture: amd64
+Depends: docker-ce | docker.io, docker-compose-plugin, curl, openssl
+Maintainer: Luiz Carlos Pielak <admin@gca-produto.com>
+Description: GCA — Gestão de Codificação Assistida
+ Plataforma instalável de governança de projetos de TI assistida por IA.
+ .
+ Após instalar este pacote, execute:
+   sudo /opt/gca/scripts/install.sh
+ .
+ Ou para instalação automatizada com variáveis de ambiente:
+   sudo GCA_LICENSE=... GCA_ADMIN_EMAIL=... GCA_ADMIN_PASSWORD=... \
+        /opt/gca/scripts/install.sh --non-interactive

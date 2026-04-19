@@ -1,0 +1,31 @@
+#!/bin/bash
+# prerm — executado antes de remover/upgrade do pacote
+
+set -e
+
+# Para o serviço se estiver rodando
+if systemctl is-active --quiet gca.service 2>/dev/null; then
+    echo "Parando serviço gca..."
+    systemctl stop gca.service || true
+fi
+
+# Para containers (sem remover volumes — dados preservados!)
+if [ -f /opt/gca/docker-compose.yml ]; then
+    cd /opt/gca && docker compose down 2>/dev/null || true
+fi
+
+cat <<EOF
+
+══════════════════════════════════════════════════════════════════
+ATENÇÃO: Os volumes Docker (dados do GCA) NÃO foram removidos:
+  - gca-postgres-data (banco)
+  - gca-uploads-storage (uploads)
+  - gca-backups (backups por projeto)
+
+Para remover TODOS os dados do GCA depois:
+  docker volume rm gca-postgres-data gca-uploads-storage gca-backups
+
+══════════════════════════════════════════════════════════════════
+EOF
+
+exit 0

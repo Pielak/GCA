@@ -1,0 +1,45 @@
+#!/bin/bash
+# postinst — script executado após apt install gca_*.deb
+
+set -e
+
+INSTALL_DIR=/opt/gca
+
+# Permissões
+chmod +x "$INSTALL_DIR/scripts/install.sh"
+chmod +x "$INSTALL_DIR/scripts/upgrade.sh"
+chmod +x "$INSTALL_DIR/scripts/backup.sh"
+chmod +x "$INSTALL_DIR/scripts/restore.sh"
+chmod +x "$INSTALL_DIR/scripts/health-check.sh"
+
+# Registra o serviço systemd
+if [ -f "$INSTALL_DIR/systemd/gca.service" ]; then
+    cp "$INSTALL_DIR/systemd/gca.service" /etc/systemd/system/
+    systemctl daemon-reload
+    echo "✓ Serviço systemd 'gca.service' registrado."
+    echo "  Para iniciar: sudo systemctl enable --now gca.service"
+fi
+
+cat <<EOF
+
+╔══════════════════════════════════════════════════════════════════╗
+║                                                                  ║
+║   GCA instalado em $INSTALL_DIR                                 ║
+║                                                                  ║
+║   Próximo passo:                                                 ║
+║                                                                  ║
+║     sudo $INSTALL_DIR/scripts/install.sh                       ║
+║                                                                  ║
+║   (instalação interativa — 10 etapas)                            ║
+║                                                                  ║
+║   Ou modo automatizado:                                          ║
+║                                                                  ║
+║     sudo GCA_LICENSE=... GCA_ADMIN_EMAIL=... \\                   ║
+║          GCA_ADMIN_PASSWORD=... \\                                ║
+║          $INSTALL_DIR/scripts/install.sh --non-interactive     ║
+║                                                                  ║
+╚══════════════════════════════════════════════════════════════════╝
+
+EOF
+
+exit 0

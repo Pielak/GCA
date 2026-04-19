@@ -1,0 +1,30 @@
+sequenceDiagram
+    autonumber
+    actor GP
+    participant UI
+    participant API
+    participant Q as QuestionnaireService
+    participant AG as AgentService (8 agentes)
+    participant DB as PostgreSQL
+    participant LLM as Provedor IA
+
+    GP->>UI: Upload PDF de questionário em /projects/{id}/settings?tab=questionario
+    UI->>API: POST /questionnaire/upload-pdf
+    API->>Q: submit_questionnaire (parse AcroForm)
+    Q->>DB: INSERT questionnaire
+    Q->>Q: TechnologyVerificationService (8 fases)
+    Q-->>API: adherence_score + findings
+    API->>AG: trigger analyze_questionnaire
+    par 7 pilares em paralelo
+        AG->>LLM: analyze_pillar P1 (Business)
+        LLM-->>AG: pillar_result
+        AG->>LLM: analyze_pillar P2..P7
+        LLM-->>AG: pillar_results
+    end
+    AG->>LLM: consolidate_ocg (premium — alta criticidade §6.2)
+    LLM-->>AG: OCG completo (STACK, ARCH, COMPLIANCE, TESTING, RISK, DELIVERABLES)
+    AG->>DB: UPSERT ocg (por questionnaire_id)
+    AG->>DB: INSERT ocg_analysis_log + ai_usage_log
+    AG-->>API: OCG ID
+    API-->>UI: 200 ocg ready
+    UI-->>GP: Dashboard do projeto com OCG preenchido

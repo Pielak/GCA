@@ -1,0 +1,18 @@
+flowchart TB
+    subgraph INST["Camada da Instância"]
+        ADMIN["Admin<br/>(is_admin=true)"]
+        SUP["Sustentação<br/>(is_support=true)"]
+    end
+    subgraph PROJ["Camada do Projeto"]
+        GP["GP<br/>(soberano do projeto)"]
+        DEV["Dev"]
+        TST["Tester"]
+        QA["QA"]
+    end
+    ADMIN -->|herda Sustentação| SUP
+    ADMIN -->|pode operar| GP
+    GP -->|union de ações| DEV
+    GP -->|union de ações| TST
+    GP -->|union de ações| QA
+    SUP -.recebe tickets target=admin.-> ADMIN
+    note1["Emenda 2026-04-19:<br/>GP : projeto :: Admin : instância"]

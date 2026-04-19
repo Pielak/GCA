@@ -1,0 +1,22 @@
+stateDiagram-v2
+    [*] --> Solicitado: /solicitar-projeto
+    Solicitado --> Pendente: request criada (PENDING)
+    Pendente --> Rejeitado: Admin rejeita
+    Pendente --> Aprovado: Admin aprova
+    Aprovado --> Ativo: projects.status=active
+    Ativo --> Pausado: PATCH /admin/projects/{id}/status {status:paused}
+    Pausado --> Ativo: reativar
+    Ativo --> Desativado: encerramento sem deleção
+    Pausado --> Desativado: encerramento sem deleção
+    Desativado --> Ativo: reativar
+    Rejeitado --> [*]
+    note right of Pausado
+        Scheduler de backup
+        automático é suspenso.
+        Dados preservados.
+    end note
+    note right of Desativado
+        Dados preservados
+        para consulta/auditoria.
+        Sem backup automático.
+    end note

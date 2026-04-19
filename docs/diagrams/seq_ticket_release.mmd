@@ -1,0 +1,37 @@
+sequenceDiagram
+    autonumber
+    actor Dev as Dev/Tester/QA
+    actor GP
+    actor Adm as Admin
+    participant UI
+    participant API
+    participant DB
+
+    Dev->>UI: /projects/{id}/incidents → "Abrir ticket"
+    UI->>API: POST /projects/{id}/incidents (category, priority, flow_description, section_reference)
+    API->>DB: INSERT incident_tickets (target_scope='gp')
+    API->>DB: INSERT user_notifications (para GPs)
+    API-->>UI: 201 ticket_id
+    Note over Dev,UI: Ticket visível em /incidents
+
+    GP->>UI: Detalhe do ticket → comentários + status
+    GP->>UI: Resolve ticket
+    UI->>API: PATCH /incidents/{id}/status {status: resolved}
+    API->>DB: UPDATE incident_tickets
+    API->>DB: INSERT user_notifications (evento resolvido)
+
+    Note over Adm,API: Correção entregue na release seguinte
+    Adm->>UI: Novo backend/releases/v0.9.0.yaml com ref_id=TICKET-{id}
+    UI->>API: GET /admin/releases
+    API->>DB: SELECT releases WHERE status='pending'
+    API-->>UI: v0.9.0 (pending, is_destructive=true)
+    Adm->>UI: "Aplicar com snapshot"
+    UI->>API: POST /admin/releases/{id}/apply {confirm:true}
+    loop projetos ativos
+        API->>DB: create_backup (DT-063)
+        DB-->>API: snapshot_id
+        API->>DB: INSERT release_application_log (snapshot_taken)
+    end
+    API->>DB: UPDATE release SET status=applied
+    API-->>UI: { snapshots_taken, status: applied }
+    UI-->>Adm: Release marcada aplicada + log com snapshots

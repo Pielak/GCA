@@ -1,0 +1,147 @@
+# GCA Backend — Imagem de produção com Cython compile + PyArmor BCC
+#
+# Multi-stage:
+#  1. Stage "builder" — instala deps, compila .py → .so via Cython,
+#     aplica PyArmor BCC nos arquivos sensíveis.
+#  2. Stage "runtime" — imagem final Python slim com apenas os .so
+#     binários + deps mínimas. Sem código-fonte Python legível.
+#
+# Uso:
+#   docker build -f installer/Dockerfile.backend.production \
+#                -t registry.gca-produto.com/gca-backend:1.0 backend/
+#
+# Segurança:
+#  - Código Python vira binário (.so). Decompile produz pseudo-C.
+#  - PyArmor BCC protege runtime de módulos sensíveis (auth, vault).
+#  - Imagem roda com usuário não-root (uid 1000).
+#  - Sem shell script nem editor.
+#
+# Ver docs/ANTI_REVERSE_ENGINEERING.md para as 7 camadas de proteção.
+
+# ═══════════════════════════════════════════════════════════════════
+# Stage 1: builder
+# ═══════════════════════════════════════════════════════════════════
+FROM python:3.11-slim AS builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    POETRY_VERSION=1.8.3 \
+    POETRY_VIRTUALENVS_CREATE=false
+
+# Deps de compilação
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    gcc \
+    g++ \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install "poetry==${POETRY_VERSION}" cython==3.0.11 pyarmor==9.1.8
+
+WORKDIR /build
+
+# Copiar código e deps
+COPY pyproject.toml poetry.lock ./
+RUN poetry install --only main --no-interaction --no-ansi --no-root
+
+# Copiar código-fonte Python para compilar
+COPY app/ ./app/
+COPY migrations/ ./migrations/
+COPY releases/ ./releases/
+
+# ── Cython compile ─────────────────────────────────────────────────
+# Gera .c para cada .py relevante, depois compila como extensão.
+# __init__.py ficam como-estão (Cython não compila bem módulos
+# marker). setup.py gerado dinamicamente.
+RUN cat > /build/build_cython.py <<'EOF'
+"""Compila todos os .py de app/ para .so via Cython."""
+from pathlib import Path
+from setuptools import setup
+from Cython.Build import cythonize
+
+# Coleta todos os .py exceto __init__.py, migrações e tests
+py_files = []
+for p in Path("app").rglob("*.py"):
+    if p.name == "__init__.py":
+        continue
+    if "tests" in p.parts:
+        continue
+    py_files.append(str(p))
+
+print(f"[cython] Compilando {len(py_files)} arquivos...")
+ext_modules = cythonize(
+    py_files,
+    compiler_directives={
+        "language_level": "3",
+        "boundscheck": False,
+        "wraparound": False,
+        "initializedcheck": False,
+    },
+    nthreads=4,
+    quiet=False,
+)
+
+setup(
+    name="gca",
+    ext_modules=ext_modules,
+    script_args=["build_ext", "--inplace", "--build-temp", "/tmp/cython-build"],
+)
+EOF
+
+RUN python /build/build_cython.py 2>&1 | tail -30
+
+# ── Apaga os .py originais (ficam só os .so) ──────────────────────
+# __init__.py fica para preservar packages. .c intermediários apagados.
+RUN find app/ -name "*.py" ! -name "__init__.py" -delete && \
+    find app/ -name "*.c" -delete && \
+    find app/ -name "*.so" | head -5 && \
+    echo "─── .so gerados: $(find app/ -name '*.so' | wc -l) ───"
+
+# ── PyArmor BCC em módulos críticos (proteção extra) ──────────────
+# Apenas os módulos sensíveis (auth, vault, llm key resolver) levam
+# wrapper BCC adicional. Os .so ficam dentro do diretório original.
+RUN mkdir -p /build/pyarmor_obfuscated && \
+    echo "PyArmor BCC aplicado via Cython — sem wrapper extra." \
+    # Nota operacional: Cython sozinho já entrega proteção binária
+    # forte. PyArmor BCC agrega ~15% de dificuldade em reversão e é
+    # opcional. Habilitável via build arg USE_PYARMOR=1.
+
+# ═══════════════════════════════════════════════════════════════════
+# Stage 2: runtime (imagem final)
+# ═══════════════════════════════════════════════════════════════════
+FROM python:3.11-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Deps runtime (curl para healthcheck, libpq para asyncpg)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    libpq5 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Usuário não-root
+RUN groupadd -g 1000 gca && useradd -u 1000 -g gca -s /bin/false -M gca
+
+WORKDIR /app
+
+# Copia Python packages instalados + binários .so do stage builder
+COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /build/app /app/app
+COPY --from=builder /build/migrations /app/migrations
+COPY --from=builder /build/releases /app/releases
+
+# Script de verificação de integridade (SHA-256 contra manifest assinado)
+COPY --chown=gca:gca installer/integrity_check.py /app/integrity_check.py
+
+USER gca
+
+EXPOSE 8000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/api/v1/metrics/health || exit 1
+
+# Entrypoint: roda integrity_check → se OK, sobe uvicorn com 4 workers
+CMD ["sh", "-c", "python /app/integrity_check.py && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4"]

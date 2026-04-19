@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor A as Admin
+    participant UI as Frontend (React)
+    participant API as Backend (FastAPI)
+    participant DB as PostgreSQL
+    participant JWT as JWT Service
+
+    A->>UI: Acessa /login, digita e-mail e senha
+    UI->>API: POST /api/v1/auth/login
+    API->>DB: SELECT user WHERE email
+    DB-->>API: User (password_hash, is_admin)
+    API->>API: verify_password(plain, hash)
+    alt Credenciais válidas
+        API->>JWT: create_access_token(sub=user.id)
+        JWT-->>API: JWT assinado (HS256)
+        API->>DB: UPDATE last_login_at
+        API-->>UI: 200 { access_token, user }
+        UI->>UI: Armazena token em memória + redirect /admin
+        UI-->>A: Dashboard Global
+    else Inválido
+        API-->>UI: 401 Unauthorized
+        UI-->>A: Mensagem "Credenciais inválidas"
+    end

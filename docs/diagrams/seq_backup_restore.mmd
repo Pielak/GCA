@@ -1,0 +1,33 @@
+sequenceDiagram
+    autonumber
+    participant S as Scheduler (APScheduler 12:00)
+    participant BS as BackupService
+    participant DB as PostgreSQL
+    participant V as Volume gca-backups
+    actor GP
+
+    S->>BS: daily_backup_job()
+    BS->>DB: SELECT projects WHERE status='active'
+    DB-->>BS: projetos ativos
+    loop cada projeto
+        BS->>BS: create_backup(trigger='scheduled')
+        BS->>DB: SELECT row_to_json(t) por 29 tabelas WHERE project_id
+        DB-->>BS: JSONLs
+        BS->>BS: zip + sha256 + manifest.json
+        BS->>V: grava zip
+        BS->>DB: INSERT project_backups (completed)
+        BS->>DB: UPDATE projects SET last_backup_at
+        BS->>BS: cleanup: mantém 10 últimos
+    end
+
+    Note over GP: Precisa reverter algo
+    GP->>BS: POST /projects/{id}/backups/{bid}/restore?confirm=true
+    BS->>V: lê zip + revalida sha256
+    alt SHA OK
+        BS->>DB: DELETE linhas do projeto (29 tabelas, ordem inv. FK)
+        BS->>DB: INSERT linhas do backup
+        BS->>DB: UPDATE project_backups SET restored_at
+        BS-->>GP: 200 restore aplicado
+    else SHA mismatch
+        BS-->>GP: 500 integridade comprometida
+    end

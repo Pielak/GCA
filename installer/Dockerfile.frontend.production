@@ -1,0 +1,108 @@
+# GCA Frontend — Imagem de produção
+# Build + javascript-obfuscator (control-flow flattening + string array)
+# + nginx servindo estático com headers de segurança.
+
+# ═══════════════════════════════════════════════════════════════════
+# Stage 1: builder
+# ═══════════════════════════════════════════════════════════════════
+FROM node:20-alpine AS builder
+
+WORKDIR /build
+
+# Copia deps e instala
+COPY package.json package-lock.json ./
+RUN npm ci --prefer-offline --no-audit
+
+# Copia source e build
+COPY . .
+RUN npm run build
+
+# ── Obfuscator JavaScript ─────────────────────────────────────────
+# Aumenta ~30-50% o tamanho do bundle mas deixa o JS ilegível a
+# engenharia reversa casual. Variáveis viram _0x... / códigos mortos
+# injetados / control-flow flattening aplicado.
+RUN npm install -g javascript-obfuscator@4.1.1
+
+RUN mkdir -p /build/dist-obfuscated && \
+    for f in /build/dist/js/*.js; do \
+        [ -f "$f" ] && javascript-obfuscator "$f" \
+            --output "/build/dist-obfuscated/$(basename $f)" \
+            --compact true \
+            --control-flow-flattening true \
+            --control-flow-flattening-threshold 0.75 \
+            --dead-code-injection true \
+            --dead-code-injection-threshold 0.4 \
+            --string-array true \
+            --string-array-threshold 0.75 \
+            --string-array-encoding base64 \
+            --transform-object-keys true \
+            --unicode-escape-sequence false \
+            --rename-globals false \
+            2>/dev/null && echo "obfuscated: $(basename $f)"; \
+    done && \
+    cp /build/dist-obfuscated/*.js /build/dist/js/ || true
+
+# ═══════════════════════════════════════════════════════════════════
+# Stage 2: nginx servindo estático
+# ═══════════════════════════════════════════════════════════════════
+FROM nginx:1.27-alpine AS runtime
+
+# Remove config default
+RUN rm /etc/nginx/conf.d/default.conf
+
+# Config nginx customizada: proxy pra backend, headers de segurança
+COPY --from=builder /build/dist /usr/share/nginx/html
+
+# Config
+COPY <<'EOF' /etc/nginx/conf.d/gca.conf
+server {
+    listen 80 default_server;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' http://gca-backend:8000 https://* ws://localhost:8000 wss://*; frame-ancestors 'none';" always;
+
+    # SPA routing
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # API proxy
+    location /api/ {
+        proxy_pass http://gca-backend:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 300s;
+    }
+
+    # Healthcheck
+    location /healthz {
+        access_log off;
+        return 200 "ok\n";
+    }
+
+    # Cache de assets imutáveis
+    location ~* \.(js|css|png|jpg|jpeg|gif|svg|woff2?)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+}
+EOF
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=5s \
+    CMD wget -qO- http://localhost/healthz || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

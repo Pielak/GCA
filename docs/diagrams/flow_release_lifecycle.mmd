@@ -1,0 +1,13 @@
+stateDiagram-v2
+    [*] --> Declarada: YAML em backend/releases/
+    Declarada --> Pending: sync_declared_releases no startup
+    Pending --> Applied_Auto: apply_nondestructive_pending\n(se is_destructive=false)
+    Pending --> Aguardando_Admin: is_destructive=true
+    Aguardando_Admin --> Snapshotted: POST /admin/releases/{id}/apply\n(take_snapshots=true)
+    Snapshotted --> Applied_Manual: migrations OK + logs
+    Applied_Auto --> Rolled_Back_Project: projeto específico restaura snapshot
+    Applied_Manual --> Rolled_Back_Project: projeto específico restaura snapshot
+    Applied_Auto --> [*]
+    Applied_Manual --> [*]
+    Rolled_Back_Project --> Applied_Auto: release continua aplicada\n(rollback é por-projeto)
+    Rolled_Back_Project --> Applied_Manual

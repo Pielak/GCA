@@ -1,0 +1,31 @@
+sequenceDiagram
+    autonumber
+    actor R as Solicitante
+    actor Adm as Admin
+    participant UI as Frontend
+    participant API as Backend
+    participant DB as PostgreSQL
+    participant Mail as EmailService
+
+    R->>UI: Acessa /solicitar-projeto
+    UI->>API: GET /public/project-requests (fields)
+    UI-->>R: Wizard 2 passos (dados + questionário)
+    R->>UI: Submete solicitação
+    UI->>API: POST /public/project-requests
+    API->>DB: INSERT project_requests (PENDING)
+    API->>Mail: Notifica admins
+    API-->>UI: 201 request_id
+    Note over R,UI: Solicitação aguarda aprovação
+
+    Adm->>UI: /admin/projects (lista pendentes)
+    UI->>API: GET /admin/projects/pending
+    API->>DB: SELECT project_requests ... LEFT JOIN projects
+    DB-->>API: Requests + project_lifecycle_status
+    API-->>UI: Lista
+    Adm->>UI: Aprova
+    UI->>API: POST /admin/projects/{id}/approve
+    API->>DB: INSERT projects (status=active)
+    API->>DB: UPDATE project_requests SET status=APPROVED
+    API->>Mail: Notifica solicitante (agora GP)
+    API-->>UI: 200 project_id
+    UI-->>Adm: Projeto criado + card "Provisionado"
