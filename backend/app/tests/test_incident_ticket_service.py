@@ -60,6 +60,7 @@ async def test_dev_creates_ticket_routed_to_gp(db_session):
         description="Ao clicar em Regenerar OCG retorna 500",
         category="bug",
         priority="alta",
+    flow_description="fluxo de teste",
     )
     assert ticket.target_scope == "gp"
     assert ticket.status == "open"
@@ -82,6 +83,7 @@ async def test_gp_creates_ticket_routed_to_admin(db_session):
         description="GP do Time de Jurídico pediu export",
         category="pedido_feature",
         priority="media",
+    flow_description="fluxo de teste",
     )
     assert ticket.target_scope == "admin"
 
@@ -101,6 +103,7 @@ async def test_admin_creates_ticket_routed_to_admin(db_session):
         description="Retenção atual é 10 — validar se cobre cenário X",
         category="duvida",
         priority="baixa",
+    flow_description="fluxo de teste",
     )
     assert ticket.target_scope == "admin"
 
@@ -118,6 +121,7 @@ async def test_non_member_non_admin_cannot_create(db_session):
             project_id=project.id,
             author_id=outsider.id,
             title="x", description="y", category="bug", priority="baixa",
+        flow_description="fluxo de teste",
         )
 
 
@@ -136,10 +140,12 @@ async def test_dev_sees_only_own_tickets(db_session):
     await svc.create_ticket(
         db_session, project_id=project.id, author_id=dev_a.id,
         title="A", description="a", category="bug", priority="media",
+    flow_description="fluxo de teste",
     )
     await svc.create_ticket(
         db_session, project_id=project.id, author_id=dev_b.id,
         title="B", description="b", category="bug", priority="media",
+    flow_description="fluxo de teste",
     )
 
     a_sees = await svc.list_for_project(db_session, project_id=project.id, requester_id=dev_a.id)
@@ -162,10 +168,12 @@ async def test_gp_sees_all_project_tickets(db_session):
     await svc.create_ticket(
         db_session, project_id=project.id, author_id=dev.id,
         title="D", description="d", category="bug", priority="alta",
+    flow_description="fluxo de teste",
     )
     await svc.create_ticket(
         db_session, project_id=project.id, author_id=gp.id,
         title="G", description="g", category="pedido_feature", priority="media",
+    flow_description="fluxo de teste",
     )
 
     seen = await svc.list_for_project(db_session, project_id=project.id, requester_id=gp.id)
@@ -189,16 +197,19 @@ async def test_admin_aggregated_cross_project(db_session):
     await svc.create_ticket(
         db_session, project_id=p1.id, author_id=gp1.id,
         title="GP1", description="g1", category="bug", priority="alta",
+    flow_description="fluxo de teste",
     )
     # GP abre em P2 → target=admin
     await svc.create_ticket(
         db_session, project_id=p2.id, author_id=gp2.id,
         title="GP2", description="g2", category="duvida", priority="baixa",
+    flow_description="fluxo de teste",
     )
     # Dev abre em P1 → target=gp (NÃO deve vir no list_for_admin)
     await svc.create_ticket(
         db_session, project_id=p1.id, author_id=dev1.id,
         title="DEV1", description="d1", category="bug", priority="media",
+    flow_description="fluxo de teste",
     )
 
     admin_view = await svc.list_for_admin(db_session)
@@ -225,6 +236,7 @@ async def test_comment_updates_ticket_and_notifies(db_session):
     ticket = await svc.create_ticket(
         db_session, project_id=project.id, author_id=dev.id,
         title="Erro X", description="x", category="bug", priority="alta",
+    flow_description="fluxo de teste",
     )
     before = ticket.updated_at
 
@@ -263,6 +275,7 @@ async def test_resolve_sets_resolved_fields(db_session):
     ticket = await svc.create_ticket(
         db_session, project_id=project.id, author_id=dev.id,
         title="Y", description="y", category="bug", priority="media",
+    flow_description="fluxo de teste",
     )
 
     updated = await svc.update_status(
@@ -286,6 +299,7 @@ async def test_reopen_clears_resolved_fields(db_session):
     ticket = await svc.create_ticket(
         db_session, project_id=project.id, author_id=dev.id,
         title="Z", description="z", category="bug", priority="baixa",
+    flow_description="fluxo de teste",
     )
     await svc.update_status(db_session, ticket_id=ticket.id, actor_id=gp.id, new_status="resolved")
     reopened = await svc.update_status(
@@ -314,6 +328,7 @@ async def test_opening_ticket_notifies_gps(db_session):
         db_session, project_id=project.id, author_id=dev.id,
         title="Bug crítico", description="xyz",
         category="bug", priority="critica",
+    flow_description="fluxo de teste",
     )
 
     for gp_id in (gp1.id, gp2.id):
@@ -348,6 +363,7 @@ async def test_invalid_category_rejected(db_session):
         await svc.create_ticket(
             db_session, project_id=project.id, author_id=dev.id,
             title="x", description="y", category="nonsense", priority="baixa",
+        flow_description="fluxo de teste",
         )
 
 
@@ -361,6 +377,7 @@ async def test_invalid_priority_rejected(db_session):
         await svc.create_ticket(
             db_session, project_id=project.id, author_id=dev.id,
             title="x", description="y", category="bug", priority="urgentissimo",
+        flow_description="fluxo de teste",
         )
 
 
@@ -374,6 +391,7 @@ async def test_empty_title_rejected(db_session):
         await svc.create_ticket(
             db_session, project_id=project.id, author_id=dev.id,
             title="   ", description="y", category="bug", priority="baixa",
+        flow_description="fluxo de teste",
         )
 
 
@@ -393,6 +411,7 @@ async def test_foreign_project_member_denied(db_session):
     ticket = await svc.create_ticket(
         db_session, project_id=p_a.id, author_id=dev_a.id,
         title="privado A", description="...", category="bug", priority="baixa",
+    flow_description="fluxo de teste",
     )
 
     # GP do projeto B tenta ver → PermissionError

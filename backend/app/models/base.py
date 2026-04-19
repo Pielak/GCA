@@ -21,6 +21,10 @@ class User(Base):
     full_name = Column(String(255))
     is_active = Column(Boolean, default=True, index=True)
     is_admin = Column(Boolean, default=False)
+    # MVP 6 Emenda 2026-04-19 — Área de Sustentação (cross-instância).
+    # Admin HERDA Support: verificação em código é (is_admin OR is_support).
+    # Support nunca vira Admin por essa via.
+    is_support = Column(Boolean, default=False, nullable=False)
     first_access_completed = Column(Boolean, default=False, index=True)  # Tracks if first password change done
     password_changed_at = Column(DateTime(timezone=True), nullable=True)  # Last password change timestamp
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -1103,6 +1107,13 @@ class IncidentTicket(Base):
     status = Column(String(20), nullable=False, default="open")  # open | in_progress | resolved | closed
     title = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
+    # MVP 6 Emenda — contexto obrigatório do incidente.
+    # section_reference: autopreenchida pelo frontend com a rota atual.
+    # flow_description: textarea obrigatório (modal recusa vazio).
+    # Ambos nullable no DB pra retrocompat com tickets anteriores à emenda;
+    # service valida presença em criações novas.
+    section_reference = Column(String(300), nullable=True)
+    flow_description = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
@@ -1112,6 +1123,29 @@ class IncidentTicket(Base):
         Index("idx_incident_tickets_project_created", project_id, created_at.desc()),
         Index("idx_incident_tickets_target_status", target_scope, status, created_at.desc()),
         Index("idx_incident_tickets_author", author_id, created_at.desc()),
+    )
+
+
+class IncidentTicketAttachment(Base):
+    """MVP 6 Emenda — anexo em ticket de incidente (imagem / log / texto / pdf).
+
+    Storage: volume gca-uploads em incidents/{ticket_id}/{hash}_{filename}.
+    Até 5 anexos por ticket, 10 MB cada (enforcement no service/router).
+    """
+    __tablename__ = "incident_ticket_attachments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("incident_tickets.id", ondelete="CASCADE"), nullable=False)
+    uploader_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    filename = Column(String(255), nullable=False)
+    mime = Column(String(120), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    sha256 = Column(String(64), nullable=False)
+    storage_path = Column(String(500), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_incident_attachments_ticket", ticket_id, created_at.asc()),
     )
 
 

@@ -11,19 +11,22 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.middleware.auth import get_current_user_from_token
-from app.models.base import IncidentTicket, IncidentTicketComment, Project, User
+from app.models.base import (
+    IncidentTicket, IncidentTicketAttachment, IncidentTicketComment, Project, User,
+)
 from app.services import incident_ticket_service as svc
 
 router = APIRouter(prefix="/projects/{project_id}/incidents", tags=["incident-tickets"])
 ticket_router = APIRouter(prefix="/incidents", tags=["incident-tickets"])
 admin_router = APIRouter(prefix="/admin/incidents", tags=["admin-incidents"])
+support_router = APIRouter(prefix="/admin/support", tags=["admin-support"])
 
 
 # ─── Schemas ────────────────────────────────────────────────────────────────
@@ -33,6 +36,8 @@ class TicketCreateRequest(BaseModel):
     description: str = Field(..., min_length=1)
     category: str
     priority: str
+    flow_description: str = Field(..., min_length=1, description="Obrigatório (Emenda 2026-04-19)")
+    section_reference: Optional[str] = Field(None, max_length=300)
 
 
 class TicketStatusRequest(BaseModel):
@@ -55,10 +60,36 @@ class TicketItem(BaseModel):
     status: str
     title: str
     description: str
+    section_reference: Optional[str] = None
+    flow_description: Optional[str] = None
     created_at: Optional[datetime]
     updated_at: Optional[datetime]
     resolved_at: Optional[datetime]
     resolved_by: Optional[UUID]
+
+
+class AttachmentItem(BaseModel):
+    id: UUID
+    ticket_id: UUID
+    uploader_id: UUID
+    uploader_name: Optional[str] = None
+    filename: str
+    mime: str
+    size_bytes: int
+    sha256: str
+    created_at: Optional[datetime]
+
+
+class SupportUserItem(BaseModel):
+    id: UUID
+    email: str
+    full_name: Optional[str] = None
+    is_admin: bool
+    is_support: bool
+
+
+class SupportFlagRequest(BaseModel):
+    is_support: bool
 
 
 class CommentItem(BaseModel):
@@ -77,6 +108,11 @@ class TicketListResponse(BaseModel):
 class TicketDetailResponse(BaseModel):
     ticket: TicketItem
     comments: list[CommentItem]
+    attachments: list[AttachmentItem] = []
+
+
+class SupportListResponse(BaseModel):
+    items: list[SupportUserItem]
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -99,6 +135,8 @@ def _ticket_to_item(
         status=t.status,
         title=t.title,
         description=t.description,
+        section_reference=t.section_reference,
+        flow_description=t.flow_description,
         created_at=t.created_at,
         updated_at=t.updated_at,
         resolved_at=t.resolved_at,
@@ -136,6 +174,21 @@ async def _require_admin(
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if not user or not user.is_active or not user.is_admin:
         raise HTTPException(status_code=403, detail="Acesso restrito a Admin.")
+    return user_id
+
+
+async def _require_admin_or_support(
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> UUID:
+    """Emenda 2026-04-19: /admin/incidents aceita Admin OU Sustentação.
+    Admin herda Support; Support puro também passa."""
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user or not user.is_active or not (user.is_admin or user.is_support):
+        raise HTTPException(
+            status_code=403,
+            detail="Acesso restrito a Admin ou Equipe Sustentação.",
+        )
     return user_id
 
 
@@ -181,6 +234,8 @@ async def create_project_ticket(
             description=payload.description,
             category=payload.category,
             priority=payload.priority,
+            flow_description=payload.flow_description,
+            section_reference=payload.section_reference,
         )
     except ValueError as e:
         msg = str(e)
@@ -208,14 +263,15 @@ async def get_ticket_detail(
         raise HTTPException(status_code=403, detail=str(e))
 
     projects, authors = await _hydrate_names(db, [ticket])
-    # comentários: hydrate author names
-    comment_author_ids = {c.author_id for c in comments}
-    comment_authors = {
+    # comentários + anexos: hydrate author names
+    attachments = await svc.list_attachments(db, ticket_id=ticket_id)
+    all_user_ids = {c.author_id for c in comments} | {a.uploader_id for a in attachments}
+    user_names = {
         u.id: (u.full_name or u.email or "")
         for u in (await db.execute(
-            select(User.id, User.full_name, User.email).where(User.id.in_(comment_author_ids))
+            select(User.id, User.full_name, User.email).where(User.id.in_(all_user_ids))
         )).all()
-    } if comment_author_ids else {}
+    } if all_user_ids else {}
 
     return TicketDetailResponse(
         ticket=_ticket_to_item(
@@ -228,11 +284,25 @@ async def get_ticket_detail(
                 id=c.id,
                 ticket_id=c.ticket_id,
                 author_id=c.author_id,
-                author_name=comment_authors.get(c.author_id),
+                author_name=user_names.get(c.author_id),
                 body=c.body,
                 created_at=c.created_at,
             )
             for c in comments
+        ],
+        attachments=[
+            AttachmentItem(
+                id=a.id,
+                ticket_id=a.ticket_id,
+                uploader_id=a.uploader_id,
+                uploader_name=user_names.get(a.uploader_id),
+                filename=a.filename,
+                mime=a.mime,
+                size_bytes=a.size_bytes,
+                sha256=a.sha256,
+                created_at=a.created_at,
+            )
+            for a in attachments
         ],
     )
 
@@ -313,16 +383,172 @@ async def update_ticket_status(
     )
 
 
+# ─── Anexos (Emenda 2026-04-19) ───────────────────────────────────────────
+
+@ticket_router.post("/{ticket_id}/attachments", response_model=AttachmentItem, status_code=201)
+async def upload_ticket_attachment(
+    ticket_id: UUID,
+    file: UploadFile = File(...),
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Anexa arquivo ao ticket (imagem / log / texto / pdf). Autorização:
+    mesma regra do get_ticket (se pode ver, pode anexar)."""
+    try:
+        await svc.get_ticket(db, ticket_id=ticket_id, requester_id=user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    content = await file.read()
+    try:
+        att = await svc.upload_attachment(
+            db,
+            ticket_id=ticket_id,
+            uploader_id=user_id,
+            filename=file.filename or "arquivo",
+            mime=file.content_type or "application/octet-stream",
+            content=content,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    uploader_name = (user.full_name or user.email) if user else None
+    return AttachmentItem(
+        id=att.id,
+        ticket_id=att.ticket_id,
+        uploader_id=att.uploader_id,
+        uploader_name=uploader_name,
+        filename=att.filename,
+        mime=att.mime,
+        size_bytes=att.size_bytes,
+        sha256=att.sha256,
+        created_at=att.created_at,
+    )
+
+
+@ticket_router.get("/{ticket_id}/attachments/{attachment_id}/download", response_class=Response)
+async def download_ticket_attachment(
+    ticket_id: UUID,
+    attachment_id: UUID,
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Download do anexo. Autorização: quem pode ver o ticket pode baixar."""
+    try:
+        await svc.get_ticket(db, ticket_id=ticket_id, requester_id=user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+    att = (await db.execute(
+        select(IncidentTicketAttachment).where(
+            IncidentTicketAttachment.id == attachment_id,
+            IncidentTicketAttachment.ticket_id == ticket_id,
+        )
+    )).scalar_one_or_none()
+    if not att:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+
+    try:
+        data = svc.read_attachment_bytes(att)
+    except ValueError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return Response(
+        content=data,
+        media_type=att.mime,
+        headers={"Content-Disposition": f'attachment; filename="{att.filename}"'},
+    )
+
+
+@ticket_router.delete("/{ticket_id}/attachments/{attachment_id}", status_code=204)
+async def delete_ticket_attachment(
+    ticket_id: UUID,
+    attachment_id: UUID,
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove anexo. Autor do anexo ou Admin (is_admin=True).
+    Support puro NÃO pode excluir anexos de outros usuários."""
+    att_check = (await db.execute(
+        select(IncidentTicketAttachment).where(
+            IncidentTicketAttachment.id == attachment_id,
+            IncidentTicketAttachment.ticket_id == ticket_id,
+        )
+    )).scalar_one_or_none()
+    if not att_check:
+        raise HTTPException(status_code=404, detail="Anexo não encontrado.")
+
+    try:
+        await svc.delete_attachment(db, attachment_id=attachment_id, actor_id=user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+
+
+# ─── Gestão Equipe Sustentação (Emenda 2026-04-19) ────────────────────────
+
+@support_router.get("", response_model=SupportListResponse)
+async def list_support_team(
+    _admin: UUID = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista membros da Equipe Sustentação (is_admin OR is_support).
+    Admin só."""
+    users = await svc.list_support_team(db)
+    return SupportListResponse(items=[
+        SupportUserItem(
+            id=u.id,
+            email=u.email,
+            full_name=u.full_name,
+            is_admin=bool(u.is_admin),
+            is_support=bool(u.is_support),
+        ) for u in users
+    ])
+
+
+@support_router.patch("/{target_user_id}", response_model=SupportUserItem)
+async def set_support_flag(
+    target_user_id: UUID,
+    payload: SupportFlagRequest,
+    actor_id: UUID = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promove ou rebaixa is_support de um usuário. Admin só.
+    Não afeta is_admin (contrato §7 MVP 6 emenda)."""
+    try:
+        user = await svc.set_support_flag(
+            db, target_user_id=target_user_id, new_value=payload.is_support, actor_id=actor_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return SupportUserItem(
+        id=user.id,
+        email=user.email,
+        full_name=user.full_name,
+        is_admin=bool(user.is_admin),
+        is_support=bool(user.is_support),
+    )
+
+
 # ─── Admin aggregated ──────────────────────────────────────────────────────
 
 @admin_router.get("", response_model=TicketListResponse)
 async def list_admin_tickets(
     status: Optional[str] = Query(None),
     project_id: Optional[UUID] = Query(None),
-    _admin: UUID = Depends(_require_admin),
+    _viewer: UUID = Depends(_require_admin_or_support),
     db: AsyncSession = Depends(get_db),
 ):
-    """Visão cross-projeto dos tickets escalados a Admin (target_scope='admin')."""
+    """Visão cross-projeto dos tickets escalados (target_scope='admin').
+    Acessível a Admin OU Equipe Sustentação (Emenda 2026-04-19)."""
     tickets = await svc.list_for_admin(db, status_filter=status, project_id=project_id)
     projects, authors = await _hydrate_names(db, tickets)
     return TicketListResponse(items=[

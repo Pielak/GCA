@@ -2,16 +2,28 @@
 
 Roteamento por papel do autor:
   Dev/Tester/QA  → target_scope='gp'    (GPs do projeto são notificados)
-  GP             → target_scope='admin' (Admins da instância são notificados)
-  Admin          → target_scope='admin' (demais Admins são notificados)
+  GP             → target_scope='admin' (Admins + Sustentação recebem)
+  Admin          → target_scope='admin' (demais Admins + Sustentação recebem)
 
 Compartimentalização: todo predicado inclui project_id. Ticket de projeto
-A nunca é lido por não-admin fora do projeto A. Admin vê cross-projeto
-via target_scope='admin'.
+A nunca é lido por não-admin fora do projeto A. Admin+Sustentação vêem
+cross-projeto via target_scope='admin'.
+
+Emenda 2026-04-19:
+- Destinatários admin = (is_admin=True OR is_support=True) — Admin herda.
+- Support (is_admin=False, is_support=True) pode ler/comentar/mudar status
+  mas não é Admin.
+- Anexos: upload_attachment/list/read/delete (até 5/10MB/tipos restritos).
+- Campos section_reference + flow_description obrigatórios em novas criações.
 """
 from __future__ import annotations
 
+import hashlib
+import os
+import re
+import unicodedata
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal, Optional
 from uuid import UUID
 
@@ -20,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import (
     IncidentTicket,
+    IncidentTicketAttachment,
     IncidentTicketComment,
     Project,
     ProjectMember,
@@ -36,6 +49,29 @@ Status = Literal["open", "in_progress", "resolved", "closed"]
 VALID_CATEGORIES: tuple[str, ...] = ("bug", "duvida", "pedido_feature", "incidente_pipeline")
 VALID_PRIORITIES: tuple[str, ...] = ("baixa", "media", "alta", "critica")
 VALID_STATUS: tuple[str, ...] = ("open", "in_progress", "resolved", "closed")
+
+# MVP 6 Emenda — anexos
+ATTACHMENT_STORAGE_ROOT = "/tmp/gca-storage/incidents"
+ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024  # 10 MB por arquivo
+ATTACHMENT_MAX_PER_TICKET = 5
+ATTACHMENT_ALLOWED_MIME: tuple[str, ...] = (
+    "image/png", "image/jpeg", "image/webp", "image/gif",
+    "text/plain", "application/json", "application/pdf",
+    "application/octet-stream",  # .log às vezes é inferido como octet-stream
+)
+ATTACHMENT_ALLOWED_EXT: tuple[str, ...] = (
+    ".png", ".jpg", ".jpeg", ".webp", ".gif",
+    ".txt", ".log", ".json", ".pdf",
+)
+
+
+def _has_admin_scope(user: User) -> bool:
+    """Admin HERDA Support. Regra dura (contrato §7 MVP 6 emenda).
+
+    Retorna True para is_admin OR is_support — ambos enxergam tickets
+    com target_scope='admin'.
+    """
+    return bool(user.is_admin or user.is_support)
 
 
 # ─── Resolução de papel/destinatários ──────────────────────────────────────
@@ -91,10 +127,10 @@ async def _list_recipients(
         )).scalars().all()
         return [uid for uid in rows if uid != author_id]
 
-    # admin
+    # admin → Admin + Sustentação (is_admin OR is_support). Emenda 2026-04-19.
     rows = (await db.execute(
         select(User.id).where(
-            User.is_admin.is_(True),
+            or_(User.is_admin.is_(True), User.is_support.is_(True)),
             User.is_active.is_(True),
         )
     )).scalars().all()
@@ -112,19 +148,32 @@ async def create_ticket(
     description: str,
     category: Category,
     priority: Priority,
+    flow_description: str,
+    section_reference: Optional[str] = None,
 ) -> IncidentTicket:
     """Cria ticket, resolve target_scope automaticamente, notifica
-    destinatários. commit ocorre dentro."""
+    destinatários. commit ocorre dentro.
+
+    Emenda 2026-04-19: flow_description é obrigatório; section_reference
+    é opcional (o frontend autopreenche com a rota atual).
+    """
     if category not in VALID_CATEGORIES:
         raise ValueError(f"Categoria inválida: {category}")
     if priority not in VALID_PRIORITIES:
         raise ValueError(f"Prioridade inválida: {priority}")
     title = (title or "").strip()
     description = (description or "").strip()
+    flow_description = (flow_description or "").strip()
     if not title or not description:
         raise ValueError("Título e descrição são obrigatórios.")
     if len(title) > 200:
         raise ValueError("Título excede 200 caracteres.")
+    if not flow_description:
+        raise ValueError("Fluxo do incidente (flow_description) é obrigatório.")
+
+    section_reference = (section_reference or "").strip() or None
+    if section_reference and len(section_reference) > 300:
+        section_reference = section_reference[:300]
 
     # Confirma projeto existe (evita FK violation mais adiante).
     project = (await db.execute(
@@ -144,6 +193,8 @@ async def create_ticket(
         status="open",
         title=title,
         description=description,
+        section_reference=section_reference,
+        flow_description=flow_description,
     )
     db.add(ticket)
     await db.commit()
@@ -278,7 +329,7 @@ async def list_for_project(
         q = q.where(IncidentTicket.status == status_filter)
     q = q.order_by(IncidentTicket.created_at.desc())
 
-    if user.is_admin:
+    if _has_admin_scope(user):
         return list((await db.execute(q)).scalars().all())
 
     member = (await db.execute(
@@ -334,9 +385,11 @@ async def get_ticket(
         raise PermissionError("Usuário inválido ou inativo.")
 
     allowed = False
-    if user.is_admin:
-        # Admin vê tickets target=admin diretamente + pode ver target=gp
-        # de qualquer projeto (admin tem visão global).
+    if _has_admin_scope(user):
+        # Admin ou Support (Sustentação) vê tickets target=admin
+        # diretamente + pode ver target=gp de qualquer projeto.
+        # Regra dura: Admin herda Support; Support compartilha visão
+        # cross-projeto dos tickets (contrato §7 MVP 6 emenda).
         allowed = True
     elif ticket.author_id == requester_id:
         allowed = True
@@ -401,3 +454,207 @@ async def _notify_recipients(
             link=_link_for(ticket),
             severity=severity,
         )
+
+
+# ─── Anexos (Emenda 2026-04-19) ────────────────────────────────────────────
+
+_SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def _sanitize_filename(name: str) -> str:
+    """Normaliza nome de arquivo para armazenamento seguro no volume.
+
+    Remove acentos, substitui caracteres fora de [A-Za-z0-9._-] por `_`,
+    limita a 120 chars. Mantém extensão se houver.
+    """
+    name = unicodedata.normalize("NFKD", name or "").encode("ascii", "ignore").decode("ascii")
+    name = name.strip().replace(" ", "_")
+    name = _SAFE_FILENAME_RE.sub("_", name)
+    name = re.sub(r"_+", "_", name).strip("._") or "arquivo"
+    return name[:120]
+
+
+def _validate_attachment(filename: str, mime: str, content: bytes) -> None:
+    """Valida tamanho, mime e extensão do anexo. Levanta ValueError."""
+    if not content:
+        raise ValueError("Arquivo vazio.")
+    if len(content) > ATTACHMENT_MAX_BYTES:
+        raise ValueError(
+            f"Arquivo excede o limite de {ATTACHMENT_MAX_BYTES // (1024 * 1024)} MB."
+        )
+    if mime not in ATTACHMENT_ALLOWED_MIME:
+        raise ValueError(f"MIME type não permitido: {mime}")
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in ATTACHMENT_ALLOWED_EXT:
+        raise ValueError(f"Extensão não permitida: {ext}")
+
+
+async def upload_attachment(
+    db: AsyncSession,
+    *,
+    ticket_id: UUID,
+    uploader_id: UUID,
+    filename: str,
+    mime: str,
+    content: bytes,
+) -> IncidentTicketAttachment:
+    """Adiciona anexo ao ticket. Validação de tamanho/tipo, contagem
+    máxima (5 por ticket), sanitização do nome, sha256 pra integridade.
+
+    Autorização: uploader precisa poder ver o ticket (get_ticket já
+    valida Admin/Support/autor/GP). Enforcement no router que chama
+    get_ticket antes.
+    """
+    _validate_attachment(filename, mime, content)
+
+    ticket = (await db.execute(
+        select(IncidentTicket).where(IncidentTicket.id == ticket_id)
+    )).scalar_one_or_none()
+    if not ticket:
+        raise ValueError("Ticket não encontrado.")
+
+    from sqlalchemy import func
+    current_count = int((await db.execute(
+        select(func.count(IncidentTicketAttachment.id)).where(
+            IncidentTicketAttachment.ticket_id == ticket_id
+        )
+    )).scalar() or 0)
+    if current_count >= ATTACHMENT_MAX_PER_TICKET:
+        raise ValueError(
+            f"Ticket já tem o máximo de {ATTACHMENT_MAX_PER_TICKET} anexos."
+        )
+
+    sha = hashlib.sha256(content).hexdigest()
+    safe_name = _sanitize_filename(filename)
+
+    dir_path = Path(ATTACHMENT_STORAGE_ROOT) / str(ticket_id)
+    dir_path.mkdir(parents=True, exist_ok=True)
+    file_path = dir_path / f"{sha[:12]}_{safe_name}"
+    file_path.write_bytes(content)
+
+    rel_path = str(file_path.relative_to(ATTACHMENT_STORAGE_ROOT))
+
+    att = IncidentTicketAttachment(
+        ticket_id=ticket_id,
+        uploader_id=uploader_id,
+        filename=safe_name,
+        mime=mime,
+        size_bytes=len(content),
+        sha256=sha,
+        storage_path=rel_path,
+    )
+    db.add(att)
+    ticket.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(att)
+    return att
+
+
+async def list_attachments(
+    db: AsyncSession, *, ticket_id: UUID
+) -> list[IncidentTicketAttachment]:
+    """Lista anexos ordenados por created_at ASC. Autorização é feita
+    pelo caller (router chama get_ticket antes)."""
+    return list((await db.execute(
+        select(IncidentTicketAttachment)
+        .where(IncidentTicketAttachment.ticket_id == ticket_id)
+        .order_by(IncidentTicketAttachment.created_at.asc())
+    )).scalars().all())
+
+
+def read_attachment_bytes(attachment: IncidentTicketAttachment) -> bytes:
+    """Lê bytes do anexo do volume + revalida sha256 (integridade)."""
+    full = Path(ATTACHMENT_STORAGE_ROOT) / attachment.storage_path
+    if not full.exists():
+        raise ValueError("Arquivo não encontrado no volume.")
+    data = full.read_bytes()
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != attachment.sha256:
+        raise ValueError(
+            f"SHA256 divergente (gravado={attachment.sha256[:12]} atual={actual[:12]})"
+        )
+    return data
+
+
+async def delete_attachment(
+    db: AsyncSession,
+    *,
+    attachment_id: UUID,
+    actor_id: UUID,
+) -> None:
+    """Remove anexo do DB + do volume. Autor do anexo OU Admin pode excluir.
+    Support pode excluir anexos próprios mas não de outros (não é Admin)."""
+    att = (await db.execute(
+        select(IncidentTicketAttachment).where(IncidentTicketAttachment.id == attachment_id)
+    )).scalar_one_or_none()
+    if not att:
+        raise ValueError("Anexo não encontrado.")
+
+    actor = (await db.execute(
+        select(User).where(User.id == actor_id)
+    )).scalar_one_or_none()
+    if not actor or not actor.is_active:
+        raise PermissionError("Usuário inválido ou inativo.")
+
+    is_admin = bool(actor.is_admin)  # Admin puro. Support NÃO pode deletar anexo de outros.
+    is_uploader = att.uploader_id == actor_id
+    if not (is_admin or is_uploader):
+        raise PermissionError("Apenas o autor do anexo ou um Admin pode excluir.")
+
+    full = Path(ATTACHMENT_STORAGE_ROOT) / att.storage_path
+    try:
+        if full.exists():
+            full.unlink()
+    except OSError:
+        # best-effort; registro do DB é a fonte de verdade pra auditoria
+        pass
+    await db.delete(att)
+    await db.commit()
+
+
+# ─── Gestão da Equipe Sustentação ─────────────────────────────────────────
+
+async def set_support_flag(
+    db: AsyncSession,
+    *,
+    target_user_id: UUID,
+    new_value: bool,
+    actor_id: UUID,
+) -> User:
+    """Promove/rebaixa is_support de um usuário. Apenas Admin pode.
+
+    Regra dura (contrato §7 MVP 6 emenda): Admin pode ativar is_support
+    em si mesmo (acumula Sustentação). UI de "Equipe Sustentação" nunca
+    promove Support a Admin — isso é gestão de usuários canônica.
+    """
+    actor = (await db.execute(
+        select(User).where(User.id == actor_id)
+    )).scalar_one_or_none()
+    if not actor or not actor.is_active or not actor.is_admin:
+        raise PermissionError("Apenas Admin pode gerenciar a Equipe Sustentação.")
+
+    target = (await db.execute(
+        select(User).where(User.id == target_user_id)
+    )).scalar_one_or_none()
+    if not target:
+        raise ValueError("Usuário alvo não encontrado.")
+    if not target.is_active:
+        raise ValueError("Usuário alvo inativo.")
+
+    target.is_support = bool(new_value)
+    await db.commit()
+    await db.refresh(target)
+    return target
+
+
+async def list_support_team(db: AsyncSession) -> list[User]:
+    """Lista usuários com is_support=True OU is_admin=True (ambos fazem
+    parte do conjunto de destinatários de target='admin'). Ordenação
+    apresenta Admins primeiro, depois Support puros."""
+    rows = (await db.execute(
+        select(User).where(
+            or_(User.is_admin.is_(True), User.is_support.is_(True)),
+            User.is_active.is_(True),
+        ).order_by(User.is_admin.desc(), User.full_name.asc())
+    )).scalars().all()
+    return list(rows)
