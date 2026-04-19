@@ -88,7 +88,8 @@ Os únicos papéis canônicos implementáveis nesta versão são:
 - aprova módulos, OCG e decisões-chave;
 - convida time;
 - mantém credenciais e parâmetros do projeto quando aplicável;
-- **não escreve código**.
+- **soberano do projeto** (emenda 2026-04-19): dentro do projeto o GP está acima dos demais papéis (Dev, Tester, QA) e tem acesso a **todas as funcionalidades** que os demais têm. A restrição anterior "GP não escreve código" fica revogada — o GP pode operar CodeGen, pipeline, testes e demais fluxos quando for necessário para destravar o projeto. A separação de responsabilidades do dia-a-dia continua (Dev escreve código como atividade principal; Tester cria testes; QA revisa), mas o GP não perde acesso por essas especializações: ele vê e opera tudo do projeto dele.
+- análogo cross-escopo: **GP está para o projeto assim como Admin está para a instância**.
 
 #### Dev
 - implementa código;

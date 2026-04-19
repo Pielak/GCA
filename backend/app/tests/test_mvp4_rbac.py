@@ -139,8 +139,9 @@ async def test_qa_approve_rbac(role, expected):
 @pytest.mark.parametrize("role,expected", [
     ("dev", 404),       # passa RBAC, falha em test_id inexistente
     ("tester", 404),    # passa RBAC, falha em test_id inexistente
-    ("gp", 403),        # RBAC bloqueia
-    ("qa", 403),        # RBAC bloqueia
+    # Emenda RBAC 2026-04-19: GP é soberano do projeto → pipeline:execute OK
+    ("gp", 404),        # passa RBAC (emenda), falha em test_id inexistente
+    ("qa", 403),        # RBAC bloqueia — QA revisa, não executa pipeline
 ])
 async def test_qa_update_test_rbac(role, expected):
     uid, org_id, project_id = await _make_project_with_member(role)

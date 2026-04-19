@@ -512,14 +512,22 @@ export function AdminProjectsPage() {
                               )}
                             </>
                           ) : (
-                            // Request APPROVED mas sem projeto real em 'projects' → órfão
+                            // Request APPROVED mas sem projeto real em 'projects' → órfão.
+                            // Botão com label textual, destacado em vermelho, pra deixar
+                            // explícito pro admin que a única ação possível é limpar a
+                            // solicitação (não há como mudar status de um projeto que
+                            // não existe mais).
                             <button
                               onClick={() => handleCleanupOrphan(proj)}
                               disabled={actionLoading === proj.id}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-900/20 disabled:opacity-30 transition-colors"
-                              title="Limpar solicitação órfã (projeto não existe mais)"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-red-500/10 text-red-300 hover:bg-red-500/20 hover:text-red-200 border border-red-500/30 disabled:opacity-30 transition-colors text-[11px]"
+                              title="Remover esta solicitação órfã (projeto correspondente foi deletado no passado)"
                             >
-                              {actionLoading === proj.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <AlertOctagon className="w-4 h-4" />}
+                              {actionLoading === proj.id
+                                ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                : <AlertOctagon className="w-3.5 h-3.5" />
+                              }
+                              Limpar órfão
                             </button>
                           )
                         })()}

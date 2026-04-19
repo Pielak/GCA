@@ -558,18 +558,19 @@ async def test_regenerate_file_happy_path_commits():
 
 
 # ============================================================================
-# DT-042: RBAC enforcement — GP é barrado, Dev permitido.
-# Contrato §4.1: GP não escreve código; Dev implementa.
+# DT-042 + Emenda RBAC 2026-04-19: GP agora É SOBERANO do projeto
+# (contrato §4.1 emendado). GP tem code:write + git:commit via union de Dev.
+# Testes invertidos: GP deve passar (não mais 403).
 # ============================================================================
 
 
 @pytest.mark.asyncio
-async def test_scaffold_rbac_blocks_gp():
-    """DT-042: GP não tem code:write → /scaffold retorna 403."""
+async def test_scaffold_rbac_gp_now_allowed_after_emenda():
+    """Emenda 2026-04-19: GP tem code:write — scaffold NÃO retorna 403."""
     uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
-        project_name="P gp-blocked",
+        project_name="P gp-now-allowed",
         user_email_prefix="scaffold-gp",
-        role="gp",  # GP não tem code:write
+        role="gp",
     )
 
     token = create_access_token(data={"sub": str(uid)})
@@ -583,20 +584,20 @@ async def test_scaffold_rbac_blocks_gp():
                 json={"project_id": str(project_id)},
             )
 
-        assert resp.status_code == 403, resp.text
-        body = resp.json()
-        assert "code:write" in body["detail"]
-        assert "gp" in body["detail"].lower()
+        # Não 403 — GP é soberano do projeto. Outros erros (400/422/500) são
+        # aceitáveis pra este teste pois só checamos que o guard de RBAC
+        # não barra mais.
+        assert resp.status_code != 403, f"GP foi bloqueado indevidamente: {resp.text}"
 
     finally:
         await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
 
 
 @pytest.mark.asyncio
-async def test_scaffold_apply_rbac_blocks_gp():
-    """DT-042: GP não tem git:commit → /scaffold/apply retorna 403."""
+async def test_scaffold_apply_rbac_gp_now_allowed_after_emenda():
+    """Emenda 2026-04-19: GP tem git:commit — scaffold/apply NÃO retorna 403."""
     uid, org_id, project_id, git_id, settings_id, q_id = await _make_user_org_project_with_full_setup(
-        project_name="P gp-apply",
+        project_name="P gp-apply-allowed",
         user_email_prefix="apply-gp",
         role="gp",
     )
@@ -615,9 +616,7 @@ async def test_scaffold_apply_rbac_blocks_gp():
                 },
             )
 
-        assert resp.status_code == 403, resp.text
-        body = resp.json()
-        assert "git:commit" in body["detail"]
+        assert resp.status_code != 403, f"GP foi bloqueado indevidamente: {resp.text}"
 
     finally:
         await _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id)
