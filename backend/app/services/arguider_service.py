@@ -27,6 +27,60 @@ logger = structlog.get_logger(__name__)
 
 
 # ============================================================================
+# JSON parsing helpers (DT-067)
+# ============================================================================
+_CODE_FENCE_RE = re.compile(
+    r"^```(?:json|JSON)?\s*\n?(?P<body>.*?)\n?```\s*$",
+    re.DOTALL,
+)
+
+
+def _strip_code_fence(text: str) -> str:
+    """Se o texto todo estiver dentro de ```json ... ```, retorna o
+    conteúdo interno. Caso contrário, retorna o texto como veio."""
+    match = _CODE_FENCE_RE.match(text.strip())
+    if match:
+        return match.group("body").strip()
+    return text
+
+
+def _extract_balanced_object(text: str) -> Optional[str]:
+    """Encontra o primeiro objeto JSON bem-formado com `{}` balanceado
+    no texto. Respeita strings (inclusive escapes e aspas internas) pra
+    não contar chaves que fazem parte de valores textuais.
+
+    Retorna o trecho exato (substring) ou None quando não há `{` válido.
+    """
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+    for i in range(start, len(text)):
+        char = text[i]
+        if escape:
+            escape = False
+            continue
+        if char == "\\":
+            escape = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : i + 1]
+    return None
+
+
+# ============================================================================
 # Document Extractor
 # ============================================================================
 
@@ -507,15 +561,54 @@ poor_definitions, improvement_suggestions, module_candidates, ocg_fields_to_upda
 
     @staticmethod
     def _extract_json(text: str) -> dict:
+        """Extrai objeto JSON da resposta do LLM tolerando formatos comuns:
+
+        1. JSON puro: `{"k": "v"}`
+        2. Dentro de code fence: ```json\n{...}\n``` (Claude Haiku costuma
+           entregar assim mesmo quando o prompt pede "só JSON").
+        3. JSON precedido/seguido por preâmbulo em linguagem natural.
+        4. Objeto JSON com chaves `{}` aninhadas — usa contagem de chaves
+           em vez de regex gananciosa.
+
+        Quando todas as estratégias falham, loga o texto completo (truncado
+        a 2000 chars) em vez de só os primeiros 200. Sem isso, quando a
+        análise sai vazia (dogfood 2026-04-19: Haiku respondeu com fence
+        e regex `\\{.*\\}` deu match mas parse falhou por conteúdo após
+        o primeiro `{`), o operador não consegue diagnosticar.
+        """
+        if not text:
+            logger.warning("arguider.json_parse_failed", reason="empty_text")
+            return {}
+
+        stripped = text.strip()
         try:
-            return json.loads(text)
+            return json.loads(stripped)
         except json.JSONDecodeError:
             pass
-        match = re.search(r"\{.*\}", text, re.DOTALL)
-        if match:
+
+        fenced = _strip_code_fence(stripped)
+        if fenced != stripped:
             try:
-                return json.loads(match.group())
+                return json.loads(fenced)
             except json.JSONDecodeError:
-                pass
-        logger.warning("arguider.json_parse_failed", text_preview=text[:200])
+                stripped = fenced
+
+        extracted = _extract_balanced_object(stripped)
+        if extracted is not None:
+            try:
+                return json.loads(extracted)
+            except json.JSONDecodeError as exc:
+                logger.warning(
+                    "arguider.json_parse_failed",
+                    reason="balanced_object_invalid",
+                    error=str(exc),
+                    extracted_preview=extracted[:500],
+                )
+
+        logger.warning(
+            "arguider.json_parse_failed",
+            reason="no_valid_json_found",
+            text_len=len(text),
+            text_preview=text[:2000],
+        )
         return {}
