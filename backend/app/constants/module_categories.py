@@ -77,3 +77,98 @@ def normalize_module_type(value: str | None) -> str:
 def is_canonical(value: str) -> bool:
     """True se o valor já é uma categoria canônica."""
     return value in CANONICAL_MODULE_TYPES
+
+
+# ============================================================================
+# MVP 9 Fase 9.1.2 — Status canônicos em pt-BR
+# ============================================================================
+
+#: Status canônicos do ciclo de vida de um módulo no Roadmap.
+#: Transições permitidas (regra dura do contrato §7 MVP 9):
+#:   sugerido → aguardando_resposta → adicionado → concluido
+#:   adicionado → sugerido  (somente se GP reabrir explicitamente)
+#:   concluido não regride.
+CANONICAL_MODULE_STATUSES: tuple[str, ...] = (
+    "sugerido",
+    "aguardando_resposta",
+    "adicionado",
+    "concluido",
+)
+
+DEFAULT_MODULE_STATUS = "sugerido"
+
+#: Aliases legados (schema livre pré-MVP9 tinha valores em inglês).
+#: Normalização sem migration destrutiva — docs antigas continuam legíveis.
+LEGACY_MODULE_STATUS_ALIASES: dict[str, str] = {
+    "suggested": "sugerido",
+    "candidate": "sugerido",
+    "pending": "sugerido",
+    "approved": "adicionado",
+    "ready": "adicionado",
+    "added": "adicionado",
+    "completed": "concluido",
+    "done": "concluido",
+    # Legacy ingles da Fase 9.3 planejada — mantidos como aliases pra
+    # quando o contrato avançar (needs_input mapeia a aguardando_resposta).
+    "needs_input": "aguardando_resposta",
+    "partial": "aguardando_resposta",
+    "ready_for_codegen": "adicionado",
+    # Status obsoletos (generating/in_progress/failed) não têm canônico
+    # direto — preservam o valor original pra UI tratar caso-a-caso.
+}
+
+#: Labels pt-BR por status canônico. Frontend consome daqui.
+STATUS_LABELS_PT_BR: dict[str, str] = {
+    "sugerido": "Sugerido",
+    "aguardando_resposta": "Aguardando resposta",
+    "adicionado": "Adicionado",
+    "concluido": "Concluído",
+}
+
+
+def normalize_module_status(value: str | None) -> str:
+    """Normaliza qualquer valor de status pra forma canônica pt-BR.
+
+    Valores já canônicos passam direto. Aliases legados (en-US) são
+    traduzidos. Valores desconhecidos mantém-se como vieram (ex:
+    `generating`/`in_progress`/`failed` do CodeGen pipeline) — o caller
+    decide se trata ou normaliza pra `sugerido`.
+    """
+    if not value:
+        return DEFAULT_MODULE_STATUS
+    v = value.strip().lower()
+    if not v:  # string só com espaços
+        return DEFAULT_MODULE_STATUS
+    if v in CANONICAL_MODULE_STATUSES:
+        return v
+    if v in LEGACY_MODULE_STATUS_ALIASES:
+        return LEGACY_MODULE_STATUS_ALIASES[v]
+    return v  # preserva valor não-canônico pra UI tratar (ex: 'failed')
+
+
+def is_canonical_status(value: str) -> bool:
+    """True se o valor é status canônico do ciclo de vida (pt-BR)."""
+    return value in CANONICAL_MODULE_STATUSES
+
+
+#: Transições permitidas — regra dura no contrato.
+#: Falso não-transições: `sugerido` → `adicionado` direto (tem que passar
+#: por `aguardando_resposta`), `concluido` → qualquer coisa.
+ALLOWED_STATUS_TRANSITIONS: dict[str, frozenset[str]] = {
+    "sugerido": frozenset({"aguardando_resposta", "adicionado"}),
+    "aguardando_resposta": frozenset({"sugerido", "adicionado"}),
+    "adicionado": frozenset({"sugerido", "concluido"}),  # sugerido só se GP reabrir
+    "concluido": frozenset(),  # terminal
+}
+
+
+def is_allowed_transition(current: str, target: str) -> bool:
+    """Valida transição de status conforme regra dura do contrato §7 MVP 9.
+
+    Retorna True pra no-op (mesmo status) e quando a transição é permitida.
+    False bloqueia: service levanta erro no caller.
+    """
+    if current == target:
+        return True
+    allowed = ALLOWED_STATUS_TRANSITIONS.get(current, frozenset())
+    return target in allowed

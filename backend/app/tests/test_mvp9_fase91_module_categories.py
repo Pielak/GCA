@@ -220,7 +220,8 @@ def test_arguider_usa_normalize_module_type():
     """Defesa: mesmo que o LLM emita valor fora do canon, o backend
     normaliza antes de persistir."""
     source = Path("/app/app/services/arguider_service.py").read_text()
-    assert "from app.constants.module_categories import normalize_module_type" in source
+    assert "from app.constants.module_categories import" in source
+    assert "normalize_module_type" in source
     assert "normalize_module_type(raw_type)" in source
 
 

@@ -485,7 +485,12 @@ class ArguiderService:
             # MVP 9 Fase 9.1 — normaliza module_type pra uma das 6
             # categorias canônicas. LLM pode emitir variações ou valores
             # legados (`component`); o normalizador força retrocompat.
-            from app.constants.module_categories import normalize_module_type
+            # MVP 9 Fase 9.1.2 — status inicial é `sugerido` (pt-BR canônico)
+            # pro item de novo candidato; ciclo de vida só avança quando
+            # GP interage (aguardando_resposta → adicionado → concluido).
+            from app.constants.module_categories import (
+                normalize_module_type, DEFAULT_MODULE_STATUS,
+            )
             for mc in result_json.get("module_candidates", []):
                 raw_type = mc.get("module_type", "feature")
                 canonical_type = normalize_module_type(raw_type)
@@ -496,6 +501,7 @@ class ArguiderService:
                     description=mc.get("description", ""),
                     module_type=canonical_type,
                     priority=mc.get("priority", "medium"),
+                    status=DEFAULT_MODULE_STATUS,  # pt-BR: "sugerido"
                     dependencies=json.dumps(mc.get("dependencies", []), ensure_ascii=False),
                     source_document_ids=json.dumps([str(document_id)], ensure_ascii=False),
                     pillar_impact=json.dumps(

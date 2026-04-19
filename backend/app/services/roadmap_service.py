@@ -10,6 +10,7 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
+from app.constants.module_categories import normalize_module_status
 from app.models.base import ModuleCandidate, GeneratedModule
 
 logger = structlog.get_logger(__name__)
@@ -52,8 +53,12 @@ class RoadmapService:
 
             for c in candidates:
                 gen = generated_by_candidate.get(str(c.id))
-                module_status = gen.status if gen else c.status
-                if module_status == "completed":
+                raw_status = gen.status if gen else c.status
+                # MVP 9 Fase 9.1.2 — normaliza pt-BR. Status do CodeGen
+                # (generating/in_progress/failed) não tem canônico do
+                # ciclo de vida do Roadmap; preserva valor original.
+                module_status = normalize_module_status(raw_status)
+                if module_status in ("concluido", "completed"):
                     completed_modules += 1
 
                 # MVP 9 Fase 9.1 — expõe categoria canônica + descrição
@@ -71,14 +76,18 @@ class RoadmapService:
                 priority = c.priority if c.priority in phases else "medium"
                 phases[priority]["modules"].append(module_info)
 
-            # Determinar status das fases
+            # Determinar status das fases (MVP 9 Fase 9.1.2 — inclui
+            # canônicos pt-BR + terminais do CodeGen).
             for key in phases:
                 mods = phases[key]["modules"]
                 if not mods:
                     phases[key]["status"] = "pending"
-                elif all(m["status"] == "completed" for m in mods):
+                elif all(m["status"] in ("concluido", "completed") for m in mods):
                     phases[key]["status"] = "completed"
-                elif any(m["status"] in ("generating", "in_progress", "approved") for m in mods):
+                elif any(m["status"] in (
+                    "aguardando_resposta", "adicionado",
+                    "generating", "in_progress",
+                ) for m in mods):
                     phases[key]["status"] = "in_progress"
                 else:
                     phases[key]["status"] = "pending"

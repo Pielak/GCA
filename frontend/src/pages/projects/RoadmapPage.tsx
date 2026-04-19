@@ -61,22 +61,30 @@ interface RoadmapData {
   next_action: string
 }
 
+// MVP 9 Fase 9.1.2 — status canônicos pt-BR (backend já normaliza
+// aliases antigos). CodeGen ainda emite generating/in_progress/failed
+// que preservamos com label humano.
 const moduleStatusStyle = (s: string) => {
-  if (s === 'completed') return 'bg-emerald-900/30 text-emerald-400'
-  if (s === 'generating' || s === 'in_progress' || s === 'approved') return 'bg-violet-900/30 text-violet-400'
+  if (s === 'concluido' || s === 'completed') return 'bg-emerald-900/30 text-emerald-400'
+  if (s === 'adicionado') return 'bg-emerald-900/20 text-emerald-300'
+  if (s === 'aguardando_resposta') return 'bg-amber-900/30 text-amber-300'
+  if (s === 'sugerido') return 'bg-slate-800 text-slate-400'
+  if (s === 'generating' || s === 'in_progress') return 'bg-violet-900/30 text-violet-400'
   if (s === 'failed') return 'bg-red-900/30 text-red-400'
   return 'bg-slate-800 text-slate-500'
 }
 
 const moduleStatusLabel = (s: string) => {
   const labels: Record<string, string> = {
+    sugerido: 'Sugerido',
+    aguardando_resposta: 'Aguardando resposta',
+    adicionado: 'Adicionado',
+    concluido: 'Concluído',
+    // CodeGen terminals
     completed: 'Concluído',
     generating: 'Gerando',
     in_progress: 'Em progresso',
-    approved: 'Aprovado',
-    pending: 'Pendente',
     failed: 'Falhou',
-    candidate: 'Candidato',
   }
   return labels[s] || s
 }
