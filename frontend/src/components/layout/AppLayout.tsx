@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
-import { Bell, Search, LogOut, Command, Check, CheckCheck } from 'lucide-react'
+import { Bell, Search, LogOut, Command, Check, CheckCheck, Sparkles } from 'lucide-react'
 import { Sidebar } from './Sidebar'
 import { BackupActiveBanner } from '../BackupActiveBanner'
 import { useAuthStore } from '@/stores/authStore'
@@ -242,6 +242,16 @@ export function AppLayout() {
                 </div>
               )}
             </div>
+
+            {/* Releases (changelog user-facing) */}
+            <button
+              onClick={() => navigate('/releases')}
+              className="p-2 rounded-xl text-slate-500 hover:text-violet-300 hover:bg-white/[0.05] transition-all duration-200"
+              title="Novidades e entregas"
+              aria-label="Novidades"
+            >
+              <Sparkles className="w-4 h-4" />
+            </button>
 
             {/* Divider */}
             <div className="w-px h-6 bg-white/[0.06] mx-1" />

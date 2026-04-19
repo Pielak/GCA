@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderOpen, Users, Shield, ChevronDown, ChevronRight,
   LogOut, Settings, Code2, FileText, GitBranch, Zap, TestTube2,
   History, BookOpen, Activity, ScrollText, Menu, X, Clock, ClipboardList,
-  CheckCircle2, BarChart3, Database, Bug, LifeBuoy
+  CheckCircle2, BarChart3, Database, Bug, LifeBuoy, Package
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -152,6 +152,7 @@ export function Sidebar() {
             <NavItem to="/admin/backups" icon={<Database className="w-4 h-4" />} label="Backups" />
             <NavItem to="/admin/incidents" icon={<Bug className="w-4 h-4" />} label="Incidentes" />
             <NavItem to="/admin/support" icon={<LifeBuoy className="w-4 h-4" />} label="Equipe Sustentação" />
+            <NavItem to="/admin/releases" icon={<Package className="w-4 h-4" />} label="Releases" />
           </div>
         )}
 

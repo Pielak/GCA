@@ -12,6 +12,9 @@ import { AdminMetricsPage } from './pages/admin/AdminMetricsPage';
 import { AdminBackupsPage } from './pages/admin/AdminBackupsPage';
 import { AdminIncidentsPage } from './pages/admin/AdminIncidentsPage';
 import { AdminSupportPage } from './pages/admin/AdminSupportPage';
+import { AdminReleasesPage } from './pages/admin/AdminReleasesPage';
+import { AdminReleaseDetailPage } from './pages/admin/AdminReleaseDetailPage';
+import { ReleasesPage } from './pages/ReleasesPage';
 import { ProjectBackupPage } from './pages/projects/ProjectBackupPage';
 import { AdminProjectViewPage } from './pages/admin/AdminProjectViewPage';
 import { DesignShowcasePage } from './pages/DesignShowcasePage';
@@ -115,6 +118,15 @@ export const router = createBrowserRouter([
         path: 'admin/support',
         element: <RequireAdmin><AdminSupportPage /></RequireAdmin>,
       },
+      {
+        path: 'admin/releases',
+        element: <RequireAdmin><AdminReleasesPage /></RequireAdmin>,
+      },
+      {
+        path: 'admin/releases/:releaseId',
+        element: <RequireAdmin><AdminReleaseDetailPage /></RequireAdmin>,
+      },
+      { path: 'releases', Component: ReleasesPage },
       {
         path: 'design-showcase',
         element: <RequireAdmin><DesignShowcasePage /></RequireAdmin>,

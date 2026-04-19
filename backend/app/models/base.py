@@ -1214,6 +1214,32 @@ class ReleaseApplicationLog(Base):
     )
 
 
+class ReleaseCompletionTask(Base):
+    """MVP 7 Fase 4 — tarefa pós-release por projeto.
+
+    Criada quando uma release adiciona campo novo obrigatório; o GP/Admin
+    preenche via UI e marca como 'done'. Estrutura pronta pra uso futuro.
+    """
+    __tablename__ = "release_completion_tasks"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    release_id = Column(UUID(as_uuid=True), ForeignKey("releases.id", ondelete="CASCADE"), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(60), nullable=False)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    payload = Column(Text, nullable=True)
+    status = Column(String(20), default="pending", nullable=False)  # pending | done | dismissed
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    completed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index("idx_release_tasks_project_status", project_id, status, created_at.desc()),
+        Index("idx_release_tasks_release", release_id, status),
+    )
+
+
 class IncidentTicketComment(Base):
     """MVP 6 — comentário em ticket de incidente."""
     __tablename__ = "incident_ticket_comments"

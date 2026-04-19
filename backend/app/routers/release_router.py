@@ -7,7 +7,7 @@ Sub-routers:
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -18,7 +18,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.middleware.auth import get_current_user_from_token
-from app.models.base import Release, ReleaseApplicationLog, ReleaseItem, User
+from app.models.base import (
+    Release, ReleaseApplicationLog, ReleaseCompletionTask, ReleaseItem, User,
+)
 from app.services import release_service as svc
 
 admin_router = APIRouter(prefix="/admin/releases", tags=["admin-releases"])
@@ -312,6 +314,136 @@ async def rollback_project(
         raise HTTPException(status_code=404, detail=str(e))
 
     return {"status": "ok", "release_id": str(release_id), "project_id": str(payload.project_id)}
+
+
+# ─── Completion tasks (assistente pós-release) ───────────────────────────
+
+class CompletionTaskOut(BaseModel):
+    id: UUID
+    release_id: UUID
+    project_id: UUID
+    kind: str
+    title: str
+    description: Optional[str]
+    payload: Optional[dict] = None
+    status: str
+    created_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    completed_by: Optional[UUID]
+
+
+class CompletionTaskListResponse(BaseModel):
+    items: list[CompletionTaskOut]
+
+
+def _task_to_out(t: ReleaseCompletionTask) -> CompletionTaskOut:
+    payload_dict = None
+    if t.payload:
+        try:
+            payload_dict = json.loads(t.payload)
+        except (ValueError, TypeError):
+            payload_dict = None
+    return CompletionTaskOut(
+        id=t.id,
+        release_id=t.release_id,
+        project_id=t.project_id,
+        kind=t.kind,
+        title=t.title,
+        description=t.description,
+        payload=payload_dict,
+        status=t.status,
+        created_at=t.created_at,
+        completed_at=t.completed_at,
+        completed_by=t.completed_by,
+    )
+
+
+@user_router.get("/project/{project_id}/completion-tasks", response_model=CompletionTaskListResponse)
+async def list_project_completion_tasks(
+    project_id: UUID,
+    status: Optional[str] = None,
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista pendências pós-release do projeto. Autorização segue regra
+    do projeto: Admin vê; GP do projeto vê; outros membros vêem as do
+    projeto onde são membros aceitos."""
+    from app.models.base import ProjectMember
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="Usuário inválido.")
+
+    allowed = user.is_admin or user.is_support
+    if not allowed:
+        member = (await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        allowed = bool(member and member.accepted_at)
+    if not allowed:
+        raise HTTPException(status_code=403, detail="Sem permissão para este projeto.")
+
+    q = select(ReleaseCompletionTask).where(ReleaseCompletionTask.project_id == project_id)
+    if status:
+        q = q.where(ReleaseCompletionTask.status == status)
+    q = q.order_by(ReleaseCompletionTask.created_at.desc())
+    tasks = (await db.execute(q)).scalars().all()
+    return CompletionTaskListResponse(items=[_task_to_out(t) for t in tasks])
+
+
+@user_router.post("/completion-tasks/{task_id}/complete", response_model=CompletionTaskOut)
+async def complete_task(
+    task_id: UUID,
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Marca tarefa pós-release como concluída. Admin OU GP do projeto."""
+    from app.models.base import ProjectMember
+
+    task = (await db.execute(
+        select(ReleaseCompletionTask).where(ReleaseCompletionTask.id == task_id)
+    )).scalar_one_or_none()
+    if not task:
+        raise HTTPException(status_code=404, detail="Tarefa não encontrada.")
+
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="Usuário inválido.")
+
+    allowed = user.is_admin
+    if not allowed:
+        member = (await db.execute(
+            select(ProjectMember).where(
+                ProjectMember.project_id == task.project_id,
+                ProjectMember.user_id == user_id,
+            )
+        )).scalar_one_or_none()
+        allowed = bool(member and member.accepted_at and member.role == "gp")
+    if not allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas Admin ou GP do projeto pode concluir tarefa pós-release.",
+        )
+
+    if task.status == "done":
+        return _task_to_out(task)
+
+    task.status = "done"
+    task.completed_at = datetime.now(timezone.utc)
+    task.completed_by = user_id
+    db.add(ReleaseApplicationLog(
+        release_id=task.release_id,
+        event_type="completion_task_fulfilled",
+        project_id=task.project_id,
+        actor_id=user_id,
+        metadata_json=json.dumps({"task_id": str(task_id), "kind": task.kind}),
+    ))
+    await db.commit()
+    await db.refresh(task)
+    return _task_to_out(task)
 
 
 # ─── Endpoints user-facing ─────────────────────────────────────────────────
