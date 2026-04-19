@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderOpen, Users, Shield, ChevronDown, ChevronRight,
   LogOut, Settings, Code2, FileText, GitBranch, Zap, TestTube2,
   History, BookOpen, Activity, ScrollText, Menu, X, Clock, ClipboardList,
-  CheckCircle2
+  CheckCircle2, BarChart3
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -148,6 +148,7 @@ export function Sidebar() {
             </div>
             <NavItem to="/admin/users" icon={<Users className="w-4 h-4" />} label="Usuários" />
             <NavItem to="/admin/audit" icon={<ScrollText className="w-4 h-4" />} label="Auditoria Global" />
+            <NavItem to="/admin/metrics" icon={<BarChart3 className="w-4 h-4" />} label="Métricas" />
           </div>
         )}
 
