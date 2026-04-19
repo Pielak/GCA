@@ -59,16 +59,19 @@ class DocumentExtractor:
             return "{arquivo binário não extraível}"
 
     def _extract_pdf(self, file_bytes: bytes) -> str:
+        """MVP 8 Fase 3 Commit A — delega ao pipeline de camadas que
+        tenta AcroForm + texto pesquisável (e, no Commit B, OCR via
+        Vision). Sem isso, formulários PDF ficavam invisíveis e
+        escaneados retornavam string vazia silenciosamente."""
         try:
-            import io
-            try:
-                import pdfplumber
-                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-                    return "\n\n".join(page.extract_text() or "" for page in pdf.pages)
-            except ImportError:
-                from PyPDF2 import PdfReader
-                reader = PdfReader(io.BytesIO(file_bytes))
-                return "\n\n".join(page.extract_text() or "" for page in reader.pages)
+            from app.services.pdf_layered_extractor import extract_pdf_layered
+            result = extract_pdf_layered(file_bytes)
+            if result.text:
+                return result.text
+            # Sem camada produtiva: preserva aviso pro log do pipeline
+            warnings = " / ".join(result.warnings) if result.warnings else "sem conteúdo extraído"
+            logger.warning("extractor.pdf_empty_layers", warnings=warnings)
+            return f"[PDF sem texto extraível — {warnings}]"
         except Exception as e:
             logger.warning("extractor.pdf_error", error=str(e))
             return f"[Erro ao extrair PDF: {str(e)}]"
