@@ -108,6 +108,139 @@ class AIKeyResolver:
         return data.get("provider")
 
     @staticmethod
+    async def resolve_project_provider_chain(
+        db: AsyncSession,
+        project_id: UUID,
+    ) -> list[dict]:
+        """DT-064 — Retorna a cadeia de providers configurados no projeto
+        em ordem de preferência (default primeiro, depois os outros
+        validados mais recentemente). Cada entrada tem:
+
+            {"provider": "openai", "model": "...", "base_url": "..."|None}
+
+        Uso: caller tenta cada provider em sequência quando encontra
+        erro transiente (rate limit, quota esgotada, 503). Implementa
+        fallback automático de IA que antes exigia intervenção manual.
+        """
+        from sqlalchemy import text
+        import json
+
+        result = await db.execute(
+            text(
+                "SELECT settings_json FROM project_settings "
+                "WHERE project_id=:pid AND setting_type='llm'"
+            ),
+            {"pid": str(project_id)},
+        )
+        row = result.fetchone()
+        if not row or not row[0]:
+            return []
+        try:
+            data = json.loads(row[0])
+        except (ValueError, TypeError):
+            return []
+
+        providers = data.get("providers") or []
+        if not providers:
+            # Formato legado single-provider
+            if data.get("provider"):
+                return [{
+                    "provider": data["provider"],
+                    "model": data.get("model_preference"),
+                    "base_url": data.get("base_url"),
+                }]
+            return []
+
+        # Default primeiro, depois os demais. Dentro de cada grupo, os
+        # mais recentemente validados com sucesso aparecem antes.
+        default_name = data.get("default_provider")
+        if not default_name:
+            for p in providers:
+                if p.get("is_default"):
+                    default_name = p.get("provider")
+                    break
+
+        def sort_key(p):
+            # Tuple: (not is_default, not last_validation_ok, -last_validated_at)
+            is_def = p.get("provider") == default_name
+            ok = bool(p.get("last_validation_ok"))
+            ts = p.get("last_validated_at") or ""
+            return (0 if is_def else 1, 0 if ok else 1, "9" + ts if ok else ts)
+
+        chain = sorted(providers, key=sort_key)
+        return [
+            {
+                "provider": p.get("provider"),
+                "model": p.get("model"),
+                "base_url": p.get("base_url"),
+            }
+            for p in chain if p.get("provider")
+        ]
+
+    @staticmethod
+    def should_fallback_to_next_provider(error_message: str) -> bool:
+        """DT-064 — Decide se um erro ao falar com provider IA justifica
+        tentar o próximo da cadeia (tipicamente, premium remoto → local).
+
+        Lógica invertida (ampla por default): QUALQUER falha de
+        comunicação/infraestrutura cai pro fallback. Só NÃO faz fallback
+        quando é erro específico de configuração do provider atual que o
+        fallback não resolveria:
+
+          - **401/403**: chave inválida. Problema de configuração.
+            Admin precisa corrigir, não tem como outro provider ajudar
+            com a mesma chave errada (cada provider tem chave própria, mas
+            se a cadeia inteira foi validada antes, 401 no primeiro
+            provider indica problema específico dele — outros podem estar
+            OK. Mas o fallback ainda faz sentido pra que, se os outros
+            tiverem chave boa, o pipeline continue).
+          - **400 com 'malformed'/'invalid model'/'schema'**: prompt mal
+            construído. Falha do código do GCA, não do provider — não
+            adianta tentar outro.
+
+        Para tudo o mais — rate limit, quota, timeout, 5xx, erro de DNS,
+        conexão recusada, EOF, SSL, socket — faz fallback. A heurística
+        privilegia UX do usuário final: mesmo em erros ambíguos, tentar
+        o provider seguinte é melhor que quebrar.
+        """
+        if not error_message:
+            # Sem erro não faz sentido fazer fallback
+            return False
+        msg = error_message.lower()
+
+        # Markers que indicam erro de parâmetro/prompt — caller bugado;
+        # outro provider não resolve.
+        no_fallback_markers = [
+            "invalid model",
+            "model not found",
+            "unknown model",
+            "schema validation",
+            "malformed request",
+            "invalid request body",
+            "invalid argument",
+            "parameter out of range",
+        ]
+        if any(m in msg for m in no_fallback_markers):
+            return False
+
+        # Erro de autenticação EM UM provider específico — o próximo
+        # provider da cadeia tem outra chave, pode funcionar. Então
+        # CAI NO FALLBACK. (Exceção: se todos os providers da cadeia
+        # derem 401, o loop itera até esgotá-los e o erro final sobe
+        # pro user, que é o comportamento correto.)
+        # Portanto: 401/403 caem no fallback sim.
+
+        # Default: fallback pra qualquer outra coisa.
+        return True
+
+    @staticmethod
+    def is_transient_ai_error(error_message: str) -> bool:
+        """Mantido para compatibilidade com callers antigos da DT-064
+        inicial. Agora delega para should_fallback_to_next_provider que
+        implementa lógica mais ampla."""
+        return AIKeyResolver.should_fallback_to_next_provider(error_message)
+
+    @staticmethod
     async def get_project_key(
         db: AsyncSession,
         project_id: UUID,

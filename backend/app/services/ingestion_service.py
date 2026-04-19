@@ -545,6 +545,97 @@ class IngestionService:
 
         return False
 
+    async def _notify_provider_fallback(
+        self,
+        db,
+        *,
+        project_id: UUID,
+        primary_provider: str,
+        fallback_provider: str,
+        document_id: UUID,
+    ) -> None:
+        """DT-064 — Avisa GPs + Admins do projeto que o provider IA
+        primário falhou e o sistema fez fallback automático para o
+        próximo da cadeia. Inclui aviso sobre possível aumento de tempo
+        de processamento quando o fallback é provider local (Ollama)."""
+        from sqlalchemy import select as _select, or_ as _or
+        from app.models.base import ProjectMember, User
+        from app.services.notification_inapp_service import InAppNotificationService
+
+        # Labels amigáveis + aviso sobre tempo
+        _names = {
+            "anthropic": "Anthropic (Claude)",
+            "openai": "OpenAI (GPT)",
+            "gemini": "Google (Gemini)",
+            "deepseek": "DeepSeek",
+            "grok": "Grok",
+            "ollama": "Ollama (IA local)",
+        }
+        primary_name = _names.get(primary_provider, primary_provider)
+        fallback_name = _names.get(fallback_provider, fallback_provider)
+
+        is_local_fallback = (fallback_provider == "ollama")
+        if is_local_fallback:
+            time_hint = (
+                " O processamento pode ficar mais lento que o habitual, pois a "
+                "IA local tem latência maior que os provedores remotos."
+            )
+        else:
+            time_hint = (
+                " O tempo de processamento pode variar conforme o provedor de "
+                "fallback."
+            )
+
+        title = f"Fallback de IA ativado: usando {fallback_name}"
+        message = (
+            f"O provedor principal ({primary_name}) não respondeu com sucesso "
+            f"na análise do documento. O sistema trocou automaticamente para "
+            f"{fallback_name} para não travar o fluxo.{time_hint} "
+            f"Se o problema persistir, verifique credenciais e cotas em "
+            f"Configurações do projeto → IA."
+        )
+
+        # Destinatários: GPs do projeto + Admins ativos
+        members_q = _select(ProjectMember.user_id).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.role == "gp",
+            ProjectMember.accepted_at.isnot(None),
+            ProjectMember.is_active.is_(True),
+        )
+        admins_q = _select(User.id).where(
+            User.is_admin.is_(True), User.is_active.is_(True),
+        )
+        gp_ids = list((await db.execute(members_q)).scalars().all())
+        admin_ids = list((await db.execute(admins_q)).scalars().all())
+        recipients = list({*gp_ids, *admin_ids})
+
+        notif = InAppNotificationService(db)
+        for uid in recipients:
+            try:
+                await notif.notify(
+                    user_id=uid,
+                    event_type="ai.provider_fallback",
+                    title=title,
+                    message=message,
+                    project_id=project_id,
+                    resource_type="ingested_document",
+                    resource_id=document_id,
+                    link=f"/projects/{project_id}/ingestion",
+                    severity="warning",
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.warning("ingestion.fallback_notification_failed",
+                               user_id=str(uid), error=str(e))
+
+        logger.info(
+            "ingestion.provider_fallback_notified",
+            project_id=str(project_id),
+            document_id=str(document_id),
+            primary=primary_provider,
+            fallback=fallback_provider,
+            recipients=len(recipients),
+        )
+
     async def _analyze_async(
         self,
         document_id: UUID,
@@ -552,71 +643,47 @@ class IngestionService:
         file_bytes: bytes,
         file_type: str,
     ):
-        """Executa análise do Arguidor em background."""
+        """Executa análise do Arguidor em background.
+
+        DT-064 — Fallback automático entre providers IA: se o provider
+        default falhar (rate limit, quota, 5xx, timeout, erro de rede
+        em geral), tenta o próximo provider configurado no projeto em
+        cascata. Notifica GPs + Admins quando o fallback é acionado,
+        avisando sobre possível aumento de tempo se cair em IA local.
+        """
         try:
             from app.db.database import AsyncSessionLocal
             async with AsyncSessionLocal() as db:
-                # Resolver provedor + chave + modelo do projeto (contrato §6.2).
-                # Análise do Arguidor é alta criticidade — sem fallback silencioso.
-                # DT-032: Arguidor passa a rotear pelo provider configurado
-                # (anthropic/openai/deepseek/grok), não mais hardcoded.
+                # DT-064: resolver toda a cadeia de providers configurados
+                # (default primeiro + demais validados). Loop vai tentar em
+                # sequência se o primeiro falhar com erro transiente.
                 from app.services.ai_key_resolver import AIKeyResolver
-                provider = await AIKeyResolver._resolve_project_provider(db, project_id)
-                project_api_key = await AIKeyResolver.get_project_key(db, project_id, provider=provider)
-                # DT-023: Ollama precisa do base_url do daemon local. Demais ignoram.
-                base_url = None
-                if provider == "ollama":
-                    base_url = await AIKeyResolver.get_project_base_url(db, project_id, provider)
+                provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
 
-                # Resolver modelo configurado (se houver) no project_settings.
-                import json as _json
-                from sqlalchemy import text as _text
-                model = None
-                try:
-                    row = (await db.execute(
-                        _text("SELECT settings_json FROM project_settings WHERE project_id=:pid AND setting_type='llm'"),
-                        {"pid": str(project_id)},
-                    )).fetchone()
-                    if row and row[0]:
-                        cfg = _json.loads(row[0])
-                        # Formato multi-provider (DT-026 backend): lista com is_default
-                        for p in cfg.get("providers", []) or []:
-                            if p.get("is_default") and p.get("provider") == provider:
-                                model = p.get("model")
-                                break
-                        # Retrocompat formato antigo
-                        if not model and cfg.get("provider") == provider:
-                            model = cfg.get("model_preference")
-                except Exception:
-                    pass
+                if not provider_chain:
+                    raise RuntimeError(
+                        "Nenhum provedor de IA configurado no projeto. "
+                        "GP deve configurar provedor e chave em Settings > IA."
+                    )
 
                 extractor = DocumentExtractor()
-                arguider = ArguiderService(
-                    db,
-                    project_api_key=project_api_key,
-                    provider=provider,
-                    model=model,
-                    base_url=base_url,
-                )
 
-                # Extrair texto
+                # Extrair texto (fora do loop — não depende do provider)
                 doc_text = await extractor.extract_text(file_bytes, file_type)
 
-                # Buscar OCG atual
+                # Buscar OCG + análises prévias (fora do loop também)
                 ocg_result = await db.execute(
                     select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
                 )
-                ocg = ocg_result.scalar_one_or_none()
-                current_ocg = json.loads(ocg.ocg_data) if ocg and ocg.ocg_data else {}
-
-                # Buscar análises anteriores
-                prev_result = await db.execute(
+                _ocg = ocg_result.scalar_one_or_none()
+                _current_ocg = json.loads(_ocg.ocg_data) if _ocg and _ocg.ocg_data else {}
+                _prev_analyses_raw = await db.execute(
                     select(ArguiderAnalysis).where(ArguiderAnalysis.project_id == project_id)
                 )
-                prev_analyses = []
-                for a in prev_result.scalars().all():
+                _prev_analyses = []
+                for a in _prev_analyses_raw.scalars().all():
                     try:
-                        prev_analyses.append({
+                        _prev_analyses.append({
                             "document_classification": json.loads(a.document_classification),
                             "gaps": json.loads(a.gaps),
                             "module_candidates": json.loads(a.module_candidates),
@@ -624,14 +691,98 @@ class IngestionService:
                     except json.JSONDecodeError:
                         pass
 
-                # Executar análise
-                await arguider.analyze_document(
-                    document_id=document_id,
-                    project_id=project_id,
-                    document_text=doc_text,
-                    current_ocg=current_ocg,
-                    previous_analyses=prev_analyses,
-                )
+                # ═══ DT-064: Loop de fallback entre providers ═══
+                last_error = None
+                successful_provider = None
+                for idx, pcfg in enumerate(provider_chain):
+                    provider = pcfg["provider"]
+                    model = pcfg.get("model")
+                    base_url = pcfg.get("base_url") if provider == "ollama" else None
+
+                    try:
+                        project_api_key = await AIKeyResolver.get_project_key(
+                            db, project_id, provider=provider,
+                        )
+                    except Exception as e:
+                        logger.warning("ingestion.key_resolve_failed",
+                                       provider=provider, error=str(e))
+                        last_error = f"Chave do provider {provider} indisponível: {e}"
+                        continue
+
+                    logger.info("ingestion.provider_attempt",
+                                document_id=str(document_id),
+                                attempt=idx + 1,
+                                total=len(provider_chain),
+                                provider=provider,
+                                model=model or "(default)")
+
+                    try:
+                        arguider = ArguiderService(
+                            db,
+                            project_api_key=project_api_key,
+                            provider=provider,
+                            model=model,
+                            base_url=base_url,
+                        )
+                        await arguider.analyze_document(
+                            document_id=document_id,
+                            project_id=project_id,
+                            document_text=doc_text,
+                            current_ocg=_current_ocg,
+                            previous_analyses=_prev_analyses,
+                        )
+                        successful_provider = provider
+                        if idx > 0:
+                            logger.warning(
+                                "ingestion.provider_fallback_succeeded",
+                                document_id=str(document_id),
+                                primary_provider=provider_chain[0]["provider"],
+                                fallback_provider=provider,
+                                providers_tried=idx + 1,
+                            )
+                            # DT-064: notificar GPs + admins do projeto que o
+                            # fallback aconteceu e que o processamento pode
+                            # estar mais lento se o fallback for provider local.
+                            await self._notify_provider_fallback(
+                                db,
+                                project_id=project_id,
+                                primary_provider=provider_chain[0]["provider"],
+                                fallback_provider=provider,
+                                document_id=document_id,
+                            )
+                        break  # sucesso — sai do loop
+                    except Exception as e:
+                        err_msg = str(e)
+                        last_error = err_msg
+                        should_fallback = AIKeyResolver.should_fallback_to_next_provider(err_msg)
+                        logger.warning(
+                            "ingestion.provider_failed",
+                            document_id=str(document_id),
+                            provider=provider,
+                            should_fallback=should_fallback,
+                            remaining_providers=len(provider_chain) - idx - 1,
+                            error=err_msg[:200],
+                        )
+                        if not should_fallback:
+                            # Erro de parâmetro/schema — fallback não resolve.
+                            # Aborta cascata e propaga.
+                            raise
+                        # Reset do status do documento para próxima tentativa
+                        from app.models.base import IngestedDocument as _IngDoc
+                        _doc = await db.get(_IngDoc, document_id)
+                        if _doc:
+                            _doc.arguider_status = "pending"
+                            _doc.arguider_error_message = None
+                            await db.commit()
+                        continue  # tenta próximo provider
+
+                if not successful_provider:
+                    # Todos os providers falharam com erro transiente.
+                    # Propaga para o caller ser marcado como erro.
+                    raise RuntimeError(
+                        f"Todos os {len(provider_chain)} providers configurados "
+                        f"retornaram erro transiente. Último erro: {last_error[:300] if last_error else 'desconhecido'}"
+                    )
 
                 # Marcar documento como analisado com OCG atualizado
                 doc = await db.get(IngestedDocument, document_id)
