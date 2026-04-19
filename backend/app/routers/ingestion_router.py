@@ -164,9 +164,8 @@ async def reanalyze_document(
         se `lost` (ex: arquivo ingerido antes da DT-030 ser aplicada), este
         endpoint retorna 409 — user precisa reuploadar.
     """
-    import os
     from app.models.base import IngestedDocument
-    from app.core.config import settings as cfg
+    from app.utils.ingested_storage import read_ingested
 
     doc = await db.get(IngestedDocument, document_id)
     if not doc or doc.project_id != project_id:
@@ -181,18 +180,19 @@ async def reanalyze_document(
             ),
         )
 
-    fullpath = os.path.join(cfg.STORAGE_PATH, doc.filename)
-    if not os.path.exists(fullpath):
-        # Marca como lost pro frontend parar de oferecer retry
+    # DT-068: o path correto é /app/storage/ingested/<project_id>/<filename>
+    # (ver utils/ingested_storage.py). O código antigo usava
+    # os.path.join(STORAGE_PATH, filename), que resolvia pra /app/storage/<filename>
+    # e falhava sempre — pior: marcava content_status='lost' em cima do
+    # bug do próprio path, corrompendo o estado.
+    file_bytes = read_ingested(project_id, doc.filename)
+    if file_bytes is None:
         doc.content_status = "lost"
         await db.commit()
         raise HTTPException(
             status_code=409,
             detail="Arquivo não encontrado no storage. Marcado como 'lost' — reenvie.",
         )
-
-    with open(fullpath, "rb") as f:
-        file_bytes = f.read()
 
     # Reset status antes do retry
     doc.arguider_status = "pending"

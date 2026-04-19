@@ -365,6 +365,18 @@ class ArguiderService:
             )
             text = response.content[0].text
             tokens = response.usage.input_tokens + response.usage.output_tokens
+            # DT-069 — detectar truncamento por limite de tokens. Sem isso,
+            # o JSON vem cortado no meio, o parse falha e o Arguidor
+            # persiste arrays vazios silenciosamente. Levanta pra caller
+            # decidir (em vez de logar warning e seguir com texto truncado).
+            stop_reason = getattr(response, "stop_reason", None)
+            if stop_reason == "max_tokens":
+                raise RuntimeError(
+                    f"LLM truncou resposta por max_tokens={max_tokens}. "
+                    f"Aumente ANTHROPIC_MAX_TOKENS no .env ou reduza o "
+                    f"tamanho do documento. Modelo: {self.model}, "
+                    f"tokens consumidos: {tokens}."
+                )
             return text, tokens
 
         import httpx
@@ -488,6 +500,36 @@ class ArguiderService:
                 )
                 self.db.add(candidate)
 
+            # DT-070 — propagar gaps/show_stoppers/poor_definitions/
+            # improvement_suggestions pra tabela `gatekeeper_items`, que é
+            # a fonte lida pela UI do Arguidor (via /projects/:id/gatekeeper).
+            # Sem isso, análise existe em arguider_analyses mas a UI
+            # permanece vazia ("Nenhum item pendente do Gatekeeper").
+            from app.models.base import GatekeeperItem
+            gk_buckets = (
+                ("gap", result_json.get("gaps", []) or []),
+                ("show_stopper", result_json.get("show_stoppers", []) or []),
+                ("poor_definition", result_json.get("poor_definitions", []) or []),
+                ("improvement", result_json.get("improvement_suggestions", []) or []),
+            )
+            prefix_map = {
+                "gap": "G", "show_stopper": "SS",
+                "poor_definition": "PD", "improvement": "IS",
+            }
+            for item_type, items in gk_buckets:
+                prefix = prefix_map[item_type]
+                for idx, item in enumerate(items, start=1):
+                    raw_id = item.get("id") if isinstance(item, dict) else None
+                    item_id = raw_id or f"{prefix}{idx:03d}"
+                    self.db.add(GatekeeperItem(
+                        project_id=project_id,
+                        arguider_analysis_id=analysis.id,
+                        item_type=item_type,
+                        item_id_in_analysis=str(item_id)[:10],
+                        item_data=json.dumps(item, ensure_ascii=False),
+                        status="pending",
+                    ))
+
             # OCG é atualizado em seguida pelo OCGUpdaterService (chamado por
             # ingestion_service). Aqui só sinalizamos a intenção do Arguidor de
             # atualizar — o flag final ocg_updated reflete proposta, não persistência.
@@ -556,8 +598,19 @@ class ArguiderService:
 
 === INSTRUÇÕES ===
 Analise o documento acima em relação ao OCG do projeto.
-Retorne SOMENTE JSON válido com as chaves: document_classification, gaps, show_stoppers,
-poor_definitions, improvement_suggestions, module_candidates, ocg_fields_to_update."""
+Retorne SOMENTE JSON válido (sem ``` code fences, sem preâmbulo) com as chaves:
+document_classification, gaps, show_stoppers, poor_definitions,
+improvement_suggestions, module_candidates, ocg_fields_to_update.
+
+DT-069 — LIMITE DE VERBOSIDADE (evita truncamento do LLM):
+- `gaps`, `show_stoppers`, `poor_definitions`: máximo 10 itens cada; cada
+  `text`/`description` até 300 chars; sem campos narrativos extras além
+  do schema.
+- `improvement_suggestions`: máximo 8 itens.
+- `module_candidates`: máximo 15 itens.
+- `document_classification`: máximo 500 chars total.
+- Se houver mais achados do que o limite, priorize os mais críticos e
+  cite no `summary` que existem outros não listados."""
 
     @staticmethod
     def _extract_json(text: str) -> dict:
@@ -609,6 +662,7 @@ poor_definitions, improvement_suggestions, module_candidates, ocg_fields_to_upda
             "arguider.json_parse_failed",
             reason="no_valid_json_found",
             text_len=len(text),
-            text_preview=text[:2000],
+            text_head=text[:500],
+            text_tail=text[-500:],
         )
         return {}

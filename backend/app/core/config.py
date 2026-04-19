@@ -179,7 +179,13 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-opus-4-6"
     ANTHROPIC_TEMPERATURE: float = 0.3
-    ANTHROPIC_MAX_TOKENS: int = 4096
+    # DT-069: 4096 era insuficiente pro schema completo do Arguidor
+    # (document_classification + gaps + show_stoppers + poor_definitions
+    # + improvement_suggestions + module_candidates + ocg_fields_to_update).
+    # Com doc rico (60+ RFs), Claude Haiku truncava no meio, o parse falhava
+    # silenciosamente e o Arguidor persistia arrays vazios. 8192 é o teto
+    # de output do Haiku 4.5 sem beta flag.
+    ANTHROPIC_MAX_TOKENS: int = 8192
 
     # Onboarding
     ONBOARDING_INVITE_EXPIRES_DAYS: int = 7
