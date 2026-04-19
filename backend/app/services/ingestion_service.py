@@ -709,7 +709,10 @@ class IngestionService:
                         "GP deve configurar provedor e chave em Settings > IA."
                     )
 
-                extractor = DocumentExtractor()
+                # MVP 8 Fase 3B — DocumentExtractor ganha contexto do
+                # projeto pra ativar OCR via Vision quando PDFs escaneados
+                # não produzem texto nas camadas 1+2.
+                extractor = DocumentExtractor(project_id=project_id, db=db)
 
                 # MVP 8 Fase 1 — marcar estágio "extracting_text"
                 await IngestionService._update_stage(db, document_id, "extracting_text")

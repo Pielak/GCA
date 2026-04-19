@@ -30,17 +30,30 @@ logger = structlog.get_logger(__name__)
 # Document Extractor
 # ============================================================================
 
-class DocumentExtractor:
+class DocumentExtractor:  # noqa: E302
+    """Extrator multi-formato.
+
+    Quando instanciado com `project_id` + `db`, pode acionar camada 3
+    do pipeline de PDF (OCR via LLM Vision do provider configurado no
+    projeto). Sem esses args, apenas camadas 1+2 do PDF ficam ativas —
+    útil pra testes e extração offline.
+    """
     """Extrai texto de diferentes tipos de arquivo."""
 
-    def __init__(self, client=None):
+    def __init__(self, client=None, project_id=None, db=None):
         self.client = client
+        self.project_id = project_id
+        self.db = db
 
     async def extract_text(self, file_bytes: bytes, file_type: str) -> str:
         if file_type in ("markdown", "md", "txt", "code"):
             return file_bytes.decode("utf-8", errors="replace")
 
         if file_type == "pdf":
+            # MVP 8 Fase 3B — se temos contexto de projeto, ativa OCR via
+            # Vision como camada 3 (quando 1+2 não produzem texto).
+            if self.project_id is not None and self.db is not None:
+                return await self._extract_pdf_with_vision_ocr(file_bytes)
             return self._extract_pdf(file_bytes)
 
         if file_type in ("docx", "doc"):
@@ -75,6 +88,44 @@ class DocumentExtractor:
         except Exception as e:
             logger.warning("extractor.pdf_error", error=str(e))
             return f"[Erro ao extrair PDF: {str(e)}]"
+
+    async def _extract_pdf_with_vision_ocr(self, file_bytes: bytes) -> str:
+        """MVP 8 Fase 3B — pipeline completo com camadas 1+2+3.
+
+        Camadas 1 e 2 (AcroForm + texto pesquisável) rodam síncronas
+        como no path sem contexto. Só se nenhuma delas produzir texto,
+        aciona OCR via `vision_service` usando o provider do projeto.
+
+        OCR custa tokens — nunca é disparado por precaução, só quando
+        o PDF é realmente escaneado/imagem e o projeto tem provider
+        com visão configurado.
+        """
+        try:
+            from app.services.pdf_layered_extractor import extract_pdf_layered_with_ocr
+            from app.services.vision_service import ocr_pdf_via_project_vision
+
+            async def _ocr_cb(pdf_bytes: bytes):
+                return await ocr_pdf_via_project_vision(
+                    pdf_bytes, self.db, self.project_id,
+                )
+
+            result = await extract_pdf_layered_with_ocr(file_bytes, ocr_callback=_ocr_cb)
+            if result.text:
+                return result.text
+            warnings = " / ".join(result.warnings) if result.warnings else "sem conteúdo extraído"
+            logger.warning(
+                "extractor.pdf_empty_layers_after_ocr",
+                project_id=str(self.project_id),
+                warnings=warnings,
+            )
+            return f"[PDF sem texto extraível após OCR — {warnings}]"
+        except Exception as e:
+            logger.warning(
+                "extractor.pdf_vision_error",
+                project_id=str(self.project_id) if self.project_id else None,
+                error=str(e),
+            )
+            return f"[Erro ao extrair PDF com OCR: {str(e)}]"
 
     def _extract_docx(self, file_bytes: bytes) -> str:
         """MVP 8 Fase 2 — delega ao rich extractor que percorre tabelas,

@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
+from typing import Awaitable, Callable
 
 import structlog
 
@@ -91,8 +92,43 @@ def extract_pdf_layered(file_bytes: bytes) -> PdfExtractionResult:
     if not result.text:
         result.warnings.append(
             "Nenhuma camada produziu texto. PDF provavelmente é escaneado/imagem — "
-            "OCR (Fase 3 Commit B) será necessário."
+            "OCR via LLM Vision será necessário."
         )
+
+    return result
+
+
+async def extract_pdf_layered_with_ocr(
+    file_bytes: bytes,
+    ocr_callback: Callable[[bytes], Awaitable[tuple[str, list[str]]]] | None = None,
+) -> PdfExtractionResult:
+    """Pipeline completo em camadas 1+2+3. Camada 3 (OCR) só é
+    disparada quando 1+2 não produziram texto E `ocr_callback` foi
+    passado. O callback recebe os bytes do PDF e deve retornar
+    `(texto_ocr, warnings)`.
+
+    Separado da `extract_pdf_layered` pra manter sync puro quando OCR
+    não é necessário (testes isolados, caminho crítico de PDF textual).
+    """
+    result = extract_pdf_layered(file_bytes)
+    if result.text or ocr_callback is None:
+        return result
+
+    try:
+        ocr_text, ocr_warnings = await ocr_callback(file_bytes)
+    except Exception as exc:
+        result.warnings.append(f"OCR falhou: {exc}")
+        logger.warning("pdf_layered.ocr_failed", error=str(exc))
+        return result
+
+    if ocr_warnings:
+        result.warnings.extend(ocr_warnings)
+
+    if ocr_text.strip():
+        result.layers_used.append("ocr")
+        result.text = ocr_text
+        # Tira o warning "nenhuma camada produziu texto" já que agora OCR cobriu
+        result.warnings = [w for w in result.warnings if "Nenhuma camada produziu texto" not in w]
 
     return result
 
