@@ -124,6 +124,11 @@ class Project(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
+    # Backup-1: cache do timestamp do último backup completo (preenchido
+    # pelo project_backup_service ao final). UI lista de projetos lê daqui
+    # pra evitar JOIN/aggregate em project_backups.
+    last_backup_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     organization = relationship("Organization", back_populates="projects")
     members = relationship("ProjectMember", back_populates="project")
@@ -138,6 +143,49 @@ class Project(Base):
 
     def __repr__(self):
         return f"<Project {self.slug}>"
+
+
+class ProjectBackup(Base):
+    """Backup-1 — backups por projeto.
+
+    1 linha por backup gerado. Retenção: 10 últimos por projeto
+    (cleanup feito pelo project_backup_service).
+
+    Status:
+      - running: backup em curso, ainda não terminou (banner visível ao GP)
+      - completed: backup gravado em volume + sha256 OK
+      - failed: erro_message preenchido, file_path pode estar incompleto
+
+    trigger_source:
+      - scheduled: cron diário 12:00
+      - manual_gp: GP do projeto clicou "Backup agora"
+      - manual_admin: Admin clicou (a pedido do GP)
+      - startup_catchup: servidor estava down 12:00 → roda no startup
+    """
+    __tablename__ = "project_backups"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    trigger_source = Column(String(40), nullable=False)
+    status = Column(String(20), nullable=False, default="running")
+    file_path = Column(String(500), nullable=True)  # relativo ao volume gca-backups
+    size_bytes = Column(Integer, nullable=False, default=0)
+    sha256 = Column(String(64), nullable=True)
+    manifest_json = Column(String, nullable=True)  # text — lista tabelas + contagens + hashes
+    error_message = Column(String, nullable=True)
+    # Quando este backup foi usado para restore:
+    restored_at = Column(DateTime(timezone=True), nullable=True)
+    restored_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index("idx_project_backups_project", project_id, created_at.desc()),
+    )
+
+    def __repr__(self):
+        return f"<ProjectBackup project={self.project_id} status={self.status}>"
 
 
 class ProjectMember(Base):

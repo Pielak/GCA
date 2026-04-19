@@ -85,6 +85,8 @@ services:
       # DT-061: scripts montados read-only pra testes verificarem
       # estrutura/sintaxe dos scripts de backup/restore.
       - ./scripts:/host_scripts:ro
+      # Backup-1: volume dedicado para backups por projeto.
+      - gca-backups:/var/gca-backups
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Frontend (React + Vite)
@@ -118,6 +120,9 @@ services:
 volumes:
   gca-postgres-data:
   gca-uploads-storage:
+  # Backup-1: backups por projeto persistem entre restarts. Path no
+  # container: /var/gca-backups. Caller: project_backup_service.
+  gca-backups:
 
 networks:
   default:

@@ -17,6 +17,11 @@ from app.routers.pipeline_audit_router import router as pipeline_audit_router
 from app.routers.pipeline_orchestration_router import router as pipeline_orchestration_router
 from app.routers.questionnaire_pdf_router import router as questionnaire_pdf_router
 from app.routers.metrics_router import router as metrics_router
+from app.routers.backup_router import (
+    router as backup_project_router,
+    admin_router as backup_admin_router,
+    status_router as backup_status_router,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -40,9 +45,24 @@ async def lifespan(app: FastAPI):
     # Archival de tokens expirados é feito via endpoint POST /questionnaires/archive-expired
     # e não mais no startup para evitar timeout de conexão
 
+    # Backup-4: scheduler diário 12:00 BRT + catch-up no startup.
+    # Pula em test environment pra não disparar backups durante pytest.
+    import os as _os
+    if "PYTEST_CURRENT_TEST" not in _os.environ:
+        try:
+            from app.services.backup_scheduler import start_scheduler
+            start_scheduler()
+        except Exception as e:
+            logger.error("gca.scheduler_start_failed", error=str(e))
+
     yield
 
     # Shutdown
+    try:
+        from app.services.backup_scheduler import stop_scheduler
+        stop_scheduler()
+    except Exception:
+        pass
     logger.info("gca.shutdown")
 
 
@@ -98,6 +118,9 @@ app.include_router(pipeline_audit_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_orchestration_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(questionnaire_pdf_router, prefix=f"{settings.API_PREFIX}", tags=["questionnaire-pdf"])
 app.include_router(metrics_router, prefix=f"{settings.API_PREFIX}", tags=["metrics"])
+app.include_router(backup_project_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
+app.include_router(backup_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-backups"])
+app.include_router(backup_status_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
 
 
 @app.get("/health")

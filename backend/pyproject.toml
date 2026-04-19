@@ -63,6 +63,9 @@ pypdf = "^4.0"
 # Code validation (DT-040 + DT-041)
 esprima = "^4.0.1"
 
+# Scheduler (Backup-4 — cron de backup diário 12:00)
+apscheduler = "^3.11.0"
+
 # Utils
 pydantic-extra-types = "^2.1.0"
 pytz = "^2023.3"
