@@ -11,6 +11,7 @@ import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { AdminMetricsPage } from './pages/admin/AdminMetricsPage';
 import { AdminBackupsPage } from './pages/admin/AdminBackupsPage';
 import { AdminIncidentsPage } from './pages/admin/AdminIncidentsPage';
+import { AdminSupportPage } from './pages/admin/AdminSupportPage';
 import { ProjectBackupPage } from './pages/projects/ProjectBackupPage';
 import { AdminProjectViewPage } from './pages/admin/AdminProjectViewPage';
 import { DesignShowcasePage } from './pages/DesignShowcasePage';
@@ -109,6 +110,10 @@ export const router = createBrowserRouter([
       {
         path: 'admin/incidents',
         element: <RequireAdmin><AdminIncidentsPage /></RequireAdmin>,
+      },
+      {
+        path: 'admin/support',
+        element: <RequireAdmin><AdminSupportPage /></RequireAdmin>,
       },
       {
         path: 'design-showcase',

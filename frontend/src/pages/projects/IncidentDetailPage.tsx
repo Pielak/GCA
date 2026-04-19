@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   ArrowLeft, Bug, Loader2, MessageSquare, Send, AlertCircle, Clock,
-  CheckCircle2, XCircle, PlayCircle,
+  CheckCircle2, XCircle, PlayCircle, Paperclip, Download, Trash2,
+  FileText, Image as ImageIcon, FileCode,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
@@ -20,6 +21,8 @@ interface Ticket {
   status: 'open' | 'in_progress' | 'resolved' | 'closed'
   title: string
   description: string
+  section_reference: string | null
+  flow_description: string | null
   created_at: string
   updated_at: string
   resolved_at: string | null
@@ -33,6 +36,30 @@ interface Comment {
   author_name: string | null
   body: string
   created_at: string
+}
+
+interface Attachment {
+  id: string
+  ticket_id: string
+  uploader_id: string
+  uploader_name: string | null
+  filename: string
+  mime: string
+  size_bytes: number
+  sha256: string
+  created_at: string
+}
+
+function formatBytes(b: number): string {
+  if (b < 1024) return `${b} B`
+  if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`
+  return `${(b / 1024 / 1024).toFixed(2)} MB`
+}
+
+function iconForMime(mime: string) {
+  if (mime.startsWith('image/')) return ImageIcon
+  if (mime === 'application/json') return FileCode
+  return FileText
 }
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -65,11 +92,13 @@ export function IncidentDetailPage() {
 
   const [ticket, setTicket] = useState<Ticket | null>(null)
   const [comments, setComments] = useState<Comment[]>([])
+  const [attachments, setAttachments] = useState<Attachment[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [commentBody, setCommentBody] = useState('')
   const [submittingComment, setSubmittingComment] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
+  const [uploadingAttachment, setUploadingAttachment] = useState(false)
 
   const load = useCallback(async () => {
     if (!ticketId) return
@@ -77,6 +106,7 @@ export function IncidentDetailPage() {
       const res = await apiClient.get(`/incidents/${ticketId}`)
       setTicket(res.data.ticket)
       setComments(res.data.comments || [])
+      setAttachments(res.data.attachments || [])
       setError(null)
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Erro ao carregar ticket.')
@@ -112,6 +142,58 @@ export function IncidentDetailPage() {
       alert(e?.response?.data?.detail || 'Falha ao mudar status.')
     } finally {
       setUpdatingStatus(false)
+    }
+  }
+
+  const uploadAttachment = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0]
+    if (!f || !ticketId) return
+    if (attachments.length >= 5) {
+      alert('Máximo de 5 anexos por ticket.')
+      return
+    }
+    setUploadingAttachment(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', f)
+      await apiClient.post(`/incidents/${ticketId}/attachments`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      await load()
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Falha ao enviar anexo.')
+    } finally {
+      setUploadingAttachment(false)
+      e.target.value = ''
+    }
+  }
+
+  const deleteAttachment = async (att: Attachment) => {
+    if (!ticketId) return
+    if (!window.confirm(`Excluir anexo "${att.filename}"? Esta ação é irreversível.`)) return
+    try {
+      await apiClient.delete(`/incidents/${ticketId}/attachments/${att.id}`)
+      await load()
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Falha ao excluir anexo.')
+    }
+  }
+
+  const downloadAttachment = async (att: Attachment) => {
+    if (!ticketId) return
+    try {
+      const res = await apiClient.get(
+        `/incidents/${ticketId}/attachments/${att.id}/download`,
+        { responseType: 'blob' },
+      )
+      const url = URL.createObjectURL(new Blob([res.data], { type: att.mime }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = att.filename
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      alert(err?.response?.data?.detail || 'Falha ao baixar anexo.')
     }
   }
 
@@ -176,6 +258,24 @@ export function IncidentDetailPage() {
           {ticket.description}
         </p>
 
+        {/* Emenda: section + flow */}
+        {(ticket.section_reference || ticket.flow_description) && (
+          <div className="space-y-2 pt-3 border-t border-slate-800">
+            {ticket.section_reference && (
+              <div>
+                <div className="text-slate-500 text-[10px] uppercase tracking-widest">Seção onde ocorreu</div>
+                <code className="text-slate-300 text-xs font-mono">{ticket.section_reference}</code>
+              </div>
+            )}
+            {ticket.flow_description && (
+              <div>
+                <div className="text-slate-500 text-[10px] uppercase tracking-widest">Fluxo executado</div>
+                <p className="text-slate-300 text-sm whitespace-pre-wrap leading-relaxed mt-1">{ticket.flow_description}</p>
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex items-center gap-3 text-[11px] text-slate-500 pt-2 border-t border-slate-800">
           <Clock className="w-3 h-3" />
           <span>Aberto por {ticket.author_name || 'autor desconhecido'}</span>
@@ -212,6 +312,76 @@ export function IncidentDetailPage() {
           ))}
         </div>
       )}
+
+      {/* Anexos */}
+      <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Paperclip className="w-4 h-4 text-slate-400" />
+            <h2 className="text-slate-200 text-sm font-medium">Anexos ({attachments.length}/5)</h2>
+          </div>
+          {attachments.length < 5 && (
+            <label className="flex items-center gap-1 text-[11px] text-violet-300 hover:text-violet-200 cursor-pointer">
+              {uploadingAttachment ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <Paperclip className="w-3 h-3" />
+              )}
+              <span>Adicionar</span>
+              <input
+                type="file"
+                accept=".png,.jpg,.jpeg,.webp,.gif,.txt,.log,.json,.pdf"
+                onChange={uploadAttachment}
+                disabled={uploadingAttachment}
+                className="hidden"
+              />
+            </label>
+          )}
+        </div>
+        {attachments.length === 0 ? (
+          <p className="text-slate-500 text-xs italic">Sem anexos.</p>
+        ) : (
+          <ul className="space-y-1">
+            {attachments.map(att => {
+              const Icon = iconForMime(att.mime)
+              const canDelete = isAdmin || att.uploader_id === user?.id
+              return (
+                <li key={att.id} className="flex items-center justify-between text-xs bg-slate-800/40 hover:bg-slate-800/70 rounded px-3 py-2 transition-colors">
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <Icon className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                    <span className="text-slate-200 truncate">{att.filename}</span>
+                    <span className="text-slate-500 flex-shrink-0">{formatBytes(att.size_bytes)}</span>
+                    <span className="text-slate-600 text-[10px] flex-shrink-0" title={att.sha256}>
+                      sha:{att.sha256.slice(0, 8)}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    <span className="text-slate-500 text-[10px]">
+                      {att.uploader_name || 'autor desconhecido'}
+                    </span>
+                    <button
+                      onClick={() => downloadAttachment(att)}
+                      className="text-slate-500 hover:text-violet-400"
+                      title="Baixar"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
+                    {canDelete && (
+                      <button
+                        onClick={() => deleteAttachment(att)}
+                        className="text-slate-500 hover:text-red-400"
+                        title="Excluir"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+      </div>
 
       {/* Comentários */}
       <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-5">
