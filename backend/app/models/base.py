@@ -1081,6 +1081,55 @@ class UserNotification(Base):
     )
 
 
+class IncidentTicket(Base):
+    """MVP 6 — ticket de incidente aberto por usuário do projeto.
+
+    Roteamento por papel do autor (resolvido no service):
+      Dev/Tester/QA  → target_scope='gp'    (GPs do projeto recebem)
+      GP             → target_scope='admin' (Admins da instância recebem)
+      Admin          → target_scope='admin' (demais Admins recebem)
+
+    Compartimentalização: cada ticket pertence a exatamente 1 projeto.
+    Ticket de projeto A nunca é visto por membro de projeto B.
+    """
+    __tablename__ = "incident_tickets"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    target_scope = Column(String(10), nullable=False)  # 'gp' | 'admin'
+    category = Column(String(40), nullable=False)  # bug | duvida | pedido_feature | incidente_pipeline
+    priority = Column(String(10), nullable=False)  # baixa | media | alta | critica
+    status = Column(String(20), nullable=False, default="open")  # open | in_progress | resolved | closed
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        Index("idx_incident_tickets_project_created", project_id, created_at.desc()),
+        Index("idx_incident_tickets_target_status", target_scope, status, created_at.desc()),
+        Index("idx_incident_tickets_author", author_id, created_at.desc()),
+    )
+
+
+class IncidentTicketComment(Base):
+    """MVP 6 — comentário em ticket de incidente."""
+    __tablename__ = "incident_ticket_comments"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ticket_id = Column(UUID(as_uuid=True), ForeignKey("incident_tickets.id", ondelete="CASCADE"), nullable=False)
+    author_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_incident_comments_ticket", ticket_id, created_at.asc()),
+    )
+
+
 class OCGDeltaLog(Base):
     """Histórico de mudanças no OCG — auditoria + rollback"""
     __tablename__ = "ocg_delta_log"

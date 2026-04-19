@@ -1,18 +1,21 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 2.7  
+Versão: 2.8  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — **Zero DT em aberto**. MVP 5 fechado (DT-016/023/041/058/060/061/062/063). Suite 652/652 passing. **MVP 6 e 7 definidos no contrato §7 (estado: definido — não iniciado)** por solicitação do stakeholder-soberano em 2026-04-19 (protocolo de adição dinâmica, contrato §7.0). Nenhuma linha de código dos MVPs 6/7 escrita até autorização explícita de início.
+Status: **controle de avanço por fase** — **MVP 6 iniciado 2026-04-19** por autorização do stakeholder-soberano. MVP 5 fechado (DT-016/023/041/058/060/061/062/063). Suite baseline 652/652 passing. MVP 7 segue definido e não iniciado (depende de MVP 6 fechado).
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum em execução.** MVP 5 fechado em 2026-04-18 + DT-063 (backup compartimentalizado) em 2026-04-19. MVP 6 e 7 aguardam autorização de início.
+**MVP 6 — Validação assistida em campo (tickets de incidente)** — iniciado 2026-04-19 por autorização do stakeholder-soberano. Fatiamento em 4 fases sequenciais com regressão entre cada:
+- Fase 1 — backend (schema + service + router + notificação + testes)
+- Fase 2 — frontend por projeto
+- Fase 3 — frontend admin
+- Fase 4 — docs + smoke dogfood + commit final
 
 ### Próximos MVPs definidos (contrato §7)
-- **MVP 6 — Validação assistida em campo (tickets de incidente)** — adicionado 2026-04-19 por solicitação do stakeholder-soberano. Estado: **definido — não iniciado**.
 - **MVP 7 — Entrega versionada preservando dados do usuário** — adicionado 2026-04-19 por solicitação do stakeholder-soberano. Estado: **definido — não iniciado**. Depende do MVP 6 fechado (a rastreabilidade ticket → release do MVP 7 exige tickets do MVP 6).
 
 ### MVP anterior fechado

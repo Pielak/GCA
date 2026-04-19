@@ -22,6 +22,11 @@ from app.routers.backup_router import (
     admin_router as backup_admin_router,
     status_router as backup_status_router,
 )
+from app.routers.incident_ticket_router import (
+    router as incident_project_router,
+    ticket_router as incident_ticket_router,
+    admin_router as incident_admin_router,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -121,6 +126,9 @@ app.include_router(metrics_router, prefix=f"{settings.API_PREFIX}", tags=["metri
 app.include_router(backup_project_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
 app.include_router(backup_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-backups"])
 app.include_router(backup_status_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
+app.include_router(incident_project_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
+app.include_router(incident_ticket_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
+app.include_router(incident_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-incidents"])
 
 
 @app.get("/health")
