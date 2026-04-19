@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.3  
+Versão: 3.4  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — **MVP 7 fechado 2026-04-19** (4 sub-fases). MVP 6 + Emenda fechados. MVP 5 fechado. Suite **704/704 passing** (+21 vs baseline 683 pré-MVP-7). Dogfood: release v0.8.0 retroativa aplicada automaticamente na instância. Nenhum MVP adicional definido no contrato.
+Status: **controle de avanço por fase** — **MVP 7 fechado 2026-04-19** (4 sub-fases). MVP 6 + Emenda fechados. MVP 5 fechado. Suite **732/732 passing em 173s** (baseline revalidada 2026-04-19 pós-saneamento, +28 vs 704 declarado no fechamento do MVP 7 — commits posteriores de métricas por projeto, GP soberano, cleanup-orphan adicionaram testes). Dogfood: release v0.8.0 retroativa aplicada automaticamente na instância. **Saneamento 2026-04-19**: §2/§6/§7/§10 realinhados ao estado pós-MVP 7; §9 registra emenda §4.1 (GP soberano) e saneamento documental. Nenhum MVP adicional definido no contrato — gate não é avaliado até autorização formal de novo MVP.
 
 ---
 
@@ -127,41 +127,52 @@ Mesmo dos MVPs anteriores:
 
 ---
 
-## 2. Escopo da fase atual
+## 2. Escopo ativo
 
-### Em escopo agora (contrato §7, MVP 4)
-- QA Readiness (endpoints `/qa/*` + página QAReadinessPage ativos);
-- execução e revisão de testes (TesterReviewPage + approve/reject já
-  presentes; auditar RBAC);
-- Documentação Viva (endpoints `/docs/*` + LiveDocsPage; auditar
-  refresh automático pós-mudança no OCG);
-- Roadmap coerente (backlog derivado do OCG — DT-037 já implementa
-  guard; RoadmapPage ativa);
-- Release Bundle (`POST /releases`, listagem, download já presentes;
-  validar gate de threshold);
-- evidências e relatórios (`GET /qa/logs/export`, `releases/download`
-  já presentes).
+### MVP em execução
+**Nenhum.** MVPs 1-7 do contrato §7 estão fechados. Não há nova seção
+`### MVP 8` no contrato soberano — portanto não existe escopo canônico
+de trabalho novo até que o stakeholder-soberano autorize formalmente
+um novo MVP pelo protocolo §7.0 (commit atômico `GCA_CANONICAL_CONTRACT.md §7`
++ `GCA_MVP_PROGRESS.md §1`).
 
-### Estado de entrada (baseline)
-Superfície já construída (auditada 2026-04-18):
-- **QA**: 12 endpoints (`qa_router.py`, 213 LOC) + `qa_service.py`
-  (312 LOC) + `QAReadinessPage.tsx` (279 LOC) + `TesterReviewPage.tsx`
-  (391 LOC). Autenticação presente; **RBAC ausente** (DT-044 abaixo).
-- **LiveDocs**: 5 endpoints (`livedocs_router.py`, 141 LOC) +
-  `livedocs_service.py` (331 LOC) + `LiveDocsPage.tsx` (207 LOC).
-  **RBAC ausente** (DT-044).
-- **Roadmap/Backlog**: 6 endpoints (`roadmap_router.py`, 246 LOC) +
-  `roadmap_service.py` (98 LOC) + `RoadmapPage.tsx` (181 LOC). RBAC
-  **parcial** — backlog:manage nos writes, GETs sem enforcement.
-- **Release Bundle**: 3 endpoints (em `deliverables_router.py`, 252
-  LOC) + `release_bundle_service.py` (417 LOC), surfaced em
-  `ReadinessPage.tsx`. **RBAC ausente** (DT-044).
+### Baseline ao fechamento do MVP 7 (2026-04-19)
+Superfície canônica entregue e validada em dogfood/suite:
+- **MVP 1** — auth, RBAC 5 papéis, cadastro/aprovação de projeto,
+  questionário externo/interno, OCG persistido básico, Gatekeeper
+  básico, auditoria mínima, configuração de IA, roteamento híbrido.
+- **MVP 2** — ingestão, quarentena PII, OCG versionado com deltas,
+  backlog derivado do OCG, Arguidor, reavaliação do Gatekeeper.
+- **MVP 3** — CodeGen controlado em 6 linguagens (Java/Kotlin/Go/C#/PHP/Node),
+  preview, commits rastreáveis, RBAC por papel, análise de adequação do
+  provedor.
+- **MVP 4** — QA Readiness com RBAC (DT-044), LiveDocs refrescável,
+  Roadmap derivado do OCG, Release Bundle com gate `qa:approve`,
+  evidências exportáveis.
+- **MVP 5** — hardening: secrets/PAT criptografados, `/metrics` +
+  dashboard (DT-060), backup/restore compartimentalizado por projeto
+  (DT-063), `upgrade.sh` idempotente (DT-062).
+- **MVP 6** (+ Emenda) — tickets de incidente por projeto, roteamento
+  por papel, Sustentação cross-instância (`is_support`), anexos
+  (5/10MB/9 tipos), `flow_description` obrigatório, `section_reference`
+  autopreenchido.
+- **MVP 7** — releases com tag semântica + changelog segmentado por
+  papel, default não-destrutivo com auto-apply no startup, migração
+  destrutiva com snapshot automático (DT-063) e rollback por projeto,
+  completion tasks pós-release. Release v0.8.0 retroativa aplicada na
+  instância dogfood.
 
-### Fora de escopo agora
-- hardening operacional avançado (MVP 5);
-- SMTP compartimentalizado (DT-016 — MVP 5);
-- Ollama como provedor (DT-023 — sprint próprio);
-- rebuild de imagem (DT-041 — follow-up operacional).
+### Dívidas estruturais residuais — não-bloqueadoras
+- **DT-041 (Minor)** — rebuild `--no-cache` da imagem para persistir
+  `pypdf`/`reportlab`/`esprima`. Paliativo via `pip install` em
+  runtime continua cobrindo o ambiente atual; fix canônico é follow-up
+  operacional de CI.
+
+### Fora de escopo sempre (até autorização explícita)
+- qualquer feature fora dos MVPs 1-7 do contrato soberano;
+- marketplace, A/B de release, multi-instância avançada, downgrade
+  de container, compartilhamento de correção entre instâncias de
+  clientes diferentes — todos explicitamente "fora de escopo" em §7.
 
 ---
 
@@ -273,6 +284,7 @@ Superfície já construída (auditada 2026-04-18):
 
 | ID | Data | Item quitado | Arquivos/módulos | Evidência |
 |---|---|---|---|---|
+| DT-064 | 2026-04-19 | **Fallback automático entre providers IA — lógica ampla + notificação ao usuário.** Problema dogfood: OpenAI default do projeto estourou quota (HTTP 429 `insufficient_quota`); Arguidor quebrou; roadmap não foi gerado; cliente comum ficaria travado. User reforçou que fallback deve ser em QUALQUER falha de conexão com IA premium (não só rate limit) e com aviso ao usuário sobre aumento de tempo. **Fix**: (1) `AIKeyResolver.resolve_project_provider_chain(db, project_id)` — retorna cadeia ordenada (default primeiro, depois validados por data, inválidos por último). Aceita formato multi-provider novo e legado single-provider. (2) `AIKeyResolver.should_fallback_to_next_provider(err_msg)` — lógica ampla: fallback em rate limit, quota, 5xx, timeout, conn refused, DNS, SSL, EOF, 401/403. Só NÃO faz fallback em erros de parâmetro/prompt (`invalid model`, `schema validation`, `malformed request`) que outro provider também não resolveria. `is_transient_ai_error` mantido como alias retrocompat. (3) `ingestion_service._analyze_async` envolvido em loop de cascata — tenta cada provider da cadeia em sequência, reseta status do documento entre tentativas, aborta na primeira falha não-transiente. (4) `ingestion_service._notify_provider_fallback` dispara `UserNotification` (severity=warning) para GPs + Admins ativos quando idx > 0; título "Fallback de IA ativado: usando X"; mensagem explicita motivo, aviso sobre aumento de tempo quando fallback é Ollama local, instrução para verificar credenciais em Settings → IA; link direto para `/projects/{id}/ingestion`. Logs estruturados: `provider_attempt`, `provider_failed`, `provider_fallback_succeeded`, `provider_fallback_notified`. | `backend/app/services/ai_key_resolver.py` (+`resolve_project_provider_chain`, +`should_fallback_to_next_provider`, alias `is_transient_ai_error`), `backend/app/services/ingestion_service.py` (`_analyze_async` reescrito com loop de cascata + helper `_notify_provider_fallback`), `backend/app/tests/test_dt064_provider_fallback.py` (novo, 14 casos: fallback em rate-limit/quota/5xx/timeout/conn/SSL/auth; no-fallback em invalid-model/schema/malformed; alias retrocompat; chain ordena default-first/validated/legacy/empty) | **14/14 novos + suite 746 passed / 0 failed** (+14 vs 732 baseline). Dogfood validado: projeto Automação Jurídica tinha OpenAI default estourada + Ollama validado como fallback; a nova lógica opera automaticamente sem intervenção manual do usuário. |
 | MVP7 | 2026-04-19 | **MVP 7 — Entrega versionada preservando dados do usuário fechada end-to-end.** 4 sub-fases sequenciais. (F1) **Backend core** (commit `71f0082`): migration `024_releases.sql` cria `releases` (tag unique, status pending/applied/rolled_back, is_destructive, declared_at/applied_at/applied_by, source_yaml) + `release_items` (kind ∈ mvp/mvp_emenda/ticket/feature/fix/schema_change; affected_roles JSON) + `release_application_log` (event_type applied/snapshot_taken/rolled_back/completion_task_*). Modelos `Release`/`ReleaseItem`/`ReleaseApplicationLog`. `release_service`: registry YAML em `backend/releases/*.yaml`, `load_declared_releases` (skipa inválidos), `sync_declared_releases` (idempotente), `apply_nondestructive_pending` (startup auto-apply), `apply_destructive_release` (Fase 2), `mark_rollback` (por projeto), `list_releases`, `get_release_with_items`, `items_visible_to_role` (segmentação). Hook no `main.py lifespan` sincroniza+aplica pós-init_db. Release v0.8.0 retroativa consolidando MVPs 1-6 + Emenda + DT-023/060/063 como items. 12 testes. (F2) **Destrutiva + rollback** (commit `d02f2d2`): `POST /admin/releases/{id}/apply` exige confirm=true, cria snapshots DT-063 por projeto ativo, registra `snapshot_taken` por projeto + `applied`. `POST /admin/releases/{id}/rollback-project` chama DT-063 `restore_from_backup` + `mark_rollback` (status da release NÃO muda — rollback é por-projeto). 7 testes. (F3) **Frontend**: `AdminReleasesPage` separa pendentes de aplicadas com badges status/destrutiva; `AdminReleaseDetailPage` mostra items com kind+ref_id+roles, botão "Aplicar com snapshot" para destrutiva pending, log de aplicação com timestamps e metadata (snapshot_id, trigger); `ReleasesPage` user-facing com accordion por release, changelog filtrado pelo backend por papel; ícones emoji por kind; `Sparkles` no topbar do AppLayout para acesso rápido; Sidebar admin ganha "Releases" (ícone `Package`). Rotas: `admin/releases`, `admin/releases/:id`, `releases`. (F4) **Completion tasks**: migration `025_release_completion_tasks.sql` + modelo `ReleaseCompletionTask`; endpoints `GET /releases/project/{pid}/completion-tasks` (Admin/Support/membro aceito) e `POST /releases/completion-tasks/{tid}/complete` (Admin OR GP do projeto) — grava `completion_task_fulfilled` no log. Estrutura pronta para quando a primeira release com campo novo chegar. 2 testes. **Smoke dogfood**: release v0.8.0 aplicada automaticamente no startup do `gca` prod (logs: `release.declared_synced count=1 tags=['v0.8.0']`, `release.auto_applied count=1 tags=['v0.8.0']`); 10 items do changelog visíveis na UI; endpoints `/admin/releases*` + `/releases*` + `/releases/completion-tasks*` registrados no OpenAPI. | `backend/migrations/024_releases.sql`, `backend/migrations/025_release_completion_tasks.sql`, `backend/app/models/base.py` (+Release/ReleaseItem/ReleaseApplicationLog/ReleaseCompletionTask), `backend/app/services/release_service.py` (novo, ~230 linhas), `backend/app/routers/release_router.py` (novo, 10+ endpoints), `backend/app/main.py` (+lifespan hook sync/apply), `backend/releases/v0.8.0.yaml` (retroativa), `backend/app/tests/test_release_service.py` (novo, 12 casos), `backend/app/tests/test_release_destructive.py` (novo, 7 casos), `backend/app/tests/test_release_completion_tasks.py` (novo, 2 casos), `frontend/src/pages/admin/AdminReleasesPage.tsx` (novo), `frontend/src/pages/admin/AdminReleaseDetailPage.tsx` (novo), `frontend/src/pages/ReleasesPage.tsx` (novo), `frontend/src/components/layout/AppLayout.tsx` (+ícone Sparkles no topbar), `frontend/src/components/layout/Sidebar.tsx` (+Package +entrada admin Releases), `frontend/src/routes.tsx` (+3 rotas) | Suite **704 passed / 0 failed em 75s** (+21 vs 683 baseline). Release v0.8.0 aplicada em dogfood com 10 items. Rastreabilidade ticket → release pronta (items referenciam MVPs/DTs/tickets via `ref_id`). Default não-destrutivo: YAML sem `is_destructive: true` é aplicado automaticamente no startup. Destrutivas ficam `pending` até Admin agir com snapshot automático. Rollback por projeto via DT-063 preservando audit_log_global. |
 | MVP6-E | 2026-04-19 | **MVP 6 Emenda 2026-04-19 — Sustentação cross-instância + anexos + contexto obrigatório fechada end-to-end.** 3 sub-fases sequenciais. (Fase 0) **Emenda contrato**: bloco "Emenda 2026-04-19" em `GCA_CANONICAL_CONTRACT.md §7 MVP 6` listando 3 itens novos + regra dura de assimetria Admin↔Support (Admin herda, Support nunca vira Admin por essa via). Commit atômico contract+progress (`3f2e373`). (F1) **Backend**: migration `023_incident_tickets_emenda.sql` adiciona `users.is_support` (bool, default false, índice parcial quando true) + `incident_tickets.section_reference` VARCHAR(300) + `incident_tickets.flow_description` TEXT + tabela `incident_ticket_attachments` (id, ticket_id, uploader_id, filename, mime, size_bytes, sha256, storage_path, created_at + índice). Modelos User.is_support, IncidentTicket.section/flow, new IncidentTicketAttachment. Service: `_has_admin_scope(user)` centraliza Admin-herda-Support; `_list_recipients` target=admin vira `is_admin OR is_support`; `list_for_project`/`get_ticket` usam o helper; `create_ticket` exige `flow_description` não-vazio (ValueError), trunca `section_reference` a 300 chars; `upload_attachment` valida tamanho (10 MB), MIME (9 tipos), extensão, sanitiza nome (NFKD + regex safe), contagem máx 5/ticket, sha256 + grava em `/tmp/gca-storage/incidents/{ticket_id}/{hash12}_{nome}`; `read_attachment_bytes` revalida sha256; `delete_attachment` permite Admin OR autor do anexo (Support-puro NÃO deleta alheio); `set_support_flag` exige Admin; `list_support_team` retorna `is_admin OR is_support` ativos. Router: helper `_require_admin_or_support` (novo) para `/admin/incidents`; `_require_admin` mantido para `/admin/support*`; 5 endpoints novos (upload multipart, download, delete, list support team, patch flag support); TicketItem ganha section/flow; TicketDetailResponse ganha attachments. 16 testes novos em `test_incident_tickets_emenda.py`. 19 chamadas legadas em `test_incident_ticket_service.py` migradas para incluir `flow_description`. Commit (`9ec8d09`). (F2) **Frontend**: `NewIncidentModal` ganhou autopreenchimento de `section_reference` (via `window.location.pathname`, editável), `flow_description` obrigatório (modal recusa vazio), dropzone de anexos com validação client-side (extensão + tamanho) e upload sequencial pós-criação do ticket; `IncidentDetailPage` exibe section/flow no card do ticket + bloco de anexos com ícone por MIME (imagem/texto/código), download blob, delete (autor ou admin), upload inline; `AdminSupportPage` nova (lista Equipe Sustentação com badges Admin/Sustentação, marca Admin que ainda não tem is_support explícito, promove/rebaixa via toggle; busca e promove usuário comum). Rotas `admin/support`; Sidebar admin ganha "Equipe Sustentação" (ícone LifeBuoy). | `backend/migrations/023_incident_tickets_emenda.sql`, `backend/app/models/base.py` (+User.is_support +IncidentTicket.section/flow +IncidentTicketAttachment), `backend/app/services/incident_ticket_service.py` (+helpers, +5 funções de anexo, +2 funções support), `backend/app/routers/incident_ticket_router.py` (+5 endpoints, +schemas Attachment/Support, +helper `_require_admin_or_support`), `backend/app/main.py` (+support_router), `backend/app/tests/test_incident_tickets_emenda.py` (novo, 16 casos), `backend/app/tests/test_incident_ticket_service.py` (19 migradas), `frontend/src/components/incidents/NewIncidentModal.tsx` (reescrita), `frontend/src/pages/projects/IncidentDetailPage.tsx` (section/flow + bloco anexos), `frontend/src/pages/admin/AdminSupportPage.tsx` (novo), `frontend/src/routes.tsx` (+1 rota), `frontend/src/components/layout/Sidebar.tsx` (+Bug/LifeBuoy, +entrada admin) | Suite **683 passed / 0 failed em 75s** (+16 vs baseline 667 MVP6 original). 10 endpoints `/incidents*` + `/admin/support*` registrados no OpenAPI. Regra dura verificada em testes: Support-puro recebe notif+lê ticket admin, NÃO promove ninguém, NÃO deleta anexo alheio; Admin continua herdando Support via `_has_admin_scope`. Contrato §7 MVP 6 em sync com código. |
 | MVP6 | 2026-04-19 | **MVP 6 — Validação assistida em campo (tickets de incidente) fechado end-to-end.** 4 fases sequenciais. (F1) **Backend**: migration `022_incident_tickets.sql` cria `incident_tickets` (target_scope gp/admin, category bug/duvida/pedido_feature/incidente_pipeline, priority baixa/media/alta/critica, status open/in_progress/resolved/closed, constraint chk_resolved_coherent) + `incident_ticket_comments` + 4 índices. Modelos `IncidentTicket`/`IncidentTicketComment` em `models/base.py`. Service `incident_ticket_service.py`: roteamento automático por papel (Dev/Tester/QA→gp; GP→admin; Admin global→admin; não-membro/não-admin → ValueError); `add_comment` toca `updated_at` + notifica; `update_status` preenche/limpa `resolved_at/resolved_by`; `list_for_project` aplica RBAC (admin=all, gp=all do projeto, dev/tester/qa=próprios); `list_for_admin` agregado por target=admin; notificação via `InAppNotificationService` com severity derivado da prioridade (critica→error, alta→warning). Router `incident_ticket_router.py` com 3 sub-routers: `/projects/{id}/incidents` (list/create), `/incidents/{ticket_id}` (get/comments/status), `/admin/incidents` (agregado com `_require_admin`). 5 endpoints REST. 15 testes em `test_incident_ticket_service.py` — roteamento (4), RBAC leitura (3), comentário+notif (1), resolve/reopen (2), notif na abertura (1), validação (3), cross-projeto bloqueado (1). (F2) **Frontend por projeto**: `IncidentListPage` (lista com filtros, modal), `NewIncidentModal` (form com título/descrição/categoria/prioridade), `IncidentDetailPage` (viewer com actions de mudança de status + thread de comentários); rotas `projects/:id/incidents` e `projects/:id/incidents/:ticketId`; sidebar do projeto ganha entrada "Incidentes" (ícone `Bug`). (F3) **Frontend admin**: `AdminIncidentsPage` com tabela, filtros status+projeto, link para detail cross-projeto; rota `admin/incidents` (`RequireAdmin`); sidebar admin ganha "Incidentes". (F4) **Smoke**: tabela criada em `gca` prod (0 linhas, pronta pra dogfood real); endpoints respondem 403 sem token (esperado); 200 com token; scheduler backup continua ativo (sem interferência). | `backend/migrations/022_incident_tickets.sql`, `backend/app/models/base.py` (+2 classes), `backend/app/services/incident_ticket_service.py` (novo, ~330 linhas), `backend/app/routers/incident_ticket_router.py` (novo, 3 sub-routers), `backend/app/tests/test_incident_ticket_service.py` (novo, 15 casos), `backend/app/main.py` (+3 router includes), `frontend/src/pages/projects/IncidentListPage.tsx` (novo), `frontend/src/pages/projects/IncidentDetailPage.tsx` (novo), `frontend/src/components/incidents/NewIncidentModal.tsx` (novo), `frontend/src/pages/admin/AdminIncidentsPage.tsx` (novo), `frontend/src/routes.tsx` (+3 rotas), `frontend/src/components/layout/Sidebar.tsx` (+ícone Bug +2 entradas) | Suite **667/667 passing** em 64s (+15 vs baseline 652). Compartimentalização contrato §2.2: todo predicado inclui `project_id`; `list_for_admin` é o único canal cross-projeto e exige is_admin. RBAC canônico §4.1 respeitado (5 papéis). MVP 7 destravado. |
@@ -376,14 +388,20 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (MVP 4)
-**PODE AVANÇAR** — todas as 5 features §7 validadas no dogfood real
-em 2026-04-18; suite 437/437 passing; nenhum Critical/Major bloqueador
-aberto. DTs UX descobertas (052/053/054/055/056) registradas como
-pós-MVP 4 (não bloqueiam o gate per §9 — são UX/cosméticos sobre
-features funcionais).
+### Situação atual do gate (pós-MVP 7)
+**NÃO APLICÁVEL — nenhum MVP em execução.**
 
-### Motivo
+Os MVPs 1-7 foram fechados com gate §9 atendido em cada transição
+(rastreabilidade no histórico abaixo). A baseline de suíte revalidada
+em **2026-04-19 pós-saneamento** é **732 passed / 0 failed em 173s**,
+com `--ignore=app/tests/e2e/test_fluxo_completo.py` (exige playwright,
+fora do caminho canônico do backend) e `TEST_DATABASE_URL` explícito
+apontando para o service `gca-postgres` quando pytest roda dentro do
+container (armadilha de `localhost`; ver §7). Nenhum novo MVP está
+definido no contrato §7 — portanto o gate volta a ser avaliado somente
+quando o stakeholder-soberano autorizar um novo MVP pelo protocolo §7.0.
+
+### Motivo do último gate avaliado (MVP 4, preservado para rastreabilidade)
 Base do MVP 4 instalada e testes verde:
 
 - ✅ **RBAC DT-044 aplicado** — 33 `require_action` nos 4 routers (qa 12 · deliverables 9 · roadmap 8 · livedocs 6). Matriz binária do contrato §4.1 auditada linha-a-linha: Admin sem membership = 403; GP = 403 em writes de teste e code; Dev/Tester/QA com scoping. `test_mvp4_rbac.py` — 29/29 passing.
@@ -405,10 +423,10 @@ Base do MVP 4 instalada e testes verde:
 - ⏸️ **Validação dogfood E2E MVP 4** — abrir QA/LiveDocs/Roadmap/Release Bundle na UI e atestar binariamente que cada um funciona ponta-a-ponta com projeto real. Pendente.
 - ⏸️ **DT-041 image drift** — paliativo aplicado em runtime (`pip install esprima reportlab pypdf` no container); correção definitiva continua sendo rebuild `--no-cache`.
 
-**Gate aberto.** Validação dogfood concluída em 2026-04-18 com SIM
-binário em cada item §7. Nenhum critério §9 regrediu. DTs cosméticas
-de UX (052/053/054/055/056) foram registradas como pós-MVP 4 e não
-bloqueiam — são polimento sobre features que comprovadamente funcionam.
+**Gate MVP 4 aberto em 2026-04-18.** Validação dogfood concluída
+com SIM binário em cada item §7. Nenhum critério §9 regrediu na
+transição. DTs cosméticas de UX (052/053/054/055/056) foram
+registradas como pós-MVP 4 e já quitadas em 4.
 
 ### Histórico do gate
 - MVP 1 → **PODE AVANÇAR** em 2026-04-17 com todos os 5 Criticals quitados
@@ -463,6 +481,28 @@ bloqueiam — são polimento sobre features que comprovadamente funcionam.
   Definition of Done/Release Bundle, RBAC). Suite 437/437 passing.
   **Gate ABERTO em 2026-04-18.** DTs UX descobertas (052/053/054/055/056)
   registradas como pós-MVP 4 — não bloqueiam.
+- MVP 5 → **ENCERRADO 2026-04-19** com DT-060 (`/metrics` + dashboard),
+  DT-061 (backup/restore), DT-062 (`upgrade.sh` idempotente), DT-063
+  (backup automático compartimentalizado por projeto) quitadas. Gate §9
+  atendido.
+- MVP 6 (forma original) → **ENCERRADO 2026-04-19** (commits `8042918`
+  + `c9230be`). 4 fases: backend (IncidentTicket + roteamento),
+  frontend projeto, frontend admin, smoke. Suite 667/667.
+- MVP 6 Emenda 2026-04-19 → **ENCERRADA 2026-04-19** (commits `3f2e373`,
+  `9ec8d09`, `21362ed`). Sustentação (`is_support` Admin-herda), anexos
+  (até 5/10MB/9 extensões), contexto obrigatório (`section_reference`
+  + `flow_description`). Suite 683/683.
+- MVP 7 → **ENCERRADO 2026-04-19** (commits `71f0082`, `d02f2d2`,
+  `d59ad8e`). 4 sub-fases: backend core (registry YAML + lifespan
+  auto-apply), destrutiva+rollback (snapshot via DT-063), frontend
+  (AdminReleases + AdminReleaseDetail + Releases), completion tasks.
+  Release v0.8.0 retroativa aplicada na instância dogfood. Suite 704/704.
+- Pós-MVP 7 (2026-04-19) → **Sem MVP em execução.** Commits posteriores
+  (métricas por projeto, project-lifecycle active/paused/inactive,
+  cleanup-orphan, emenda §4.1 GP soberano, empacotamento/screenshots)
+  são saneamento operacional e ajustes de UI fora do corpo dos MVPs
+  canônicos. Gate só volta a ser avaliado quando novo MVP for
+  autorizado pelo stakeholder-soberano.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -470,37 +510,35 @@ automaticamente a **NÃO AVANÇAR** até quitação.
 
 ---
 
-## 7. Ordem recomendada de saneamento (MVP 4)
+## 7. Ordem recomendada de saneamento (sem MVP ativo)
 
-1. **DT-045 — testes e2e que hangam** (Critical, bloqueador do gate)
-   - diagnosticar o hang de `test_ocg_e2e.py::TestConsolidator` e de
-     `test_e2e_pipeline_fase6.py` (já tem `LLMServiceFactory.create_client`
-     mockado mas alguma corotina não resolve — provável chamada direta a
-     `ai_service`/`agent_service` fora do patch);
-   - opção A: completar mocks / patching para todos os clientes AI
-     invocados pelos paths `submit_questionnaire` → `generate_ocg_*`;
-   - opção B: marcar os casos específicos como `pytest.mark.skip(reason=...)`
-     com justificativa até que os mocks sejam corrigidos, nunca remover
-     silenciosamente; revalidar gate.
+Sem MVP em execução, não há ordem canônica de saneamento por fase.
+O que resta é operacional e **não-bloqueador**:
 
-2. **Validação dogfood E2E MVP 4** (binária SIM/NÃO por item)
-   - QA Readiness: abrir `QAReadinessPage`, ver pilares com score, verificar
-     RBAC (Dev/Tester executa; QA aprova);
-   - Tester Review: editar teste como Tester, aprovar como QA, exportar log
-     via `GET /qa/logs/export`;
-   - LiveDocs: alterar OCG, confirmar `POST /docs/refresh` atualiza
-     documentação;
-   - Roadmap: regenerar backlog via `POST /roadmap/regenerate` sob
-     `backlog:manage`;
-   - Release Bundle: criar `POST /releases` (precisa `qa:approve`), baixar
-     via `GET /releases/download`.
-
-3. **DT-041 — deploy image drift** (Minor, operacional)
+1. **DT-041 — deploy image drift** (Minor, operacional)
    - `docker compose build --no-cache gca-backend` e validar que `pypdf`,
-     `reportlab` e `esprima` ficam persistidos na imagem; fora do caminho
-     crítico do gate, mas evita retrabalho em CI.
+     `reportlab` e `esprima` persistem na imagem. Paliativo em runtime
+     continua cobrindo o ambiente atual.
 
-> Cada passo exige revalidação de testes e gate antes do próximo.
+2. **Playwright para `test_fluxo_completo.py`** (opcional)
+   - Teste de GUI E2E é ignorado por ausência do pacote `playwright` no
+     container backend. Se o GCA ganhar pipeline de GUI E2E, instalar o
+     pacote + browsers e remover o `--ignore` no CI. Fora do caminho
+     canônico do backend.
+
+3. **Armadilha de host do `TEST_DATABASE_URL`** (nota operacional)
+   - `conftest.py` usa `localhost:5432` como default — correto quando o
+     pytest roda na máquina hospedeira, mas falha quando roda dentro do
+     container `gca-backend` (dentro do container, `localhost` é o
+     próprio container, não `gca-postgres`). Execução canônica dentro
+     do container: `docker exec -e TEST_DATABASE_URL="postgresql+asyncpg://gca:gca_secret@gca-postgres:5432/gca_test" gca-backend bash -c "cd /app && pytest --ignore=app/tests/e2e/test_fluxo_completo.py -q"`.
+     Não é DT — é documentação do fluxo correto. Se virar recorrente,
+     considerar detectar em runtime e ajustar.
+
+> Cada passo exige revalidação de testes antes do próximo. Qualquer
+> nova demanda de escopo deve ser roteada para o protocolo §7.0 do
+> contrato (proposta formal de novo MVP ou nova DT dentro de MVP
+> existente — nunca implementação silenciosa).
 
 ---
 
@@ -530,28 +568,25 @@ Antes de qualquer mudança:
 | 2026-04-17 | Separação explícita entre Contexto A (IA de desenvolvimento do GCA) e Contexto B (IA operacional do cliente). Regra dura de não acoplamento: escolha de IA no desenvolvimento do produto não vira dependência obrigatória do cliente. | `GCA_CANONICAL_CONTRACT.md §6.6` (novo), `CLAUDE.md §6.5` (novo), `GCA_MVP_PROGRESS.md §5.3` (nota) | Prevenir que conveniência de desenvolvimento (ex.: usar Claude/Anthropic para construir o GCA) seja lida como obrigação do cliente final. Preserva flexibilidade multi-provedor por instância/projeto. Sem mudança de código. |
 | 2026-04-17 | Saneamento de working tree acumulada: 5 commits organizando 3 frentes (bugfixes, MVP 2 core, automação session 22). Trabalho anterior não commitado foi agrupado por coerência; senha em plaintext em `scripts/capturar_telas_gca.py` extraída para env var antes do commit. | commits `32e12a8`, `80d438d`, `3942f6a`, `f3db454`, `609ca1c` | Reduzir risco de rollback confuso. Trabalho de sessão anterior (contração OCG + PII + scripts manual/tutorial + bugfixes de aprovação GP e axios multipart) estava misturado na working tree sem trilha clara. |
 | 2026-04-18 | Saneamento do documento §6/§7/§10 para o MVP 4. Versões anteriores ainda descreviam gate, ordem de saneamento e marco de saída do MVP 2 apesar do cabeçalho anunciar MVP 4 ativo. Adicionado histórico das transições MVP 2 → 3 → 4. Registrada DT-045 (testes e2e que hangam) como novo Critical do MVP 4. | `GCA_MVP_PROGRESS.md §6`, `§7`, `§10`, `§3.2` (DT-045), cabeçalho (versão 1.6) | Eliminar contradição estrutural apontada pelo gate §9 critério 3. Garantir que futuras sessões partam do estado verdadeiro em vez de reinterpretar o MVP 2. Sem mudança de código. |
+| 2026-04-19 | Emenda §4.1 — GP é soberano do projeto. Revoga a regra anterior "GP não escreve código" e declara que o GP tem acesso a todas as funcionalidades do projeto, inclusive CodeGen, pipeline de testes e demais fluxos. Analogia cross-escopo: GP está para o projeto assim como Admin está para a instância. Separação do dia-a-dia (Dev codifica, Tester testa, QA revisa) é mantida, mas não remove acesso. | `GCA_CANONICAL_CONTRACT.md §4.1` (emenda no bloco GP), commit `9f2181e` (impactos de UI órfão visível) | Destravar o GP quando precisa operar o projeto por inteiro sem depender de presença de Dev/Tester/QA. Necessário para dogfood e cenários com equipe reduzida. Implica revisão de enforcement que antes usava "GP não escreve" como sinônimo de "GP não aciona code:write". |
+| 2026-04-19 | Saneamento pós-MVP 7. §2/§6/§7/§10 ainda descreviam MVP 4 como fase ativa apesar do cabeçalho declarar MVPs 1-7 fechados e suite 704/704. Conteúdo do MVP 4 foi preservado na seção "Histórico do gate" (§6) e no próprio §4 (dívida quitada); §2 passou a descrever "baseline ao fechamento do MVP 7"; §7 e §10 foram consolidados em notas de encerramento. | `GCA_MVP_PROGRESS.md §2`, `§6` (situação atual), `§7`, `§10`, cabeçalho | Mesmo princípio do saneamento 2026-04-18: eliminar contradição estrutural (gate §9 critério 3). Sem mudança de código. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
 ---
 
-## 10. Próximo marco de saída do MVP 4
+## 10. Próximo marco
 
-O MVP 4 poderá ser considerado apto a encerrar quando:
-- [x] DT-044 — RBAC enforcement nos 4 routers (qa, livedocs, deliverables,
-  roadmap) — commit `c787dbb`, 29/29 testes em `test_mvp4_rbac.py`;
-- [x] features canônicas §7 MVP 4 presentes no código — QAService, LiveDocsService,
-  RoadmapService, ReleaseBundleService instanciados e surfaced nas páginas
-  respectivas;
-- [x] **DT-045 — testes e2e que hangam** — quitada 2026-04-18. Autouse
-  fixture patcha `AgentService._call_llm`. Suite 386 passed / 0 failed
-  em 42.72s contra `gca_test`;
-- [ ] **validação dogfood E2E MVP 4** — cada item §7 do contrato atestado
-  binariamente por execução manual no `gca.code-auditor.com.br`:
-  - [ ] QA Readiness com métricas por pilar rendering real;
-  - [ ] execução + revisão de testes + exportação de evidências;
-  - [ ] Documentação Viva atualizando pós-mudança do OCG;
-  - [ ] Roadmap coerente com backlog derivado do OCG (guard DT-037);
-  - [ ] Release Bundle com gate de `qa:approve` efetivo;
-- [ ] nenhum Critical dos MVPs anteriores tiver regredido;
-- [ ] gate mudar para **PODE AVANÇAR** com justificativa registrada.
+Com MVPs 1-7 fechados e nenhum MVP novo autorizado no contrato §7,
+não há marco de saída canônico pendente. O próximo marco é **externo
+ao documento**: solicitação formal do stakeholder-soberano abrindo
+`### MVP 8` no contrato, pelo protocolo §7.0 (commit atômico
+alterando `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`).
+
+Enquanto isso não ocorrer:
+- não há gate a fechar;
+- nenhuma feature nova entra em produção sem trilha formal (deve
+  ser roteada como nova DT dentro de um MVP existente, ou como
+  solicitação formal de novo MVP — nunca implementação silenciosa);
+- as DTs residuais minor (DT-041, playwright para GUI E2E) podem
+  ser endereçadas como follow-up operacional, sem gate associado.
