@@ -233,11 +233,23 @@ async def _resolve_ollama_config(
     return None
 
 
+#: Timeout generoso pra Ollama em CPU. qwen2.5-coder:7b leva 30-180s
+#: por chamada quando não há GPU dedicada. Se o user tem GPU, a
+#: resposta volta em ≤10s — timeout só protege contra hang real.
+OLLAMA_READ_TIMEOUT_SECONDS = 240
+
+
 async def _call_ollama(
     *, base_url: str, model: str, system_prompt: str, user_prompt: str,
 ) -> str:
     """POST OpenAI-compatible em /v1/chat/completions do daemon Ollama
-    do projeto. Retorna o texto cru da resposta — caller faz parse."""
+    do projeto. Retorna o texto cru da resposta — caller faz parse.
+
+    Timeout dividido: connect=10s (fail rápido se daemon caiu),
+    read=240s (modelo 7b em CPU pode demorar). Logs marcam tempo
+    decorrido pra debug.
+    """
+    import time
     url = f"{base_url}/v1/chat/completions"
     payload = {
         "model": model,
@@ -248,10 +260,29 @@ async def _call_ollama(
             {"role": "user", "content": user_prompt},
         ],
     }
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
-        resp.raise_for_status()
-        body = resp.json()
+    timeout = httpx.Timeout(connect=10.0, read=OLLAMA_READ_TIMEOUT_SECONDS, write=10.0, pool=5.0)
+    started = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+            resp.raise_for_status()
+            body = resp.json()
+    except httpx.ReadTimeout as exc:
+        elapsed = time.monotonic() - started
+        logger.warning(
+            "module_details.ollama_timeout",
+            base_url=base_url, model=model,
+            elapsed_s=round(elapsed, 1),
+            limit_s=OLLAMA_READ_TIMEOUT_SECONDS,
+        )
+        raise RuntimeError(
+            f"Ollama ({model}) não respondeu em {OLLAMA_READ_TIMEOUT_SECONDS}s. "
+            "Modelo pode estar carregando do disco (primeira chamada) "
+            "ou rodando em CPU lenta. Tente novamente — modelo já está "
+            "em memória após o primeiro carregamento."
+        ) from exc
+    elapsed = time.monotonic() - started
+    logger.info("module_details.ollama_call_ok", model=model, elapsed_s=round(elapsed, 1))
     choices = body.get("choices") or []
     if not choices:
         return ""

@@ -76,6 +76,57 @@ async def get_module_details(
     return details
 
 
+@router.get("/projects/{project_id}/modules/{module_id}/template.pdf")
+async def get_module_template_pdf(
+    project_id: UUID,
+    module_id: UUID,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.5.1 — Template PDF AcroForm pra GP responder o item.
+
+    Gera PDF com cabeçalho do item, descrição, detalhamento (Fase 9.2)
+    e seções com fields editáveis amarelos (lacunas) ou verdes (já
+    preenchidos pelo OCG). `module_id` embutido em hidden field +
+    metadata pra detecção no upload (Fase 9.5.2).
+
+    Se o item ainda não tem `details_json`, gera on-demand via Ollama
+    do projeto antes de renderizar (custo: 1 chamada local). Sem
+    Ollama configurado, falha 503.
+    """
+    from fastapi.responses import Response
+    from app.services.template_pdf_service import generate_template_pdf
+
+    try:
+        pdf_bytes = await generate_template_pdf(db, project_id, module_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        logger.warning(
+            "module_template_pdf.unexpected_error",
+            project_id=str(project_id), module_id=str(module_id),
+            error_type=type(exc).__name__, error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gerar template ({type(exc).__name__}): {exc!r}",
+        )
+
+    safe_id = str(module_id)[:8]
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f'attachment; filename="gca-template-{safe_id}.pdf"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @router.post("/projects/{project_id}/roadmap/foundation/sync")
 async def sync_roadmap_foundation(
     project_id: UUID,

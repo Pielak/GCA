@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Loader2, RefreshCw, X, AlertTriangle, FileText } from 'lucide-react'
-import { apiClient } from '@/lib/api'
+import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download } from 'lucide-react'
+import api, { apiClient } from '@/lib/api'
 
 /**
  * MVP 9 Fase 9.2 — Modal de detalhamento on-demand de item do Roadmap.
@@ -214,18 +214,81 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
                 </Section>
               )}
 
-              {/* Placeholder para 9.5 */}
-              <div className="border border-dashed border-slate-700 rounded p-3 bg-slate-900/30">
-                <p className="text-[11px] text-slate-500">
-                  📄 <strong>Em breve (Fase 9.5):</strong> botão "Baixar template PDF" (com AcroForm fields,
-                  campos pré-preenchidos do OCG e lacunas em cor diferente). GP preenche, faz upload na
-                  Ingestão e o item vira "Adicionado" automaticamente.
-                </p>
+              {/* MVP 9 Fase 9.5.1 — Download do template PDF AcroForm */}
+              <div className="border border-violet-500/30 rounded-lg p-4 bg-violet-950/10">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="flex-1 min-w-[260px]">
+                    <p className="text-sm font-medium text-violet-200 flex items-center gap-2">
+                      <FileText className="w-4 h-4" />
+                      Template PDF para preencher
+                    </p>
+                    <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+                      PDF com AcroForm fields. <span className="text-emerald-300">Verde</span> = já preenchido pelo OCG.
+                      <span className="text-amber-300"> Amarelo</span> = lacuna pra você responder.
+                      Após preencher, faça upload na aba <strong>Ingestão</strong> — o item será vinculado automaticamente.
+                    </p>
+                  </div>
+                  <DownloadTemplateButton projectId={projectId} moduleId={moduleId} moduleName={moduleName} />
+                </div>
               </div>
             </>
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+function DownloadTemplateButton({
+  projectId, moduleId, moduleName,
+}: { projectId: string; moduleId: string; moduleName: string }) {
+  const [downloading, setDownloading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handle = async () => {
+    setDownloading(true)
+    setError(null)
+    try {
+      const res = await api.get(
+        `/projects/${projectId}/modules/${moduleId}/template.pdf`,
+        { responseType: 'blob' },
+      )
+      const blob = new Blob([res.data], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const safeName = moduleName.replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 40)
+      a.download = `gca-template-${safeName}-${moduleId.slice(0, 8)}.pdf`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (err: any) {
+      const status = err?.response?.status || err?.status
+      if (status === 503) {
+        setError('Ollama não configurado. Configure em Settings → IA.')
+      } else {
+        setError(err?.message || 'Erro ao gerar template.')
+      }
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={handle}
+        disabled={downloading}
+        className="flex items-center gap-2 text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        {downloading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+        {downloading ? 'Gerando…' : 'Baixar template PDF'}
+      </button>
+      {error && (
+        <span className="text-[10px] text-red-300 max-w-[200px] text-right">{error}</span>
+      )}
     </div>
   )
 }
