@@ -1,15 +1,23 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.4  
+Versão: 3.5  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — **MVP 7 fechado 2026-04-19** (4 sub-fases). MVP 6 + Emenda fechados. MVP 5 fechado. Suite **732/732 passing em 173s** (baseline revalidada 2026-04-19 pós-saneamento, +28 vs 704 declarado no fechamento do MVP 7 — commits posteriores de métricas por projeto, GP soberano, cleanup-orphan adicionaram testes). Dogfood: release v0.8.0 retroativa aplicada automaticamente na instância. **Saneamento 2026-04-19**: §2/§6/§7/§10 realinhados ao estado pós-MVP 7; §9 registra emenda §4.1 (GP soberano) e saneamento documental. Nenhum MVP adicional definido no contrato — gate não é avaliado até autorização formal de novo MVP.
+Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 quitada. **MVP 8 aberto no contrato §7 em 2026-04-19** por solicitação do stakeholder-soberano (pré-processamento de documentos + feedback de progresso). Fase 1 do MVP 8 (barra de progresso) em execução imediata; fases 2-6 registradas como definidas, aguardando autorização de início. Suite baseline pós-DT-064: 746/746. Dogfood: release v0.8.0 retroativa aplicada automaticamente.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum em execução.** MVPs 1-7 todos fechados. Nenhum MVP adicional definido no contrato §7. Próximas evoluções exigem solicitação formal do stakeholder-soberano via protocolo §7.0 (nova seção `### MVP 8` seria adicionada com em-escopo e fora-de-escopo obrigatórios, commit atômico contrato+progress).
+**MVP 8 — Ingestão inteligente de documentos** — Fase 1 em execução (barra de progresso). Fases 2-6 definidas no contrato §7 MVP 8, aguardando autorização explícita de início conforme protocolo §7.0.
+
+Escopo por fase:
+- **Fase 1** (em execução agora): feedback de progresso — `arguider_stage` + `arguider_progress_percent` no schema + polling frontend + barra visível.
+- **Fase 2** (definida): extração rica de `.docx` transformando tabelas em parágrafos estruturados.
+- **Fase 3** (definida): pipeline em camadas para `.pdf` com AcroForm → texto → OCR fallback.
+- **Fase 4** (definida): normalização por heurística detectando seções implícitas.
+- **Fase 5** (definida): relatório de extração exibido ao usuário antes do Arguidor.
+- **Fase 6** (definida): testes de regressão com fixtures reais.
 
 ### MVPs fechados recentes
 - **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
