@@ -194,8 +194,39 @@ async def reanalyze_document(
             detail="Arquivo não encontrado no storage. Marcado como 'lost' — reenvie.",
         )
 
+    # DT-071 — idempotência da reanalise. Sem limpar a análise anterior
+    # e os items derivados, dois bugs acontecem:
+    #  (1) DT-065 checkpoint detecta `arguider_analyses` existente pro
+    #      document_id e PULA o LLM, indo direto pra updating_ocg. Ou
+    #      seja, /reanalyze não reanalisa — reusa a análise velha.
+    #  (2) Se forçássemos rodar de novo sem limpar, gatekeeper_items e
+    #      module_candidates antigos ficam órfãos (mesmo doc, múltiplos
+    #      IDs) e a UI duplica tudo.
+    # Fix: DELETE gatekeeper_items → module_candidates → arguider_analyses
+    # do document_id antes de disparar a task async. Ordem respeita a FK
+    # arguider_analysis_id.
+    from sqlalchemy import delete, select as _select
+    from app.models.base import ArguiderAnalysis, GatekeeperItem, ModuleCandidate
+
+    analysis_ids_q = await db.execute(
+        _select(ArguiderAnalysis.id).where(ArguiderAnalysis.document_id == document_id)
+    )
+    analysis_ids = [row[0] for row in analysis_ids_q.all()]
+    if analysis_ids:
+        await db.execute(
+            delete(GatekeeperItem).where(GatekeeperItem.arguider_analysis_id.in_(analysis_ids))
+        )
+        await db.execute(
+            delete(ModuleCandidate).where(ModuleCandidate.arguider_analysis_id.in_(analysis_ids))
+        )
+        await db.execute(
+            delete(ArguiderAnalysis).where(ArguiderAnalysis.id.in_(analysis_ids))
+        )
+
     # Reset status antes do retry
     doc.arguider_status = "pending"
+    doc.arguider_stage = "queued"
+    doc.arguider_progress_percent = 0
     doc.arguider_error_message = None
     doc.arguider_started_at = None
     doc.arguider_completed_at = None
