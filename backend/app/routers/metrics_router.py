@@ -16,10 +16,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.middleware.auth import get_current_user_from_token
 from app.db.database import get_db
-from app.models.base import User
+from app.models.base import ProjectMember, User
 from app.services.metrics_service import MetricsService
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
+project_router = APIRouter(
+    prefix="/projects/{project_id}/metrics", tags=["project-metrics"],
+)
 
 
 async def _require_admin(
@@ -81,3 +84,47 @@ async def metrics_prometheus(
     svc = MetricsService(db)
     text = await svc.as_prometheus_text(hours=hours)
     return Response(content=text, media_type="text/plain; charset=utf-8")
+
+
+# ─── Métricas por projeto (autorização: admin OR membro aceito) ───────────
+
+async def _require_project_access(
+    project_id: UUID,
+    user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Autoriza acesso a métricas do projeto.
+    Admin (ou Support) sempre; caso contrário exige membership aceito."""
+    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
+    if not user or not user.is_active:
+        raise HTTPException(status_code=403, detail="Usuário inválido ou inativo.")
+
+    if user.is_admin or user.is_support:
+        return {"user_id": user_id, "scope": "admin_or_support"}
+
+    member = (await db.execute(
+        select(ProjectMember).where(
+            ProjectMember.project_id == project_id,
+            ProjectMember.user_id == user_id,
+        )
+    )).scalar_one_or_none()
+    if not member or not member.accepted_at:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas Admin, Sustentação ou membro aceito do projeto pode ver estas métricas.",
+        )
+    return {"user_id": user_id, "scope": "member", "role": member.role}
+
+
+@project_router.get("/dashboard")
+async def project_metrics_dashboard(
+    project_id: UUID,
+    hours: int = Query(24, ge=1, le=720),
+    _auth: dict = Depends(_require_project_access),
+    db: AsyncSession = Depends(get_db),
+):
+    """Métricas operacionais do projeto: AI usage e eventos de audit
+    (limitação: audit filtra por resource_id=project_id — eventos
+    diretos sobre o projeto, não os recursos-filhos)."""
+    svc = MetricsService(db)
+    return await svc.as_dashboard_dict(hours=hours, project_id=project_id)

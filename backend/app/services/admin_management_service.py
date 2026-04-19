@@ -1,0 +1,193 @@
+"""Gestão da camada administrativa: promoção / rebaixamento / convite.
+
+Extensão autorizada em 2026-04-19 pelo stakeholder-soberano — até aqui só
+existia `auth_service.bootstrap_admin` (primeiro admin no setup).
+
+Regras duras:
+- Apenas Admin pode promover, rebaixar ou convidar.
+- **Último admin ativo não pode se auto-rebaixar** — bloqueia órfão.
+- Rebaixar Admin não toca em is_support (as flags são independentes).
+- Criar Admin novo via convite: gera senha temporária, email opcional
+  (reusa email_service.send_admin_invitation_email). Se SMTP não
+  configurado, a senha é retornada no response pra Admin comunicar
+  manualmente.
+"""
+from __future__ import annotations
+
+import secrets
+from datetime import datetime, timezone
+from typing import Optional
+from uuid import UUID, uuid4
+
+import structlog
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.security import hash_password
+from app.models.base import User
+from app.services.email_service import EmailService
+
+logger = structlog.get_logger(__name__)
+
+
+async def _require_admin_actor(db: AsyncSession, actor_id: UUID) -> User:
+    actor = (await db.execute(
+        select(User).where(User.id == actor_id)
+    )).scalar_one_or_none()
+    if not actor or not actor.is_active or not actor.is_admin:
+        raise PermissionError("Apenas Admin ativo pode gerenciar a camada administrativa.")
+    return actor
+
+
+async def _count_active_admins(db: AsyncSession) -> int:
+    return int((await db.execute(
+        select(func.count(User.id)).where(
+            User.is_admin.is_(True),
+            User.is_active.is_(True),
+        )
+    )).scalar() or 0)
+
+
+async def set_admin_flag(
+    db: AsyncSession,
+    *,
+    target_user_id: UUID,
+    new_value: bool,
+    actor_id: UUID,
+) -> User:
+    """Promove ou rebaixa o papel de Admin de um usuário existente.
+
+    Regra dura (contrato §4.1 + stakeholder 2026-04-19):
+    - Apenas Admin pode tocar em is_admin de outros.
+    - Último admin ativo não pode se auto-rebaixar.
+    - Rebaixar não altera is_support (flags independentes).
+    """
+    actor = await _require_admin_actor(db, actor_id)
+
+    target = (await db.execute(
+        select(User).where(User.id == target_user_id)
+    )).scalar_one_or_none()
+    if not target:
+        raise ValueError("Usuário alvo não encontrado.")
+    if not target.is_active:
+        raise ValueError("Usuário alvo inativo.")
+
+    current = bool(target.is_admin)
+    if current == new_value:
+        return target  # noop
+
+    # Rebaixando e alvo é o actor: checa se é o último admin
+    if (new_value is False) and (target.id == actor.id):
+        count = await _count_active_admins(db)
+        if count <= 1:
+            raise PermissionError(
+                "Você é o último administrador ativo — não é possível se rebaixar."
+            )
+
+    # Rebaixando alvo diferente: também checa, por segurança (evita
+    # cenário de race onde 2 admins se rebaixam simultaneamente).
+    if new_value is False and target.id != actor.id:
+        count = await _count_active_admins(db)
+        if count <= 1:
+            raise PermissionError(
+                "A instância ficaria sem administradores ativos. Operação bloqueada."
+            )
+
+    target.is_admin = bool(new_value)
+    await db.commit()
+    await db.refresh(target)
+    logger.info(
+        "admin_flag_changed",
+        target_id=str(target.id),
+        new_value=new_value,
+        actor_id=str(actor.id),
+    )
+    return target
+
+
+async def invite_admin(
+    db: AsyncSession,
+    *,
+    email: str,
+    full_name: str,
+    actor_id: UUID,
+    activation_link: str = "",
+) -> dict:
+    """Cria (ou promove) usuário a Admin via convite.
+
+    Fluxo:
+    - Se email já existe: marca is_admin=True (equivalente a promote).
+    - Se não existe: cria user com senha temporária, is_admin=True,
+      first_access_completed=False (forçará troca na 1ª entrada).
+    - Tenta enviar email com senha via EmailService.send_admin_invitation_email.
+      Se SMTP não configurado / falhar, a senha é retornada no response
+      pro Admin comunicar manualmente.
+
+    Retorna: {user_id, email, created, temp_password_sent, temp_password?}
+    """
+    actor = await _require_admin_actor(db, actor_id)
+    email = (email or "").strip().lower()
+    full_name = (full_name or "").strip()
+    if not email or "@" not in email:
+        raise ValueError("Email inválido.")
+    if not full_name:
+        raise ValueError("Nome obrigatório.")
+
+    existing = (await db.execute(
+        select(User).where(User.email == email)
+    )).scalar_one_or_none()
+
+    created = False
+    temp_password: Optional[str] = None
+    if existing:
+        if not existing.is_active:
+            raise ValueError("Usuário existe mas está inativo. Reative antes de promover.")
+        existing.is_admin = True
+        user = existing
+    else:
+        temp_password = secrets.token_urlsafe(12)
+        user = User(
+            id=uuid4(),
+            email=email,
+            full_name=full_name,
+            password_hash=hash_password(temp_password),
+            is_active=True,
+            is_admin=True,
+            first_access_completed=False,
+        )
+        db.add(user)
+        created = True
+    await db.commit()
+    await db.refresh(user)
+
+    sent = False
+    if created and temp_password:
+        try:
+            ok, _err = EmailService.send_admin_invitation_email(
+                to_email=email,
+                invited_by_name=(actor.full_name or actor.email),
+                temporary_password=temp_password,
+                activation_link=activation_link or "",
+            )
+            sent = bool(ok)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("admin_invite_email_failed", error=str(e))
+            sent = False
+
+    logger.info(
+        "admin_invited",
+        user_id=str(user.id),
+        email=email,
+        created=created,
+        email_sent=sent,
+    )
+
+    return {
+        "user_id": str(user.id),
+        "email": user.email,
+        "created": created,
+        "email_sent": sent,
+        # Só retorna a senha se: user foi criado agora AND email não
+        # foi enviado (admin precisa comunicar manualmente).
+        "temp_password": temp_password if (created and not sent) else None,
+    }

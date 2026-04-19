@@ -15,7 +15,8 @@ Mantém o footprint do GCA pequeno; observabilidade externa fica como
 candidato pra clientes que querem Grafana real.
 """
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 import structlog
 from sqlalchemy import func, select
@@ -38,8 +39,11 @@ class MetricsService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def _ai_usage_aggregations(self, since: datetime) -> Dict[str, Any]:
-        """Agrupa AIUsageLog por provider/operation desde `since`."""
+    async def _ai_usage_aggregations(
+        self, since: datetime, project_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """Agrupa AIUsageLog por provider/operation desde `since`.
+        Quando project_id passado, filtra por AIUsageLog.project_id."""
         stmt = (
             select(
                 AIUsageLog.provider,
@@ -52,6 +56,8 @@ class MetricsService:
             .where(AIUsageLog.created_at >= since)
             .group_by(AIUsageLog.provider, AIUsageLog.operation)
         )
+        if project_id is not None:
+            stmt = stmt.where(AIUsageLog.project_id == project_id)
         rows = (await self.db.execute(stmt)).all()
         return {
             "since": since.isoformat(),
@@ -68,8 +74,18 @@ class MetricsService:
             ],
         }
 
-    async def _audit_aggregations(self, since: datetime) -> Dict[str, Any]:
-        """Conta eventos de audit por event_type desde `since`."""
+    async def _audit_aggregations(
+        self, since: datetime, project_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """Conta eventos de audit por event_type desde `since`.
+
+        Quando project_id passado, filtra por GlobalAuditLog.resource_id.
+        Limitação: GlobalAuditLog não tem coluna project_id direta — esse
+        filtro pega apenas eventos cujo recurso direto É o projeto
+        (ex: project.created). Eventos de recursos-filhos do projeto
+        (questionnaire.submitted, ocg.updated, etc) não aparecem aqui
+        no escopo por-projeto; aparecem no global.
+        """
         stmt = (
             select(
                 GlobalAuditLog.event_type,
@@ -80,6 +96,8 @@ class MetricsService:
             .order_by(func.count(GlobalAuditLog.id).desc())
             .limit(20)
         )
+        if project_id is not None:
+            stmt = stmt.where(GlobalAuditLog.resource_id == project_id)
         rows = (await self.db.execute(stmt)).all()
         return {
             "since": since.isoformat(),
@@ -112,17 +130,28 @@ class MetricsService:
             "inactive": int(total_inactive),
         }
 
-    async def as_dashboard_dict(self, hours: int = 24) -> Dict[str, Any]:
-        """Snapshot agregado para a UI — janela default 24h."""
+    async def as_dashboard_dict(
+        self, hours: int = 24, project_id: Optional[UUID] = None
+    ) -> Dict[str, Any]:
+        """Snapshot agregado para a UI — janela default 24h.
+
+        Quando `project_id` é passado (escopo por projeto), ai_usage e
+        audit são filtrados; users/projects.by_status são omitidos do
+        payload (não fazem sentido no escopo de um único projeto).
+        """
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        return {
+        out: Dict[str, Any] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "window_hours": hours,
-            "ai_usage": await self._ai_usage_aggregations(since),
-            "audit": await self._audit_aggregations(since),
-            "projects": await self._project_summary(),
-            "users": await self._user_summary(),
+            "scope": "project" if project_id else "global",
+            "project_id": str(project_id) if project_id else None,
+            "ai_usage": await self._ai_usage_aggregations(since, project_id=project_id),
+            "audit": await self._audit_aggregations(since, project_id=project_id),
         }
+        if project_id is None:
+            out["projects"] = await self._project_summary()
+            out["users"] = await self._user_summary()
+        return out
 
     async def as_prometheus_text(self, hours: int = 24) -> str:
         """Métricas em formato texto Prometheus (sem prometheus_client).

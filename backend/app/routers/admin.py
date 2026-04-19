@@ -1354,3 +1354,67 @@ async def delete_user(
 
     logger.info("admin.user_deleted", user_id=str(user_id), email=email)
     return {"success": True, "message": f"Usuário {email} excluído"}
+
+
+# ─── Gestão de camada administrativa (2026-04-19) ────────────────────────
+
+class AdminFlagRequest(BaseModel):
+    is_admin: bool
+
+
+class AdminInviteRequest(BaseModel):
+    email: EmailStr
+    full_name: str
+    activation_link: str | None = None
+
+
+@router.patch("/users/{user_id}/admin-flag")
+async def set_admin_flag_endpoint(
+    user_id: UUID,
+    payload: AdminFlagRequest,
+    actor_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Promove ou rebaixa o papel de Admin. Último admin ativo não pode
+    se auto-rebaixar (anti-órfão). is_support fica independente."""
+    from app.services import admin_management_service as svc
+    try:
+        updated = await svc.set_admin_flag(
+            db, target_user_id=user_id, new_value=payload.is_admin, actor_id=actor_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return {
+        "id": str(updated.id),
+        "email": updated.email,
+        "full_name": updated.full_name,
+        "is_admin": bool(updated.is_admin),
+        "is_support": bool(updated.is_support),
+    }
+
+
+@router.post("/invitations/admin", status_code=201)
+async def invite_admin_endpoint(
+    payload: AdminInviteRequest,
+    actor_id: UUID = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Convida novo administrador (ou promove user existente pelo email).
+    Tenta enviar email com senha temp; se falha, retorna a senha pro
+    admin comunicar manualmente."""
+    from app.services import admin_management_service as svc
+    try:
+        result = await svc.invite_admin(
+            db,
+            email=payload.email,
+            full_name=payload.full_name,
+            actor_id=actor_id,
+            activation_link=payload.activation_link or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    return result

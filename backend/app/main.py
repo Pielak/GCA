@@ -16,7 +16,7 @@ from app.routers.pipeline_quality_router import router as pipeline_quality_route
 from app.routers.pipeline_audit_router import router as pipeline_audit_router
 from app.routers.pipeline_orchestration_router import router as pipeline_orchestration_router
 from app.routers.questionnaire_pdf_router import router as questionnaire_pdf_router
-from app.routers.metrics_router import router as metrics_router
+from app.routers.metrics_router import router as metrics_router, project_router as metrics_project_router
 from app.routers.backup_router import (
     router as backup_project_router,
     admin_router as backup_admin_router,
@@ -147,6 +147,7 @@ app.include_router(pipeline_audit_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_orchestration_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(questionnaire_pdf_router, prefix=f"{settings.API_PREFIX}", tags=["questionnaire-pdf"])
 app.include_router(metrics_router, prefix=f"{settings.API_PREFIX}", tags=["metrics"])
+app.include_router(metrics_project_router, prefix=f"{settings.API_PREFIX}", tags=["project-metrics"])
 app.include_router(backup_project_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
 app.include_router(backup_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-backups"])
 app.include_router(backup_status_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
