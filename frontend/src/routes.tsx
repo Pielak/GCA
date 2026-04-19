@@ -9,6 +9,8 @@ import { AdminProjectsPage } from './pages/admin/AdminProjectsPage';
 import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { AdminMetricsPage } from './pages/admin/AdminMetricsPage';
+import { AdminBackupsPage } from './pages/admin/AdminBackupsPage';
+import { ProjectBackupPage } from './pages/projects/ProjectBackupPage';
 import { AdminProjectViewPage } from './pages/admin/AdminProjectViewPage';
 import { DesignShowcasePage } from './pages/DesignShowcasePage';
 import { ProjectListPage } from './pages/projects/ProjectListPage';
@@ -98,6 +100,10 @@ export const router = createBrowserRouter([
         element: <RequireAdmin><AdminMetricsPage /></RequireAdmin>,
       },
       {
+        path: 'admin/backups',
+        element: <RequireAdmin><AdminBackupsPage /></RequireAdmin>,
+      },
+      {
         path: 'design-showcase',
         element: <RequireAdmin><DesignShowcasePage /></RequireAdmin>,
       },
@@ -130,6 +136,7 @@ export const router = createBrowserRouter([
           { path: 'readiness', element: <RequireProjectSetup><ReadinessPage /></RequireProjectSetup> },
           { path: 'settings', Component: ProjectSettingsPage },
           { path: 'audit', Component: PipelineAuditPage },
+          { path: 'backups', Component: ProjectBackupPage },
         ],
       },
     ],

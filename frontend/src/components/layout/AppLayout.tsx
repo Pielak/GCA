@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react'
 import { Outlet, useNavigate } from 'react-router-dom'
 import { Bell, Search, LogOut, Command, Check, CheckCheck } from 'lucide-react'
 import { Sidebar } from './Sidebar'
+import { BackupActiveBanner } from '../BackupActiveBanner'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotificationsWS } from '@/hooks/useNotificationsWS'
@@ -147,6 +148,8 @@ export function AppLayout() {
 
   return (
     <div className="flex h-screen bg-[#06060e] text-slate-100 overflow-hidden">
+      {/* Backup-4: banner de backup ativo (cross-projeto) */}
+      <BackupActiveBanner />
       {/* Noise overlay global */}
       <div className="fixed inset-0 pointer-events-none z-50 opacity-[0.015]"
         style={{
