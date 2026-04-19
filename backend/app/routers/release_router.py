@@ -184,6 +184,136 @@ async def get_release_log(
     ])
 
 
+# ─── Fase 2: aplicação destrutiva + rollback ─────────────────────────────
+
+class ApplyDestructiveRequest(BaseModel):
+    confirm: bool
+    take_snapshots: bool = True
+
+
+class ApplyDestructiveResponse(BaseModel):
+    release_id: UUID
+    status: str
+    snapshots_taken: int
+    affected_projects: int
+
+
+class RollbackProjectRequest(BaseModel):
+    project_id: UUID
+    snapshot_id: UUID
+    confirm: bool
+
+
+@admin_router.post("/{release_id}/apply", response_model=ApplyDestructiveResponse)
+async def apply_destructive(
+    release_id: UUID,
+    payload: ApplyDestructiveRequest,
+    actor_id: UUID = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Aplica release destrutiva. Fluxo:
+      1. valida release pending + is_destructive=True;
+      2. se take_snapshots=True: cria backup (DT-063) de cada projeto
+         ativo com trigger_source='manual_admin'; registra snapshot_id;
+      3. marca release applied + loga eventos.
+
+    As migrations SQL reais rodam via deploy/upgrade.sh **antes** do
+    backend subir — este endpoint só formaliza o registro da aplicação
+    e garante snapshot pré-release. Migration destrutiva sem este
+    fluxo é considerada violação do contrato §7 MVP 7.
+    """
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Operação destrutiva — passe confirm=true no body.",
+        )
+
+    from app.models.base import Project
+    from app.services import project_backup_service as backup_svc
+
+    rel = (await db.execute(
+        select(Release).where(Release.id == release_id)
+    )).scalar_one_or_none()
+    if not rel:
+        raise HTTPException(status_code=404, detail="Release não encontrada.")
+    if rel.status != "pending":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Release não está pending (status={rel.status}).",
+        )
+    if not rel.is_destructive:
+        raise HTTPException(
+            status_code=400,
+            detail="Release não é destrutiva; aplicação automática já ocorre no startup.",
+        )
+
+    snapshots: list[dict] = []
+    if payload.take_snapshots:
+        # Projetos ativos — snapshot pré-release por projeto
+        active_projects = (await db.execute(
+            select(Project).where(Project.deleted_at.is_(None))
+        )).scalars().all()
+        for p in active_projects:
+            try:
+                b = await backup_svc.create_backup(
+                    db, p.id, trigger_source="manual_admin", actor_id=actor_id,
+                )
+                snapshots.append({"project_id": p.id, "snapshot_id": b.id})
+            except Exception:
+                # Se um projeto falhar, registra mas continua — admin decide abortar
+                pass
+
+    try:
+        await svc.apply_destructive_release(
+            db, release_id=release_id, actor_id=actor_id, snapshots=snapshots,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return ApplyDestructiveResponse(
+        release_id=release_id,
+        status="applied",
+        snapshots_taken=len(snapshots),
+        affected_projects=len(snapshots),
+    )
+
+
+@admin_router.post("/{release_id}/rollback-project", status_code=200)
+async def rollback_project(
+    release_id: UUID,
+    payload: RollbackProjectRequest,
+    actor_id: UUID = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restaura um projeto ao snapshot pré-release. Usa DT-063 pra
+    aplicar `restore_from_backup` e registra evento 'rolled_back' no
+    log da release."""
+    if not payload.confirm:
+        raise HTTPException(
+            status_code=400,
+            detail="Operação destrutiva — passe confirm=true.",
+        )
+
+    from app.services import project_backup_service as backup_svc
+
+    try:
+        await backup_svc.restore_from_backup(
+            db, payload.project_id, payload.snapshot_id, actor_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    try:
+        await svc.mark_rollback(
+            db, release_id=release_id, project_id=payload.project_id,
+            actor_id=actor_id, snapshot_id=payload.snapshot_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {"status": "ok", "release_id": str(release_id), "project_id": str(payload.project_id)}
+
+
 # ─── Endpoints user-facing ─────────────────────────────────────────────────
 
 @user_router.get("", response_model=ReleaseListResponse)
