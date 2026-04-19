@@ -2,7 +2,7 @@
 
 Versão: 3.5  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 em execução**: Fases 1-3 + Fase 5 fechadas; Fases 4 e 6 aguardando autorização. Suite baseline pós-DT-072: 838/838. Dogfood: release v0.8.0 retroativa aplicada; pipeline Arguidor→Gatekeeper→Roadmap revalidado em doc PDF (completed/100 honesto) + relatório de extração exposto na UI.
+Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 em execução** (Fases 1-3 + 5 fechadas; 4 e 6 aguardando). **MVP 9 aberto no contrato §7 em 2026-04-19** (Roadmap multicategoria com pré-ingestão guiada) — 5 fases definidas, Fase 9.1 em execução imediata. Suite baseline pós-DT-072: 838/838. Dogfood: pipeline revalidado em doc PDF ponta-a-ponta + relatório de extração exposto na UI.
 
 ---
 
