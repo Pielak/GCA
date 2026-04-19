@@ -10,6 +10,7 @@ import { AdminUsersPage } from './pages/admin/AdminUsersPage';
 import { AdminAuditPage } from './pages/admin/AdminAuditPage';
 import { AdminMetricsPage } from './pages/admin/AdminMetricsPage';
 import { AdminBackupsPage } from './pages/admin/AdminBackupsPage';
+import { AdminIncidentsPage } from './pages/admin/AdminIncidentsPage';
 import { ProjectBackupPage } from './pages/projects/ProjectBackupPage';
 import { AdminProjectViewPage } from './pages/admin/AdminProjectViewPage';
 import { DesignShowcasePage } from './pages/DesignShowcasePage';
@@ -36,6 +37,8 @@ import { SetupWizardPage } from './pages/SetupWizardPage';
 import { TesterReviewPage } from './pages/projects/TesterReviewPage';
 import { PipelineAuditPage } from './pages/projects/PipelineAuditPage';
 import { ProjectLoginPage } from './pages/ProjectLoginPage';
+import { IncidentListPage } from './pages/projects/IncidentListPage';
+import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
 
 export const router = createBrowserRouter([
   {
@@ -104,6 +107,10 @@ export const router = createBrowserRouter([
         element: <RequireAdmin><AdminBackupsPage /></RequireAdmin>,
       },
       {
+        path: 'admin/incidents',
+        element: <RequireAdmin><AdminIncidentsPage /></RequireAdmin>,
+      },
+      {
         path: 'design-showcase',
         element: <RequireAdmin><DesignShowcasePage /></RequireAdmin>,
       },
@@ -137,6 +144,8 @@ export const router = createBrowserRouter([
           { path: 'settings', Component: ProjectSettingsPage },
           { path: 'audit', Component: PipelineAuditPage },
           { path: 'backups', Component: ProjectBackupPage },
+          { path: 'incidents', Component: IncidentListPage },
+          { path: 'incidents/:ticketId', Component: IncidentDetailPage },
         ],
       },
     ],

@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderOpen, Users, Shield, ChevronDown, ChevronRight,
   LogOut, Settings, Code2, FileText, GitBranch, Zap, TestTube2,
   History, BookOpen, Activity, ScrollText, Menu, X, Clock, ClipboardList,
-  CheckCircle2, BarChart3, Database
+  CheckCircle2, BarChart3, Database, Bug
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -150,6 +150,7 @@ export function Sidebar() {
             <NavItem to="/admin/audit" icon={<ScrollText className="w-4 h-4" />} label="Auditoria Global" />
             <NavItem to="/admin/metrics" icon={<BarChart3 className="w-4 h-4" />} label="Métricas" />
             <NavItem to="/admin/backups" icon={<Database className="w-4 h-4" />} label="Backups" />
+            <NavItem to="/admin/incidents" icon={<Bug className="w-4 h-4" />} label="Incidentes" />
           </div>
         )}
 
@@ -208,6 +209,7 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/readiness`} label="Definition of Done" icon={<CheckCircle2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/backups`} label="Backups" icon={<Database className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/incidents`} label="Incidentes" icon={<Bug className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
                       </div>
                     )}
