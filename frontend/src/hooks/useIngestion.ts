@@ -149,15 +149,52 @@ export const useDocumentStatusPolling = (projectId: string | undefined, document
   })
 }
 
+// MVP 9 Fase 9.5.2 — módulos elegíveis pra receber vínculo de upload.
+export interface EligibleModule {
+  id: string
+  name: string
+  module_type: string
+  priority: string
+  status: string
+  source: string
+}
+
+export const useEligibleModules = (projectId: string | undefined, enabled: boolean = true) => {
+  return useQuery({
+    queryKey: ['ingestion', 'eligible-modules', projectId],
+    queryFn: async () => {
+      const r = await apiClient.get<EligibleModule[]>(
+        `/projects/${projectId}/modules/eligible-for-link`
+      )
+      return r.data
+    },
+    enabled: !!projectId && enabled,
+    staleTime: 30 * 1000,
+  })
+}
+
 // Upload de documento (multipart/form-data)
+// MVP 9 Fase 9.5.2 — opcionalmente vincula a um módulo do Roadmap via
+// target_module_id. Se omitido E for PDF de template GCA, backend tenta
+// extrair automaticamente.
+export interface UploadDocumentArgs {
+  file: File
+  targetModuleId?: string | null
+}
+
 export const useUploadDocument = (projectId: string | undefined) => {
   const queryClient = useQueryClient()
   const toast = useToast()
 
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async (args: File | UploadDocumentArgs) => {
       const formData = new FormData()
+      const file = args instanceof File ? args : args.file
+      const targetModuleId = args instanceof File ? null : args.targetModuleId
       formData.append('file', file)
+      if (targetModuleId) {
+        formData.append('target_module_id', targetModuleId)
+      }
       // Não setar Content-Type manualmente — axios detecta FormData e adiciona o
       // boundary. Setar 'multipart/form-data' sem boundary quebra o parser FastAPI.
       const response = await apiClient.post(`/projects/${projectId}/ingestion`, formData)

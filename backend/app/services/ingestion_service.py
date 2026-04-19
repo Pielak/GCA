@@ -283,8 +283,16 @@ class IngestionService:
         original_filename: str,
         content_type: str = "",
         category: str | None = None,
+        target_module_id: UUID | None = None,
     ) -> dict:
-        """Upload e análise assíncrona de documento."""
+        """Upload e análise assíncrona de documento.
+
+        MVP 9 Fase 9.5.2 — `target_module_id` opcional vincula o doc a
+        um item do Roadmap. Quando o pipeline confirma propagação, o
+        item transita pra `adicionado` e cria DELIVERABLE automático.
+        Se `target_module_id` for None E o file_type for pdf, tenta
+        extrair de hidden field/metadata/footer do template GCA.
+        """
         # Validar tamanho
         if len(file_bytes) > MAX_FILE_SIZE:
             return {"error": "Arquivo excede o tamanho máximo de 50MB", "status_code": 413}
@@ -325,6 +333,31 @@ class IngestionService:
         pii_detected, pii_fields = self._detect_pii(file_bytes, file_type)
         quarantine_status = "quarantined" if pii_detected else "none"
 
+        # MVP 9 Fase 9.5.2 — descobre target_module_id se ausente.
+        # Estratégia: explícito do form > hidden field do PDF > metadata > footer.
+        if target_module_id is None and file_type == "pdf":
+            from app.services.pdf_module_id_extractor import extract_module_id
+            extracted = extract_module_id(file_bytes)
+            if extracted is not None:
+                # Validação de compartimentalização (§2.2): módulo precisa
+                # pertencer ao mesmo projeto. Se não, ignora silenciosamente
+                # — não é falha, é doc upload normal.
+                from app.models.base import ModuleCandidate as _MC
+                mc_check = await self.db.get(_MC, extracted)
+                if mc_check and mc_check.project_id == project_id:
+                    target_module_id = extracted
+                    logger.info(
+                        "ingestion.target_module_extracted_from_pdf",
+                        document_filename=original_filename,
+                        target_module_id=str(target_module_id),
+                    )
+                else:
+                    logger.warning(
+                        "ingestion.target_module_pdf_cross_project",
+                        extracted=str(extracted),
+                        project_id=str(project_id),
+                    )
+
         # Criar registro
         document = IngestedDocument(
             project_id=project_id,
@@ -340,6 +373,7 @@ class IngestionService:
             pii_fields=json.dumps(pii_fields) if pii_fields else None,
             arguider_status="pending" if not pii_detected else "quarantined",
             git_file_path=f"docs/ingested/uncategorized/{filename}",
+            target_module_id=target_module_id,
         )
         self.db.add(document)
         await self.db.commit()
@@ -605,6 +639,124 @@ class IngestionService:
                 error=str(_commit_exc),
             )
             raise
+
+    @staticmethod
+    def _deliverable_category_from_module(module_type: str | None) -> str:
+        """Mapeia categoria canônica do MVP 9 pra schema de DELIVERABLES."""
+        m = (module_type or "").lower()
+        return {
+            "infrastructure": "config",
+            "deploy_pipeline": "config",
+            "observability": "config",
+            "middleware": "code",
+            "backend_service": "code",
+            "feature": "code",
+        }.get(m, "other")
+
+    @classmethod
+    async def _link_target_module_after_pipeline(
+        cls,
+        *,
+        document_id: UUID,
+        project_id: UUID,
+    ) -> None:
+        """MVP 9 Fase 9.5.2 — após o pipeline completar com sucesso, se o doc
+        está vinculado a um item do Roadmap (target_module_id), transita o
+        item pra `adicionado` E cria row em `project_deliverables`.
+
+        Wrapper com session fresca (isola do estado da session do
+        _analyze_async). A lógica core está em
+        `_link_target_module_in_session` pra ser testável.
+        """
+        from app.db.database import AsyncSessionLocal as _ASL
+        async with _ASL() as _db:
+            await cls._link_target_module_in_session(_db, document_id, project_id)
+            await _db.commit()
+
+    @classmethod
+    async def _link_target_module_in_session(
+        cls,
+        db,
+        document_id: UUID,
+        project_id: UUID,
+    ) -> None:
+        """Lógica core da Fase 9.5.2 testável com session arbitrária.
+
+        Idempotente: chamadas duplicadas no mesmo (doc, módulo) não
+        duplicam deliverable nem mudam status repetido. Não comita —
+        caller decide.
+        """
+        from app.models.base import (
+            IngestedDocument as _Doc,
+            ModuleCandidate as _MC,
+            ProjectDeliverable as _Del,
+        )
+        from app.constants.module_categories import (
+            CATEGORY_LABELS_PT_BR, is_allowed_transition,
+        )
+        import re as _re
+
+        doc = await db.get(_Doc, document_id)
+        if not doc or not doc.target_module_id:
+            return  # Doc sem vínculo — nada a fazer
+
+        mc = await db.get(_MC, doc.target_module_id)
+        if not mc or mc.project_id != project_id:
+            logger.warning(
+                "ingestion.target_module_not_found_or_cross_project",
+                document_id=str(document_id),
+                target_module_id=str(doc.target_module_id),
+            )
+            return
+
+        # Transição: status atual → 'adicionado' (se permitido)
+        target_status = "adicionado"
+        current = mc.status or "sugerido"
+        if current != target_status and is_allowed_transition(current, target_status):
+            mc.status = target_status
+            logger.info(
+                "ingestion.module_status_transitioned",
+                module_id=str(mc.id), project_id=str(project_id),
+                from_status=current, to_status=target_status,
+            )
+        elif current != target_status:
+            logger.warning(
+                "ingestion.module_status_transition_blocked",
+                module_id=str(mc.id), from_status=current,
+                to_status=target_status,
+            )
+
+        # Cria DELIVERABLE idempotente (UniqueConstraint por
+        # project_id + normalized_name).
+        normalized = _re.sub(r"\s+", " ", (mc.name or "").strip()).lower()[:500]
+        existing = await db.execute(
+            select(_Del).where(
+                _Del.project_id == project_id,
+                _Del.normalized_name == normalized,
+            )
+        )
+        existing_row = existing.scalar_one_or_none()
+        cat_label = CATEGORY_LABELS_PT_BR.get(mc.module_type or "", "Outro")
+        if existing_row is None:
+            db.add(_Del(
+                project_id=project_id,
+                name=mc.name or "Item sem nome",
+                normalized_name=normalized,
+                category=IngestionService._deliverable_category_from_module(mc.module_type),
+                kind=f"roadmap_module:{mc.module_type or 'feature'}",
+                status="declared",
+                notes=f"Criado automaticamente ao adicionar item do Roadmap ({cat_label}). Doc fonte: {doc.original_filename}",
+            ))
+            logger.info(
+                "ingestion.deliverable_created_from_module",
+                module_id=str(mc.id), project_id=str(project_id),
+                deliverable_name=mc.name,
+            )
+        else:
+            logger.info(
+                "ingestion.deliverable_already_exists",
+                module_id=str(mc.id), normalized_name=normalized,
+            )
 
     @classmethod
     async def _update_stage_fresh(
@@ -1060,6 +1212,23 @@ class IngestionService:
                         # sucesso completo do pipeline (arguider + ocg + propagação disparada).
                         # DT-072: session fresca (mesmo motivo de _update_stage_fresh acima).
                         await IngestionService._update_stage_fresh(document_id, "completed", percent=100)
+
+                        # MVP 9 Fase 9.5.2 — se este doc estava vinculado a
+                        # um item do Roadmap (target_module_id), transita o
+                        # item pra `adicionado` e cria DELIVERABLE automático.
+                        # Isolado em try/except: falha aqui não invalida o
+                        # pipeline completo — log warning + segue.
+                        try:
+                            await IngestionService._link_target_module_after_pipeline(
+                                document_id=document_id,
+                                project_id=project_id,
+                            )
+                        except Exception as _link_exc:
+                            logger.warning(
+                                "ingestion.target_module_link_failed",
+                                document_id=str(document_id),
+                                error=str(_link_exc),
+                            )
 
                     except Exception as e:
                         import traceback

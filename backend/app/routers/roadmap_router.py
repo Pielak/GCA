@@ -76,6 +76,47 @@ async def get_module_details(
     return details
 
 
+@router.get("/projects/{project_id}/modules/eligible-for-link")
+async def list_modules_eligible_for_link(
+    project_id: UUID,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.5.2 — Lista módulos do projeto que podem receber
+    vínculo de upload (status `sugerido` ou `aguardando_resposta`).
+
+    Frontend usa pra popular dropdown na tela de upload da Ingestão.
+    Já vem ordenado por (priority desc, status asc, name) — itens de
+    Fase 1 alta prioridade aparecem primeiro.
+    """
+    from app.models.base import ModuleCandidate as _MC
+
+    rows = await db.execute(
+        select(_MC)
+        .where(_MC.project_id == project_id)
+        .where(_MC.status.in_(["sugerido", "aguardando_resposta"]))
+    )
+    items = rows.scalars().all()
+
+    priority_rank = {"high": 0, "medium": 1, "low": 2}
+    items_sorted = sorted(
+        items,
+        key=lambda m: (priority_rank.get(m.priority or "medium", 1), m.status, m.name or ""),
+    )
+
+    return [
+        {
+            "id": str(m.id),
+            "name": m.name,
+            "module_type": m.module_type,
+            "priority": m.priority,
+            "status": m.status,
+            "source": m.source,
+        }
+        for m in items_sorted
+    ]
+
+
 @router.get("/projects/{project_id}/modules/{module_id}/template.pdf")
 async def get_module_template_pdf(
     project_id: UUID,

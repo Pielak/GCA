@@ -2,7 +2,7 @@ import React, { useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { Upload, FileText, Trash2, Play, Terminal, Loader2, RefreshCw } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
-import { useDocuments, useUploadDocument, useDeleteDocument, type IngestedDocument } from '@/hooks/useIngestion';
+import { useDocuments, useUploadDocument, useDeleteDocument, useEligibleModules, type IngestedDocument } from '@/hooks/useIngestion';
 import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
 import { IngestionProgressBar } from '@/components/ingestion/IngestionProgressBar';
 import { ExtractionReportCard } from '@/components/ingestion/ExtractionReportCard';
@@ -127,11 +127,19 @@ export function IngestionPage() {
   const pendingCount = documents.filter(d => d.arguider_status === 'pending').length;
   const processingCount = documents.filter(d => d.arguider_status === 'processing').length;
 
+  // MVP 9 Fase 9.5.2 — vínculo opcional com item do Roadmap.
+  const eligibleModules = useEligibleModules(projectId);
+  const [targetModuleId, setTargetModuleId] = useState<string>('');
+
   const handleFiles = useCallback((files: FileList | File[]) => {
+    const tgt = targetModuleId || null;
     Array.from(files).forEach(file => {
-      uploadMutation.mutate(file);
+      uploadMutation.mutate({ file, targetModuleId: tgt });
     });
-  }, [uploadMutation]);
+    // Reseta dropdown após upload — força re-seleção (evita anexar o mesmo
+    // módulo a vários docs sem o GP perceber).
+    if (tgt) setTargetModuleId('');
+  }, [uploadMutation, targetModuleId]);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -196,6 +204,38 @@ export function IngestionPage() {
           </button>
         </div>
       </div>
+
+      {/* MVP 9 Fase 9.5.2 — vínculo opcional com item do Roadmap */}
+      {(eligibleModules.data?.length ?? 0) > 0 && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+          <label className="block text-xs uppercase tracking-wide text-slate-500 mb-2">
+            Vincular este upload a um item do Roadmap (opcional)
+          </label>
+          <div className="flex items-center gap-3 flex-wrap">
+            <select
+              value={targetModuleId}
+              onChange={e => setTargetModuleId(e.target.value)}
+              className="flex-1 min-w-[280px] bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-violet-500 focus:outline-none"
+            >
+              <option value="">— Nenhum (doc avulso ou auto-detecção via PDF GCA) —</option>
+              {eligibleModules.data?.map(m => (
+                <option key={m.id} value={m.id}>
+                  [{m.priority === 'high' ? 'Fase 1' : m.priority === 'medium' ? 'Fase 2' : 'Fase 3'}] {m.name} · {m.status}
+                </option>
+              ))}
+            </select>
+            {targetModuleId && (
+              <span className="text-[11px] text-violet-300 bg-violet-900/20 border border-violet-700/40 rounded px-2 py-1">
+                ✓ Vinculado — item virará "Adicionado" ao concluir o pipeline
+              </span>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-500 mt-2">
+            Se você baixou o template PDF do Roadmap (botão "Baixar template PDF" no item),
+            o sistema detecta o vínculo automaticamente — não precisa selecionar aqui.
+          </p>
+        </div>
+      )}
 
       {/* Upload Area */}
       <div

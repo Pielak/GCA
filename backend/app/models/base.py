@@ -957,6 +957,8 @@ class ProjectSettings(Base):
 # FASE 1 — Ingestão de Documentos + Arguidor
 # ============================================================================
 
+# MVP 9 Fase 9.5.2 — vínculo opcional com item do Roadmap.
+# Coluna target_module_id adicionada via migration 029.
 class IngestedDocument(Base):
     """Documento ingerido por projeto para análise do Arguidor"""
     __tablename__ = "ingested_documents"
@@ -997,6 +999,14 @@ class IngestedDocument(Base):
     # 'available': bytes em /app/storage ou recuperáveis via backfill
     # 'lost': perdidos permanentemente (uploads sem persistência prévia, etc.)
     content_status = Column(String(20), nullable=False, default="available")
+
+    # MVP 9 Fase 9.5.2 — vínculo opcional com item do Roadmap.
+    # Migration 029 adicionou FK ON DELETE SET NULL.
+    target_module_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("module_candidates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])

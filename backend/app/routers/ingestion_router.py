@@ -21,6 +21,7 @@ async def upload_document(
     project_id: UUID,
     file: UploadFile = File(...),
     description: Optional[str] = Form(None),
+    target_module_id: Optional[str] = Form(None),
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
     _setup: dict = Depends(require_project_setup_complete),
@@ -48,6 +49,16 @@ async def upload_document(
         )
 
     file_bytes = await file.read()
+
+    # MVP 9 Fase 9.5.2 — parse target_module_id se fornecido. UUID inválido
+    # vira None (em vez de 400) — service tenta extrair do PDF como fallback.
+    parsed_target: UUID | None = None
+    if target_module_id:
+        try:
+            parsed_target = UUID(target_module_id)
+        except ValueError:
+            parsed_target = None
+
     service = IngestionService(db)
     result = await service.upload_document(
         project_id=project_id,
@@ -55,6 +66,7 @@ async def upload_document(
         file_bytes=file_bytes,
         original_filename=filename,
         content_type=file.content_type or "",
+        target_module_id=parsed_target,
     )
 
     sc = result.pop("status_code", 200)
