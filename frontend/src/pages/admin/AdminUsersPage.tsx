@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
-import { Search, Loader2, Zap, Trash2, Shield, FolderOpen } from 'lucide-react'
+import { Search, Loader2, Zap, Trash2, Shield, FolderOpen, UserPlus, ShieldOff, X } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -39,6 +39,7 @@ export function AdminUsersPage() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const [inviteOpen, setInviteOpen] = useState(false)
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type })
@@ -55,6 +56,22 @@ export function AdminUsersPage() {
       showToast(`Usuário ${user?.is_active !== false ? 'desativado' : 'reativado'}`, 'success')
     } catch (err: any) {
       showToast(err?.message || 'Erro ao alterar status', 'error')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const toggleAdmin = async (userId: string, currentIsAdmin: boolean, userName: string) => {
+    const next = !currentIsAdmin
+    const action = next ? 'promover' : 'rebaixar'
+    if (!confirm(`Confirma ${action} "${userName}" ${next ? 'a Administrador' : 'de Administrador'}?`)) return
+    setActionLoading(userId)
+    try {
+      await apiClient.patch(`/admin/users/${userId}/admin-flag`, { is_admin: next })
+      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_admin: next } : u))
+      showToast(`"${userName}" ${next ? 'promovido a Admin' : 'rebaixado'}`, 'success')
+    } catch (err: any) {
+      showToast(err?.response?.data?.detail || err?.message || 'Erro ao alterar papel Admin', 'error')
     } finally {
       setActionLoading(null)
     }
@@ -114,9 +131,18 @@ export function AdminUsersPage() {
         </div>
       )}
 
-      <div>
-        <h1 className="text-xl font-semibold text-slate-100">Gestão de Usuários</h1>
-        <p className="text-slate-500 text-sm mt-0.5">Controle de acesso e perfis do sistema</p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-slate-100">Gestão de Usuários</h1>
+          <p className="text-slate-500 text-sm mt-0.5">Controle de acesso, perfis e camada administrativa.</p>
+        </div>
+        <button
+          onClick={() => setInviteOpen(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded-lg flex-shrink-0"
+        >
+          <UserPlus className="w-3.5 h-3.5" />
+          Convidar Administrador
+        </button>
       </div>
 
       {/* Filtros */}
@@ -228,6 +254,28 @@ export function AdminUsersPage() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {/* Promover / Rebaixar Admin */}
+                      <button
+                        onClick={() => toggleAdmin(u.id, !!u.is_admin, u.full_name || u.email)}
+                        disabled={actionLoading === u.id || !isActive}
+                        className={`p-1.5 rounded transition-colors ${
+                          u.is_admin
+                            ? 'text-purple-400 hover:text-amber-400 hover:bg-amber-500/10'
+                            : 'text-slate-500 hover:text-purple-400 hover:bg-purple-500/10'
+                        } disabled:opacity-20 disabled:cursor-not-allowed`}
+                        title={
+                          !isActive
+                            ? 'Ative o usuário antes de mudar o papel Admin'
+                            : u.is_admin
+                              ? (isSelf(u.id) ? 'Rebaixar-se (apenas se não for o último admin)' : 'Rebaixar de Administrador')
+                              : 'Promover a Administrador'
+                        }
+                      >
+                        {u.is_admin
+                          ? <ShieldOff className="w-4 h-4" />
+                          : <Shield className="w-4 h-4" />
+                        }
+                      </button>
                       {/* Excluir — não pode excluir a si mesmo */}
                       <button
                         onClick={() => deleteUser(u.id, u.full_name || u.email)}
@@ -264,6 +312,157 @@ export function AdminUsersPage() {
           </tbody>
         </table>
       </div>
+
+      {inviteOpen && (
+        <InviteAdminModal
+          onClose={() => setInviteOpen(false)}
+          onDone={(msg, type) => { setInviteOpen(false); showToast(msg, type); loadUsers() }}
+        />
+      )}
+    </div>
+  )
+}
+
+
+function InviteAdminModal({
+  onClose, onDone,
+}: { onClose: () => void; onDone: (msg: string, type: 'success' | 'error') => void }) {
+  const [email, setEmail] = useState('')
+  const [fullName, setFullName] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<{ temp_password: string | null; email_sent: boolean } | null>(null)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email.trim() || !fullName.trim()) {
+      setError('Email e nome são obrigatórios.')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const res = await apiClient.post('/admin/invitations/admin', {
+        email: email.trim(),
+        full_name: fullName.trim(),
+      })
+      if (res.data.temp_password) {
+        // Mostra senha inline pro admin copiar (quando email falhou)
+        setResult({ temp_password: res.data.temp_password, email_sent: false })
+      } else {
+        onDone(
+          res.data.created
+            ? `Admin "${email}" convidado. Email enviado.`
+            : `"${email}" promovido a Admin (já era usuário).`,
+          'success',
+        )
+      }
+    } catch (err: any) {
+      setError(err?.response?.data?.detail || 'Falha ao convidar administrador.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm"
+      onClick={onClose}
+    >
+      <form
+        onSubmit={submit}
+        onClick={e => e.stopPropagation()}
+        className="w-full max-w-md bg-slate-900 border border-slate-700 rounded-2xl shadow-2xl"
+      >
+        <div className="flex items-center justify-between px-5 py-3 border-b border-slate-800">
+          <div className="flex items-center gap-2">
+            <Shield className="w-4 h-4 text-purple-400" />
+            <h2 className="text-slate-100 text-sm font-semibold">Convidar Administrador</h2>
+          </div>
+          <button type="button" onClick={onClose} className="text-slate-500 hover:text-slate-200">
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        {result ? (
+          <div className="p-5 space-y-3">
+            <div className="p-3 bg-amber-950/30 border border-amber-900/40 rounded-lg text-amber-200 text-xs">
+              Usuário criado com sucesso, mas o envio de email falhou. Comunique a senha abaixo manualmente ao novo administrador. <strong>Ela não voltará a ser exibida.</strong>
+            </div>
+            <div>
+              <label className="text-slate-400 text-xs block mb-1">Senha temporária</label>
+              <code className="block bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-emerald-300 font-mono break-all">
+                {result.temp_password}
+              </code>
+            </div>
+            <div className="flex justify-end pt-2">
+              <button
+                type="button"
+                onClick={() => onDone(`Admin criado. Senha exibida uma única vez — comunique ao usuário.`, 'success')}
+                className="px-3 py-1.5 bg-violet-600 hover:bg-violet-500 text-white text-xs rounded-lg"
+              >
+                Concluído
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="p-5 space-y-3">
+              {error && (
+                <div className="p-2.5 bg-red-950/30 border border-red-900/40 rounded-lg text-red-300 text-xs">
+                  {error}
+                </div>
+              )}
+
+              <div>
+                <label className="text-slate-400 text-xs block mb-1">Email</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={e => setEmail(e.target.value)}
+                  placeholder="nome@empresa.com"
+                  required
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500/50"
+                />
+              </div>
+              <div>
+                <label className="text-slate-400 text-xs block mb-1">Nome completo</label>
+                <input
+                  type="text"
+                  value={fullName}
+                  onChange={e => setFullName(e.target.value)}
+                  placeholder="Nome do administrador"
+                  required
+                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-500/50"
+                />
+              </div>
+
+              <p className="text-[11px] text-slate-500">
+                Se o email já existir na instância, o usuário será promovido a Administrador sem mudar a senha.
+                Se não existir, será criado com senha temporária enviada por email. Quando o envio falha, a senha é exibida aqui na hora.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-slate-800">
+              <button
+                type="button"
+                onClick={onClose}
+                className="px-3 py-1.5 text-slate-400 hover:text-slate-200 text-xs"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs rounded-lg"
+              >
+                {submitting && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                Convidar
+              </button>
+            </div>
+          </>
+        )}
+      </form>
     </div>
   )
 }

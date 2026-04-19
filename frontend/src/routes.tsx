@@ -43,6 +43,7 @@ import { PipelineAuditPage } from './pages/projects/PipelineAuditPage';
 import { ProjectLoginPage } from './pages/ProjectLoginPage';
 import { IncidentListPage } from './pages/projects/IncidentListPage';
 import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
+import { ProjectMetricsPage } from './pages/projects/ProjectMetricsPage';
 
 export const router = createBrowserRouter([
   {
@@ -163,6 +164,7 @@ export const router = createBrowserRouter([
           { path: 'backups', Component: ProjectBackupPage },
           { path: 'incidents', Component: IncidentListPage },
           { path: 'incidents/:ticketId', Component: IncidentDetailPage },
+          { path: 'metrics', Component: ProjectMetricsPage },
         ],
       },
     ],

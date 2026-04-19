@@ -212,6 +212,7 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/readiness`} label="Definition of Done" icon={<CheckCircle2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/backups`} label="Backups" icon={<Database className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/incidents`} label="Incidentes" icon={<Bug className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/metrics`} label="Métricas" icon={<BarChart3 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
                       </div>
                     )}
