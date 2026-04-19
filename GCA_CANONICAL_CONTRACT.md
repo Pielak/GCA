@@ -300,6 +300,23 @@ Exemplo 2:
 
 ## 7. Escopo canônico por MVP
 
+### 7.0 Protocolo de adição dinâmica de MVPs
+
+Esta seção é **extensível por solicitação do stakeholder-soberano** (dono do produto). MVPs 1 a 5 nasceram com o produto; MVPs ≥ 6 são incorporados sob as regras abaixo.
+
+Regras duras:
+1. Somente o stakeholder-soberano autoriza a criação de novo MVP. Claude não cria MVP por conta própria, nem infere escopo a partir de pedido de feature isolado — toda solicitação de feature fora dos MVPs atuais deve ser tratada ou como nova DT dentro de um MVP existente, ou como solicitação formal de novo MVP.
+2. Adição de MVP é commit **atômico** alterando simultaneamente:
+   - `GCA_CANONICAL_CONTRACT.md §7` (nova subseção numerada, com **em escopo** e **fora de escopo** obrigatórios);
+   - `GCA_MVP_PROGRESS.md §1` (cabeçalho com estado inicial e objetivo).
+3. MVP recém-adicionado nasce com estado **"definido — não iniciado"** e só é trabalhado quando:
+   - o MVP soberano anterior estiver fechado pelo gate §9;
+   - o stakeholder autorizar o início explicitamente.
+4. Nenhum MVP fora deste contrato soberano é implementado, mesmo que código rascunho exista em skills ou documentos históricos.
+5. Em escopo e fora de escopo são obrigatórios no momento da criação — não se começa trabalho com escopo difuso.
+6. Numeração é monotônica crescente. Não há renumeração retroativa.
+7. Releases do produto amarram-se a uma lista de MVPs fechados e tickets (MVP 6) entregues — ver MVP 7.
+
 ### MVP 1 — Base operacional e saneamento do núcleo
 
 #### Em escopo
@@ -365,6 +382,52 @@ Exemplo 2:
 - observabilidade complementar;
 - rotinas de backup/restore maduras;
 - melhorias de deploy/upgrade por cliente.
+
+### MVP 6 — Validação assistida em campo (tickets de incidente)
+
+**Motivação:** o GCA é produto novo. Usuários reais (GPs e membros de projeto) vão encontrar bugs e necessidades não previstas. Este MVP cria o canal oficial dentro da instância para registrar, rotear e rastrear esses achados, de modo que cada incidente vire insumo rastreável para correções futuras (entregues via MVP 7).
+
+#### Em escopo
+- abertura de ticket de incidente pelo usuário, a partir do projeto em que ele atua;
+- roteamento automático por papel de origem:
+  - Dev / Tester / QA abre → **GPs do projeto** recebem;
+  - GP abre → **Admins da instância** recebem;
+  - Admin abre em um projeto → **demais Admins** recebem (tickets intra-admin);
+- seção agregada na área administrativa com visão cross-projeto dos tickets escalados para Admin;
+- campos mínimos: título, descrição, prioridade (baixa/média/alta/crítica), categoria (bug/dúvida/pedido de feature/incidente de pipeline), status (aberto/em andamento/resolvido/fechado);
+- conversa no ticket (comentários entre autor, GP e/ou Admin), com autoria e timestamp;
+- notificação in-app para os destinatários no ato da abertura e em cada evento relevante (comentário novo, mudança de status, resolução);
+- auditoria compartimentalizada do ciclo de vida do ticket em `audit_log_global`;
+- isolamento por projeto: ticket de um projeto nunca vaza para membros de outro projeto.
+
+#### Fora de escopo
+- anexos de arquivo (texto e link apenas; anexos entram em iteração posterior);
+- SLA formal com escalonamento automático por tempo decorrido;
+- integração com ferramentas externas (Jira, Linear, Zendesk, email bidirecional);
+- pesquisa de satisfação pós-resolução;
+- tickets transversais entre projetos (cada ticket pertence a exatamente um projeto; alternativa é abrir tickets irmãos).
+
+### MVP 7 — Entrega versionada preservando dados do usuário
+
+**Motivação:** quando a correção de um ticket (MVP 6) ou uma feature nova gera uma release do GCA, o usuário não pode perder os dados já inseridos (projetos, questionários, OCG, backlog, documentos, configurações). Este MVP institui o contrato de entrega: por default a release **não sobrescreve** dado persistido; quando a correção exige migração destrutiva, o usuário tem caminho explícito de recuperação e complemento.
+
+#### Em escopo
+- versionamento explícito da instância: cada release tem **tag semântica** e **changelog visível** ao usuário dentro da UI;
+- cada release amarra-se à lista de **MVPs fechados** e **tickets (MVP 6) resolvidos** que a motivaram (rastreabilidade ticket → release);
+- política default **não-destrutiva**: toda migração nova preserva dado existente (coluna nova é nullable ou tem default; remoção passa por janela de deprecação; mudança de tipo usa coluna paralela); o `upgrade.sh` (DT-062) roda essas migrations sem intervenção do usuário;
+- quando a correção exige migração **destrutiva ou semanticamente incompatível**:
+  - usuário recebe aviso explícito **antes** da aplicação com descrição do impacto;
+  - snapshot pré-release é gerado automaticamente reaproveitando o backup por projeto (DT-063);
+  - usuário tem botão para **restaurar o estado anterior** dos dados do projeto;
+  - usuário é conduzido por um **assistente pós-release** para completar informações novas referentes ao ticket que motivou a entrega (ex.: release adiciona campo obrigatório no questionário por causa do ticket X — assistente mostra projetos afetados e solicita o novo campo);
+- changelog segmentado por papel: Admin vê a release inteira; GP vê o que afeta os projetos onde atua; Dev/Tester/QA vê o que afeta os módulos em uso;
+- auditoria: cada aplicação de release + cada restauração de snapshot + cada preenchimento via assistente pós-release gera evento em `audit_log_global`.
+
+#### Fora de escopo
+- downgrade da versão do aplicativo (container/imagem) — continua operação manual via DT-062 `upgrade.sh` / `restore.sh`;
+- compartilhamento automático de correção entre instâncias de clientes diferentes (cada cliente recebe release pelo fluxo de instalação próprio);
+- marketplace de plugins, features opt-in ou A/B testing de release;
+- edição retroativa de dado de usuário fora do caminho oferecido pelo assistente pós-release (dado preservado é dado preservado — mudança arbitrária exige nova release).
 
 ---
 

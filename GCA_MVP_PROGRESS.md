@@ -1,15 +1,22 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 2.6  
-Data-base: 2026-04-18  
-Status: **controle de avanço por fase** — **Zero DT em aberto**. MVP 5 fechado, DT-058 Sprint 4 concluída via simulação isolada (autorizada pelo user). Suite 645/645 passing. Pronto pra próxima frente — frontend dashboard de métricas, integração Grafana real, agendamento cron de backup, ou MVP 6 caso o contrato evolua.
+Versão: 2.7  
+Data-base: 2026-04-19  
+Status: **controle de avanço por fase** — **Zero DT em aberto**. MVP 5 fechado (DT-016/023/041/058/060/061/062/063). Suite 652/652 passing. **MVP 6 e 7 definidos no contrato §7 (estado: definido — não iniciado)** por solicitação do stakeholder-soberano em 2026-04-19 (protocolo de adição dinâmica, contrato §7.0). Nenhuma linha de código dos MVPs 6/7 escrita até autorização explícita de início.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 5 — Hardening operacional** (iniciado 2026-04-18)
+**Nenhum em execução.** MVP 5 fechado em 2026-04-18 + DT-063 (backup compartimentalizado) em 2026-04-19. MVP 6 e 7 aguardam autorização de início.
+
+### Próximos MVPs definidos (contrato §7)
+- **MVP 6 — Validação assistida em campo (tickets de incidente)** — adicionado 2026-04-19 por solicitação do stakeholder-soberano. Estado: **definido — não iniciado**.
+- **MVP 7 — Entrega versionada preservando dados do usuário** — adicionado 2026-04-19 por solicitação do stakeholder-soberano. Estado: **definido — não iniciado**. Depende do MVP 6 fechado (a rastreabilidade ticket → release do MVP 7 exige tickets do MVP 6).
+
+### MVP anterior fechado
+**MVP 5 — Hardening operacional** (executado 2026-04-18 / fechado 2026-04-19)
 
 ### MVP anterior
 **MVP 4 — Qualidade, documentação e entrega — ENCERRADO 2026-04-18**
@@ -27,7 +34,7 @@ commit (DT-043 flow), integração Git, commits rastreáveis, validação
 pós-geração, bloqueios por papel (DT-042), docstrings obrigatórias,
 análise de adequação do provedor (DT-043).
 
-### Objetivo do MVP 5 (contrato §7)
+### Objetivo do MVP 5 (contrato §7) — **FECHADO**
 Endurecer operação para deploy real em clientes:
 - criptografia de segredos e PATs
 - hardening de produção
@@ -38,6 +45,53 @@ Endurecer operação para deploy real em clientes:
   **DT-041** (image drift `--no-cache` rebuild), e validação Sprint 4
   da DT-058 (5 projetos-piloto, 1 por linguagem, requer autorização)
   fica como pendência de validação não-bloqueadora.
+
+### Objetivo do MVP 6 (contrato §7) — **definido, não iniciado**
+Criar o canal oficial de **tickets de incidente** dentro da instância para que
+usuários reais (que vão encontrar bugs e necessidades não previstas) tenham
+rota clara de comunicação:
+- Dev/Tester/QA abre ticket no projeto → GPs do projeto recebem.
+- GP abre ticket → Admins da instância recebem.
+- Seção cross-projeto na área administrativa agrega tickets escalados.
+- Campos: título, descrição, prioridade (baixa/média/alta/crítica), categoria
+  (bug/dúvida/pedido/incidente de pipeline), status (aberto/em andamento/
+  resolvido/fechado).
+- Conversa por comentários (sem anexos no V1).
+- Notificação in-app em cada evento.
+- Auditoria compartimentalizada em `audit_log_global`.
+- Isolamento por projeto mantido.
+
+Fora de escopo no MVP 6: anexos de arquivo, SLA com escalonamento automático,
+integração externa (Jira/Linear/Zendesk/email bidirecional), pesquisa de
+satisfação, tickets cross-projeto.
+
+### Objetivo do MVP 7 (contrato §7) — **definido, não iniciado**
+Institucionalizar a **entrega versionada preservando dados do usuário**, para
+que correções de tickets (MVP 6) ou novas features cheguem sem destruir o que
+o usuário já persistiu:
+- Release tem tag semântica + changelog visível + lista de MVPs fechados e
+  tickets resolvidos que a motivaram.
+- Default **não-destrutivo**: migrations preservam dado (colunas novas
+  nullable ou com default; remoção passa por deprecação; mudança de tipo
+  via coluna paralela).
+- Quando a migração **precisa** ser destrutiva:
+  - aviso explícito pré-aplicação com descrição do impacto;
+  - snapshot automático (reaproveita DT-063) antes da aplicação;
+  - botão de restaurar estado anterior;
+  - assistente pós-release para completar dados novos exigidos pela feature
+    que motivou o ticket.
+- Changelog segmentado por papel (Admin/GP/Dev/Tester/QA vêem só o que lhes
+  afeta).
+- Auditoria em cada release aplicada, restauração de snapshot e preenchimento
+  pós-release.
+
+Fora de escopo no MVP 7: downgrade de container (continua manual via DT-062),
+compartilhamento de correção entre instâncias diferentes, marketplace/A-B
+testing de release, edição retroativa arbitrária fora do assistente
+pós-release.
+
+**Dependência:** MVP 7 só inicia depois de MVP 6 fechado (a rastreabilidade
+ticket → release exige tickets persistidos).
 
 ### Objetivo do momento
 Amadurecer o ciclo de **qualidade → entrega**: QA Readiness com métricas
