@@ -1040,12 +1040,16 @@ class ModuleCandidate(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    arguider_analysis_id = Column(UUID(as_uuid=True), ForeignKey("arguider_analyses.id"), nullable=False)
+    # MVP 9 Fase 9.1.1 — nullable porque foundation modules (source='ocg_foundation')
+    # nascem do OCG sem passar por ArguiderAnalysis. Migration 027 aplicou
+    # DROP NOT NULL + adicionou coluna `source` pra distinguir origem.
+    arguider_analysis_id = Column(UUID(as_uuid=True), ForeignKey("arguider_analyses.id"), nullable=True)
+    source = Column(String(30), nullable=False, default="arguider")  # 'arguider' | 'ocg_foundation'
     name = Column(String(200), nullable=False)
     description = Column(Text, nullable=False)
     module_type = Column(String(20), nullable=False)  # feature, component
     priority = Column(String(10), nullable=False, default="medium")  # high, medium, low
-    status = Column(String(20), nullable=False, default="suggested")  # suggested, approved, rejected, in_progress, completed
+    status = Column(String(20), nullable=False, default="sugerido")  # MVP 9.1.2: pt-BR canônico
     approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     rejected_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)

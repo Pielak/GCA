@@ -405,6 +405,26 @@ class OCGUpdaterService:
             change_type=change_type,
         )
 
+        # MVP 9 Fase 9.1.1 — após atualizar o OCG, sincroniza itens de
+        # Fundação no Roadmap. Service é idempotente (deduplica por
+        # nome), logo safe rodar em cada update. Falha é não-fatal:
+        # o update do OCG já commitou, foundation é best-effort.
+        try:
+            from app.services.roadmap_foundation_service import RoadmapFoundationService
+            foundation_result = await RoadmapFoundationService(self.db).sync_foundation(project_id)
+            logger.info(
+                "ocg_updater.foundation_synced",
+                project_id=str(project_id),
+                created=foundation_result.get("created", 0),
+                skipped=foundation_result.get("skipped", 0),
+            )
+        except Exception as foundation_exc:
+            logger.warning(
+                "ocg_updater.foundation_sync_failed",
+                project_id=str(project_id),
+                error=str(foundation_exc),
+            )
+
         return {
             "ocg_id": str(ocg.id),
             "version_from": version_from,

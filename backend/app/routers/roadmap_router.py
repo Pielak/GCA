@@ -28,6 +28,36 @@ async def get_roadmap(
     return await service.get_roadmap(project_id)
 
 
+@router.post("/projects/{project_id}/roadmap/foundation/sync")
+async def sync_roadmap_foundation(
+    project_id: UUID,
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.1.1 — Sincroniza Fase 1 (Fundação) a partir do OCG.
+
+    Determinístico (não usa LLM): lê `STACK_RECOMMENDATION`,
+    `ARCHITECTURE_OVERVIEW` e `PROJECT_PROFILE` do OCG mais recente e
+    cria itens de fundação no Roadmap com `source='ocg_foundation'`,
+    `priority='high'`, `status='sugerido'`. Idempotente — itens já
+    existentes pelo nome não são recriados.
+
+    Chamado:
+      - automaticamente pelo `OCGUpdaterService` quando o OCG muda;
+      - manualmente pelo GP via este endpoint (ex: quando o contrato
+        deste módulo evoluir e quiser regerar).
+    """
+    from app.services.roadmap_foundation_service import RoadmapFoundationService
+    result = await RoadmapFoundationService(db).sync_foundation(project_id)
+    logger.info(
+        "roadmap.foundation_sync_requested",
+        project_id=str(project_id),
+        created=result.get("created"),
+        skipped=result.get("skipped"),
+    )
+    return result
+
+
 # ============================================================================
 # Backlog Vivo (spec seção 7.2)
 # ============================================================================
