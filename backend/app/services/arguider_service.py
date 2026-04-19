@@ -74,13 +74,13 @@ class DocumentExtractor:
             return f"[Erro ao extrair PDF: {str(e)}]"
 
     def _extract_docx(self, file_bytes: bytes) -> str:
+        """MVP 8 Fase 2 — delega ao rich extractor que percorre tabelas,
+        caixas de texto, headers/footers e notas de rodapé, não só
+        doc.paragraphs. Sem isso, documentos com RFs em tabela viram
+        texto vazio pro Arguidor e o OCG não evolui."""
         try:
-            import io
-            from docx import Document
-            doc = Document(io.BytesIO(file_bytes))
-            return "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
-        except ImportError:
-            return "[python-docx não instalado — extrair DOCX não disponível]"
+            from app.services.rich_docx_extractor import extract_rich_text
+            return extract_rich_text(file_bytes)
         except Exception as e:
             logger.warning("extractor.docx_error", error=str(e))
             return f"[Erro ao extrair DOCX: {str(e)}]"
