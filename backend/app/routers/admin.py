@@ -1495,7 +1495,14 @@ async def cleanup_orphan_project_request(
     """Remove `project_requests` APPROVED cuja linha em `projects` não
     existe mais (órfão — efeito colateral de deleção hard feita no
     passado). Valida antes de deletar: se o projeto existe, recusa.
+
+    Limpa FKs dependentes de `project_requests`:
+    - onboarding_progress (rascunho do wizard)
+    - team_invites (convites pendentes/rejeitados)
+    Ambas sem ON DELETE CASCADE no schema original, precisam DELETE
+    explícito antes.
     """
+    from sqlalchemy import text
     from app.models.base import Project as _Project
     from app.models.onboarding import ProjectRequest
 
@@ -1520,7 +1527,37 @@ async def cleanup_orphan_project_request(
         )
 
     project_name = req.project_name
-    await db.delete(req)
-    await db.commit()
+    try:
+        # Limpa FKs sem CASCADE. Inclusive `onboarding_progress` e
+        # `team_invites`, que amarram ao project_requests.id.
+        await db.execute(
+            text("DELETE FROM onboarding_progress WHERE project_id = :rid"),
+            {"rid": request_id},
+        )
+        await db.execute(
+            text("DELETE FROM team_invites WHERE project_id = :rid"),
+            {"rid": request_id},
+        )
+        await db.delete(req)
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        logger.error("admin.orphan_cleanup_failed", request_id=str(request_id), error=str(e))
+        # Se outra FK não mapeada aparecer, responde útil em vez de
+        # "Network Error" no frontend.
+        msg = str(e)
+        if "foreign key constraint" in msg.lower():
+            import re
+            m = re.search(r'constraint "([^"]+)"', msg)
+            cname = m.group(1) if m else "desconhecida"
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Órfão tem referência em '{cname}'. O backend precisa "
+                    f"limpar essa FK antes — reporte esse nome ao time de backend."
+                ),
+            )
+        raise HTTPException(status_code=500, detail=f"Falha ao limpar órfão: {msg[:200]}")
+
     logger.info("admin.orphan_request_cleaned", request_id=str(request_id), name=project_name)
     return {"success": True, "cleaned": project_name}
