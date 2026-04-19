@@ -1,9 +1,12 @@
 """Email Service"""
+import json
 import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional, List
+from typing import Optional, List, Tuple
+from uuid import UUID
+
 import structlog
 
 from app.core.config import settings
@@ -48,8 +51,206 @@ def _is_non_deliverable_email(to_email: Optional[str]) -> bool:
     return False
 
 
+async def _load_project_smtp_config(db, project_id: UUID) -> Optional[dict]:
+    """DT-016: lê SMTP do projeto (host/port/user/from + senha do vault).
+
+    Retorna dict com chaves `host, port, use_tls, username, password,
+    from_email, from_name` ou None se o projeto não tem SMTP próprio
+    configurado / a senha não foi gravada no vault.
+
+    Não levanta — caller decide o fallback (geralmente: cair no global).
+    """
+    from sqlalchemy import select
+    from app.models.base import ProjectSettings
+    from app.services.vault_service import VaultService
+
+    try:
+        result = await db.execute(
+            select(ProjectSettings).where(
+                ProjectSettings.project_id == project_id,
+                ProjectSettings.setting_type == "smtp",
+            )
+        )
+        row = result.scalar_one_or_none()
+        if not row or not row.settings_json:
+            return None
+        cfg = json.loads(row.settings_json)
+        if not cfg.get("host") or not cfg.get("from_email"):
+            return None
+
+        vault = VaultService()
+        password = await vault.get_secret(db, project_id, "smtp_password", "main")
+        if not password:
+            logger.warning(
+                "email.project_smtp_no_password",
+                project_id=str(project_id),
+                note="config existe mas senha não está no vault — fallback global",
+            )
+            return None
+
+        return {
+            "host": cfg["host"],
+            "port": int(cfg.get("port", 587)),
+            "use_tls": bool(cfg.get("use_tls", True)),
+            "username": cfg.get("username", cfg["from_email"]),
+            "password": password,
+            "from_email": cfg["from_email"],
+            "from_name": cfg.get("from_name", "GCA"),
+        }
+    except Exception as e:
+        logger.warning(
+            "email.project_smtp_load_failed",
+            project_id=str(project_id),
+            error=str(e)[:200],
+        )
+        return None
+
+
 class EmailService:
     """Service for sending emails via SMTP"""
+
+    @staticmethod
+    async def send_email_for_project(
+        db,
+        project_id: UUID,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        reply_to: Optional[str] = None,
+        attachments: Optional[List[tuple]] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """DT-016: dispara email usando o SMTP do projeto quando configurado.
+
+        Fluxo:
+        1. Lê config SMTP do projeto (project_settings.setting_type='smtp'
+           + senha no vault).
+        2. Se existe: envia com essa config; identidade do remetente é
+           do projeto (alinhado contrato §6.6 — separação por cliente).
+        3. Se não existe: cai no SMTP global (settings.SMTP_*) com warn
+           estruturado pra audit trail.
+
+        Mantém todos os guards de segurança (test_environment,
+        non_deliverable). Caller passa project_id quando souber em qual
+        projeto está; a função `send_email` síncrona segue intacta para
+        callers globais (auth, admin invites externos).
+        """
+        if _is_test_environment():
+            logger.info("email.skipped_test_environment", to=to_email, subject=subject, project_id=str(project_id))
+            return True, None
+        if _is_non_deliverable_email(to_email):
+            logger.warning("email.skipped_non_deliverable", to=to_email, subject=subject, project_id=str(project_id))
+            return True, None
+
+        proj_cfg = await _load_project_smtp_config(db, project_id)
+        if proj_cfg:
+            logger.info(
+                "email.using_project_smtp",
+                project_id=str(project_id),
+                from_email=proj_cfg["from_email"],
+                host=proj_cfg["host"],
+            )
+            return EmailService._send_with_config(
+                cfg=proj_cfg,
+                to_email=to_email,
+                subject=subject,
+                html_content=html_content,
+                text_content=text_content,
+                cc=cc,
+                bcc=bcc,
+                reply_to=reply_to,
+                attachments=attachments,
+            )
+
+        # Fallback global. Audit trail estruturado pra ficar visível —
+        # GP precisa configurar SMTP do projeto pra cumprir §6.6 LGPD.
+        logger.warning(
+            "email.fallback_global_smtp",
+            project_id=str(project_id),
+            to=to_email,
+            note="Projeto sem SMTP próprio — usando SMTP global do admin. GP deve configurar em Configurações > SMTP.",
+        )
+        return EmailService.send_email(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+            cc=cc,
+            bcc=bcc,
+            reply_to=reply_to,
+            attachments=attachments,
+        )
+
+    @staticmethod
+    def _send_with_config(
+        cfg: dict,
+        to_email: str,
+        subject: str,
+        html_content: str,
+        text_content: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        reply_to: Optional[str] = None,
+        attachments: Optional[List[tuple]] = None,
+    ) -> Tuple[bool, Optional[str]]:
+        """DT-016: helper síncrono que envia com config arbitrária (não settings.*).
+
+        Espelha `send_email` mas usa `cfg` em vez de `settings.SMTP_*`.
+        Centraliza o envelope MIME pra evitar duplicação. Os mesmos
+        callers de `send_email` poderiam migrar pra cá com cfg=settings,
+        mas por ora deixamos `send_email` intacto para reduzir blast
+        radius do refactor.
+        """
+        try:
+            msg = MIMEMultipart("mixed" if attachments else "alternative")
+            msg["Subject"] = subject
+            msg["From"] = f"{cfg['from_name']} <{cfg['from_email']}>"
+            if reply_to:
+                msg["Reply-To"] = reply_to
+            msg["To"] = to_email
+            if cc:
+                msg["Cc"] = ", ".join(cc)
+            if bcc:
+                msg["Bcc"] = ", ".join(bcc)
+
+            if attachments:
+                body_part = MIMEMultipart("alternative")
+                if text_content:
+                    body_part.attach(MIMEText(text_content, "plain"))
+                body_part.attach(MIMEText(html_content, "html"))
+                msg.attach(body_part)
+                for filename, data, mime_type in attachments:
+                    from email.mime.application import MIMEApplication
+                    part = MIMEApplication(data, Name=filename)
+                    part["Content-Disposition"] = f'attachment; filename="{filename}"'
+                    msg.attach(part)
+            else:
+                if text_content:
+                    msg.attach(MIMEText(text_content, "plain"))
+                msg.attach(MIMEText(html_content, "html"))
+
+            with smtplib.SMTP(cfg["host"], cfg["port"]) as server:
+                if cfg.get("use_tls"):
+                    server.starttls()
+                server.login(cfg["username"], cfg["password"])
+                recipients = [to_email] + (cc or []) + (bcc or [])
+                server.sendmail(cfg["from_email"], recipients, msg.as_string())
+
+            logger.info("email.sent_success", to=to_email, subject=subject, source="project_smtp")
+            return True, None
+        except smtplib.SMTPAuthenticationError as e:
+            logger.error("email.auth_failed", error=str(e), source="project_smtp")
+            return False, "SMTP authentication failed (project config). Check credentials."
+        except smtplib.SMTPException as e:
+            logger.error("email.smtp_error", error=str(e), source="project_smtp")
+            return False, f"SMTP error (project config): {str(e)}"
+        except Exception as e:
+            logger.error("email.unexpected_error", error=str(e), source="project_smtp")
+            return False, str(e)
+
+
 
     @staticmethod
     def send_email(

@@ -344,13 +344,27 @@ class QuestionnaireService:
             </div>
             """
 
+            # DT-016: usa SMTP do projeto quando temos project_id (Contexto B
+            # do contrato §6.6 — identidade do remetente é do cliente, não do
+            # admin global). Fallback global automático no email_service quando
+            # projeto não tem SMTP configurado.
             for admin in admins:
                 try:
-                    EmailService.send_email(
-                        to_email=admin.email,
-                        subject=subject,
-                        html_content=body,
-                    )
+                    if project_id:
+                        async with AsyncSessionLocal() as _email_db:
+                            await EmailService.send_email_for_project(
+                                db=_email_db,
+                                project_id=project_id,
+                                to_email=admin.email,
+                                subject=subject,
+                                html_content=body,
+                            )
+                    else:
+                        EmailService.send_email(
+                            to_email=admin.email,
+                            subject=subject,
+                            html_content=body,
+                        )
                     logger.info("questionnaire.admin_notified", admin_email=admin.email, project=project_name)
                 except Exception as e:
                     logger.warning("questionnaire.admin_notify_failed", admin_email=admin.email, error=str(e))
