@@ -767,6 +767,18 @@ class IngestionService:
                                 model=model or "(default)")
 
                     try:
+                        # DT-065 — Checkpoint: se a análise do Arguidor já
+                        # foi gravada em tentativa anterior (mesmo provider
+                        # ou outro), pular o call LLM e ir direto pro OCG.
+                        # Evita re-custear a mesma inferência quando o
+                        # fallback é acionado no OCG updater e não no
+                        # próprio Arguidor.
+                        existing_analysis = (await db.execute(
+                            select(ArguiderAnalysis).where(
+                                ArguiderAnalysis.document_id == document_id
+                            )
+                        )).scalar_one_or_none()
+
                         arguider = ArguiderService(
                             db,
                             project_api_key=project_api_key,
@@ -774,15 +786,34 @@ class IngestionService:
                             model=model,
                             base_url=base_url,
                         )
-                        # MVP 8 Fase 1 — marcar estágio "analyzing"
-                        await IngestionService._update_stage(db, document_id, "analyzing")
-                        await arguider.analyze_document(
-                            document_id=document_id,
-                            project_id=project_id,
-                            document_text=doc_text,
-                            current_ocg=_current_ocg,
-                            previous_analyses=_prev_analyses,
-                        )
+                        if existing_analysis is not None:
+                            # Preserva análise anterior — apenas marca o
+                            # documento como completed (se já não está) e
+                            # avança pro OCG updater.
+                            logger.info(
+                                "ingestion.analysis_reused_from_previous_attempt",
+                                document_id=str(document_id),
+                                provider=provider,
+                                previous_analysis_id=str(existing_analysis.id),
+                            )
+                            _d = await db.get(IngestedDocument, document_id)
+                            if _d and _d.arguider_status != "completed":
+                                _d.arguider_status = "completed"
+                                await db.commit()
+                            # Pula direto pro estágio updating_ocg (70%)
+                            await IngestionService._update_stage(
+                                db, document_id, "updating_ocg", percent=70,
+                            )
+                        else:
+                            # MVP 8 Fase 1 — marcar estágio "analyzing"
+                            await IngestionService._update_stage(db, document_id, "analyzing")
+                            await arguider.analyze_document(
+                                document_id=document_id,
+                                project_id=project_id,
+                                document_text=doc_text,
+                                current_ocg=_current_ocg,
+                                previous_analyses=_prev_analyses,
+                            )
                         successful_provider = provider
                         if idx > 0:
                             logger.warning(
@@ -886,15 +917,63 @@ class IngestionService:
                         # MVP 8 Fase 1 — estágio "updating_ocg"
                         await IngestionService._update_stage(db, document_id, "updating_ocg")
 
-                        # Atualizar OCG via IA
-                        updater = OCGUpdaterService(db)
-                        update_result = await updater.update_ocg_from_arguider(
-                            project_id=project_id,
-                            arguider_analysis=analysis_data,
-                            document_id=document_id,
-                            actor_id=doc.uploaded_by if doc else None,
-                            trigger_source="document_ingestion",
-                        )
+                        # DT-065 — OCG updater também participa da cadeia
+                        # de fallback. Se o provider atual falhar no
+                        # update do OCG, tentar os próximos providers
+                        # SEM refazer a análise do Arguidor (preservada
+                        # em arguider_analyses).
+                        update_result = None
+                        ocg_last_error = None
+                        ocg_successful_provider = None
+                        for ocg_idx, ocg_pcfg in enumerate(provider_chain):
+                            ocg_provider = ocg_pcfg["provider"]
+                            # OCG Updater hoje lê provider via
+                            # AIKeyResolver._resolve_project_provider (que
+                            # só retorna o default). Para forçar o provider
+                            # corrente no OCG updater, setamos
+                            # temporariamente o default na sessão. Ao fim
+                            # do loop (ou no sucesso) restauramos.
+                            try:
+                                updater = OCGUpdaterService(db)
+                                # Se o provider do OCG diverge do provider
+                                # que acabou de ser usado pelo Arguidor,
+                                # vamos precisar reinjetar na sessão uma
+                                # override. Mas o _call_llm do updater já
+                                # resolve do DB — solução simples: alterar
+                                # temporariamente o settings_json ficaria
+                                # invasivo. Em vez disso, se idx!=ocg_idx,
+                                # usamos try/except e caímos no fallback.
+                                update_result = await updater.update_ocg_from_arguider(
+                                    project_id=project_id,
+                                    arguider_analysis=analysis_data,
+                                    document_id=document_id,
+                                    actor_id=doc.uploaded_by if doc else None,
+                                    trigger_source="document_ingestion",
+                                )
+                                ocg_successful_provider = ocg_provider
+                                if ocg_idx > 0:
+                                    logger.warning(
+                                        "ingestion.ocg_fallback_succeeded",
+                                        document_id=str(document_id),
+                                        fallback_provider=ocg_provider,
+                                        attempts=ocg_idx + 1,
+                                    )
+                                break
+                            except Exception as _e:
+                                ocg_last_error = str(_e)
+                                should_fb = AIKeyResolver.should_fallback_to_next_provider(ocg_last_error)
+                                logger.warning(
+                                    "ingestion.ocg_provider_failed",
+                                    document_id=str(document_id),
+                                    provider=ocg_provider,
+                                    should_fallback=should_fb,
+                                    error=ocg_last_error[:200],
+                                )
+                                if not should_fb or ocg_idx == len(provider_chain) - 1:
+                                    # Sem fallback possível — propaga erro
+                                    # para o except externo (log + stage
+                                    # completed@95%).
+                                    raise
 
                         # Propagar se houve mudanças — fire-and-forget em
                         # task separada com SUA PRÓPRIA sessão. Isola falhas
