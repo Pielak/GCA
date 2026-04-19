@@ -60,6 +60,9 @@ openpyxl = "^3.1.2"
 reportlab = "^4.0"
 pypdf = "^4.0"
 
+# Code validation (DT-040 + DT-041)
+esprima = "^4.0.1"
+
 # Utils
 pydantic-extra-types = "^2.1.0"
 pytz = "^2023.3"
@@ -70,6 +73,7 @@ aiohttp = "^3.9.0"
 pytest = "^7.4.3"
 pytest-asyncio = "^0.21.1"
 pytest-cov = "^4.1.0"
+pytest-timeout = "^2.4.0"
 black = "^23.12.0"
 flake8 = "^6.1.0"
 mypy = "^1.7.1"
