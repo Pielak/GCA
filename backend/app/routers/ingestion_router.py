@@ -306,3 +306,45 @@ async def get_document_content(
             "Cache-Control": "private, max-age=60",
         },
     )
+
+
+@router.get("/projects/{project_id}/ingestion/{document_id}/extraction-report")
+async def get_extraction_report(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 8 Fase 5 — Relatório do que o pipeline de extração entendeu.
+
+    Retorna estatísticas (nº de parágrafos, tabelas, camadas PDF usadas,
+    primeiros N RFs/RNFs/módulos detectados, warnings do extractor).
+    Calculado sob demanda a partir dos bytes do doc — não depende do
+    Arguidor ter rodado. O GP usa esse relatório pra decidir se o doc
+    foi bem interpretado ou se precisa reenviar em outro formato.
+    """
+    from app.models.base import IngestedDocument
+    from app.utils.ingested_storage import read_ingested
+    from app.services.extraction_report_service import build_extraction_report
+
+    doc = await db.get(IngestedDocument, document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    if doc.content_status == "lost":
+        raise HTTPException(
+            status_code=410,
+            detail="Conteúdo do documento perdido — não é possível gerar relatório.",
+        )
+
+    file_bytes = read_ingested(project_id, doc.filename)
+    if file_bytes is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Arquivo não encontrado no storage.",
+        )
+
+    report = build_extraction_report(file_bytes, doc.file_type)
+    report["document_id"] = str(document_id)
+    report["original_filename"] = doc.original_filename
+    return report

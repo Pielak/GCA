@@ -5,6 +5,7 @@ import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useDocuments, useUploadDocument, useDeleteDocument, type IngestedDocument } from '@/hooks/useIngestion';
 import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
 import { IngestionProgressBar } from '@/components/ingestion/IngestionProgressBar';
+import { ExtractionReportCard } from '@/components/ingestion/ExtractionReportCard';
 import { apiClient } from '@/lib/api';
 
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
@@ -379,6 +380,16 @@ export function IngestionPage() {
                   >
                     <span className="inline-block w-8" />
                     ↳ {humanizeArguiderError(doc.arguider_error_message)}
+                  </div>
+                )}
+                {/* MVP 8 Fase 5 — relatório de extração. Só oferece quando
+                   o pipeline terminou (status completed/error) pra o report
+                   refletir o que foi de fato processado. Colapsado por
+                   default; GP expande sob demanda. */}
+                {(doc.arguider_status === 'completed' || doc.arguider_status === 'error') &&
+                  doc.content_status !== 'lost' && projectId && (
+                  <div className="px-5 pb-3 -mt-1">
+                    <ExtractionReportCard projectId={projectId} documentId={doc.id} />
                   </div>
                 )}
                 {isQuarantined && (

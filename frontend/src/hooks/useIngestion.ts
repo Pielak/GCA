@@ -87,6 +87,43 @@ export const useDocuments = (projectId: string | undefined) => {
   })
 }
 
+// MVP 8 Fase 5 — relatório de extração (o que o pipeline entende do doc
+// antes do Arguidor). Permite GP confirmar se o doc foi bem interpretado
+// ou decidir reenviar em outro formato.
+export interface ExtractionReport {
+  ok: boolean
+  document_id: string
+  original_filename: string
+  file_type: string
+  chars: number
+  paragraphs: number
+  tables_detected: number
+  text_boxes: number
+  headers_footers: number
+  pdf_layers: string[]
+  pdf_pages_with_text: number
+  acroform_fields: number
+  requirements_functional: string[]
+  requirements_non_functional: string[]
+  module_hints: string[]
+  warnings: string[]
+  text_sample: string
+}
+
+export const useExtractionReport = (projectId: string | undefined, documentId: string | undefined, enabled: boolean = true) => {
+  return useQuery({
+    queryKey: ['ingestion', 'extraction-report', projectId, documentId],
+    queryFn: async () => {
+      const response = await apiClient.get<ExtractionReport>(
+        `/projects/${projectId}/ingestion/${documentId}/extraction-report`
+      )
+      return response.data
+    },
+    enabled: !!projectId && !!documentId && enabled,
+    staleTime: 1000 * 60, // report é caro — cacheia 1min
+  })
+}
+
 // Detalhe de um documento
 export const useDocumentDetail = (projectId: string | undefined, documentId: string | undefined) => {
   return useQuery({
