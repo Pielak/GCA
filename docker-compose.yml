@@ -82,6 +82,9 @@ services:
       # → todo restart apagava os bytes (DB mantinha registro, arquivo sumia).
       # Volume nomeado mantém os arquivos em /var/lib/docker/volumes/.
       - gca-uploads-storage:/tmp/gca-storage
+      # DT-061: scripts montados read-only pra testes verificarem
+      # estrutura/sintaxe dos scripts de backup/restore.
+      - ./scripts:/host_scripts:ro
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
   # Frontend (React + Vite)
