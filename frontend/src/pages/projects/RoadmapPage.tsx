@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Clock, CheckCircle, Circle, GitCommit, Loader2, RefreshCw, AlertTriangle } from 'lucide-react'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
+import { ModuleDetailsModal } from '@/components/roadmap/ModuleDetailsModal'
 
 // MVP 9 Fase 9.1 — categorias canônicas de módulos no Roadmap.
 // Mantido em sync com `backend/app/constants/module_categories.py`.
@@ -96,6 +97,8 @@ export function RoadmapPage() {
   const [error, setError] = useState<string | null>(null)
   // MVP 9 Fase 9.1 — filtro por categoria. null = todas.
   const [categoryFilter, setCategoryFilter] = useState<ModuleCategory | null>(null)
+  // MVP 9 Fase 9.2 — modal de detalhamento on-demand. Guarda o módulo aberto.
+  const [detailsModule, setDetailsModule] = useState<{ id: string; name: string } | null>(null)
 
   const loadData = async () => {
     setLoading(true)
@@ -265,11 +268,21 @@ export function RoadmapPage() {
                           {visibleModules.map((mod, mi) => {
                             const cat = (mod.module_type || 'feature') as ModuleCategory
                             const knownCat = cat in CATEGORY_LABEL
+                            // MVP 9 Fase 9.2 — chip clicável abre modal de
+                            // detalhamento. Só ativo se temos id (rows
+                            // antigas pré-MVP9 podem não ter retornado id).
+                            const clickable = !!mod.id
                             return (
-                              <span
+                              <button
                                 key={mod.id || mi}
-                                title={mod.description || undefined}
-                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${moduleStatusStyle(mod.status)}`}
+                                type="button"
+                                disabled={!clickable}
+                                onClick={() => clickable && setDetailsModule({ id: mod.id!, name: mod.name })}
+                                title={clickable
+                                  ? `${mod.description || mod.name} · clique para detalhar`
+                                  : (mod.description || mod.name)
+                                }
+                                className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded ${moduleStatusStyle(mod.status)} ${clickable ? 'hover:ring-1 hover:ring-violet-500/50 cursor-pointer' : 'cursor-default opacity-80'}`}
                               >
                                 <GitCommit className="w-3 h-3" />
                                 {mod.name}
@@ -279,7 +292,7 @@ export function RoadmapPage() {
                                   </span>
                                 )}
                                 <span className="opacity-60">({moduleStatusLabel(mod.status)})</span>
-                              </span>
+                              </button>
                             )
                           })}
                         </div>
@@ -299,6 +312,16 @@ export function RoadmapPage() {
           <p className="text-slate-500 text-xs mb-1">Próxima ação recomendada</p>
           <p className="text-slate-300 text-sm">{next_action}</p>
         </div>
+      )}
+
+      {/* MVP 9 Fase 9.2 — Modal de detalhamento on-demand */}
+      {detailsModule && id && (
+        <ModuleDetailsModal
+          projectId={id}
+          moduleId={detailsModule.id}
+          moduleName={detailsModule.name}
+          onClose={() => setDetailsModule(null)}
+        />
       )}
     </div>
   )

@@ -1058,6 +1058,13 @@ class ModuleCandidate(Base):
     source_document_ids = Column(Text, nullable=False, default="[]")  # JSON array
     pillar_impact = Column(Text, nullable=False, default="{}")  # JSON {p1:bool,...,p7:bool}
     ready_for_codegen = Column(Boolean, nullable=False, default=False)
+    # MVP 9 Fase 9.2 — cache do detalhamento gerado por Ollama (migration 028).
+    # JSON: {what_it_is, prerequisites, missing_inputs, input_examples,
+    # suggested_template_sections}. NULL = nunca gerado.
+    details_json = Column(Text, nullable=True)
+    details_generated_at = Column(DateTime(timezone=True), nullable=True)
+    details_provider = Column(String(50), nullable=True)
+    details_model = Column(String(100), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

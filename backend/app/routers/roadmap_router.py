@@ -28,6 +28,54 @@ async def get_roadmap(
     return await service.get_roadmap(project_id)
 
 
+@router.get("/projects/{project_id}/modules/{module_id}/details")
+async def get_module_details(
+    project_id: UUID,
+    module_id: UUID,
+    refresh: bool = False,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.2 — Detalhamento on-demand de um item do Roadmap.
+
+    Retorna `what_it_is`, `prerequisites`, `missing_inputs`,
+    `input_examples` e `suggested_template_sections` (insumo para Fase
+    9.5.1). Gerado por Ollama do projeto na primeira chamada; cache
+    persistido em `module_candidates.details_json`. `?refresh=true`
+    força regeneração.
+
+    Falha explícita quando Ollama não configurado — detalhamento é
+    baixa criticidade (§6.2) e não justifica fallback pra premium.
+    """
+    from app.services.module_details_service import get_or_generate_details
+
+    try:
+        details = await get_or_generate_details(
+            db, project_id, module_id, force_regenerate=refresh,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        # Ex: Ollama não configurado — devolve 503 com mensagem
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        logger.warning(
+            "module_details.unexpected_error",
+            project_id=str(project_id),
+            module_id=str(module_id),
+            error_type=type(exc).__name__,
+            error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gerar detalhamento ({type(exc).__name__}): {exc!r}",
+        )
+
+    return details
+
+
 @router.post("/projects/{project_id}/roadmap/foundation/sync")
 async def sync_roadmap_foundation(
     project_id: UUID,
