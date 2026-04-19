@@ -38,7 +38,10 @@ export function AdminSupportPage() {
         apiClient.get('/admin/users'),
       ])
       setTeam(teamRes.data.items || [])
-      setAllUsers(usersRes.data.items || usersRes.data || [])
+      // /admin/users retorna {"users": [...]} (não "items") — conferir
+      // backend/app/routers/admin.py:list_users
+      const userList = usersRes.data.users || usersRes.data.items || []
+      setAllUsers(Array.isArray(userList) ? userList : [])
       setError(null)
     } catch (e: any) {
       setError(e?.response?.data?.detail || 'Erro ao carregar Equipe Sustentação.')
