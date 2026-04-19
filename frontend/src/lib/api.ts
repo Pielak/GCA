@@ -36,7 +36,28 @@ api.interceptors.request.use(
 
 // Response interceptor: Handle errors
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // DT-066 — sliding session: se o backend emitiu novo token no header
+    // (porque o atual estava perto de expirar), substitui silenciosamente.
+    // Mantém user ativo na UI durante ingestões longas sem ver /login.
+    const renewed = response.headers?.['x-access-token-renewed']
+    if (typeof renewed === 'string' && renewed.length > 0) {
+      try {
+        localStorage.setItem('token', renewed)
+        const raw = localStorage.getItem('auth-storage')
+        if (raw) {
+          const parsed = JSON.parse(raw)
+          if (parsed?.state) {
+            parsed.state.token = renewed
+            localStorage.setItem('auth-storage', JSON.stringify(parsed))
+          }
+        }
+      } catch {
+        // best-effort — não quebra a resposta se o parse falhar
+      }
+    }
+    return response
+  },
   (error: AxiosError) => {
     // Handle 401 Unauthorized - redirect to login.
     // Não redirecionar se já estiver em qualquer tela de login (/login,

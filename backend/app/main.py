@@ -104,13 +104,22 @@ app = FastAPI(
 )
 
 # CORS Middleware
+# DT-066: expõe X-Access-Token-Renewed pro frontend poder ler o header
+# e fazer sliding refresh silencioso. Sem expose_headers, navegador esconde.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
     allow_methods=settings.CORS_ALLOW_METHODS,
     allow_headers=settings.CORS_ALLOW_HEADERS,
+    expose_headers=["X-Access-Token-Renewed"],
 )
+
+# DT-066: Sliding session — renova token quando próximo do vencimento
+# em respostas 2xx/3xx autenticadas. Deve ser adicionado DEPOIS do CORS
+# (Starlette executa na ordem inversa da adição; CORS fica mais externo).
+from app.middleware.sliding_session import SlidingSessionMiddleware
+app.add_middleware(SlidingSessionMiddleware)
 
 # Routes
 app.include_router(auth.router, prefix=f"{settings.API_PREFIX}/auth", tags=["auth"])

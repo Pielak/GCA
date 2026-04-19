@@ -152,6 +152,10 @@ class AuthService:
         if project_slug:
             token_data["project_slug"] = project_slug
 
+        # DT-066: issued-at pro sliding session middleware saber a idade
+        # do token e evitar renovação em bursts de requests muito próximos.
+        token_data["iat"] = int(datetime.now(timezone.utc).timestamp())
+
         # Create tokens
         access_token = create_access_token(token_data)
         refresh_token = create_refresh_token(user.id)
