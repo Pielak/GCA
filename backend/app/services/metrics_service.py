@@ -153,6 +153,67 @@ class MetricsService:
             out["users"] = await self._user_summary()
         return out
 
+    async def as_per_project_breakdown(self, hours: int = 24) -> Dict[str, Any]:
+        """Breakdown de ai_usage agregado POR PROJETO (admin-only).
+
+        Uma linha por projeto com total de calls, tokens in/out e custo.
+        Inclui projetos ativos (sem registro na janela → linha com zeros
+        só quando houver uso; projetos completamente sem chamadas não
+        aparecem pra economizar tela).
+        """
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        stmt = (
+            select(
+                AIUsageLog.project_id,
+                func.count(AIUsageLog.id).label("calls"),
+                func.coalesce(func.sum(AIUsageLog.tokens_input), 0).label("tokens_in"),
+                func.coalesce(func.sum(AIUsageLog.tokens_output), 0).label("tokens_out"),
+                func.coalesce(func.sum(AIUsageLog.cost_usd), 0.0).label("cost_usd"),
+            )
+            .where(AIUsageLog.created_at >= since)
+            .group_by(AIUsageLog.project_id)
+        )
+        rows = (await self.db.execute(stmt)).all()
+
+        # Hydrate project name + status em 1 query batched.
+        pids = [r.project_id for r in rows if r.project_id]
+        project_info: Dict[str, Dict[str, Any]] = {}
+        if pids:
+            info_rows = (await self.db.execute(
+                select(Project.id, Project.name, Project.slug, Project.status)
+                .where(Project.id.in_(pids))
+            )).all()
+            for p in info_rows:
+                project_info[str(p.id)] = {
+                    "name": p.name,
+                    "slug": p.slug,
+                    "status": p.status,
+                }
+
+        items = []
+        for r in rows:
+            pid_str = str(r.project_id) if r.project_id else None
+            info = project_info.get(pid_str or "") if pid_str else None
+            items.append({
+                "project_id": pid_str,
+                "project_name": info["name"] if info else "(sem vínculo)",
+                "project_slug": info["slug"] if info else None,
+                "project_status": info["status"] if info else None,
+                "calls": int(r.calls),
+                "tokens_in": int(r.tokens_in),
+                "tokens_out": int(r.tokens_out),
+                "cost_usd": float(round(r.cost_usd, 6)),
+            })
+        # Ordena por custo desc (mais caros primeiro — útil pro admin)
+        items.sort(key=lambda x: x["cost_usd"], reverse=True)
+
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "window_hours": hours,
+            "since": since.isoformat(),
+            "items": items,
+        }
+
     async def as_prometheus_text(self, hours: int = 24) -> str:
         """Métricas em formato texto Prometheus (sem prometheus_client).
 

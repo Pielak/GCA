@@ -39,6 +39,43 @@ async def test_dashboard_global_includes_users_and_projects(db_session):
 
 
 @pytest.mark.asyncio
+async def test_per_project_breakdown_lists_one_row_per_project(db_session):
+    """as_per_project_breakdown retorna 1 linha por projeto + metadados.
+    Ordem por custo desc."""
+    org = await create_test_organization(db_session)
+    p_hi = await create_test_project(db_session, organization_id=org.id, slug="perproj-hi")
+    p_lo = await create_test_project(db_session, organization_id=org.id, slug="perproj-lo")
+
+    # p_hi consome mais
+    db_session.add(AIUsageLog(
+        id=uuid4(), project_id=p_hi.id, provider="anthropic", model="claude",
+        operation="analyze", tokens_input=100, tokens_output=200, cost_usd=0.10,
+        created_at=datetime.now(timezone.utc),
+    ))
+    db_session.add(AIUsageLog(
+        id=uuid4(), project_id=p_lo.id, provider="anthropic", model="claude",
+        operation="analyze", tokens_input=10, tokens_output=20, cost_usd=0.01,
+        created_at=datetime.now(timezone.utc),
+    ))
+    await db_session.commit()
+
+    svc = MetricsService(db_session)
+    out = await svc.as_per_project_breakdown(hours=1)
+
+    # Achar as 2 linhas que criei
+    by_slug = {i["project_slug"]: i for i in out["items"] if i["project_slug"] in ("perproj-hi", "perproj-lo")}
+    assert set(by_slug.keys()) == {"perproj-hi", "perproj-lo"}
+    assert by_slug["perproj-hi"]["calls"] == 1
+    assert by_slug["perproj-hi"]["cost_usd"] == pytest.approx(0.10, rel=1e-3)
+    assert by_slug["perproj-lo"]["cost_usd"] == pytest.approx(0.01, rel=1e-3)
+
+    # Ordenação: hi vem antes de lo (custo desc)
+    hi_idx = next(i for i, it in enumerate(out["items"]) if it["project_slug"] == "perproj-hi")
+    lo_idx = next(i for i, it in enumerate(out["items"]) if it["project_slug"] == "perproj-lo")
+    assert hi_idx < lo_idx
+
+
+@pytest.mark.asyncio
 async def test_dashboard_project_scoped_filters_ai_usage(db_session):
     org = await create_test_organization(db_session)
     p_a = await create_test_project(db_session, organization_id=org.id, slug="met-a")

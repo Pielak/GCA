@@ -69,6 +69,20 @@ async def metrics_dashboard(
     return await svc.as_dashboard_dict(hours=hours)
 
 
+@router.get("/per-project")
+async def metrics_per_project(
+    hours: int = Query(24, ge=1, le=720, description="Janela em horas (1-720)"),
+    _admin: dict = Depends(_require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Breakdown de uso de IA POR PROJETO agregado na janela.
+    Admin-only — permite comparar consumo/custo entre projetos.
+    Ordena por custo desc.
+    """
+    svc = MetricsService(db)
+    return await svc.as_per_project_breakdown(hours=hours)
+
+
 @router.get("/prometheus", response_class=Response)
 async def metrics_prometheus(
     hours: int = Query(24, ge=1, le=720),

@@ -50,9 +50,28 @@ function formatCost(usd: number): string {
   return '$' + usd.toFixed(2)
 }
 
+interface PerProjectRow {
+  project_id: string | null
+  project_name: string
+  project_slug: string | null
+  project_status: string | null
+  calls: number
+  tokens_in: number
+  tokens_out: number
+  cost_usd: number
+}
+
+interface PerProjectResponse {
+  generated_at: string
+  window_hours: number
+  since: string
+  items: PerProjectRow[]
+}
+
 export function AdminMetricsPage() {
   const [hours, setHours] = useState(24)
   const [data, setData] = useState<MetricsDashboard | null>(null)
+  const [perProject, setPerProject] = useState<PerProjectResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -60,8 +79,12 @@ export function AdminMetricsPage() {
   const load = useCallback(async () => {
     setError(null)
     try {
-      const res = await apiClient.get(`/metrics/dashboard?hours=${hours}`)
-      setData(res.data)
+      const [globalRes, perProjectRes] = await Promise.all([
+        apiClient.get(`/metrics/dashboard?hours=${hours}`),
+        apiClient.get(`/metrics/per-project?hours=${hours}`),
+      ])
+      setData(globalRes.data)
+      setPerProject(perProjectRes.data)
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string }
       setError(e?.response?.data?.detail || e?.message || 'Erro ao carregar métricas')
@@ -216,6 +239,67 @@ export function AdminMetricsPage() {
                           <td className="py-2 px-3 text-right text-emerald-400 font-mono">{formatCost(r.cost_usd)}</td>
                         </tr>
                       ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
+
+          {/* Uso de IA por PROJETO — breakdown compartimentalizado */}
+          <Section
+            title="Uso de IA por projeto"
+            icon={<Brain className="w-4 h-4 text-violet-400" />}
+            hint={perProject ? `${perProject.items.length} projeto(s) com consumo na janela` : undefined}
+          >
+            {!perProject || perProject.items.length === 0 ? (
+              <EmptyState message="Nenhum projeto consumiu IA na janela." />
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-slate-500 text-xs uppercase tracking-wider border-b border-slate-800">
+                    <tr>
+                      <th className="text-left py-2 px-3 font-medium">Projeto</th>
+                      <th className="text-left py-2 px-3 font-medium">Status</th>
+                      <th className="text-right py-2 px-3 font-medium">Calls</th>
+                      <th className="text-right py-2 px-3 font-medium">Tokens In</th>
+                      <th className="text-right py-2 px-3 font-medium">Tokens Out</th>
+                      <th className="text-right py-2 px-3 font-medium">Cost (USD)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {perProject.items.map((r) => {
+                      const statusCls =
+                        r.project_status === 'active'    ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30' :
+                        r.project_status === 'paused'    ? 'bg-amber-500/10 text-amber-300 border-amber-500/30' :
+                        r.project_status === 'inactive'  ? 'bg-slate-500/10 text-slate-400 border-slate-500/30' :
+                        'bg-slate-700/30 text-slate-500 border-slate-700/50'
+                      return (
+                        <tr
+                          key={r.project_id || 'sem-vinculo'}
+                          className="border-b border-slate-800/50 hover:bg-slate-900/40"
+                        >
+                          <td className="py-2 px-3">
+                            <div className="text-slate-200">{r.project_name}</div>
+                            {r.project_slug && (
+                              <div className="text-[10px] text-slate-600 font-mono">{r.project_slug}</div>
+                            )}
+                          </td>
+                          <td className="py-2 px-3">
+                            {r.project_status ? (
+                              <span className={`text-[10px] px-1.5 py-0.5 rounded-md border ${statusCls}`}>
+                                {r.project_status}
+                              </span>
+                            ) : (
+                              <span className="text-slate-600 text-xs">—</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-right text-slate-300">{formatNumber(r.calls)}</td>
+                          <td className="py-2 px-3 text-right text-slate-400">{formatNumber(r.tokens_in)}</td>
+                          <td className="py-2 px-3 text-right text-slate-400">{formatNumber(r.tokens_out)}</td>
+                          <td className="py-2 px-3 text-right text-emerald-400 font-mono">{formatCost(r.cost_usd)}</td>
+                        </tr>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
