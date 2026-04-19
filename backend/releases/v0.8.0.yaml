@@ -1,0 +1,58 @@
+# MVP 7 — Release retroativa consolidando tudo aplicado até 2026-04-19.
+#
+# Quando a instância subir pela primeira vez depois do MVP 7, o
+# release_service detecta este YAML como pending, marca não-destrutiva,
+# aplica sem exigir ação do Admin, e registra as entregas que já estão
+# em produção pra dar partida no changelog.
+
+tag: v0.8.0
+title: "Consolidação pré-MVP 7 (2026-04-19)"
+is_destructive: false
+body: |
+  Release retroativa declarada no próprio commit do MVP 7. Reúne no
+  changelog os MVPs 1-5, MVP 6 (tickets) + Emenda (Sustentação + anexos
+  + seção/fluxo) e as DTs operacionais já quitadas. Nenhuma migration é
+  aplicada por este YAML — o banco já está no estado final dessas
+  entregas. Serve só pra dar histórico ao painel de releases.
+
+items:
+  - kind: mvp
+    ref_id: MVP1
+    title: "Base operacional — autenticação, RBAC canônico, OCG básico, Gatekeeper, auditoria, provedor de IA"
+    affected_roles: ["all"]
+  - kind: mvp
+    ref_id: MVP2
+    title: "Contexto vivo — ingestão, quarentena PII, OCG versionado, backlog, Arguidor"
+    affected_roles: ["all"]
+  - kind: mvp
+    ref_id: MVP3
+    title: "Geração assistida controlada — CodeGen com preview, commits rastreáveis, docstrings obrigatórias"
+    affected_roles: ["dev", "gp", "admin"]
+  - kind: mvp
+    ref_id: MVP4
+    title: "Qualidade e entrega — QA Readiness, Documentação Viva, Roadmap, Release Bundle"
+    affected_roles: ["qa", "tester", "gp", "admin"]
+  - kind: mvp
+    ref_id: MVP5
+    title: "Hardening operacional — observabilidade, backup/restore maduros, upgrade idempotente"
+    affected_roles: ["admin"]
+  - kind: mvp
+    ref_id: MVP6
+    title: "Validação assistida em campo — tickets de incidente (Dev/QA → GP → Admin)"
+    affected_roles: ["all"]
+  - kind: mvp_emenda
+    ref_id: MVP6-E
+    title: "MVP 6 Emenda — Equipe Sustentação (is_support), anexos em tickets, contexto obrigatório (seção + fluxo)"
+    affected_roles: ["all"]
+  - kind: feature
+    ref_id: DT-063
+    title: "Backup compartimentalizado por projeto com scheduler diário 12:00 + rollback (Admin/GP)"
+    affected_roles: ["admin", "gp"]
+  - kind: feature
+    ref_id: DT-060
+    title: "Observabilidade: /metrics/health, /metrics/dashboard, /metrics/prometheus"
+    affected_roles: ["admin"]
+  - kind: feature
+    ref_id: DT-023
+    title: "Suporte a Ollama local como provedor de IA"
+    affected_roles: ["admin", "gp"]

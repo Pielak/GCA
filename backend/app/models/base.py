@@ -1149,6 +1149,71 @@ class IncidentTicketAttachment(Base):
     )
 
 
+class Release(Base):
+    """MVP 7 — Release aplicada ou pendente na instância.
+
+    Cada release é declarada em backend/releases/<tag>.yaml shipado com
+    o código. Ao startup, `release_service` detecta novas e:
+      - não-destrutivas: aplica automaticamente (status='applied').
+      - destrutivas: fica status='pending' até Admin confirmar; na
+        aplicação, snapshot DT-063 por projeto ativo registrado em
+        release_application_log antes das migrations rodarem.
+
+    Rollback: snapshot pré-release pode restaurar o projeto (DT-063).
+    Não há rollback do app/container (continua op manual via DT-062).
+    """
+    __tablename__ = "releases"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    tag = Column(String(40), unique=True, nullable=False)
+    title = Column(String(200), nullable=False)
+    body = Column(Text, nullable=True)
+    is_destructive = Column(Boolean, default=False, nullable=False)
+    status = Column(String(20), default="pending", nullable=False)  # pending | applied | rolled_back
+    declared_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+    applied_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    git_commit_hash = Column(String(64), nullable=True)
+    source_yaml = Column(String(255), nullable=True)
+
+
+class ReleaseItem(Base):
+    """Item de changelog dentro de uma release (MVP, ticket, fix, feature)."""
+    __tablename__ = "release_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    release_id = Column(UUID(as_uuid=True), ForeignKey("releases.id", ondelete="CASCADE"), nullable=False)
+    kind = Column(String(40), nullable=False)  # mvp | mvp_emenda | ticket | feature | fix | schema_change
+    ref_id = Column(String(60), nullable=True)
+    title = Column(String(300), nullable=False)
+    description = Column(Text, nullable=True)
+    # JSON: ["admin", "gp", "dev", "tester", "qa", "all"]
+    affected_roles = Column(Text, default='["all"]', nullable=False)
+    display_order = Column(Integer, default=0, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_release_items_release", release_id, display_order),
+    )
+
+
+class ReleaseApplicationLog(Base):
+    """Log de eventos de release (aplicação, snapshot, rollback)."""
+    __tablename__ = "release_application_log"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    release_id = Column(UUID(as_uuid=True), ForeignKey("releases.id", ondelete="CASCADE"), nullable=False)
+    event_type = Column(String(60), nullable=False)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
+    actor_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    metadata_json = Column("metadata", Text, nullable=True)  # coluna "metadata" no DB, atributo metadata_json em Python (metadata é reservado do SQLAlchemy)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_release_log_release_created", release_id, created_at.asc()),
+    )
+
+
 class IncidentTicketComment(Base):
     """MVP 6 — comentário em ticket de incidente."""
     __tablename__ = "incident_ticket_comments"

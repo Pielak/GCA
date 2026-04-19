@@ -1,15 +1,19 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.1  
+Versão: 3.2  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — **MVP 6 + Emenda 2026-04-19 fechados**. MVP 5 fechado. Suite **683/683 passing** (+16 da emenda). MVP 7 destravado, aguarda autorização explícita.
+Status: **controle de avanço por fase** — **MVP 7 iniciado 2026-04-19** por autorização do stakeholder-soberano. MVP 6 + Emenda fechados. MVP 5 fechado. Suite baseline 683/683 antes do MVP 7. 4 sub-fases sequenciais com regressão entre cada.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum em execução.** MVP 6 + Emenda 2026-04-19 fechados. MVP 7 pronto para iniciar (dependência de MVP 6 satisfeita), aguarda autorização explícita.
+**MVP 7 — Entrega versionada preservando dados do usuário** — iniciado 2026-04-19. Fatiamento em 4 sub-fases sequenciais:
+- **Fase 1** — backend core: schema `releases`/`release_items`/`release_application_log`, service com detecção de releases YAML shipadas, aplicação automática de não-destrutivas no startup, seed retroativa v0.8.0.
+- **Fase 2** — release destrutiva: endpoint Admin dispara snapshot (via DT-063) antes de aplicar migrations destrutivas; registrar snapshot_ids em `release_application_log`; rollback via botão "Reverter".
+- **Fase 3** — frontend: `/admin/releases` (todos os admins) + `/releases` (user-facing, segmentado por papel); banner/notif de release nova.
+- **Fase 4** — completion tasks (assistente pós-release) + docs + smoke + commit final.
 
 ### MVPs fechados
 - **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).

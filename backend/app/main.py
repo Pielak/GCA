@@ -28,6 +28,10 @@ from app.routers.incident_ticket_router import (
     admin_router as incident_admin_router,
     support_router as incident_support_router,
 )
+from app.routers.release_router import (
+    admin_router as release_admin_router,
+    user_router as release_user_router,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -60,6 +64,25 @@ async def lifespan(app: FastAPI):
             start_scheduler()
         except Exception as e:
             logger.error("gca.scheduler_start_failed", error=str(e))
+
+    # MVP 7: sincroniza releases declaradas (backend/releases/*.yaml) com
+    # a tabela `releases` e aplica as não-destrutivas automaticamente.
+    # Releases destrutivas ficam pending até Admin confirmar.
+    if "PYTEST_CURRENT_TEST" not in _os.environ:
+        try:
+            from app.db.database import AsyncSessionLocal
+            from app.services import release_service as _rel_svc
+            async with AsyncSessionLocal() as _db:
+                created = await _rel_svc.sync_declared_releases(_db)
+                if created:
+                    logger.info("release.declared_synced", count=len(created),
+                                tags=[r.tag for r in created])
+                applied = await _rel_svc.apply_nondestructive_pending(_db)
+                if applied:
+                    logger.info("release.auto_applied", count=len(applied),
+                                tags=[r.tag for r in applied])
+        except Exception as e:
+            logger.error("release.startup_sync_failed", error=str(e))
 
     yield
 
@@ -131,6 +154,8 @@ app.include_router(incident_project_router, prefix=f"{settings.API_PREFIX}", tag
 app.include_router(incident_ticket_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-incidents"])
 app.include_router(incident_support_router, prefix=f"{settings.API_PREFIX}", tags=["admin-support"])
+app.include_router(release_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-releases"])
+app.include_router(release_user_router, prefix=f"{settings.API_PREFIX}", tags=["releases"])
 
 
 @app.get("/health")
