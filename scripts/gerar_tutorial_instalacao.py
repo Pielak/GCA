@@ -18,7 +18,7 @@ from docx.oxml import OxmlElement
 from docx.shared import Cm, Inches, Pt, RGBColor
 
 WIREFRAME_DIR = Path("/home/luiz/GCA/docs/wireframes")
-SCREENSHOT_DIR = Path("/home/luiz/GCA/screenshots_v2")
+SCREENSHOT_DIR = Path("/home/luiz/GCA/screenshots_v3")
 OUT_PATH = Path("/home/luiz/GCA/docs/GCA_Tutorial_Instalacao_v1.docx")
 
 VIOLET = RGBColor(0x6D, 0x28, 0xD9)
@@ -603,49 +603,62 @@ def build(doc: Document):
     h1(doc, "6. Dentro de um projeto — fluxo do GP")
     para(doc,
          "A área de projeto concentra o fluxo diário do Gerente de Projeto (GP). Após a aprovação "
-         "do projeto pelo Administrador, o GP acessa a lista de projetos e entra no seu. "
-         "Cada uma das 21 telas do projeto tem um propósito específico descrito abaixo.")
+         "do projeto pelo Administrador, o GP acessa a lista de projetos (visão segmentada — sem "
+         "os menus de camada administrativa) e entra no seu projeto. A sidebar se reconfigura "
+         "automaticamente mostrando todos os sub-itens do projeto, que são o fluxo operacional "
+         "completo do GP, Dev, Tester e QA.")
+    para(doc,
+         "As telas abaixo foram capturadas com o usuário Fernando, GP real do projeto Automação "
+         "Jurídica Assistida, para demonstrar o layout correto da sidebar de projeto (em vez da "
+         "sidebar administrativa). Observe a diferença: o menu \"ADMINISTRAÇÃO\" foi substituído "
+         "por \"MEUS PROJETOS\" com o projeto ativo expandido e seus 18 sub-itens.")
+
+    h2(doc, "6.0. Lista de projetos (visão do GP)")
+    para(doc, "Entrada da sessão do GP: lista apenas os projetos onde ele é membro aceito. "
+              "Cliques levam à rota /projects/{id}.")
+    image(doc, SCREENSHOT_DIR / "30_projeto_gp_lista_projetos.png",
+          "Figura — Lista de projetos visível ao GP.", width_in=5.9)
 
     project_shots = [
-        ("6.1. Dashboard do projeto", "31_projeto_dashboard.png",
-         "Visão consolidada do projeto: readiness do OCG, últimos deltas, backlog priorizado, pendências."),
-        ("6.2. Equipe", "32_projeto_team.png",
+        ("6.1. Dashboard do projeto", "31_projeto_gp_dashboard.png",
+         "Visão consolidada do projeto: readiness do OCG, últimos deltas, backlog priorizado, pendências. Note na sidebar: sub-itens específicos do projeto (Dashboard, Equipe, OCG, Repositórios, Ingestão, Gatekeeper, Arguidor, CodeGen, QA, Revisão, Backlog, Roadmap, Docs, Readiness, Settings, Audit, Backups, Incidentes, Métricas) — visualização do GP."),
+        ("6.2. Equipe", "32_projeto_gp_team.png",
          "Gestão da equipe do projeto — convites, papéis, multi-papel."),
-        ("6.3. OCG — Objeto Canônico de Governança", "33_projeto_ocg.png",
+        ("6.3. OCG — Objeto Canônico de Governança", "33_projeto_gp_ocg.png",
          "Fonte única de verdade do projeto. Exibe os sete pilares (Business, Architecture, Stack, Testing, Compliance, Risk, Deliverables) com status e score."),
-        ("6.4. Repositórios externos", "34_projeto_external_repos.png",
+        ("6.4. Repositórios externos", "34_projeto_gp_external_repos.png",
          "Lista de repositórios Git vinculados ao projeto (integração via PAT criptografada)."),
-        ("6.5. Ingestão", "35_projeto_ingestion.png",
+        ("6.5. Ingestão", "35_projeto_gp_ingestion.png",
          "Uploads de documentos para análise. Detector de PII aplica quarentena quando necessário."),
-        ("6.6. Gatekeeper", "36_projeto_gatekeeper.png",
+        ("6.6. Gatekeeper", "36_projeto_gp_gatekeeper.png",
          "Avaliação por sete pilares. Bloqueia avanço de fase quando thresholds não são atingidos."),
-        ("6.7. Arguidor", "37_projeto_arguider.png",
+        ("6.7. Arguidor", "37_projeto_gp_arguider.png",
          "Análise LLM dos documentos ingeridos. Gera findings que alimentam o backlog."),
-        ("6.8. Geração de Código (CodeGen)", "38_projeto_codegen.png",
-         "Gera estrutura inicial de projeto com base no OCG + scaffolders determinísticos."),
-        ("6.9. QA Readiness", "39_projeto_qa_readiness.png",
+        ("6.8. Geração de Código (CodeGen)", "38_projeto_gp_codegen.png",
+         "Gera estrutura inicial de projeto com base no OCG + scaffolders determinísticos. Desde a emenda RBAC 2026-04-19, o GP pode operar CodeGen sem depender exclusivamente de Dev."),
+        ("6.9. QA Readiness", "39_projeto_gp_qa_readiness.png",
          "Estado de prontidão de QA com cobertura por pilar."),
-        ("6.10. Revisão de Testes", "40_projeto_tester_review.png",
+        ("6.10. Revisão de Testes", "40_projeto_gp_tester_review.png",
          "Workflow de aprovação de testes executados (Tester cria, QA aprova)."),
-        ("6.11. Backlog", "41_projeto_backlog.png",
+        ("6.11. Backlog", "41_projeto_gp_backlog.png",
          "Itens derivados do OCG + findings do Arguidor, priorizados."),
-        ("6.12. Roadmap", "42_projeto_roadmap.png",
+        ("6.12. Roadmap", "42_projeto_gp_roadmap.png",
          "Visão temporal de entregas planejadas."),
-        ("6.13. Documentação Viva", "43_projeto_docs.png",
+        ("6.13. Documentação Viva", "43_projeto_gp_docs.png",
          "Documentação gerada automaticamente a partir do OCG e atualizada a cada mudança."),
-        ("6.14. Definition of Done", "44_projeto_readiness.png",
+        ("6.14. Definition of Done", "44_projeto_gp_readiness.png",
          "Checklist de critérios de entrega final — Release Bundle."),
-        ("6.15. Configurações", "45_projeto_settings.png",
+        ("6.15. Configurações", "45_projeto_gp_settings.png",
          "Três tabs: Questionário (PDF), Repositório (Git + PAT), Provedor de IA do projeto."),
-        ("6.16. Pipeline Audit", "46_projeto_audit.png",
+        ("6.16. Pipeline Audit", "46_projeto_gp_audit.png",
          "Logs de auditoria específicos do projeto, filtrados por projeto."),
-        ("6.17. Backups do projeto", "47_projeto_backups.png",
+        ("6.17. Backups do projeto", "47_projeto_gp_backups.png",
          "Lista de backups do projeto, download, botão 'Backup agora', rollback."),
-        ("6.18. Incidentes", "48_projeto_incidents.png",
+        ("6.18. Incidentes", "48_projeto_gp_incidents.png",
          "Tickets abertos pelo time do projeto. Filtros de status e prioridade."),
-        ("6.19. Modal de abertura de ticket", "49_projeto_abrir_ticket_modal.png",
+        ("6.19. Modal de abertura de ticket", "49_projeto_gp_abrir_ticket_modal.png",
          "Formulário: título, descrição, categoria, prioridade, seção (autopreenchida), fluxo (obrigatório), anexos."),
-        ("6.20. Métricas do Projeto", "50_projeto_metrics.png",
+        ("6.20. Métricas do Projeto", "50_projeto_gp_metrics.png",
          "Uso de IA e eventos de auditoria compartimentalizados — visão do GP e demais membros."),
     ]
 
