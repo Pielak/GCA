@@ -1,15 +1,18 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 2.9  
+Versão: 3.0  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — **MVP 6 fechado 2026-04-19** (4 fases: backend + frontend projeto + frontend admin + docs). MVP 5 fechado (DT-016/023/041/058/060/061/062/063). Suite 667/667 passing (+15 vs baseline 652). MVP 7 segue definido e não iniciado (agora destravado — dependência MVP 6 satisfeita).
+Status: **controle de avanço por fase** — MVP 6 fechado 2026-04-19; **Emenda 2026-04-19 ao MVP 6 em execução** (Sustentação cross-instância + anexos + contexto obrigatório section/flow). MVP 5 fechado. Suite baseline 667/667 antes da emenda. MVP 7 segue definido, não iniciado.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum em execução.** MVP 6 fechado em 2026-04-19 (4 fases). MVP 5 + DT-063 fechados. MVP 7 pronto para iniciar (dependência de MVP 6 satisfeita), aguarda autorização explícita do stakeholder-soberano.
+**Emenda ao MVP 6 — em execução 2026-04-19**. Expansão autorizada pelo stakeholder no mesmo dia do fechamento original do MVP 6. Adiciona: Área de Sustentação (flag cross-instância `is_support`, Admin herda), anexos no ticket (até 5 arquivos / 10 MB / tipos png|jpg|jpeg|webp|gif|txt|log|json|pdf), contexto obrigatório do incidente (`section_reference` autopreenchido + `flow_description` obrigatório). Regra dura: Admin sobrepõe Support; Support nunca vira Admin por essa via. 3 sub-fases (backend → frontend → docs).
+
+### MVPs fechados
+- **MVP 6 (forma original)** — fechado 2026-04-19 às 02:15 (commits `8042918` + `c9230be`). Emenda no mesmo dia reabre escopo.
 
 ### Próximos MVPs definidos (contrato §7)
 - **MVP 7 — Entrega versionada preservando dados do usuário** — adicionado 2026-04-19. Estado: **definido — não iniciado, destravado**. A rastreabilidade ticket → release (exigida no §7 MVP 7) passa a existir em produção com o MVP 6 fechado.
