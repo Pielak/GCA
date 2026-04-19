@@ -979,6 +979,11 @@ class IngestedDocument(Base):
     arguider_started_at = Column(DateTime(timezone=True), nullable=True)
     arguider_completed_at = Column(DateTime(timezone=True), nullable=True)
     arguider_error_message = Column(Text, nullable=True)
+    # MVP 8 Fase 1 — feedback de progresso. Estágio textual canônico +
+    # porcentagem bucket por estágio. Frontend renderiza barra real.
+    arguider_stage = Column(String(40), nullable=False, default="queued")
+    arguider_progress_percent = Column(Integer, nullable=False, default=0)
+    arguider_stage_updated_at = Column(DateTime(timezone=True), nullable=True)
     ocg_updated = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

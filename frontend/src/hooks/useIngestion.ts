@@ -2,6 +2,16 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
 
+// MVP 8 Fase 1 — estágios canônicos do pipeline de ingestão/análise
+export type ArguiderStage =
+  | 'queued'               // aguardando análise
+  | 'extracting_text'      // extraindo texto do documento
+  | 'analyzing'            // chamando LLM do Arguidor
+  | 'updating_ocg'         // aplicando deltas ao OCG
+  | 'regenerating_backlog' // propagando pro backlog / roadmap / gatekeeper
+  | 'completed'            // terminou com sucesso
+  | 'failed'               // alguma etapa falhou
+
 export interface IngestedDocument {
   id: string
   original_filename: string
@@ -22,6 +32,10 @@ export interface IngestedDocument {
   source_url?: string | null
   source_repo_id?: string | null
   content_status?: 'available' | 'lost'
+  // MVP 8 Fase 1 — feedback de progresso
+  arguider_stage?: ArguiderStage
+  arguider_progress_percent?: number
+  arguider_stage_updated_at?: string | null
 }
 
 export interface DocumentDetail extends IngestedDocument {
@@ -45,6 +59,10 @@ export interface DocumentStatus {
   arguider_started_at: string | null
   arguider_completed_at: string | null
   ocg_updated: boolean
+  // MVP 8 Fase 1 — feedback de progresso
+  arguider_stage?: ArguiderStage
+  arguider_progress_percent?: number
+  arguider_stage_updated_at?: string | null
 }
 
 // Lista documentos do projeto
@@ -56,8 +74,16 @@ export const useDocuments = (projectId: string | undefined) => {
       return response.data
     },
     enabled: !!projectId,
-    staleTime: 1000 * 30,
-    refetchInterval: 1000 * 15, // Auto-refresh a cada 15s
+    staleTime: 1000 * 3,
+    // MVP 8 Fase 1 — polling adaptativo: 2s enquanto houver doc
+    // processando (pra barra avançar visivelmente); 15s caso contrário.
+    refetchInterval: (query) => {
+      const data = query.state.data as IngestedDocument[] | undefined
+      const anyProcessing = Array.isArray(data) && data.some(d =>
+        d.arguider_status === 'pending' || d.arguider_status === 'processing'
+      )
+      return anyProcessing ? 2000 : 15000
+    },
   })
 }
 

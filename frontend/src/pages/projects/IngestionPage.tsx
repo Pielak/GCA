@@ -4,6 +4,7 @@ import { Upload, FileText, Trash2, Play, Terminal, Loader2, RefreshCw } from 'lu
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useDocuments, useUploadDocument, useDeleteDocument, type IngestedDocument } from '@/hooks/useIngestion';
 import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
+import { IngestionProgressBar } from '@/components/ingestion/IngestionProgressBar';
 import { apiClient } from '@/lib/api';
 
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
@@ -330,14 +331,24 @@ export function IngestionPage() {
                   <span className="text-slate-400 text-xs">{fileTypeLabel(doc.file_type)}</span>
                   <span className="text-slate-400 text-xs">{formatFileSize(doc.file_size_bytes)}</span>
                   <span className="text-slate-500 text-xs">{new Date(doc.created_at).toLocaleDateString('pt-BR')}</span>
-                  <div className="flex items-center gap-2 text-xs">
-                    {doc.arguider_status === 'processing' ? (
-                      <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-                    ) : (
-                      <span title={st.label}>{st.icon}</span>
+                  <div className="flex flex-col gap-1 text-xs min-w-[180px]">
+                    <div className="flex items-center gap-2">
+                      {doc.arguider_status === 'processing' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                      ) : (
+                        <span title={st.label}>{st.icon}</span>
+                      )}
+                      <span className={st.color}>{st.label}</span>
+                      {doc.ocg_updated && <span className="text-emerald-600 text-[10px]">(OCG)</span>}
+                    </div>
+                    {/* MVP 8 Fase 1 — barra de progresso real quando processando */}
+                    {doc.arguider_status === 'processing' && (
+                      <IngestionProgressBar
+                        stage={doc.arguider_stage}
+                        percent={doc.arguider_progress_percent ?? 0}
+                        stageUpdatedAt={doc.arguider_stage_updated_at ?? null}
+                      />
                     )}
-                    <span className={st.color}>{st.label}</span>
-                    {doc.ocg_updated && <span className="text-emerald-600 text-[10px]">(OCG)</span>}
                   </div>
                   {/* DT-039: botão re-analisar (só quando relevante e content_status!='lost') */}
                   {(doc.arguider_status === 'error' || doc.arguider_status === 'completed') && doc.content_status !== 'lost' && (

@@ -545,6 +545,49 @@ class IngestionService:
 
         return False
 
+    # MVP 8 Fase 1 — Mapa canônico de estágio → porcentagem.
+    # Ordem: queued(0) → extracting_text(10) → analyzing(40) →
+    # updating_ocg(70) → regenerating_backlog(90) → completed(100).
+    _STAGE_PERCENTS: dict[str, int] = {
+        "queued": 0,
+        "extracting_text": 10,
+        "analyzing": 40,
+        "updating_ocg": 70,
+        "regenerating_backlog": 90,
+        "completed": 100,
+        "failed": 0,  # percent não regride; frontend mostra último valor
+    }
+
+    @classmethod
+    async def _update_stage(
+        cls,
+        db,
+        document_id: UUID,
+        stage: str,
+        *,
+        percent: int | None = None,
+    ) -> None:
+        """MVP 8 Fase 1 — atualiza arguider_stage + porcentagem do documento.
+
+        Commit dedicado para que o frontend (polling) enxergue o estágio
+        mesmo que o resto do pipeline demore. Se `percent` não vem, usa
+        o default do mapa. Nunca regride porcentagem exceto quando
+        explicitamente passado (ex: reset pra 0 em reanalyze).
+        """
+        from datetime import datetime as _dt, timezone as _tz
+        from app.models.base import IngestedDocument as _Doc
+        doc = await db.get(_Doc, document_id)
+        if not doc:
+            return
+        doc.arguider_stage = stage
+        if percent is None:
+            percent = cls._STAGE_PERCENTS.get(stage, doc.arguider_progress_percent)
+        # Não regride (exceto se caller explicitamente passar valor menor)
+        if percent >= doc.arguider_progress_percent or stage == "failed":
+            doc.arguider_progress_percent = percent
+        doc.arguider_stage_updated_at = _dt.now(_tz.utc)
+        await db.commit()
+
     async def _notify_provider_fallback(
         self,
         db,
@@ -668,8 +711,15 @@ class IngestionService:
 
                 extractor = DocumentExtractor()
 
+                # MVP 8 Fase 1 — marcar estágio "extracting_text"
+                await IngestionService._update_stage(db, document_id, "extracting_text")
+
                 # Extrair texto (fora do loop — não depende do provider)
                 doc_text = await extractor.extract_text(file_bytes, file_type)
+
+                # MVP 8 Fase 1 — texto extraído, próximo estágio será "analyzing"
+                # (a atualização real acontece dentro do loop, antes do
+                # arguider.analyze_document)
 
                 # Buscar OCG + análises prévias (fora do loop também)
                 ocg_result = await db.execute(
@@ -724,6 +774,8 @@ class IngestionService:
                             model=model,
                             base_url=base_url,
                         )
+                        # MVP 8 Fase 1 — marcar estágio "analyzing"
+                        await IngestionService._update_stage(db, document_id, "analyzing")
                         await arguider.analyze_document(
                             document_id=document_id,
                             project_id=project_id,
@@ -831,6 +883,9 @@ class IngestionService:
                             except _json.JSONDecodeError:
                                 pass
 
+                        # MVP 8 Fase 1 — estágio "updating_ocg"
+                        await IngestionService._update_stage(db, document_id, "updating_ocg")
+
                         # Atualizar OCG via IA
                         updater = OCGUpdaterService(db)
                         update_result = await updater.update_ocg_from_arguider(
@@ -846,6 +901,8 @@ class IngestionService:
                         # de propagação do commit do OCG (que já aconteceu)
                         # e libera o caller para retornar imediatamente.
                         if update_result and update_result.get("changes"):
+                            # MVP 8 Fase 1 — estágio "regenerating_backlog"
+                            await IngestionService._update_stage(db, document_id, "regenerating_backlog")
                             asyncio.create_task(
                                 _propagate_async(
                                     project_id=project_id,
@@ -869,6 +926,10 @@ class IngestionService:
                                    document_id=str(document_id),
                                    ocg_updated=bool(update_result))
 
+                        # MVP 8 Fase 1 — marcar estágio "completed" após
+                        # sucesso completo do pipeline (arguider + ocg + propagação disparada).
+                        await IngestionService._update_stage(db, document_id, "completed", percent=100)
+
                     except Exception as e:
                         import traceback
                         logger.warning(
@@ -878,9 +939,21 @@ class IngestionService:
                             error_type=type(e).__name__,
                             traceback=traceback.format_exc(),
                         )
+                        # Mesmo com falha no OCG reativo, o Arguidor já
+                        # completou — marcamos completed mas com porcentagem
+                        # ligeiramente menor pro frontend mostrar o alerta
+                        # via arguider_error_message (que vem do caller).
+                        await IngestionService._update_stage(db, document_id, "completed", percent=95)
 
         except Exception as e:
             logger.error("ingestion.analysis_async_error", document_id=str(document_id), error=str(e))
+            # MVP 8 Fase 1 — marcar estágio "failed" para frontend parar o polling
+            try:
+                from app.db.database import AsyncSessionLocal as _ASL
+                async with _ASL() as _db:
+                    await IngestionService._update_stage(_db, document_id, "failed")
+            except Exception:
+                pass
 
     async def list_documents(self, project_id: UUID) -> list[dict]:
         """Lista documentos do projeto."""
@@ -913,6 +986,14 @@ class IngestionService:
                 "source_url": getattr(d, "source_url", None),
                 "source_repo_id": str(d.source_repo_id) if getattr(d, "source_repo_id", None) else None,
                 "content_status": getattr(d, "content_status", "available"),
+                # MVP 8 Fase 1 — feedback de progresso (expostos na listagem
+                # pra barra renderizar sem depender de chamada extra ao /status)
+                "arguider_stage": getattr(d, "arguider_stage", None),
+                "arguider_progress_percent": getattr(d, "arguider_progress_percent", 0),
+                "arguider_stage_updated_at": (
+                    d.arguider_stage_updated_at.isoformat()
+                    if getattr(d, "arguider_stage_updated_at", None) else None
+                ),
             }
             for d in docs
         ]
@@ -978,6 +1059,10 @@ class IngestionService:
             "arguider_started_at": doc.arguider_started_at.isoformat() if doc.arguider_started_at else None,
             "arguider_completed_at": doc.arguider_completed_at.isoformat() if doc.arguider_completed_at else None,
             "ocg_updated": doc.ocg_updated,
+            # MVP 8 Fase 1 — feedback de progresso
+            "arguider_stage": doc.arguider_stage,
+            "arguider_progress_percent": doc.arguider_progress_percent,
+            "arguider_stage_updated_at": doc.arguider_stage_updated_at.isoformat() if doc.arguider_stage_updated_at else None,
         }
 
     async def delete_document(self, project_id: UUID, document_id: UUID) -> dict:
