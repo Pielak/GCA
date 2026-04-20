@@ -122,6 +122,7 @@ async def get_or_generate_details(
             cached["_model"] = module.details_model
             # MVP 9 Fase 9.3 — anexa readiness se já avaliado
             cached["readiness"] = _build_readiness_payload(module)
+            cached["external_reference"] = _build_external_reference_payload(module)
             return cached
         except (ValueError, TypeError):
             logger.warning("module_details.cache_corrupted", module_id=str(module_id))
@@ -158,6 +159,7 @@ async def get_or_generate_details(
     parsed["_model"] = config["model"]
     # MVP 9 Fase 9.3 — anexa readiness se disponível
     parsed["readiness"] = _build_readiness_payload(module)
+    parsed["external_reference"] = _build_external_reference_payload(module)
     return parsed
 
 
@@ -184,6 +186,28 @@ def _build_readiness_payload(module) -> dict[str, Any] | None:
     }
 
 
+def _build_external_reference_payload(module) -> dict[str, Any] | None:
+    """MVP 9 Fase 9.2.ext — empacota external_reference do módulo pro frontend.
+
+    Retorna None quando nada declarado. Quando tem URL mas sem fetch,
+    retorna `{url, fetched: false}`. Com fetch ok: inclui chars + fetched_at.
+    Com erro de fetch: inclui error.
+    """
+    if not module.external_reference:
+        return None
+    payload: dict[str, Any] = {
+        "url": module.external_reference,
+        "fetched": bool(module.external_reference_content),
+    }
+    if module.external_reference_fetched_at:
+        payload["fetched_at"] = module.external_reference_fetched_at.isoformat()
+    if module.external_reference_content:
+        payload["chars"] = len(module.external_reference_content)
+    if module.external_reference_fetch_error:
+        payload["error"] = module.external_reference_fetch_error
+    return payload
+
+
 async def _load_latest_ocg(db: AsyncSession, project_id: UUID) -> dict[str, Any] | None:
     row = await db.execute(
         select(OCG)
@@ -201,7 +225,12 @@ async def _load_latest_ocg(db: AsyncSession, project_id: UUID) -> dict[str, Any]
 
 
 def _build_user_prompt(module: ModuleCandidate, ocg_data: dict[str, Any]) -> str:
-    """Constrói o prompt customizado por item (P2=b — schema gerado por item)."""
+    """Constrói o prompt customizado por item (P2=b — schema gerado por item).
+
+    MVP 9 Fase 9.2.ext: quando o item tem `external_reference` com
+    conteúdo já fetched, anexa trecho ao prompt pra Ollama destilar
+    descrição mais aderente à doc oficial do serviço.
+    """
     stack = ocg_data.get("STACK_RECOMMENDATION") or {}
     arch = ocg_data.get("ARCHITECTURE_OVERVIEW") or {}
     profile = ocg_data.get("PROJECT_PROFILE") or {}
@@ -223,7 +252,7 @@ def _build_user_prompt(module: ModuleCandidate, ocg_data: dict[str, Any]) -> str
     exec_model = _list_or_dash(arch.get("execution_model"))
     deliverables = _list_or_dash(profile.get("deliverables") or arch.get("deliverables") or [])
 
-    return DETAIL_PROMPT_USER_TEMPLATE.format(
+    base = DETAIL_PROMPT_USER_TEMPLATE.format(
         name=module.name,
         module_type=module.module_type or "feature",
         description=module.description or "(sem descrição)",
@@ -233,6 +262,25 @@ def _build_user_prompt(module: ModuleCandidate, ocg_data: dict[str, Any]) -> str
         execution_model=exec_model,
         deliverables=deliverables,
     )
+
+    # MVP 9 Fase 9.2.ext — injeta doc externa quando fetched
+    ext_url = (module.external_reference or "").strip()
+    ext_content = (module.external_reference_content or "").strip()
+    if ext_url and ext_content:
+        # Limita a 8KB pra não estourar contexto do Ollama
+        snippet = ext_content[:8000]
+        if len(ext_content) > 8000:
+            snippet += "\n\n[... doc externa truncada em 8KB pra prompt]"
+        base += (
+            f"\n\nDocumentação oficial declarada (URL: {ext_url}):\n"
+            f"```\n{snippet}\n```\n\n"
+            "Use a documentação acima como fonte autoritativa para os campos "
+            "what_it_is, prerequisites, missing_inputs e suggested_template_sections. "
+            "Quando um campo estiver explícito na doc oficial, marque "
+            "from_ocg com o valor literal."
+        )
+
+    return base
 
 
 async def _resolve_ollama_config(

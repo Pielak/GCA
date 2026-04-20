@@ -1085,6 +1085,13 @@ class ModuleCandidate(Base):
     readiness_provider = Column(String(50), nullable=True)
     readiness_model = Column(String(100), nullable=True)
     dependencies_inferred = Column(Text, nullable=True)
+    # MVP 9 Fase 9.2.ext — WebFetch curado (migration 031).
+    # URL declarada explicitamente pelo GP/Foundation generator.
+    # WebFetch só roda quando preenchido (sem navegação autônoma).
+    external_reference = Column(String(500), nullable=True)
+    external_reference_content = Column(Text, nullable=True)
+    external_reference_fetched_at = Column(DateTime(timezone=True), nullable=True)
+    external_reference_fetch_error = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

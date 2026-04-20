@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download, Sparkles } from 'lucide-react'
+import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download, Sparkles, Globe, ExternalLink } from 'lucide-react'
 import api, { apiClient } from '@/lib/api'
 
 /**
@@ -33,6 +33,14 @@ interface ReadinessPayload {
   model: string | null
 }
 
+interface ExternalReferencePayload {
+  url: string
+  fetched: boolean
+  fetched_at?: string
+  chars?: number
+  error?: string
+}
+
 interface ModuleDetails {
   what_it_is: string
   prerequisites: string[]
@@ -40,6 +48,7 @@ interface ModuleDetails {
   input_examples: string[]
   suggested_template_sections: SuggestedSection[]
   readiness?: ReadinessPayload | null
+  external_reference?: ExternalReferencePayload | null
   _cached: boolean
   _generated_at: string | null
   _provider: string | null
@@ -231,6 +240,14 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
                 </Section>
               )}
 
+              {/* MVP 9 Fase 9.2.ext — WebFetch curado */}
+              <ExternalReferenceBlock
+                projectId={projectId}
+                moduleId={moduleId}
+                external={details.external_reference ?? null}
+                onChanged={() => load(true)}
+              />
+
               {/* MVP 9 Fase 9.3 — Avaliação Premium de readiness */}
               <ReadinessBlock
                 projectId={projectId}
@@ -314,6 +331,186 @@ function DownloadTemplateButton({
       {error && (
         <span className="text-[10px] text-red-300 max-w-[200px] text-right">{error}</span>
       )}
+    </div>
+  )
+}
+
+function ExternalReferenceBlock({
+  projectId, moduleId, external, onChanged,
+}: {
+  projectId: string
+  moduleId: string
+  external: ExternalReferencePayload | null
+  onChanged: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [urlInput, setUrlInput] = useState(external?.url || '')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const save = async (urlValue: string | null) => {
+    setBusy(true); setErr(null)
+    try {
+      await api.put(
+        `/projects/${projectId}/modules/${moduleId}/external-reference`,
+        { url: urlValue },
+      )
+      setEditing(false)
+      onChanged()
+    } catch (e: any) {
+      setErr(e?.response?.data?.detail || e?.message || 'Falha ao salvar URL.')
+    } finally { setBusy(false) }
+  }
+
+  const fetchNow = async () => {
+    setBusy(true); setErr(null)
+    try {
+      await api.post(`/projects/${projectId}/modules/${moduleId}/fetch-external`)
+      onChanged()
+    } catch (e: any) {
+      const det = e?.response?.data?.detail || e?.message
+      setErr(det || 'Falha no fetch.')
+    } finally { setBusy(false) }
+  }
+
+  // Sem URL declarada: oferece input
+  if (!external && !editing) {
+    return (
+      <div className="border border-slate-700 rounded-lg p-4 bg-slate-900/30">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div className="flex-1 min-w-[260px]">
+            <p className="text-sm font-medium text-slate-300 flex items-center gap-2">
+              <Globe className="w-4 h-4 text-slate-500" />
+              Documentação externa (opcional)
+            </p>
+            <p className="text-[11px] text-slate-500 mt-1">
+              Se este item se refere a uma API/serviço com doc pública (ex: DataJud, gov.br),
+              declare a URL aqui. O conteúdo enriquece o detalhamento via Ollama.
+              GCA <strong>não navega autonomamente</strong> — só URLs declaradas.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setUrlInput(''); setEditing(true) }}
+            className="text-xs px-3 py-1.5 rounded border border-slate-600 hover:border-slate-400 text-slate-300 hover:text-slate-100"
+          >
+            Declarar URL
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (editing) {
+    return (
+      <div className="border border-violet-500/40 rounded-lg p-4 bg-violet-950/10">
+        <p className="text-sm font-medium text-violet-200 flex items-center gap-2 mb-2">
+          <Globe className="w-4 h-4" />
+          URL da documentação externa
+        </p>
+        <input
+          type="url"
+          value={urlInput}
+          onChange={e => setUrlInput(e.target.value)}
+          placeholder="https://..."
+          className="w-full bg-slate-950 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-violet-500 focus:outline-none"
+        />
+        <div className="flex gap-2 mt-3 justify-end">
+          <button
+            type="button"
+            onClick={() => { setEditing(false); setErr(null); setUrlInput(external?.url || '') }}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded text-slate-400 hover:text-slate-200"
+          >
+            Cancelar
+          </button>
+          {external?.url && (
+            <button
+              type="button"
+              onClick={() => save(null)}
+              disabled={busy}
+              className="text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10"
+            >
+              Remover URL
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => save(urlInput.trim() || null)}
+            disabled={busy || !urlInput.trim()}
+            className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : 'Salvar URL'}
+          </button>
+        </div>
+        {err && <p className="text-[10px] text-red-300 mt-2">{err}</p>}
+      </div>
+    )
+  }
+
+  // Tem URL — mostra estado e oferece fetch/edit
+  const isError = !!external?.error
+  const isFetched = !!external?.fetched
+  return (
+    <div className={`border rounded-lg p-4 ${
+      isError ? 'border-red-500/40 bg-red-950/10' :
+      isFetched ? 'border-emerald-500/30 bg-emerald-950/10' :
+      'border-slate-700 bg-slate-900/30'
+    }`}>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex-1 min-w-[260px]">
+          <p className="text-sm font-medium flex items-center gap-2 text-slate-200">
+            <Globe className="w-4 h-4" />
+            Documentação externa
+          </p>
+          <a
+            href={external?.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-[11px] text-violet-300 hover:text-violet-200 inline-flex items-center gap-1 mt-1 break-all"
+          >
+            {external?.url}
+            <ExternalLink className="w-3 h-3 flex-shrink-0" />
+          </a>
+          {isFetched && external?.chars && (
+            <p className="text-[10px] text-emerald-300 mt-1">
+              ✓ {external.chars.toLocaleString('pt-BR')} chars extraídos
+              {external.fetched_at && ` · ${new Date(external.fetched_at).toLocaleString('pt-BR')}`}
+              {' · '}injetados no detalhamento
+            </p>
+          )}
+          {isError && (
+            <p className="text-[10px] text-red-300 mt-1">
+              ⚠ {external.error}
+            </p>
+          )}
+          {!isFetched && !isError && (
+            <p className="text-[10px] text-slate-500 mt-1">
+              URL declarada mas não baixada ainda. Clique "Fetch agora" pra puxar e enriquecer detalhamento.
+            </p>
+          )}
+        </div>
+        <div className="flex gap-1.5 flex-col">
+          <button
+            type="button"
+            onClick={fetchNow}
+            disabled={busy}
+            className="text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white disabled:opacity-50 flex items-center gap-1"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
+            {isFetched ? 'Re-baixar' : 'Fetch agora'}
+          </button>
+          <button
+            type="button"
+            onClick={() => { setUrlInput(external?.url || ''); setEditing(true) }}
+            disabled={busy}
+            className="text-xs px-2 py-1 rounded text-slate-400 hover:text-slate-200"
+          >
+            Editar
+          </button>
+        </div>
+      </div>
+      {err && <p className="text-[10px] text-red-300 mt-2">{err}</p>}
     </div>
   )
 }

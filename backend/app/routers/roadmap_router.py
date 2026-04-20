@@ -76,6 +76,93 @@ async def get_module_details(
     return details
 
 
+@router.put("/projects/{project_id}/modules/{module_id}/external-reference")
+async def set_external_reference(
+    project_id: UUID,
+    module_id: UUID,
+    payload: dict,
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.2.ext — Define URL de doc externa do item.
+
+    Body: `{"url": "https://..."}` ou `{"url": null}` pra remover.
+    Não dispara fetch — só persiste. Use o endpoint `fetch-external`
+    pra forçar download. Sem URL, GCA não navega autonomamente.
+    """
+    from app.models.base import ModuleCandidate as _MC
+    from app.services.web_fetch_service import WebFetchError, validate_url
+
+    mc = await db.get(_MC, module_id)
+    if not mc or mc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Módulo não encontrado")
+
+    url_raw = payload.get("url") if isinstance(payload, dict) else None
+    if url_raw is None or url_raw == "":
+        mc.external_reference = None
+        mc.external_reference_content = None
+        mc.external_reference_fetched_at = None
+        mc.external_reference_fetch_error = None
+        await db.commit()
+        return {"external_reference": None, "removed": True}
+
+    try:
+        canonical = validate_url(url_raw)
+    except WebFetchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    mc.external_reference = canonical
+    # Reseta cache — próximo fetch refaz
+    mc.external_reference_content = None
+    mc.external_reference_fetched_at = None
+    mc.external_reference_fetch_error = None
+    await db.commit()
+    return {"external_reference": canonical, "fetched": False}
+
+
+@router.post("/projects/{project_id}/modules/{module_id}/fetch-external")
+async def fetch_external_reference(
+    project_id: UUID,
+    module_id: UUID,
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.2.ext — Faz fetch da URL declarada e persiste o
+    conteúdo extraído. Se URL não está declarada, retorna 400.
+    """
+    from datetime import datetime, timezone as _tz
+    from app.models.base import ModuleCandidate as _MC
+    from app.services.web_fetch_service import WebFetchError, fetch_and_extract
+
+    mc = await db.get(_MC, module_id)
+    if not mc or mc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Módulo não encontrado")
+    if not mc.external_reference:
+        raise HTTPException(
+            status_code=400,
+            detail="Item não tem external_reference declarada. Defina via PUT antes.",
+        )
+
+    try:
+        text, meta = await fetch_and_extract(mc.external_reference)
+    except WebFetchError as exc:
+        mc.external_reference_fetch_error = str(exc)
+        mc.external_reference_fetched_at = datetime.now(_tz.utc)
+        await db.commit()
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    mc.external_reference_content = text
+    mc.external_reference_fetched_at = datetime.now(_tz.utc)
+    mc.external_reference_fetch_error = None
+    await db.commit()
+    return {
+        "external_reference": mc.external_reference,
+        "fetched_at": mc.external_reference_fetched_at.isoformat(),
+        "chars": len(text),
+        "meta": meta,
+    }
+
+
 @router.get("/projects/{project_id}/roadmap/deploy-plan")
 async def get_deploy_plan(
     project_id: UUID,
