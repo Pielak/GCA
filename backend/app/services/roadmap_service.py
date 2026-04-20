@@ -63,6 +63,8 @@ class RoadmapService:
 
                 # MVP 9 Fase 9.1 — expõe categoria canônica + descrição
                 # pra UI agrupar/filtrar por camada (feature/backend/infra/etc).
+                # MVP 9 Fase 9.3 — readiness_status pra UI mostrar chip
+                # "pronto pra CodeGen" vs "needs_input" vs "partial".
                 module_info = {
                     "id": str(c.id),
                     "name": c.name,
@@ -70,6 +72,7 @@ class RoadmapService:
                     "description": c.description or "",
                     "module_type": c.module_type or "feature",
                     "priority": c.priority or "medium",
+                    "readiness_status": c.readiness_status,
                     "created_at": c.created_at.isoformat() if c.created_at else None,
                 }
 

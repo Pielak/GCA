@@ -38,6 +38,8 @@ const CATEGORY_ORDER: ModuleCategory[] = [
   'backend_service', 'feature', 'deploy_pipeline',
 ]
 
+type ReadinessStatus = 'ready_for_codegen' | 'partial' | 'needs_input' | 'unknown'
+
 interface RoadmapModule {
   id?: string
   name: string
@@ -45,7 +47,23 @@ interface RoadmapModule {
   module_type?: ModuleCategory | string
   description?: string
   priority?: string
+  // MVP 9 Fase 9.3 — avaliação Premium do estado pra CodeGen
+  readiness_status?: ReadinessStatus | string | null
   created_at: string | null
+}
+
+const READINESS_STYLE: Record<string, string> = {
+  ready_for_codegen: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+  partial: 'bg-amber-500/15 text-amber-300 border-amber-500/40',
+  needs_input: 'bg-red-500/15 text-red-300 border-red-500/40',
+  unknown: 'bg-slate-700/40 text-slate-400 border-slate-600',
+}
+
+const READINESS_LABEL: Record<string, string> = {
+  ready_for_codegen: '✓ Pronto pra CodeGen',
+  partial: '◐ Parcial',
+  needs_input: '⚠ Precisa input',
+  unknown: '? Não avaliado',
 }
 
 interface RoadmapPhase {
@@ -289,6 +307,11 @@ export function RoadmapPage() {
                                 {knownCat && (
                                   <span className={`ml-1 px-1 rounded border text-[10px] ${CATEGORY_STYLE[cat]}`}>
                                     {CATEGORY_LABEL[cat]}
+                                  </span>
+                                )}
+                                {mod.readiness_status && READINESS_LABEL[mod.readiness_status] && (
+                                  <span className={`ml-1 px-1 rounded border text-[10px] ${READINESS_STYLE[mod.readiness_status] || READINESS_STYLE.unknown}`}>
+                                    {READINESS_LABEL[mod.readiness_status]}
                                   </span>
                                 )}
                                 <span className="opacity-60">({moduleStatusLabel(mod.status)})</span>

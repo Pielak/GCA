@@ -1075,6 +1075,16 @@ class ModuleCandidate(Base):
     details_generated_at = Column(DateTime(timezone=True), nullable=True)
     details_provider = Column(String(50), nullable=True)
     details_model = Column(String(100), nullable=True)
+    # MVP 9 Fase 9.3 — orquestração premium (migration 030).
+    # readiness_status: ready_for_codegen | partial | needs_input | unknown
+    # readiness_gaps: JSON list de strings curtas
+    # dependencies_inferred: JSON list de UUIDs/names de módulos pré-requisito
+    readiness_status = Column(String(30), nullable=True)
+    readiness_gaps = Column(Text, nullable=True)
+    readiness_evaluated_at = Column(DateTime(timezone=True), nullable=True)
+    readiness_provider = Column(String(50), nullable=True)
+    readiness_model = Column(String(100), nullable=True)
+    dependencies_inferred = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 

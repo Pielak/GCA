@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download } from 'lucide-react'
+import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download, Sparkles } from 'lucide-react'
 import api, { apiClient } from '@/lib/api'
 
 /**
@@ -24,16 +24,33 @@ interface SuggestedSection {
   fields: SuggestedField[]
 }
 
+interface ReadinessPayload {
+  status: 'ready_for_codegen' | 'partial' | 'needs_input' | 'unknown'
+  gaps: string[]
+  dependencies_inferred: string[]
+  evaluated_at: string | null
+  provider: string | null
+  model: string | null
+}
+
 interface ModuleDetails {
   what_it_is: string
   prerequisites: string[]
   missing_inputs: string[]
   input_examples: string[]
   suggested_template_sections: SuggestedSection[]
+  readiness?: ReadinessPayload | null
   _cached: boolean
   _generated_at: string | null
   _provider: string | null
   _model: string | null
+}
+
+const READINESS_BADGE: Record<string, { label: string; cls: string }> = {
+  ready_for_codegen: { label: '✓ Pronto pra CodeGen', cls: 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300' },
+  partial: { label: '◐ Parcial — pode iniciar com ressalvas', cls: 'bg-amber-500/15 border-amber-500/40 text-amber-300' },
+  needs_input: { label: '⚠ Precisa de input crítico', cls: 'bg-red-500/15 border-red-500/40 text-red-300' },
+  unknown: { label: '? Sem contexto suficiente', cls: 'bg-slate-700/40 border-slate-600 text-slate-400' },
 }
 
 interface Props {
@@ -214,6 +231,14 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
                 </Section>
               )}
 
+              {/* MVP 9 Fase 9.3 — Avaliação Premium de readiness */}
+              <ReadinessBlock
+                projectId={projectId}
+                moduleId={moduleId}
+                readiness={details.readiness ?? null}
+                onChanged={() => load(false)}
+              />
+
               {/* MVP 9 Fase 9.5.1 — Download do template PDF AcroForm */}
               <div className="border border-violet-500/30 rounded-lg p-4 bg-violet-950/10">
                 <div className="flex items-start justify-between gap-3 flex-wrap">
@@ -289,6 +314,120 @@ function DownloadTemplateButton({
       {error && (
         <span className="text-[10px] text-red-300 max-w-[200px] text-right">{error}</span>
       )}
+    </div>
+  )
+}
+
+function ReadinessBlock({
+  projectId, moduleId, readiness, onChanged,
+}: {
+  projectId: string
+  moduleId: string
+  readiness: ReadinessPayload | null
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+
+  const evaluate = async () => {
+    setBusy(true); setErr(null)
+    try {
+      await api.post(`/projects/${projectId}/modules/${moduleId}/evaluate-readiness`)
+      onChanged()
+    } catch (e: any) {
+      const status = e?.response?.status || e?.status
+      if (status === 503) {
+        setErr('Provider Premium não configurado. Configure Anthropic ou OpenAI em Settings → IA.')
+      } else if (status === 403) {
+        setErr('Sem permissão. GP do projeto precisa disparar.')
+      } else {
+        setErr(e?.message || 'Falha na avaliação.')
+      }
+    } finally { setBusy(false) }
+  }
+
+  if (!readiness) {
+    return (
+      <div className="border border-slate-700 rounded-lg p-4 bg-slate-900/40">
+        <div className="flex items-start justify-between gap-3 flex-wrap">
+          <div>
+            <p className="text-sm font-medium text-slate-200 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-violet-300" />
+              Avaliação Premium pendente
+            </p>
+            <p className="text-[11px] text-slate-400 mt-1">
+              Provider Premium ainda não avaliou se este item tem informação
+              suficiente pra CodeGen. Roda automaticamente após item virar
+              "Adicionado", ou clique pra forçar.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={evaluate}
+            disabled={busy}
+            className="flex items-center gap-2 text-xs px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white font-medium disabled:opacity-50"
+          >
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            {busy ? 'Avaliando…' : 'Avaliar agora'}
+          </button>
+        </div>
+        {err && <p className="text-[10px] text-red-300 mt-2">{err}</p>}
+      </div>
+    )
+  }
+
+  const badge = READINESS_BADGE[readiness.status] || READINESS_BADGE.unknown
+  return (
+    <div className={`border rounded-lg p-4 ${badge.cls}`}>
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <p className="text-sm font-semibold flex items-center gap-2">
+            <Sparkles className="w-4 h-4" />
+            {badge.label}
+          </p>
+          <p className="text-[10px] opacity-70 mt-1">
+            avaliado por {readiness.provider}{readiness.model ? ` (${readiness.model})` : ''}
+            {readiness.evaluated_at ? ` · ${new Date(readiness.evaluated_at).toLocaleString('pt-BR')}` : ''}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={evaluate}
+          disabled={busy}
+          className="text-[11px] px-2 py-1 rounded border border-current opacity-70 hover:opacity-100 disabled:opacity-30"
+          title="Re-avaliar (custa nova chamada Premium)"
+        >
+          {busy ? '…' : 'Re-avaliar'}
+        </button>
+      </div>
+
+      {readiness.gaps.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-wide opacity-70 mb-1">
+            Gaps específicos identificados
+          </div>
+          <ul className="text-xs space-y-0.5 list-disc list-inside opacity-90">
+            {readiness.gaps.map((g, i) => <li key={i}>{g}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {readiness.dependencies_inferred.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-wide opacity-70 mb-1">
+            Dependências inferidas (outros módulos)
+          </div>
+          <div className="flex flex-wrap gap-1">
+            {readiness.dependencies_inferred.map((d, i) => (
+              <span key={i} className="text-[11px] px-2 py-0.5 rounded bg-black/20 border border-current">
+                {d}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {err && <p className="text-[10px] text-red-300 mt-2">{err}</p>}
     </div>
   )
 }

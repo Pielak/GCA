@@ -120,6 +120,8 @@ async def get_or_generate_details(
             )
             cached["_provider"] = module.details_provider
             cached["_model"] = module.details_model
+            # MVP 9 Fase 9.3 — anexa readiness se já avaliado
+            cached["readiness"] = _build_readiness_payload(module)
             return cached
         except (ValueError, TypeError):
             logger.warning("module_details.cache_corrupted", module_id=str(module_id))
@@ -154,7 +156,32 @@ async def get_or_generate_details(
     parsed["_generated_at"] = module.details_generated_at.isoformat()
     parsed["_provider"] = "ollama"
     parsed["_model"] = config["model"]
+    # MVP 9 Fase 9.3 — anexa readiness se disponível
+    parsed["readiness"] = _build_readiness_payload(module)
     return parsed
+
+
+def _build_readiness_payload(module) -> dict[str, Any] | None:
+    """Empacota readiness_* fields do módulo num dict pra resposta API.
+    Retorna None se nunca foi avaliado (Fase 9.3 ainda não rodou)."""
+    if not module.readiness_status:
+        return None
+    try:
+        gaps = json.loads(module.readiness_gaps) if module.readiness_gaps else []
+    except (ValueError, TypeError):
+        gaps = []
+    try:
+        deps = json.loads(module.dependencies_inferred) if module.dependencies_inferred else []
+    except (ValueError, TypeError):
+        deps = []
+    return {
+        "status": module.readiness_status,
+        "gaps": gaps,
+        "dependencies_inferred": deps,
+        "evaluated_at": module.readiness_evaluated_at.isoformat() if module.readiness_evaluated_at else None,
+        "provider": module.readiness_provider,
+        "model": module.readiness_model,
+    }
 
 
 async def _load_latest_ocg(db: AsyncSession, project_id: UUID) -> dict[str, Any] | None:

@@ -76,6 +76,46 @@ async def get_module_details(
     return details
 
 
+@router.post("/projects/{project_id}/modules/{module_id}/evaluate-readiness")
+async def evaluate_module_readiness_endpoint(
+    project_id: UUID,
+    module_id: UUID,
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.3 — Disparo manual da orquestração Premium.
+
+    Avalia readiness_status do módulo (ready_for_codegen / partial /
+    needs_input / unknown), gaps específicos e dependências inferidas.
+    Persiste em `module_candidates`.
+
+    Roda automaticamente após item virar `adicionado` (Fase 9.5.2);
+    este endpoint serve pra GP forçar re-avaliação após enriquecer
+    o OCG ou o detalhamento do item.
+
+    503 se nenhum provider Premium configurado.
+    """
+    from app.services.module_orchestration_service import evaluate_module_readiness
+
+    try:
+        result = await evaluate_module_readiness(db, project_id, module_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        logger.warning(
+            "evaluate_readiness.unexpected_error",
+            project_id=str(project_id), module_id=str(module_id),
+            error_type=type(exc).__name__, error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(status_code=500, detail=f"Erro: {exc!r}")
+
+    return result
+
+
 @router.get("/projects/{project_id}/modules/eligible-for-link")
 async def list_modules_eligible_for_link(
     project_id: UUID,

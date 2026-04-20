@@ -664,14 +664,53 @@ class IngestionService:
         está vinculado a um item do Roadmap (target_module_id), transita o
         item pra `adicionado` E cria row em `project_deliverables`.
 
+        MVP 9 Fase 9.3 (extension): após transição, dispara orquestração
+        Premium pra avaliar readiness_status. Falha silenciosa se Premium
+        não configurado (não invalida fluxo principal).
+
         Wrapper com session fresca (isola do estado da session do
         _analyze_async). A lógica core está em
         `_link_target_module_in_session` pra ser testável.
         """
         from app.db.database import AsyncSessionLocal as _ASL
         async with _ASL() as _db:
-            await cls._link_target_module_in_session(_db, document_id, project_id)
+            target_module_id = await cls._link_target_module_in_session(
+                _db, document_id, project_id,
+            )
             await _db.commit()
+
+        # MVP 9 Fase 9.3 — avalia readiness em sessão própria pra
+        # evitar dependência da session que acabou de commitar.
+        if target_module_id:
+            await cls._evaluate_readiness_safe(project_id, target_module_id)
+
+    @classmethod
+    async def _evaluate_readiness_safe(
+        cls, project_id: UUID, module_id: UUID,
+    ) -> None:
+        """Wrapper que invoca orquestração Premium e captura falhas
+        operacionais (sem Premium configurado, timeout, etc) sem
+        derrubar o fluxo. Erros viram log warning."""
+        from app.db.database import AsyncSessionLocal as _ASL
+        from app.services.module_orchestration_service import evaluate_module_readiness
+        try:
+            async with _ASL() as _db:
+                await evaluate_module_readiness(_db, project_id, module_id)
+                logger.info(
+                    "ingestion.readiness_evaluated",
+                    module_id=str(module_id), project_id=str(project_id),
+                )
+        except RuntimeError as exc:
+            # Sem Premium configurado — esperado em projetos só com Ollama
+            logger.info(
+                "ingestion.readiness_skipped_no_premium",
+                module_id=str(module_id), reason=str(exc),
+            )
+        except Exception as exc:
+            logger.warning(
+                "ingestion.readiness_eval_failed",
+                module_id=str(module_id), error=str(exc),
+            )
 
     @classmethod
     async def _link_target_module_in_session(
@@ -679,8 +718,13 @@ class IngestionService:
         db,
         document_id: UUID,
         project_id: UUID,
-    ) -> None:
+    ) -> UUID | None:
         """Lógica core da Fase 9.5.2 testável com session arbitrária.
+
+        Retorna o `module_id` vinculado quando aplicou transição/criou
+        deliverable, ou `None` quando doc não tinha vínculo. Caller
+        usa o retorno pra disparar hooks subsequentes (Fase 9.3
+        readiness eval).
 
         Idempotente: chamadas duplicadas no mesmo (doc, módulo) não
         duplicam deliverable nem mudam status repetido. Não comita —
@@ -698,7 +742,7 @@ class IngestionService:
 
         doc = await db.get(_Doc, document_id)
         if not doc or not doc.target_module_id:
-            return  # Doc sem vínculo — nada a fazer
+            return None  # Doc sem vínculo — nada a fazer
 
         mc = await db.get(_MC, doc.target_module_id)
         if not mc or mc.project_id != project_id:
@@ -707,7 +751,7 @@ class IngestionService:
                 document_id=str(document_id),
                 target_module_id=str(doc.target_module_id),
             )
-            return
+            return None
 
         # Transição: status atual → 'adicionado' (se permitido)
         target_status = "adicionado"
@@ -757,6 +801,8 @@ class IngestionService:
                 "ingestion.deliverable_already_exists",
                 module_id=str(mc.id), normalized_name=normalized,
             )
+
+        return mc.id
 
     @classmethod
     async def _update_stage_fresh(
