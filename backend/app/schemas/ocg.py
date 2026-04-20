@@ -228,6 +228,10 @@ class OCGResponse(BaseModel):
     ARCHITECTURE_OVERVIEW: Any = {}
     RISK_ANALYSIS: Any = {}
     APPROVAL_STATUS: Any = {}
+    # DT-076 Fase 1 — modelo de dados derivado do stack + profile.
+    # Inferência determinística via data_model_inference.infer_data_model.
+    # Alimenta ddl_generator_service (Fase 2) e scaffolders (Fase 3).
+    DATA_MODEL: Any = {}
 
     class Config:
         from_attributes = True

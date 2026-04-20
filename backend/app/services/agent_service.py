@@ -736,6 +736,40 @@ Return complete JSON analysis with score, classification, findings, and recommen
                 APPROVAL_STATUS=ocg_json.get("APPROVAL_STATUS") or ocg_json.get("approval_status") or {"status": "NEEDS_REVIEW" if any_blocking else "APPROVED", "overall_score": overall_score},
             )
 
+            # DT-076 Fase 1 — inferir DATA_MODEL determinístico a partir do
+            # profile + stack. Preserva o que vier do agente se explícito.
+            try:
+                from app.services.data_model_inference import infer_data_model
+                existing_dm = ocg_json.get("DATA_MODEL") or ocg_json.get("data_model")
+                if existing_dm:
+                    ocg_response.DATA_MODEL = existing_dm
+                else:
+                    profile_for_dm = ocg_response.PROJECT_PROFILE or req.project_metadata or {}
+                    stack_for_dm = ocg_response.STACK_RECOMMENDATION or {}
+                    sec_controls = (
+                        (profile_for_dm.get("security_controls") if isinstance(profile_for_dm, dict) else None)
+                        or (req.project_metadata or {}).get("security_controls")
+                        or []
+                    )
+                    ocg_response.DATA_MODEL = infer_data_model(
+                        project_profile=profile_for_dm,
+                        stack_recommendation=stack_for_dm,
+                        security_controls=sec_controls,
+                    )
+            except Exception as _dm_exc:
+                logger.warning(
+                    "ocg.data_model_inference_failed",
+                    error=str(_dm_exc),
+                )
+                ocg_response.DATA_MODEL = {
+                    "engine": None,
+                    "tables": [],
+                    "foreign_keys": [],
+                    "seed_data": [],
+                    "warnings": [f"Falha na inferência: {_dm_exc}"],
+                    "inference_rationale": [],
+                }
+
             # Salvar no banco
             await self.save_ocg(ocg_response)
 
