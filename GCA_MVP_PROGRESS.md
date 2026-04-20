@@ -1,17 +1,45 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.24  
+Versão: 3.25  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 FECHADO 2026-04-20 com 8/10 fases entregues + 2 diferidas**. Fases entregues: 12.1 rate limit `/public/project-requests`, 12.2 timezone configurável BackupScheduler, 12.3 consolidar `accepted_at`/`joined_at` (bug silencioso corrigido), 12.4 deprecar `initial_password_hash`, 12.5 410 Gone em fluxo legado + TODOs SMTP, 12.6 canário e2e idempotente + gate real, 12.7 type safety frontend (237→91 `any`, −61,6%), 12.9 builder canônico de prompt CodeGen. **Diferidas pela regra dura de parada §7 MVP 12**: 12.8 Celery/Redis fila persistente (diagnóstico estrutural, 3-4 dias), 12.10 cobertura completa audit_log_global. Re-escopadas para MVP 13 — Robustez estrutural (não autorizado ainda).
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 aberto 2026-04-20 pelo protocolo §7.0** (autorização do stakeholder-soberano) com 7 fases em 2 temas: **Tema A (fila persistente Celery/Redis)** 13.1 setup + infra, 13.2 lifespan + worker lifecycle, 13.3 refactor pipeline Arguider/OCG Updater/auto-CodeGen, 13.4 testes + monitoring + retry policy. **Tema B (cobertura completa de `audit_log_global`)** 13.5 inventário + helpers de log canônico, 13.6 instrumentação projeto + questionário, 13.7 instrumentação OCG + CodeGen + chain integrity e2e. **Estado inicial: definido — não iniciado.** Baseline de entrada: **1404 passing, 4 skipped** pós-MVP 12.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** — **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano. Escopo consolidado: 6 DTs de auditoria 2026-04-20 + 4 dívidas estruturais mais antigas (type safety frontend, fila persistente diferida, helper prompt CodeGen duplicado, cobertura incompleta de hash chain) que seguiam como backlog indefinido.
+**MVP 13 — Robustez estrutural: fila persistente + cobertura completa de auditoria** — **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano. Absorve as 2 fases diferidas do MVP 12 (12.8 Celery e 12.10 audit coverage) em ciclo canônico dedicado a robustez (não saneamento).
 
-**Objetivo:** fechar em ordem A→B→C→D→E→F→G —
+**Objetivo:** fechar em ordem Tema A (13.1→13.4) depois Tema B (13.5→13.7); Tema B pode rodar em paralelo ao A após 13.5 produzir inventário. Cada fase commitável independentemente com gate §9 atendido.
+
+**Tema A — Fila persistente Celery/Redis (4 fases):**
+- **Fase 13.1** Setup Celery + infra (dependência, `celery_app.py`, serviço `gca-celery-worker` no docker-compose, healthcheck via `inspect ping`, smoke de task trivial).
+- **Fase 13.2** Lifespan + worker lifecycle (integrar no `main.py`; health check expandido no `/health`; worker como processo separado).
+- **Fase 13.3** Refactor pipeline Arguider + OCG Updater + auto-CodeGen (migrar os 8 `asyncio.create_task` mapeados). **Ponto de maior risco** — tem autorização de sub-divisão (13.3a/b/c) se diagnóstico revelar mais entrelaçamento que o esperado.
+- **Fase 13.4** Testes (`CELERY_TASK_ALWAYS_EAGER`) + monitoring + retry policy (max_retries=3, DLQ `celery_dlq`, logs estruturados).
+
+**Tema B — Cobertura completa de `audit_log_global` (3 fases):**
+- **Fase 13.5** Inventário + helpers canônicos por domínio (`log_project_event`, `log_questionnaire_event`, `log_codegen_event`). Resultado publicado no §3 como lista binária "tem audit / falta audit".
+- **Fase 13.6** Instrumentação projeto (aprovação/rejeição, status transitions) + questionário (submit + aprovação).
+- **Fase 13.7** Instrumentação OCG (update_from_arguider, rollback, consolidate) + CodeGen (scaffold, apply, regenerate-file) + teste E2E de chain integrity (`verify_chain()` íntegra após série de ações).
+
+**Regras duras (do contrato §7 MVP 13):**
+- Fase 13.3 pode ser sub-dividida (13.3a Arguider / 13.3b OCG / 13.3c CodeGen) se o diagnóstico revelar entrelaçamento maior que o mapeado em 12.8.
+- Infraestrutura (13.1+13.2) é pré-requisito de 13.3/13.4 — ordem obrigatória no Tema A.
+- Performance durante refactor Celery não pode degradar ≥20% vs asyncio baseline (medir antes/depois).
+- Retry infinito proibido; DLQ obrigatória; max_retries bounded.
+- Nenhuma expansão de RBAC ou papel canônico (§4).
+- `audit_log_global` mantém hash chain SHA-256 atual; Merkle/blockchain fora.
+
+**Baseline de entrada:** suíte **1404 passing, 4 skipped** pós-MVP 12 contra `gca_test` isolado. Redis já healthy no docker-compose. Frontend build íntegro. Fase 11.4 já estabeleceu padrão canônico de `log_role_event` que 13.5 replicará por domínio.
+
+---
+
+### MVP anterior
+**MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** — **FECHADO 2026-04-20 com 8/10 fases entregues + 2 diferidas (12.8 e 12.10 → MVP 13)**.
+
+**Objetivo do MVP 12 (contrato §7) — FECHADO:** resolver em ordem A→B→C→D→E→F→G —
 1. **Tema A — Segurança de fronteira:** ✅ Fase 12.1 rate limit em `POST /public/project-requests` (slowapi + env `PUBLIC_RATE_LIMIT`; 3 testes).
 2. **Tema B — Configurabilidade operacional:** ✅ Fase 12.2 timezone configurável em BackupScheduler (env `BACKUP_TIMEZONE`; fallback em valor inválido; 10 testes).
 3. **Tema C — Higiene de schema + cleanup:** ✅ Fase 12.3 consolidar `accepted_at`/`joined_at` (fix + helpers + docstring; 11 testes); 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
@@ -172,7 +200,7 @@ Mesmo dos MVPs anteriores:
 ## 2. Escopo ativo
 
 ### MVP em execução
-**Nenhum.** MVP 12 fechado em 2026-04-20 com 8/10 fases entregues + 2 diferidas para MVP 13 pela regra dura de parada §7 MVP 12.
+**MVP 13 — Robustez estrutural: fila persistente + cobertura completa de auditoria**, no estado **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Escopo travado no contrato §7 MVP 13 com 7 fases em 2 temas: A fila persistente Celery/Redis (13.1-13.4), B cobertura completa de audit_log_global (13.5-13.7). Commit que abre MVP 13 é documental (§7 contrato + §1/§2/§6/§9/§10 progresso). Implementação por fase exige autorização explícita adicional (§7.0 regra 3).
 
 ### Baseline ao fechamento do MVP 10 + DT-076 (2026-04-20)
 Suíte baseline: **1266/1266 passing** contra `gca_test` isolado (+104
@@ -489,28 +517,37 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (pós-MVP 12)
-**ABERTO — MVP 12 fechado com 8/10 fases entregues + 2 diferidas.**
+### Situação atual do gate (MVP 13 — abertura)
+**ABERTO PARA AVALIAÇÃO — MVP 13 definido, não iniciado.**
 
-Os MVPs 1-12 foram fechados com gate §9 atendido. Baseline de suíte
-pós-MVP 12: suíte específica de MVP 12 totaliza 44+ testes passing
-(3+10+11+3+2+3+13 Fases 12.1→12.7+12.9); zero regressão nas suites
-pré-existentes. Frontend build íntegro. Lane e2e CI agora é gate real.
+Os MVPs 1-12 foram fechados com gate §9 atendido em cada transição.
+Baseline de suíte pós-MVP 12: **1404 passed, 4 skipped** em 277s
+contra `gca_test` isolado. Frontend build íntegro. Lane e2e CI é
+gate real (continue-on-error removido na Fase 12.6).
 
-Fases diferidas para **MVP 13 — Robustez estrutural** (não autorizado):
-- **12.8** Celery/Redis fila persistente — diagnóstico revelou 3-4
-  dias, 5 frentes (setup Celery, lifespan, refactor pipeline, migração
-  testes, monitoring). Watchdog DT-073 cobre sintoma operacional.
-- **12.10** Cobertura completa audit_log_global — ~20+ endpoints a
-  instrumentar. Cobertura parcial da Fase 11.4 (role events) segue
-  operando.
+MVP 13 nasce com gate §9 **aberto** (critério binário 1-9 todos SIM
+neste instante): nenhum blocker/critical/contradição herdado do
+MVP 12; suíte verde; build verde. As 2 dívidas absorvidas (12.8 e
+12.10) têm diagnóstico inicial feito e escopo canônico travado nas
+7 fases do MVP 13. Gate vira "fechado" durante execução de cada
+fase e volta a "aberto" quando todos critérios §9 voltarem a SIM.
 
-Operacional:
-- Lane e2e do CI saiu de `continue-on-error: true` (Fase 12.6).
-- `TEST_DATABASE_URL` explícito apontando para `gca-postgres` quando
-  pytest roda dentro do container (armadilha de `localhost`; ver §7).
-- `slowapi` adicionado como dependência runtime; `docker compose
-  build --no-cache backend` instala via pyproject.toml/requirements.
+Pré-requisitos operacionais:
+- Redis já healthy no `docker-compose.yml` (inaugurado no MVP 8 como
+  worker de Ollama cache; agora será usado como broker Celery).
+- Fase 11.4 já estabeleceu padrão canônico de audit via
+  `AuditService.log_role_event` (7 pontos instrumentados); Fase 13.5
+  replica esse padrão por domínio.
+- Watchdog DT-073 continua operando em paralelo à migração Celery —
+  só desligar quando 13.3 provar cobertura completa.
+- Fase 13.3 tem autorização de sub-divisão (13.3a/b/c) se diagnóstico
+  mostrar entrelaçamento maior que o esperado.
+
+Operacional residual do MVP 12 preservado:
+- Lane e2e CI como gate real (sem continue-on-error).
+- `slowapi` runtime via pyproject.toml.
+- `BACKUP_TIMEZONE` env var opcional.
+- `TEST_DATABASE_URL` explícito dentro do container.
 
 ### Motivo do último gate avaliado (MVP 4, preservado para rastreabilidade)
 Base do MVP 4 instalada e testes verde:
@@ -769,6 +806,7 @@ Antes de qualquer mudança:
 | 2026-04-20 | Abertura de **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 11` (nova subseção numerada com em escopo e fora de escopo obrigatórios — 7 fases) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.7, §1 MVP ativo = MVP 11 definido/não-iniciado, §2 escopo ativo, §6 gate aberto para avaliação, §10 próximo marco). Tema 1 (simetria §4.1 Admin↔Admin ↔ GP↔GP): 11.1 GP convida outro GP compartimentalizado; 11.2 GP transferir soberania do projeto; 11.3 guard reforçado último Admin; 11.4 auditoria de role events em `audit_log_global`. Tema 2 (higiene operacional residual): 11.5 DT-041 image drift; 11.6 DT-076 V2 multi-DB; 11.7 Playwright GUI E2E. Estado inicial "definido — não iniciado"; implementação por fase exige autorização explícita adicional (§7.0 regra 3). | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 11), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Capturar em ciclo canônico a dívida estrutural identificada em 2026-04-20 (GP não convida GP apesar de §4.1 emendado 2026-04-19) e as três dívidas operacionais residuais (DT-041/DT-076 V2/Playwright) que seguiam sem marco claro de liquidação. Protocolo §7.0 evita implementação silenciosa. Sem mudança de código. |
 | 2026-04-20 | Abertura de **MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 12` (nova subseção com 10 fases distribuídas em 7 temas A-G) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.15, §1 MVP ativo = MVP 12 definido/não-iniciado, §2 escopo, §6 gate aberto para avaliação, §10 próximo marco). Tema A segurança: 12.1 rate limit `/public/request-project`. Tema B config: 12.2 timezone configurável BackupScheduler. Tema C higiene schema: 12.3 consolidar `accepted_at`/`joined_at`, 12.4 deprecar `ProjectRequest.initial_password_hash`, 12.5 limpar TODOs SMTP deprecados. Tema D CI: 12.6 canário e2e + remover `continue-on-error`. Tema E type safety: 12.7 remover `any` do frontend. Tema F robustez: 12.8 fila persistente Celery, 12.9 consolidar helper prompt CodeGen. Tema G observabilidade: 12.10 cobertura completa de `audit_log_global`. Estado inicial "definido — não iniciado"; fases 12.8 e 12.10 têm regra dura de parada se escopo diagnóstico exceder. Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 12), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Capturar em ciclo canônico as 6 DTs identificadas em auditoria pós-MVP 11 + 4 dívidas estruturais que seguiam como backlog indefinido (type safety, fila persistente diferida, helper prompt duplicado, hash chain incompleto). Stakeholder autorizou incluir todas em um único MVP de saneamento para fechar ciclo. Protocolo §7.0 evita implementação silenciosa. Sem mudança de código. |
 | 2026-04-20 | Fechamento de **MVP 12** com 8/10 fases entregues + 2 diferidas pela regra dura §7 MVP 12. Fases entregues em commits atômicos por fase (7eedb8f/780395a/1f4e740/b70ee16/6c40d7b/fe69964/d45e241/0f2dc62). Fases 12.8 (Celery) e 12.10 (cobertura audit) diferidas após diagnóstico inicial revelar escopo estrutural (3-4 dias cada, ≥5 frentes de trabalho). Re-escopadas para MVP 13 — Robustez estrutural (não autorizado ainda). Watchdog DT-073 cobre sintoma operacional de asyncio; Fase 11.4 cobre role events em audit_log_global. | `GCA_CANONICAL_CONTRACT.md §7 MVP 12` (emenda marcando 12.8 e 12.10 como diferidas), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Respeitar regra dura de parada do contrato: fase estrutural não é empurrada silenciosamente; é formalizada como DT e re-escopada para MVP futuro. Preserva rastreabilidade + evita "déficit técnico escondido dentro de MVP". |
+| 2026-04-20 | Abertura de **MVP 13 — Robustez estrutural: fila persistente + cobertura completa de auditoria** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 13` (nova subseção com 7 fases em 2 temas: A fila Celery/Redis 13.1-13.4, B audit coverage 13.5-13.7) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.25, §1 MVP ativo = MVP 13 definido/não-iniciado, §2 escopo, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = autorização fase 1). Fase 13.3 tem autorização de sub-divisão (13.3a/b/c) se diagnóstico pré-implementação revelar entrelaçamento maior que o mapeado em 12.8. Estado inicial "definido — não iniciado"; implementação por fase exige autorização explícita adicional (§7.0 regra 3). Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 13), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Formalizar em ciclo canônico as 2 fases diferidas do MVP 12 (12.8 Celery e 12.10 audit coverage) que têm caráter estrutural (não saneamento). Absorver diagnóstico já feito no diferimento e estruturar em 7 fases independentes + comitáveis. Evitar que dívida estrutural fique sem marco canônico. Sem mudança de código. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
@@ -776,25 +814,32 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-MVP 12 fechado em 2026-04-20 com 8/10 fases entregues + 2 diferidas.
-O próximo marco é **externo ao documento**: autorização formal do
-stakeholder-soberano abrindo `### MVP 13` no contrato §7 pelo
-protocolo §7.0 (commit atômico `GCA_CANONICAL_CONTRACT.md §7` +
-`GCA_MVP_PROGRESS.md §1`).
+MVP 13 aberto no contrato §7 em 2026-04-20 no estado **definido —
+não iniciado**. O próximo marco é **autorização explícita do
+stakeholder-soberano para iniciar a primeira fase** (§7.0 regra 3).
 
-**MVP 13 proposto (não autorizado): Robustez estrutural.**
-Escopo sugerido absorvendo as fases diferidas:
-- Celery/Redis para pipeline Arguider/OCG Updater/CodeGen (ex-12.8,
-  5 frentes: setup, lifespan, refactor, testes, monitoring).
-- Cobertura completa de `audit_log_global` em endpoints críticos
-  de projeto, questionário, OCG e CodeGen (ex-12.10).
-- Qualquer dívida estrutural adicional que o dogfood pós-MVP 12
-  revele (registrada formalmente antes do início).
+Ordem canônica sugerida de execução:
+1. **Fase 13.1** — Setup Celery + infra (dep + celery_app + docker
+   worker + healthcheck + smoke).
+2. **Fase 13.2** — Lifespan + worker lifecycle.
+3. **Fase 13.3** — Refactor pipeline Arguider + OCG + auto-CodeGen.
+   **Ponto de maior risco** — autorizado sub-dividir em 13.3a/b/c
+   se diagnóstico revelar entrelaçamento maior que o mapeado.
+4. **Fase 13.4** — Testes (`CELERY_TASK_ALWAYS_EAGER`) + monitoring
+   + retry policy.
+5. **Fase 13.5** — Inventário audit + helpers canônicos por domínio.
+   Pode rodar em paralelo com Tema A após 13.1.
+6. **Fase 13.6** — Instrumentação projeto + questionário.
+7. **Fase 13.7** — Instrumentação OCG + CodeGen + E2E chain integrity.
 
-Enquanto MVP 13 não for autorizado:
-- Não há gate a fechar.
-- Nenhuma feature nova entra em produção sem trilha formal.
-- DTs residuais dessa rodada (type safety frontend com 91 `any`
-  restantes em shadcn/ui; follow-up do CI e2e canário após dogfood
-  real estabilizar) podem ser endereçadas como follow-up operacional,
-  sem gate associado.
+Regras duras durante a execução do MVP 13:
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- Nenhuma implementação silenciosa; cada fase tem commit próprio
+  com escopo binário.
+- Escopo fechado no contrato §7 MVP 13; qualquer item fora disso
+  exige nova emenda do contrato.
+- Performance não pode regredir ≥20% vs baseline asyncio.
+- Retry infinito proibido; DLQ obrigatória.
+- Watchdog DT-073 permanece operando até 13.3 provar cobertura
+  completa — só então desligar.
+- Nenhuma mudança de RBAC ou papel canônico (§4).
