@@ -1,15 +1,25 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.6  
+Versão: 3.7  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases). **MVP 10 fechado** (todas as 8 fases — 10.1 schema, 10.2 Ollama unit/integration/e2e, 10.3 Premium security/compliance, 10.4 stale detection, 10.5 UI Plano de Testes, 10.6 approve/reject, 10.7 LiveDocs reais, 10.8 Regenerar granular). **DT-073 (watchdog ingestão), DT-074 (PII via extractor) e DT-075 (fila persistente diferida) quitadas em 2026-04-20. DT-076 (DDL não gerado — crítica estrutural cross-pipeline) quitada em 2026-04-20 em 6 fases: OCG.DATA_MODEL, ddl_generator_service (7 frameworks), integração CodeGen, Backlog sensível, Doc Viva com modelo de dados.** Suite baseline pós-DT-076: 1266/1266 (+104).
+Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases). **MVP 10 fechado** (todas as 8 fases — 10.1 schema, 10.2 Ollama unit/integration/e2e, 10.3 Premium security/compliance, 10.4 stale detection, 10.5 UI Plano de Testes, 10.6 approve/reject, 10.7 LiveDocs reais, 10.8 Regenerar granular). **DT-073 (watchdog ingestão), DT-074 (PII via extractor) e DT-075 (fila persistente diferida) quitadas em 2026-04-20. DT-076 (DDL não gerado — crítica estrutural cross-pipeline) quitada em 2026-04-20 em 6 fases: OCG.DATA_MODEL, ddl_generator_service (7 frameworks), integração CodeGen, Backlog sensível, Doc Viva com modelo de dados.** Suite baseline pós-DT-076: 1266/1266 (+104). **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 (autorização do stakeholder-soberano) com 7 fases: 11.1 GP→GP convite, 11.2 GP transferir soberania, 11.3 guard último Admin, 11.4 auditoria de role events, 11.5 DT-041 image drift, 11.6 DT-076 V2 multi-DB, 11.7 Playwright GUI E2E. **Estado inicial: definido — não iniciado.**
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum.** MVPs 1 a 10 do contrato §7 estão fechados. Baseline de suíte pós-DT-076: **1266/1266 passing (+104)**. Nenhum novo MVP autorizado pelo stakeholder-soberano sob o protocolo §7.0 — portanto não há escopo canônico em execução.
+**MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano (âncora: GP não consegue convidar outro GP apesar da emenda §4.1 2026-04-19; dívidas operacionais residuais DT-041/DT-076 V2/Playwright sem marco de liquidação).
+
+**Objetivo:** resolver em dois temas, sem misturar —
+1. **Simetria de soberania RBAC (compartimentalizada):** Fase 11.1 GP convida outro GP do mesmo projeto; Fase 11.2 GP transfere soberania do projeto; Fase 11.3 guard reforçado de último Admin ativo; Fase 11.4 auditoria de role events em `audit_log_global`.
+2. **Higiene operacional residual:** Fase 11.5 DT-041 image drift (`--no-cache` + CI); Fase 11.6 DT-076 V2 cobertura multi-DB (Oracle/SQL Server/SQLite/MongoDB no `ddl_generator_service`); Fase 11.7 Playwright GUI E2E (sair do `--ignore` em `test_fluxo_completo.py`).
+
+**Gate esperado ao fim:** RBAC simétrico entre instância (Admin↔Admin) e projeto (GP↔GP) sem quebrar compartimentalização §2.2; `audit_log_global` registra todo evento de papel; imagem backend idempotente; suíte verde com GUI E2E dentro do caminho canônico.
+
+**Baseline de entrada:** suíte 1266/1266 passing pós-DT-076 (validada em 2026-04-20 contra `gca_test` isolado em 4m15s); frontend build íntegro (2393 módulos em 7.12s). MVP 10 com gate §9 atendido.
+
+**Baseline anterior (pré-MVP 11):** nenhum MVP em execução. MVPs 1-10 fechados. Baseline de suíte pós-DT-076: **1266/1266 passing (+104)**.
 
 ### MVPs fechados recentes (2026-04-19 / 2026-04-20)
 - **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
@@ -28,7 +38,7 @@ Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-
 - **MVP 6 Emenda 2026-04-19** — fechada 2026-04-19 (commits `3f2e373` emenda contrato, `9ec8d09` backend, `<próximo>` frontend/docs). Adicionou Sustentação (flag cross-instância `is_support`; Admin herda), anexos (até 5/10MB/9 extensões), contexto obrigatório (section_reference autopreenchido + flow_description bloqueante). Regra dura mantida: Admin sobrepõe Support; UI de Sustentação não promove Support a Admin.
 
 ### Próximos MVPs definidos (contrato §7)
-- **MVP 7 — Entrega versionada preservando dados do usuário** — adicionado 2026-04-19. Estado: **definido — não iniciado, destravado**. A rastreabilidade ticket → release (exigida no §7 MVP 7) passa a existir em produção com o MVP 6 fechado.
+- **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — adicionado 2026-04-20 pelo protocolo §7.0 (autorização do stakeholder-soberano). Estado: **definido — não iniciado**. Destravado pelo fechamento do MVP 10 + gate §9 atendido. 7 fases (11.1–11.7) descritas no contrato §7 MVP 11.
 
 ### MVP anterior fechado
 **MVP 6 — Validação assistida em campo (tickets de incidente)** — executado e fechado em 2026-04-19. 4 fases sequenciais, cada uma com build + commit:
@@ -137,11 +147,16 @@ Mesmo dos MVPs anteriores:
 ## 2. Escopo ativo
 
 ### MVP em execução
-**Nenhum.** MVPs 1 a 10 do contrato §7 estão fechados. Não há MVP 11
-(ou superior) no contrato soberano — portanto não existe escopo canônico
-de trabalho novo até que o stakeholder-soberano autorize formalmente
-um novo MVP pelo protocolo §7.0 (commit atômico `GCA_CANONICAL_CONTRACT.md §7`
-+ `GCA_MVP_PROGRESS.md §1`).
+**MVP 11 — Simetria de soberania RBAC e higiene operacional residual**,
+no estado **definido — não iniciado**. Aberto no contrato §7 em
+2026-04-20 pelo protocolo §7.0 (autorização explícita do
+stakeholder-soberano). Escopo canônico travado no contrato §7 MVP 11
+com 7 fases (11.1 GP→GP convite, 11.2 GP transferir soberania, 11.3
+guard último Admin, 11.4 auditoria role events, 11.5 DT-041 image
+drift, 11.6 DT-076 V2 multi-DB, 11.7 Playwright GUI E2E). Nenhum
+código tocado neste ciclo — o commit que abre MVP 11 é documental
+(§7 contrato + §1/§2/§6/§9/§10 progresso). Implementação começa
+quando stakeholder autorizar início explícito (§7.0 regra 3).
 
 ### Baseline ao fechamento do MVP 10 + DT-076 (2026-04-20)
 Suíte baseline: **1266/1266 passing** contra `gca_test` isolado (+104
@@ -192,17 +207,19 @@ testes em DT-076). Superfície canônica entregue e validada em dogfood/suite:
   frameworks de migration) + integração ponta-a-ponta em CodeGen,
   Backlog e Doc Viva (6 commits atômicos, F1-F6).
 
-### Dívidas estruturais residuais — não-bloqueadoras
+### Dívidas estruturais residuais — agora capturadas no MVP 11
 - **DT-041 (Minor)** — rebuild `--no-cache` da imagem para persistir
-  `pypdf`/`reportlab`/`esprima`. Paliativo via `pip install` em
-  runtime continua cobrindo o ambiente atual; fix canônico é follow-up
-  operacional de CI.
-- **DT-076 V2 (Minor, diferida)** — suporte a Oracle, SQL Server, SQLite
-  e MongoDB em `ddl_generator_service` (V1 cobre PostgreSQL + MySQL).
-  Placeholder já existe no código. Não bloqueia fluxo canônico atual.
+  `pypdf`/`reportlab`/`esprima`. Entra em Fase **11.5**. Paliativo
+  via `pip install` em runtime continua cobrindo o ambiente atual
+  até execução.
+- **DT-076 V2 (Minor, diferida)** — suporte a Oracle, SQL Server,
+  SQLite e MongoDB em `ddl_generator_service`. Entra em Fase **11.6**.
+  V1 (PostgreSQL + MySQL) segue cobrindo o fluxo canônico até lá.
+- **Playwright GUI E2E** — `test_fluxo_completo.py` permanece no
+  `--ignore` até Fase **11.7**.
 
 ### Fora de escopo sempre (até autorização explícita)
-- qualquer feature fora dos MVPs 1-10 do contrato soberano;
+- qualquer feature fora dos MVPs 1-11 do contrato soberano;
 - marketplace, A/B de release, multi-instância avançada, downgrade
   de container, compartilhamento de correção entre instâncias de
   clientes diferentes — todos explicitamente "fora de escopo" em §7.
@@ -456,15 +473,22 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (pós-MVP 10 + DT-076)
-**NÃO APLICÁVEL — nenhum MVP em execução.**
+### Situação atual do gate (MVP 11 — abertura)
+**ABERTO PARA AVALIAÇÃO — MVP 11 definido, não iniciado.**
 
 Os MVPs 1-10 foram fechados com gate §9 atendido em cada transição
 (rastreabilidade no histórico abaixo). A baseline de suíte pós-DT-076
-é **1266 passed / 0 failed** (+104 testes somados por DT-076). Nenhum
-MVP 11 (ou superior) está definido no contrato §7 — portanto o gate
-volta a ser avaliado somente quando o stakeholder-soberano autorizar
-um novo MVP pelo protocolo §7.0. Operacional:
+é **1266 passed / 0 failed** (+104 testes somados por DT-076),
+confirmada empiricamente em 2026-04-20 em 4m15s contra `gca_test`
+isolado. Frontend build íntegro em 7.12s (2393 módulos).
+
+MVP 11 nasce com gate §9 **aberto** (critério binário 1-9 todos SIM
+neste instante): nenhum blocker/critical/contradição herdado do
+MVP 10; suíte verde; build verde; RBAC ambíguo no tema do MVP 11
+é **o próprio escopo** (GP→GP), portanto não é debt herdada, é
+trabalho a executar dentro do MVP. Nenhuma implementação começa
+antes de autorização explícita do stakeholder-soberano por fase
+(§7.0 regra 3). Operacional:
 - `--ignore=app/tests/e2e/test_fluxo_completo.py` (exige playwright,
   fora do caminho canônico do backend);
 - `TEST_DATABASE_URL` explícito apontando para `gca-postgres` quando
@@ -472,8 +496,11 @@ um novo MVP pelo protocolo §7.0. Operacional:
 
 **Veredito binário:** sem blocker, sem critical, sem contradição
 estrutural entre código e contrato após o saneamento documental
-2026-04-20 (ver emenda §9). Gate **aberto** para o último MVP
-encerrado (MVP 10); inexistente para MVP 11 (não autorizado).
+2026-04-20 e abertura do MVP 11 pelo protocolo §7.0. Gate **aberto**
+para MVP 10 (encerrado); gate **aberto** para MVP 11 no estado
+"definido — não iniciado" — vira "fechado" assim que uma das 7
+fases começar a ser executada e durante a execução até que todos
+os critérios §9 voltem a SIM.
 
 ### Motivo do último gate avaliado (MVP 4, preservado para rastreabilidade)
 Base do MVP 4 instalada e testes verde:
@@ -596,8 +623,16 @@ registradas como pós-MVP 4 e já quitadas em 4.
   em `7f47a22`. DT-076 (DDL cross-pipeline) fechada em 6 fases atômicas
   (F1-F6, commits `013d292` → `349647a`) com +104 testes. Suite
   **1266/1266 passing**.
-- Pós-DT-076 (2026-04-20) → **Sem MVP em execução.** Gate só volta a
-  ser avaliado quando novo MVP for autorizado pelo stakeholder-soberano.
+- Pós-DT-076 (2026-04-20) → Sem MVP em execução. Suite **1266/1266
+  passing** confirmada empiricamente (4m15s); frontend build íntegro
+  (7.12s). MVP 10 gate §9 atendido.
+- MVP 11 → **ABERTO 2026-04-20** pelo protocolo §7.0 (autorização do
+  stakeholder-soberano). Estado: **definido — não iniciado**. Escopo
+  canônico travado no contrato §7 MVP 11: Fase 11.1 GP→GP convite,
+  11.2 GP transferir soberania, 11.3 guard último Admin, 11.4
+  auditoria role events, 11.5 DT-041 image drift, 11.6 DT-076 V2
+  multi-DB, 11.7 Playwright GUI E2E. Gate volta a ser avaliado por
+  fase conforme 11.1–11.7 forem executadas.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -666,6 +701,7 @@ Antes de qualquer mudança:
 | 2026-04-19 | Emenda §4.1 — GP é soberano do projeto. Revoga a regra anterior "GP não escreve código" e declara que o GP tem acesso a todas as funcionalidades do projeto, inclusive CodeGen, pipeline de testes e demais fluxos. Analogia cross-escopo: GP está para o projeto assim como Admin está para a instância. Separação do dia-a-dia (Dev codifica, Tester testa, QA revisa) é mantida, mas não remove acesso. | `GCA_CANONICAL_CONTRACT.md §4.1` (emenda no bloco GP), commit `9f2181e` (impactos de UI órfão visível) | Destravar o GP quando precisa operar o projeto por inteiro sem depender de presença de Dev/Tester/QA. Necessário para dogfood e cenários com equipe reduzida. Implica revisão de enforcement que antes usava "GP não escreve" como sinônimo de "GP não aciona code:write". |
 | 2026-04-19 | Saneamento pós-MVP 7. §2/§6/§7/§10 ainda descreviam MVP 4 como fase ativa apesar do cabeçalho declarar MVPs 1-7 fechados e suite 704/704. Conteúdo do MVP 4 foi preservado na seção "Histórico do gate" (§6) e no próprio §4 (dívida quitada); §2 passou a descrever "baseline ao fechamento do MVP 7"; §7 e §10 foram consolidados em notas de encerramento. | `GCA_MVP_PROGRESS.md §2`, `§6` (situação atual), `§7`, `§10`, cabeçalho | Mesmo princípio do saneamento 2026-04-18: eliminar contradição estrutural (gate §9 critério 3). Sem mudança de código. |
 | 2026-04-20 | Saneamento pós-MVP 10 + DT-076. §1/§2/§6/§10 ainda descreviam "MVP 8 Fase 1 em execução" ou "MVPs 1-7 fechados, nenhum MVP em execução" apesar do cabeçalho declarar MVP 8, MVP 9 e MVP 10 fechados e suite 1266/1266. §1 agora lista as 6+8+8 fases dos MVPs 8/9/10 com commits; §2 renomeia baseline para "ao fechamento do MVP 10 + DT-076" e inclui MVP 8/9/10 + DT-073/074/075/076; §6 situação atual vira "pós-MVP 10 + DT-076"; histórico do gate recebe entradas para MVP 8/9/10 + pós-DT-076; §10 atualiza próximo marco para MVP 11. Veredito binário consolidado: gate aberto para o último MVP encerrado; nenhum novo MVP autorizado. | `GCA_MVP_PROGRESS.md §1`, `§2`, `§6` (situação atual + histórico), `§10` | Mesmo princípio dos saneamentos 2026-04-18 e 2026-04-19: eliminar contradição estrutural (gate §9 critério 3 — contradição entre contrato canônico e progresso). Nenhuma mudança de código. |
+| 2026-04-20 | Abertura de **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 11` (nova subseção numerada com em escopo e fora de escopo obrigatórios — 7 fases) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.7, §1 MVP ativo = MVP 11 definido/não-iniciado, §2 escopo ativo, §6 gate aberto para avaliação, §10 próximo marco). Tema 1 (simetria §4.1 Admin↔Admin ↔ GP↔GP): 11.1 GP convida outro GP compartimentalizado; 11.2 GP transferir soberania do projeto; 11.3 guard reforçado último Admin; 11.4 auditoria de role events em `audit_log_global`. Tema 2 (higiene operacional residual): 11.5 DT-041 image drift; 11.6 DT-076 V2 multi-DB; 11.7 Playwright GUI E2E. Estado inicial "definido — não iniciado"; implementação por fase exige autorização explícita adicional (§7.0 regra 3). | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 11), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Capturar em ciclo canônico a dívida estrutural identificada em 2026-04-20 (GP não convida GP apesar de §4.1 emendado 2026-04-19) e as três dívidas operacionais residuais (DT-041/DT-076 V2/Playwright) que seguiam sem marco claro de liquidação. Protocolo §7.0 evita implementação silenciosa. Sem mudança de código. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
@@ -673,18 +709,26 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-Com MVPs 1-10 fechados e nenhum MVP 11 autorizado no contrato §7,
-não há marco de saída canônico pendente. O próximo marco é **externo
-ao documento**: solicitação formal do stakeholder-soberano abrindo
-`### MVP 11` no contrato, pelo protocolo §7.0 (commit atômico
-alterando `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`).
+MVP 11 aberto no contrato §7 em 2026-04-20 no estado **definido —
+não iniciado**. O próximo marco é **autorização explícita do
+stakeholder-soberano para iniciar a primeira fase** (§7.0 regra 3).
 
-Enquanto isso não ocorrer:
-- não há gate a fechar;
-- nenhuma feature nova entra em produção sem trilha formal (deve
-  ser roteada como nova DT dentro de um MVP existente, ou como
-  solicitação formal de novo MVP — nunca implementação silenciosa);
-- as DTs residuais minor (DT-041 image drift, DT-076 V2 Oracle/SQL
-  Server/SQLite/Mongo no `ddl_generator_service`, playwright para GUI
-  E2E) podem ser endereçadas como follow-up operacional, sem gate
-  associado.
+Ordem canônica sugerida de execução (o stakeholder decide a ordem
+real, as fases são independentes entre si):
+1. **Fase 11.1** — GP convida outro GP do mesmo projeto (backend
+   `project_team_service` + frontend `ProjectTeamPage.tsx` + token
+   compartimentalizado + teste).
+2. **Fase 11.4** — auditoria de role events primeiro, para que
+   11.1/11.2/11.3 já gravem eventos desde o início.
+3. **Fase 11.2** — GP transferir soberania do projeto.
+4. **Fase 11.3** — guard reforçado de último Admin ativo.
+5. **Fase 11.5–11.7** — higiene operacional residual (DT-041,
+   DT-076 V2, Playwright GUI E2E) em qualquer ordem.
+
+Regras duras durante a execução do MVP 11:
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- Nenhuma implementação silenciosa; cada fase tem commit próprio
+  com escopo binário.
+- Escopo fechado no contrato §7 MVP 11; qualquer item fora disso
+  exige nova emenda do contrato (não encaixa neste MVP por
+  "proximidade de tema").
