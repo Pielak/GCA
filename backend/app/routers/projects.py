@@ -1,4 +1,6 @@
 """Projects Router"""
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
@@ -17,10 +19,18 @@ router = APIRouter()
 
 
 # Request/Response Models
+#
+# Whitelist canônica de papéis de projeto (contrato §4.1 + MVP 11 Fase 11.1):
+# apenas `dev`, `tester`, `qa`, `gp` são aceitos no convite. Admin é papel de
+# instância, nunca é atribuído via invite de projeto; lixo (tech_lead,
+# dev_senior, etc.) é rejeitado pela whitelist.
+ProjectMemberInviteRole = Literal["dev", "tester", "qa", "gp"]
+
+
 class InviteTeamMemberRequest(BaseModel):
-    """Request: Invite user to project"""
+    """Request: Invite user to project."""
     email: EmailStr
-    role: str  # tech_lead, dev_senior, dev_pleno, qa, compliance
+    role: ProjectMemberInviteRole
 
 
 class InviteTeamMemberResponse(BaseModel):

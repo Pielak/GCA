@@ -1,25 +1,32 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.7  
+Versão: 3.8  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases). **MVP 10 fechado** (todas as 8 fases — 10.1 schema, 10.2 Ollama unit/integration/e2e, 10.3 Premium security/compliance, 10.4 stale detection, 10.5 UI Plano de Testes, 10.6 approve/reject, 10.7 LiveDocs reais, 10.8 Regenerar granular). **DT-073 (watchdog ingestão), DT-074 (PII via extractor) e DT-075 (fila persistente diferida) quitadas em 2026-04-20. DT-076 (DDL não gerado — crítica estrutural cross-pipeline) quitada em 2026-04-20 em 6 fases: OCG.DATA_MODEL, ddl_generator_service (7 frameworks), integração CodeGen, Backlog sensível, Doc Viva com modelo de dados.** Suite baseline pós-DT-076: 1266/1266 (+104). **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 (autorização do stakeholder-soberano) com 7 fases: 11.1 GP→GP convite, 11.2 GP transferir soberania, 11.3 guard último Admin, 11.4 auditoria de role events, 11.5 DT-041 image drift, 11.6 DT-076 V2 multi-DB, 11.7 Playwright GUI E2E. **Estado inicial: definido — não iniciado.**
+Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases). **MVP 10 fechado** (todas as 8 fases — 10.1 schema, 10.2 Ollama unit/integration/e2e, 10.3 Premium security/compliance, 10.4 stale detection, 10.5 UI Plano de Testes, 10.6 approve/reject, 10.7 LiveDocs reais, 10.8 Regenerar granular). **DT-073/074/075 quitadas em 2026-04-20. DT-076 (DDL não gerado) quitada em 2026-04-20 em 6 fases.** Suite baseline pós-DT-076: 1266/1266. **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0. **Fase 11.1 (GP→GP convite compartimentalizado) FECHADA 2026-04-20** com 13 testes novos + schema `Literal[dev,tester,qa,gp]` no `InviteTeamMemberRequest` + dropdown frontend com `gp`. Suite pós-11.1: **1279/1279 passing** (+13). Fases 11.2–11.7 seguem definidas / não iniciadas.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano (âncora: GP não consegue convidar outro GP apesar da emenda §4.1 2026-04-19; dívidas operacionais residuais DT-041/DT-076 V2/Playwright sem marco de liquidação).
+**MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — **em execução**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0.
+
+**Fases:**
+- **Fase 11.1 — GP convida outro GP do mesmo projeto** — **FECHADA 2026-04-20**. Backend: `InviteTeamMemberRequest.role` virou `Literal["dev","tester","qa","gp"]` em `backend/app/routers/projects.py`; whitelist canônica rejeita lixo (admin/tech_lead/vazio/"GP" maiúsculo → 422). Frontend: `ProjectTeamPage.tsx` adicionou `'gp'` ao type `InviteRole` e ao `ROLE_OPTIONS` com label "GP (co-gestor do projeto)". Compartimentalização preservada: `require_action('project:manage_team')` resolvido dentro do `project_id` do path + check no serviço de que o chamador é GP **daquele** projeto. Audit do DB de produção: só role `gp` em uso (1 membro) — zero risco de backwards-incompat. Testes: `test_mvp11_fase111_gp_invite.py` com 13 casos (feliz GP→GP, whitelist 5 inválidos × sanidade 4 canônicos, RBAC 3 papéis). Suite pós-11.1: **1279/1279 passing** (+13).
+- Fase 11.2 GP transferir soberania do projeto — **definida**.
+- Fase 11.3 Guard reforçado de último Admin ativo — **definida**.
+- Fase 11.4 Auditoria de role events em `audit_log_global` — **definida**.
+- Fase 11.5 DT-041 image drift — **definida**.
+- Fase 11.6 DT-076 V2 cobertura multi-DB — **definida**.
+- Fase 11.7 Playwright GUI E2E — **definida**.
 
 **Objetivo:** resolver em dois temas, sem misturar —
-1. **Simetria de soberania RBAC (compartimentalizada):** Fase 11.1 GP convida outro GP do mesmo projeto; Fase 11.2 GP transfere soberania do projeto; Fase 11.3 guard reforçado de último Admin ativo; Fase 11.4 auditoria de role events em `audit_log_global`.
-2. **Higiene operacional residual:** Fase 11.5 DT-041 image drift (`--no-cache` + CI); Fase 11.6 DT-076 V2 cobertura multi-DB (Oracle/SQL Server/SQLite/MongoDB no `ddl_generator_service`); Fase 11.7 Playwright GUI E2E (sair do `--ignore` em `test_fluxo_completo.py`).
+1. **Simetria de soberania RBAC (compartimentalizada):** Fases 11.1 (✅), 11.2, 11.3, 11.4.
+2. **Higiene operacional residual:** Fases 11.5, 11.6, 11.7.
 
 **Gate esperado ao fim:** RBAC simétrico entre instância (Admin↔Admin) e projeto (GP↔GP) sem quebrar compartimentalização §2.2; `audit_log_global` registra todo evento de papel; imagem backend idempotente; suíte verde com GUI E2E dentro do caminho canônico.
 
-**Baseline de entrada:** suíte 1266/1266 passing pós-DT-076 (validada em 2026-04-20 contra `gca_test` isolado em 4m15s); frontend build íntegro (2393 módulos em 7.12s). MVP 10 com gate §9 atendido.
-
-**Baseline anterior (pré-MVP 11):** nenhum MVP em execução. MVPs 1-10 fechados. Baseline de suíte pós-DT-076: **1266/1266 passing (+104)**.
+**Baseline de entrada:** suíte 1266/1266 passing pós-DT-076 (validada em 2026-04-20). **Baseline atual pós-11.1: 1279/1279 passing.**
 
 ### MVPs fechados recentes (2026-04-19 / 2026-04-20)
 - **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
@@ -627,12 +634,16 @@ registradas como pós-MVP 4 e já quitadas em 4.
   passing** confirmada empiricamente (4m15s); frontend build íntegro
   (7.12s). MVP 10 gate §9 atendido.
 - MVP 11 → **ABERTO 2026-04-20** pelo protocolo §7.0 (autorização do
-  stakeholder-soberano). Estado: **definido — não iniciado**. Escopo
-  canônico travado no contrato §7 MVP 11: Fase 11.1 GP→GP convite,
-  11.2 GP transferir soberania, 11.3 guard último Admin, 11.4
-  auditoria role events, 11.5 DT-041 image drift, 11.6 DT-076 V2
-  multi-DB, 11.7 Playwright GUI E2E. Gate volta a ser avaliado por
-  fase conforme 11.1–11.7 forem executadas.
+  stakeholder-soberano). Escopo canônico travado no contrato §7 MVP 11:
+  Fase 11.1 GP→GP convite, 11.2 GP transferir soberania, 11.3 guard
+  último Admin, 11.4 auditoria role events, 11.5 DT-041 image drift,
+  11.6 DT-076 V2 multi-DB, 11.7 Playwright GUI E2E.
+- MVP 11 Fase 11.1 → **FECHADA 2026-04-20**. Schema whitelist
+  `Literal["dev","tester","qa","gp"]` no `InviteTeamMemberRequest` +
+  dropdown frontend com `gp`. 13 testes novos em
+  `test_mvp11_fase111_gp_invite.py`. Suite 1279/1279 passing.
+  Compartimentalização preservada (check `project:manage_team` +
+  service check de membership). Gate §9 atendido.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta

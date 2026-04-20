@@ -21,15 +21,18 @@ interface TeamMember {
   joined_at: string
 }
 
-// Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4): Dev, Tester, QA.
-// GP não é convidado aqui (é criado na aprovação do projeto); Admin é camada
-// administrativa, não é membro de projeto.
-type InviteRole = 'dev' | 'tester' | 'qa'
+// Papéis canônicos de projeto (GCA_CANONICAL_CONTRACT.md §4 + MVP 11 Fase 11.1):
+// Dev, Tester, QA e GP. Admin é papel de instância, nunca entra via convite
+// de projeto. Emenda §4.1 (2026-04-19) consolidou "GP é soberano do projeto" —
+// analogia: Admin convida Admin na instância; GP convida GP no projeto. Só o
+// GP atual vê este formulário (require_action project:manage_team).
+type InviteRole = 'dev' | 'tester' | 'qa' | 'gp'
 
 const ROLE_OPTIONS: { value: InviteRole; label: string }[] = [
   { value: 'dev', label: 'Dev' },
   { value: 'tester', label: 'Tester' },
   { value: 'qa', label: 'QA' },
+  { value: 'gp', label: 'GP (co-gestor do projeto)' },
 ]
 
 const ROLE_COLORS: Record<string, string> = {
