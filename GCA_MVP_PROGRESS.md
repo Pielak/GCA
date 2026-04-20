@@ -1,15 +1,33 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.14  
+Versão: 3.15  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 FECHADO 2026-04-20** (todas as 7 fases: 11.1 / 11.2 / 11.3 / 11.4 / 11.5 / 11.6 / 11.7). Fase 11.7 (Playwright GUI E2E): `test_fluxo_completo.py` sai do `--ignore` e integra-se à suite via marker `e2e`; URLs configuráveis por env var; `pytest.importorskip("playwright")` no topo; lane dedicada no CI (`e2e` job) instala chromium on-demand. Suite default do backend agora roda via `-m "not e2e"` em vez de `--ignore` — **1360 passed, 3 skipped** (3º skip é o arquivo e2e escaneado+skipado via importorskip quando playwright ausente). Gate §9 atendido em cada fase.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 aberto 2026-04-20 pelo protocolo §7.0** (autorização do stakeholder-soberano) com 10 fases (saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema, CI maturity, type safety, robustez estrutural, observabilidade compliance). **Estado inicial: definido — não iniciado.** Baseline de entrada: suite **1360/1360 passing, 3 skipped** contra `gca_test` isolado.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — **em execução**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0.
+**MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** — **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano. Escopo consolidado: 6 DTs de auditoria 2026-04-20 + 4 dívidas estruturais mais antigas (type safety frontend, fila persistente diferida, helper prompt CodeGen duplicado, cobertura incompleta de hash chain) que seguiam como backlog indefinido.
+
+**Objetivo:** fechar em ordem A→B→C→D→E→F→G —
+1. **Tema A — Segurança de fronteira:** Fase 12.1 rate limit em `/public/request-project`.
+2. **Tema B — Configurabilidade operacional:** Fase 12.2 timezone configurável em BackupScheduler.
+3. **Tema C — Higiene de schema + cleanup:** 12.3 consolidar `accepted_at`/`joined_at`; 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
+4. **Tema D — CI maturity:** 12.6 canário real + remoção `continue-on-error` da lane e2e.
+5. **Tema E — Type safety frontend:** 12.7 remoção de `any` em ~20 arquivos TS.
+6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis (pipeline arguider/ocg_updater/codegen); 12.9 consolidação de helper de prompt CodeGen.
+7. **Tema G — Observabilidade compliance:** 12.10 cobertura completa de `audit_log_global` (projeto, questionário, OCG, CodeGen).
+
+**Regras duras:** fases 12.8 (Celery) e 12.10 (hash chain) são estruturalmente maiores — se diagnóstico inicial revelar escopo excessivo, o executor para e pede decisão binária antes de continuar. Nenhuma feature nova introduzida; apenas saneamento. Gate §9 revalidado após cada fase.
+
+**Baseline de entrada:** suíte **1360/1360 passing, 3 skipped** contra `gca_test` isolado. MVP 11 com gate §9 atendido em todas as 7 fases.
+
+---
+
+### MVP encerrado (referência)
+**MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — **FECHADO 2026-04-20** (todas as 7 fases).
 
 **Fases:**
 - **Fase 11.1 — GP convida outro GP do mesmo projeto** — **FECHADA 2026-04-20**. Backend: `InviteTeamMemberRequest.role` virou `Literal["dev","tester","qa","gp"]` em `backend/app/routers/projects.py`; whitelist canônica rejeita lixo (admin/tech_lead/vazio/"GP" maiúsculo → 422). Frontend: `ProjectTeamPage.tsx` adicionou `'gp'` ao type `InviteRole` e ao `ROLE_OPTIONS` com label "GP (co-gestor do projeto)". Compartimentalização preservada: `require_action('project:manage_team')` resolvido dentro do `project_id` do path + check no serviço de que o chamador é GP **daquele** projeto. Audit do DB de produção: só role `gp` em uso (1 membro) — zero risco de backwards-incompat. Testes: `test_mvp11_fase111_gp_invite.py` com 13 casos (feliz GP→GP, whitelist 5 inválidos × sanidade 4 canônicos, RBAC 3 papéis). Suite pós-11.1: **1279/1279 passing** (+13).
@@ -154,16 +172,7 @@ Mesmo dos MVPs anteriores:
 ## 2. Escopo ativo
 
 ### MVP em execução
-**MVP 11 — Simetria de soberania RBAC e higiene operacional residual**,
-no estado **definido — não iniciado**. Aberto no contrato §7 em
-2026-04-20 pelo protocolo §7.0 (autorização explícita do
-stakeholder-soberano). Escopo canônico travado no contrato §7 MVP 11
-com 7 fases (11.1 GP→GP convite, 11.2 GP transferir soberania, 11.3
-guard último Admin, 11.4 auditoria role events, 11.5 DT-041 image
-drift, 11.6 DT-076 V2 multi-DB, 11.7 Playwright GUI E2E). Nenhum
-código tocado neste ciclo — o commit que abre MVP 11 é documental
-(§7 contrato + §1/§2/§6/§9/§10 progresso). Implementação começa
-quando stakeholder autorizar início explícito (§7.0 regra 3).
+**MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade**, no estado **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Escopo travado no contrato §7 MVP 12 com 10 fases distribuídas em 7 temas (A segurança de fronteira, B configurabilidade, C higiene de schema, D CI maturity, E type safety frontend, F robustez estrutural, G observabilidade compliance). Commit que abre MVP 12 é documental (§7 contrato + §1/§2/§6/§9/§10 progresso).
 
 ### Baseline ao fechamento do MVP 10 + DT-076 (2026-04-20)
 Suíte baseline: **1266/1266 passing** contra `gca_test` isolado (+104
@@ -480,27 +489,27 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (MVP 11 — encerramento)
-**ABERTO — MVP 11 fechado em todas as 7 fases.**
+### Situação atual do gate (MVP 12 — abertura)
+**ABERTO PARA AVALIAÇÃO — MVP 12 definido, não iniciado.**
 
 Os MVPs 1-11 foram fechados com gate §9 atendido em cada transição
 (rastreabilidade no histórico abaixo). Baseline de suíte pós-MVP 11:
-**1360 passed, 3 skipped** em 275s contra `gca_test` isolado
-(3 skips: 2 pré-existentes + 1 novo do e2e via `importorskip`, conforme
-Fase 11.7). Frontend build íntegro.
+**1360 passed, 3 skipped** em 275s contra `gca_test` isolado. Frontend
+build íntegro.
+
+MVP 12 nasce com gate §9 **aberto** (critério binário 1-9 todos SIM
+neste instante): nenhum blocker/critical/contradição herdado do
+MVP 11; suíte verde; build verde; itens do MVP 12 são dívidas
+conhecidas que **entram como escopo de trabalho**, não como debt que
+bloqueia. Gate vira "fechado" assim que a primeira fase começar a ser
+executada e durante a execução até que todos os critérios §9 voltem
+a SIM.
 
 Operacional:
-- MVP 11 Fase 11.7 substituiu `--ignore=app/tests/e2e/test_fluxo_completo.py`
-  por marker `e2e`. Execução default agora usa `-m "not e2e"` — e2e fica
-  na suite mas é desselecionado por marker (ou skipado via
-  `importorskip` quando playwright não instalado).
+- Lane e2e no CI continua com `continue-on-error: true` até Fase 12.6
+  entregar o canário real.
 - `TEST_DATABASE_URL` explícito apontando para `gca-postgres` quando
   pytest roda dentro do container (armadilha de `localhost`; ver §7).
-
-**Veredito binário:** sem blocker, sem critical, sem contradição
-estrutural entre código e contrato. Gate **aberto** em todo o
-histórico MVP 1-11. Próximo marco: autorização explícita do
-stakeholder-soberano para abrir MVP 12 pelo protocolo §7.0.
 
 ### Motivo do último gate avaliado (MVP 4, preservado para rastreabilidade)
 Base do MVP 4 instalada e testes verde:
@@ -745,6 +754,7 @@ Antes de qualquer mudança:
 | 2026-04-19 | Saneamento pós-MVP 7. §2/§6/§7/§10 ainda descreviam MVP 4 como fase ativa apesar do cabeçalho declarar MVPs 1-7 fechados e suite 704/704. Conteúdo do MVP 4 foi preservado na seção "Histórico do gate" (§6) e no próprio §4 (dívida quitada); §2 passou a descrever "baseline ao fechamento do MVP 7"; §7 e §10 foram consolidados em notas de encerramento. | `GCA_MVP_PROGRESS.md §2`, `§6` (situação atual), `§7`, `§10`, cabeçalho | Mesmo princípio do saneamento 2026-04-18: eliminar contradição estrutural (gate §9 critério 3). Sem mudança de código. |
 | 2026-04-20 | Saneamento pós-MVP 10 + DT-076. §1/§2/§6/§10 ainda descreviam "MVP 8 Fase 1 em execução" ou "MVPs 1-7 fechados, nenhum MVP em execução" apesar do cabeçalho declarar MVP 8, MVP 9 e MVP 10 fechados e suite 1266/1266. §1 agora lista as 6+8+8 fases dos MVPs 8/9/10 com commits; §2 renomeia baseline para "ao fechamento do MVP 10 + DT-076" e inclui MVP 8/9/10 + DT-073/074/075/076; §6 situação atual vira "pós-MVP 10 + DT-076"; histórico do gate recebe entradas para MVP 8/9/10 + pós-DT-076; §10 atualiza próximo marco para MVP 11. Veredito binário consolidado: gate aberto para o último MVP encerrado; nenhum novo MVP autorizado. | `GCA_MVP_PROGRESS.md §1`, `§2`, `§6` (situação atual + histórico), `§10` | Mesmo princípio dos saneamentos 2026-04-18 e 2026-04-19: eliminar contradição estrutural (gate §9 critério 3 — contradição entre contrato canônico e progresso). Nenhuma mudança de código. |
 | 2026-04-20 | Abertura de **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 11` (nova subseção numerada com em escopo e fora de escopo obrigatórios — 7 fases) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.7, §1 MVP ativo = MVP 11 definido/não-iniciado, §2 escopo ativo, §6 gate aberto para avaliação, §10 próximo marco). Tema 1 (simetria §4.1 Admin↔Admin ↔ GP↔GP): 11.1 GP convida outro GP compartimentalizado; 11.2 GP transferir soberania do projeto; 11.3 guard reforçado último Admin; 11.4 auditoria de role events em `audit_log_global`. Tema 2 (higiene operacional residual): 11.5 DT-041 image drift; 11.6 DT-076 V2 multi-DB; 11.7 Playwright GUI E2E. Estado inicial "definido — não iniciado"; implementação por fase exige autorização explícita adicional (§7.0 regra 3). | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 11), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Capturar em ciclo canônico a dívida estrutural identificada em 2026-04-20 (GP não convida GP apesar de §4.1 emendado 2026-04-19) e as três dívidas operacionais residuais (DT-041/DT-076 V2/Playwright) que seguiam sem marco claro de liquidação. Protocolo §7.0 evita implementação silenciosa. Sem mudança de código. |
+| 2026-04-20 | Abertura de **MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 12` (nova subseção com 10 fases distribuídas em 7 temas A-G) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.15, §1 MVP ativo = MVP 12 definido/não-iniciado, §2 escopo, §6 gate aberto para avaliação, §10 próximo marco). Tema A segurança: 12.1 rate limit `/public/request-project`. Tema B config: 12.2 timezone configurável BackupScheduler. Tema C higiene schema: 12.3 consolidar `accepted_at`/`joined_at`, 12.4 deprecar `ProjectRequest.initial_password_hash`, 12.5 limpar TODOs SMTP deprecados. Tema D CI: 12.6 canário e2e + remover `continue-on-error`. Tema E type safety: 12.7 remover `any` do frontend. Tema F robustez: 12.8 fila persistente Celery, 12.9 consolidar helper prompt CodeGen. Tema G observabilidade: 12.10 cobertura completa de `audit_log_global`. Estado inicial "definido — não iniciado"; fases 12.8 e 12.10 têm regra dura de parada se escopo diagnóstico exceder. Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 12), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Capturar em ciclo canônico as 6 DTs identificadas em auditoria pós-MVP 11 + 4 dívidas estruturais que seguiam como backlog indefinido (type safety, fila persistente diferida, helper prompt duplicado, hash chain incompleto). Stakeholder autorizou incluir todas em um único MVP de saneamento para fechar ciclo. Protocolo §7.0 evita implementação silenciosa. Sem mudança de código. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
@@ -752,18 +762,28 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-Com MVPs 1-11 fechados e nenhum MVP 12 autorizado no contrato §7,
-não há marco de saída canônico pendente. O próximo marco é **externo
-ao documento**: solicitação formal do stakeholder-soberano abrindo
-`### MVP 12` no contrato, pelo protocolo §7.0 (commit atômico
-alterando `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`).
+MVP 12 aberto no contrato §7 em 2026-04-20 no estado **definido —
+não iniciado**. O próximo marco é **autorização explícita do
+stakeholder-soberano para iniciar a primeira fase** (§7.0 regra 3).
 
-Enquanto isso não ocorrer:
-- não há gate a fechar;
-- nenhuma feature nova entra em produção sem trilha formal (deve
-  ser roteada como nova DT dentro de um MVP existente, ou como
-  solicitação formal de novo MVP — nunca implementação silenciosa);
-- DTs residuais minor (reobservação do CI e2e quando seed
-  estabilizar; `continue-on-error` removível da lane e2e depois
-  que canário real passar) podem ser endereçadas como follow-up
-  operacional, sem gate associado.
+Ordem canônica sugerida de execução (A→B→C→D→E→F→G):
+1. **Fase 12.1** — Rate limit em `/public/request-project`.
+2. **Fase 12.2** — Timezone configurável em BackupScheduler.
+3. **Fase 12.3** — Consolidar `accepted_at`/`joined_at`.
+4. **Fase 12.4** — Deprecar `ProjectRequest.initial_password_hash`.
+5. **Fase 12.5** — Limpar TODOs SMTP de fluxo deprecado.
+6. **Fase 12.6** — Canário e2e + remover `continue-on-error`.
+7. **Fase 12.7** — Remover `any` de arquivos TS.
+8. **Fase 12.8** — Fila persistente Celery (pipeline). **Atenção:** se
+   diagnóstico inicial mostrar escopo excessivo, parar e pedir decisão.
+9. **Fase 12.9** — Consolidar helper de prompt CodeGen.
+10. **Fase 12.10** — Cobertura completa de `audit_log_global`.
+    **Atenção:** fase grande — mesma regra de parada de 12.8.
+
+Regras duras durante a execução do MVP 12:
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- Nenhuma implementação silenciosa; cada fase tem commit próprio
+  com escopo binário.
+- Escopo fechado no contrato §7 MVP 12; qualquer item fora disso
+  exige nova emenda do contrato.
+- Nenhuma feature nova; se identificada, escopar em MVP futuro.
