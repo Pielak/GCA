@@ -1,206 +1,224 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { BookOpen, RefreshCw, Loader2, CheckCircle, Clock, AlertTriangle, FileText } from 'lucide-react'
-import { apiClient } from '@/lib/api'
+import {
+  BookOpen, RefreshCw, Loader2, AlertTriangle, FileText, Network, Sparkles,
+} from 'lucide-react'
+import {
+  useLiveDocs, useBulkRegenerateModuleDocs, useBulkRegenerateConsolidatedDocs,
+  type LiveDocListItem, type LiveDocType,
+} from '@/hooks/useLiveDocs'
+import { LiveDocModal } from '@/components/livedocs/LiveDocModal'
 
-interface DocSection {
-  id: string
-  title: string
-  status: string
-  lastGen: string | null
-  source: string
-  wordCount: number
+/**
+ * MVP 10 Fase 10.7 — Documentação Viva real (LiveDocs).
+ *
+ * Substitui o placeholder anterior (seções derivadas do OCG sem
+ * conteúdo textual) por LiveDocs efetivos:
+ *   - module_doc (1 por módulo) via Ollama §6.2
+ *   - index + architecture (globais) via Premium §6.3
+ *
+ * Cada item exibe stale flag + modal com provenance.
+ */
+
+const TYPE_META: Record<LiveDocType, {
+  label: string; icon: React.ReactNode; border: string; chip: string;
+}> = {
+  module_doc: {
+    label: 'Documentação de Módulo',
+    icon: <FileText className="w-4 h-4" />,
+    border: 'border-emerald-700/40',
+    chip: 'bg-emerald-900/30 text-emerald-300 border-emerald-700/50',
+  },
+  index: {
+    label: 'Índice Executivo',
+    icon: <BookOpen className="w-4 h-4" />,
+    border: 'border-violet-700/40',
+    chip: 'bg-violet-900/30 text-violet-300 border-violet-700/50',
+  },
+  architecture: {
+    label: 'Arquitetura',
+    icon: <Network className="w-4 h-4" />,
+    border: 'border-sky-700/40',
+    chip: 'bg-sky-900/30 text-sky-300 border-sky-700/50',
+  },
 }
 
-const STATUS_CONFIG: Record<string, { label: string; cls: string }> = {
-  published: { label: 'Publicado', cls: 'bg-emerald-900/40 text-emerald-400' },
-  outdated: { label: 'Desatualizado', cls: 'bg-amber-900/40 text-amber-400' },
-  pending: { label: 'Pendente', cls: 'bg-slate-800 text-slate-500' },
-  draft: { label: 'Rascunho', cls: 'bg-blue-900/40 text-blue-400' },
-  generating: { label: 'Gerando...', cls: 'bg-violet-900/40 text-violet-400' },
-}
-
-// Seções derivadas do OCG quando nenhuma doc real existe ainda
-const OCG_DERIVED_SECTIONS = [
-  { key: 'PROJECT_PROFILE', title: 'Perfil do Projeto', icon: '📋' },
-  { key: 'STACK_RECOMMENDATION', title: 'Stack Tecnológica', icon: '⚙️' },
-  { key: 'ARCHITECTURE_OVERVIEW', title: 'Visão Arquitetural', icon: '🏗️' },
-  { key: 'COMPLIANCE_CHECKLIST', title: 'Conformidade e Regulatório', icon: '🔒' },
-  { key: 'TESTING_REQUIREMENTS', title: 'Estratégia de Testes', icon: '🧪' },
-  { key: 'RISK_ANALYSIS', title: 'Análise de Riscos', icon: '⚠️' },
-  { key: 'DELIVERABLES', title: 'Entregáveis', icon: '📦' },
-]
+const TYPE_ORDER: LiveDocType[] = ['index', 'architecture', 'module_doc']
 
 export function LiveDocsPage() {
   const { id: projectId } = useParams<{ id: string }>()
-  const [sections, setSections] = useState<DocSection[]>([])
-  const [ocgSections, setOcgSections] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
+  const { data: docs, isLoading } = useLiveDocs(projectId)
+  const bulkModule = useBulkRegenerateModuleDocs(projectId)
+  const bulkConsolidated = useBulkRegenerateConsolidatedDocs(projectId)
+  const [openDocId, setOpenDocId] = useState<string | null>(null)
 
-  const showToast = (message: string, type: 'success' | 'error') => {
-    setToast({ message, type })
-    setTimeout(() => setToast(null), 4000)
+  const byType: Record<LiveDocType, LiveDocListItem[]> = {
+    module_doc: [], index: [], architecture: [],
   }
-
-  const loadData = useCallback(async () => {
-    if (!projectId) return
-    try {
-      const [docsRes, ocgRes] = await Promise.all([
-        apiClient.get(`/projects/${projectId}/docs`).catch(() => ({ data: { sections: [] } })),
-        apiClient.get(`/projects/${projectId}/ocg`).catch(() => ({ data: {} })),
-      ])
-
-      setSections(docsRes.data?.sections || [])
-
-      // Derivar seções do OCG se não há docs reais
-      const ocg = ocgRes.data?.ocg
-      if (ocg && ocg.ocg_data) {
-        const data = typeof ocg.ocg_data === 'string' ? JSON.parse(ocg.ocg_data) : ocg.ocg_data
-        const derived = OCG_DERIVED_SECTIONS
-          .filter(s => {
-            const val = data[s.key]
-            return val && (typeof val === 'object' ? Object.keys(val).length > 0 : true)
-          })
-          .map(s => ({
-            ...s,
-            hasContent: true,
-            status: 'pending',
-          }))
-        setOcgSections(derived)
-      }
-    } catch { /* ignore */ }
-    setLoading(false)
-  }, [projectId])
-
-  useEffect(() => { loadData() }, [loadData])
-
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    try {
-      await apiClient.post(`/projects/${projectId}/docs/refresh`)
-      showToast('Documentação regenerada com sucesso', 'success')
-      await loadData()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao regenerar documentação', 'error')
+  for (const d of docs || []) {
+    if (d.doc_type in byType) {
+      byType[d.doc_type].push(d)
     }
-    setRefreshing(false)
   }
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
-
-  const hasDocs = sections.length > 0
-  const published = sections.filter(s => s.status === 'published').length
-  const pending = sections.filter(s => s.status === 'pending').length
+  const total = docs?.length ?? 0
+  const staleCount = (docs || []).filter((d) => d.is_stale).length
 
   return (
     <div className="p-6 space-y-6">
-      {toast && (
-        <div className={`p-3 rounded-lg text-sm ${toast.type === 'success' ? 'bg-emerald-900/30 border border-emerald-700 text-emerald-300' : 'bg-red-900/30 border border-red-700 text-red-300'}`}>
-          {toast.message}
-        </div>
-      )}
-
-      <div className="flex items-start justify-between">
+      {/* Header */}
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h2 className="text-lg font-semibold text-slate-100">Documentação Viva</h2>
           <p className="text-slate-500 text-sm mt-0.5">
-            Documentação gerada e atualizada automaticamente a partir do OCG do projeto.
-            Toda mudança no OCG dispara regeneração.
+            Docs geradas por LLM a partir do OCG atual. Cada item registra
+            sua procedência (versão do OCG, ingestões e modelo usado).
           </p>
         </div>
-        <button
-          onClick={handleRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 px-3 py-2 bg-violet-600/20 border border-violet-600/30 text-violet-400 text-sm rounded-lg hover:bg-violet-600/30 disabled:opacity-40 transition-colors"
-        >
-          {refreshing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          Regenerar
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={() => bulkModule.mutate()}
+            disabled={bulkModule.isPending}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
+            title="Gera/regera uma doc por módulo via Ollama local"
+          >
+            {bulkModule.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Docs de Módulo (Ollama)
+          </button>
+          <button
+            type="button"
+            onClick={() => bulkConsolidated.mutate()}
+            disabled={bulkConsolidated.isPending}
+            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-violet-600/30 border border-violet-500/40 text-violet-200 hover:bg-violet-600/40 disabled:opacity-50"
+            title="Gera/regera índice e arquitetura via Premium"
+          >
+            {bulkConsolidated.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+            Index + Architecture (Premium)
+          </button>
+        </div>
       </div>
 
-      {/* Stats */}
-      {hasDocs && (
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
-            <p className="text-2xl font-semibold text-slate-100">{sections.length}</p>
-            <p className="text-slate-500 text-xs mt-1">Total de seções</p>
-          </div>
-          <div className="bg-emerald-950/20 border border-emerald-800/30 rounded-xl p-4 text-center">
-            <p className="text-2xl font-semibold text-emerald-400">{published}</p>
-            <p className="text-slate-500 text-xs mt-1">Publicadas</p>
-          </div>
-          <div className="bg-amber-950/20 border border-amber-800/30 rounded-xl p-4 text-center">
-            <p className="text-2xl font-semibold text-amber-400">{pending}</p>
-            <p className="text-slate-500 text-xs mt-1">Pendentes</p>
+      {/* Stale banner */}
+      {staleCount > 0 && (
+        <div className="bg-amber-500/10 border border-amber-500/40 rounded p-3 flex items-start gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="text-[12px] text-amber-200 flex-1">
+            <strong>{staleCount} documento(s) desatualizado(s)</strong> — OCG
+            evoluiu desde a última geração. Clique em "Regenerar" para alinhar.
           </div>
         </div>
       )}
 
-      {/* Seções de documentação real */}
-      {hasDocs ? (
-        <div className="space-y-3">
-          {sections.map(doc => {
-            const st = STATUS_CONFIG[doc.status] || STATUS_CONFIG.pending
+      {/* Stats */}
+      {total > 0 && (
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 text-center">
+            <p className="text-2xl font-semibold text-slate-100">{total}</p>
+            <p className="text-slate-500 text-xs mt-1">Total de docs</p>
+          </div>
+          <div className="bg-emerald-950/20 border border-emerald-800/30 rounded-xl p-4 text-center">
+            <p className="text-2xl font-semibold text-emerald-400">{total - staleCount}</p>
+            <p className="text-slate-500 text-xs mt-1">Atualizados</p>
+          </div>
+          <div className="bg-amber-950/20 border border-amber-800/30 rounded-xl p-4 text-center">
+            <p className="text-2xl font-semibold text-amber-400">{staleCount}</p>
+            <p className="text-slate-500 text-xs mt-1">Desatualizados</p>
+          </div>
+        </div>
+      )}
+
+      {/* Loading */}
+      {isLoading && (
+        <div className="flex items-center justify-center py-10 text-slate-500 text-sm">
+          <Loader2 className="w-4 h-4 animate-spin mr-2" />
+          Carregando docs…
+        </div>
+      )}
+
+      {/* Empty */}
+      {!isLoading && total === 0 && (
+        <div className="text-center py-12 border border-dashed border-slate-800 rounded-xl text-slate-500">
+          <FileText className="w-10 h-10 mx-auto mb-3 opacity-40" />
+          <p className="text-sm">Nenhuma documentação viva gerada ainda.</p>
+          <p className="text-[11px] mt-1 text-slate-600">
+            Clique nos botões acima para gerar — "Docs de Módulo" (uma por
+            módulo do Roadmap) ou "Index + Architecture" (consolidados).
+          </p>
+        </div>
+      )}
+
+      {/* Listagem agrupada por tipo */}
+      {!isLoading && total > 0 && (
+        <div className="space-y-5">
+          {TYPE_ORDER.map((t) => {
+            const items = byType[t]
+            if (items.length === 0) return null
+            const meta = TYPE_META[t]
             return (
-              <div key={doc.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <FileText className="w-5 h-5 text-slate-500" />
-                    <div>
-                      <p className="text-slate-200 text-sm font-medium">{doc.title}</p>
-                      <p className="text-slate-500 text-xs mt-0.5">
-                        Fonte: {doc.source} · {doc.wordCount > 0 ? `${doc.wordCount} palavras` : 'Sem conteúdo'}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${st.cls}`}>{st.label}</span>
-                    {doc.lastGen && <span className="text-slate-600 text-xs">{new Date(doc.lastGen).toLocaleDateString('pt-BR')}</span>}
-                  </div>
+              <section key={t} className="space-y-2">
+                <h3 className="flex items-center gap-2 text-slate-300 text-sm font-semibold">
+                  <span className={`p-1 rounded ${meta.chip} border`}>{meta.icon}</span>
+                  {meta.label}
+                  <span className="text-[11px] text-slate-500">({items.length})</span>
+                </h3>
+                <div className="space-y-1.5">
+                  {items.map((d) => (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={() => setOpenDocId(d.id)}
+                      className={`w-full text-left px-3 py-2 rounded border hover:ring-1 hover:ring-violet-500/50 transition-all ${
+                        d.is_stale
+                          ? 'border-amber-500/40 bg-amber-950/10'
+                          : `${meta.border} bg-slate-950/30 hover:bg-slate-900/40`
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-[11px] text-slate-300 truncate flex-1">
+                          {d.module_id
+                            ? `Módulo ${d.module_id.slice(0, 8)}…`
+                            : `Global do projeto`}
+                        </span>
+                        {d.generator_provider && (
+                          <span className="text-[10px] text-slate-500 whitespace-nowrap">
+                            {d.generator_provider} / {d.generator_model}
+                          </span>
+                        )}
+                        {d.is_stale && (
+                          <span
+                            className="text-[10px] text-amber-300 flex items-center gap-1"
+                            title={d.stale_reason || 'OCG evoluiu desde a geração'}
+                          >
+                            <AlertTriangle className="w-3 h-3" />
+                            stale
+                          </span>
+                        )}
+                        <span className="text-[10px] text-slate-500 whitespace-nowrap">
+                          {d.content_chars.toLocaleString('pt-BR')} chars
+                        </span>
+                      </div>
+                      {d.content_preview && (
+                        <p className="text-[10px] text-slate-500 mt-1 truncate">
+                          {d.content_preview}
+                        </p>
+                      )}
+                    </button>
+                  ))}
                 </div>
-              </div>
+              </section>
             )
           })}
         </div>
-      ) : (
-        /* Seções derivadas do OCG (quando não há docs reais) */
-        <div className="space-y-4">
-          <div className="bg-slate-900/50 border border-slate-800/50 rounded-xl p-4">
-            <div className="flex items-center gap-2 mb-3">
-              <BookOpen className="w-4 h-4 text-violet-400" />
-              <h3 className="text-slate-300 text-sm font-semibold">Seções disponíveis no OCG</h3>
-            </div>
-            <p className="text-slate-500 text-xs mb-4">
-              Estas seções serão transformadas em documentação formal quando o botão "Regenerar" for acionado.
-              A documentação é criada a partir do conteúdo do OCG.
-            </p>
+      )}
 
-            {ocgSections.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {ocgSections.map(s => (
-                  <div key={s.key} className="flex items-center gap-3 p-3 rounded-lg bg-slate-800/40 border border-slate-700/30">
-                    <span className="text-lg">{s.icon}</span>
-                    <div>
-                      <p className="text-slate-200 text-sm">{s.title}</p>
-                      <p className="text-slate-500 text-xs flex items-center gap-1">
-                        <CheckCircle className="w-3 h-3 text-emerald-500" />
-                        Conteúdo disponível no OCG
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="text-center py-6">
-                <AlertTriangle className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                <p className="text-slate-500 text-sm">OCG ainda não possui conteúdo suficiente para gerar documentação.</p>
-                <p className="text-slate-600 text-xs mt-1">Ingira documentos e aguarde a análise do Arguidor.</p>
-              </div>
-            )}
-          </div>
-        </div>
+      {/* Modal */}
+      {openDocId && projectId && (
+        <LiveDocModal
+          projectId={projectId}
+          docId={openDocId}
+          onClose={() => setOpenDocId(null)}
+        />
       )}
     </div>
   )
