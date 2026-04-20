@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.22  
+Versão: 3.23  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1-12.7 FECHADAS 2026-04-20**. Fase 12.7 (type safety frontend): novo `frontend/src/lib/errors.ts` com helpers canônicos `getErrorMessage`, `getErrorStatus`, `isAxiosError` + type `ApiError`; substituição em massa `catch (err: any)` → `catch (err: unknown)` + `err.response?.data?.detail` → `getErrorMessage(err)` + `err.response?.status` → `getErrorStatus(err)` em ~40 arquivos TS; uso de `ApiError` cast onde código depende do shape do interceptor de `lib/api.ts`. Redução **237 → 91 ocorrências de `any`** (−61,6%); tsc errors mantidos em 57 baseline (zero erros novos — os restantes são pré-existentes: módulos radix-ui não instalados, `TestArtifact` mismatches, etc.). Fases 12.8-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1-12.7 + 12.9 FECHADAS 2026-04-20**. Fase 12.9 (consolidar helper de prompt CodeGen): novo `backend/app/services/codegen_prompt_builder.py` com `build_scaffold_prompt` (multi-arquivo) e `build_regenerate_file_prompt` (single-arquivo); router `code_generation.py` invoca builder em vez de construir prompt in-line; 13 testes cobrindo header, regra docstring, project metadata, OCG context, fallbacks, formato de resposta, truncagem de current_content, limite de arguider_modules. 49 testes existentes de CodeGen permanecem verdes. Fases 12.8 e 12.10 seguem diferidas aguardando decisão formal no §9.
 
 ---
 
@@ -17,7 +17,7 @@ Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em exe
 3. **Tema C — Higiene de schema + cleanup:** ✅ Fase 12.3 consolidar `accepted_at`/`joined_at` (fix + helpers + docstring; 11 testes); 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
 4. **Tema D — CI maturity:** ✅ Fase 12.6 canário `seed_e2e.py` idempotente + CI roda seed + `continue-on-error` removido (3 testes).
 5. **Tema E — Type safety frontend:** ✅ Fase 12.7 redução de `any` (237→91, −61,6%) via helpers canônicos `getErrorMessage`/`getErrorStatus`/`ApiError` em `lib/errors.ts` + substituição em massa em ~40 arquivos.
-6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis (pipeline arguider/ocg_updater/codegen); 12.9 consolidação de helper de prompt CodeGen.
+6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis ⏸️ diferida (regra de parada); ✅ Fase 12.9 consolidação de helper de prompt CodeGen (builder canônico `codegen_prompt_builder.py` + 13 testes).
 7. **Tema G — Observabilidade compliance:** 12.10 cobertura completa de `audit_log_global` (projeto, questionário, OCG, CodeGen).
 
 **Regras duras:** fases 12.8 (Celery) e 12.10 (hash chain) são estruturalmente maiores — se diagnóstico inicial revelar escopo excessivo, o executor para e pede decisão binária antes de continuar. Nenhuma feature nova introduzida; apenas saneamento. Gate §9 revalidado após cada fase.

@@ -483,95 +483,23 @@ async def generate_scaffold(
     for doc in ingested_docs[:10]:  # Limitar a 10 para não estourar tokens
         doc_context += f"- {doc.original_filename} ({doc.file_type}, categoria: {doc.document_category or 'N/A'})\n"
 
-    prompt = f"""Você é um engenheiro de software sênior. Gere o scaffold completo de um projeto com código fonte REAL.
-
-## REGRA INEGOCIÁVEL — DOCSTRINGS OBRIGATÓRIAS
-
-**TODO arquivo de código DEVE ter docstrings. Sem exceção, sem parametrização.**
-
-- **Python (.py)**: docstring no topo do módulo (aspas triplas) + docstring em toda classe + docstring em toda função/método (exceto `__init__` se trivial). Use PEP 257.
-- **TypeScript/JavaScript (.ts/.tsx/.js/.jsx)**: bloco JSDoc (`/** ... */`) em toda função exportada, classe e componente React. Inclua `@param`, `@returns`.
-- **Go (.go)**: comentário iniciando com o nome do identificador em toda função, tipo e package (godoc).
-- **Java (.java)**: Javadoc (`/** ... */`) em toda classe e método público.
-
-Arquivos sem docstrings serão rejeitados pela validação automática e marcados como TODO. Isso atrasa o projeto — faça direito na primeira vez.
-
-## Projeto
-- Nome: {project.name}
-- Slug: {project.slug}
-- Descrição: {project.description or 'Sem descrição'}
-
-## Stack Tecnológica (do OCG)
-{json.dumps(stack, indent=2, ensure_ascii=False) if stack else 'Não definida — use Python + FastAPI como padrão'}
-
-## Arquitetura (do OCG)
-{json.dumps(architecture, indent=2, ensure_ascii=False) if architecture else 'Padrão: Clean Architecture com camadas service/repository'}
-
-## Requisitos de Testes (do OCG)
-{json.dumps(testing, indent=2, ensure_ascii=False) if testing else 'Testes unitários e de integração obrigatórios'}
-
-## Módulos Identificados (OCG + Arguidor)
-{json.dumps(modules, indent=2, ensure_ascii=False) if modules else 'Nenhum módulo identificado no OCG'}
-{json.dumps(arguider_modules[:10], indent=2, ensure_ascii=False) if arguider_modules else ''}
-
-## Regras de Negócio
-{json.dumps(business_rules[:10], indent=2, ensure_ascii=False) if business_rules else 'Sem regras de negócio explícitas'}
-
-## Gaps Identificados pelo Arguidor
-{json.dumps(arguider_gaps[:10], indent=2, ensure_ascii=False) if arguider_gaps else 'Nenhum gap identificado'}
-
-## Findings Críticos
-{json.dumps(critical_findings[:5], indent=2, ensure_ascii=False) if critical_findings else 'Nenhum'}
-
-## Compliance
-{json.dumps(compliance[:5], indent=2, ensure_ascii=False) if compliance else 'Não definido'}
-
-## Documentos Ingeridos
-{doc_context if doc_context else 'Nenhum documento ingerido'}
-
-## INSTRUÇÕES IMPORTANTES
-
-1. Gere arquivos de código REAIS (NÃO .md, NÃO placeholders vazios)
-2. Use a stack definida no OCG. Se não definida, use Python + FastAPI + PostgreSQL
-3. Os caminhos dos arquivos devem seguir a convenção da stack (ex: Python → .py, TypeScript → .ts/.tsx)
-4. Cada arquivo DEVE ter conteúdo real com:
-   - Imports necessários
-   - TODAS as classes e funções DEVEM ter docstrings completas explicando: propósito, parâmetros, retorno e exceções
-   - Módulos devem ter docstring no topo explicando a responsabilidade do arquivo
-   - Tratamento de erro básico com mensagens descritivas
-   - Type hints em todos os parâmetros e retornos
-5. Para partes que precisam de mais detalhes, use comentários TODO:
-   `# TODO: Implementar lógica de <funcionalidade>`
-6. Para partes onde FALTAM INFORMAÇÕES do projeto, use marcador NMI:
-   `# [NMI] Need More Information: <o que falta>`
-7. Gere pelo menos: main/entry point, models, routes/controllers, services, config, testes
-8. MÁXIMO 25 arquivos para caber no response
-
-## FORMATO DE RESPOSTA
-
-Responda EXCLUSIVAMENTE com JSON válido, sem markdown, sem explicações.
-CRÍTICO: No campo "content", use \\n para quebras de linha e escape aspas com \\". NÃO use quebras de linha literais dentro de strings JSON.
-{{
-  "files": [
-    {{
-      "path": "src/main.py",
-      "content": "conteúdo completo do arquivo aqui",
-      "status": "complete"
-    }},
-    {{
-      "path": "src/routes/payments.py",
-      "content": "# TODO: Implementar processamento de pagamentos\\n# [NMI] Need More Information: gateway de pagamento\\ndef process_payment():\\n    pass",
-      "status": "nmi"
-    }}
-  ],
-  "summary": "Gerados X arquivos para projeto Y com framework Z"
-}}
-
-Status possíveis:
-- "complete": arquivo com implementação funcional
-- "todo": arquivo com TODOs mas estrutura definida
-- "nmi": arquivo que precisa de mais informações do projeto
-"""
+    # MVP 12 Fase 12.9 — prompt consolidado via builder canônico.
+    from app.services.codegen_prompt_builder import build_scaffold_prompt
+    prompt = build_scaffold_prompt(
+        project_name=project.name,
+        project_slug=project.slug,
+        project_description=project.description,
+        stack=stack,
+        architecture=architecture,
+        testing=testing,
+        modules=modules,
+        arguider_modules=arguider_modules,
+        business_rules=business_rules,
+        arguider_gaps=arguider_gaps,
+        critical_findings=critical_findings,
+        compliance=compliance,
+        ingested_docs_context=doc_context,
+    )
 
     # 5. Chamar LLM
     api_key = app_settings.ANTHROPIC_API_KEY
@@ -1253,47 +1181,17 @@ async def regenerate_single_file(
     stack = ocg_data.get("STACK_RECOMMENDATION", {})
     architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
 
-    extra = request.instructions or "Reescreva completamente o arquivo mantendo o propósito detectado pelo path."
-    current_block = (
-        f"\n## Conteúdo Atual (referência — pode ser inteiramente substituído)\n```\n{request.current_content[:6000]}\n```\n"
-        if request.current_content
-        else ""
+    # MVP 12 Fase 12.9 — prompt consolidado via builder canônico.
+    from app.services.codegen_prompt_builder import build_regenerate_file_prompt
+    prompt = build_regenerate_file_prompt(
+        project_name=project.name,
+        project_description=project.description,
+        stack=stack,
+        architecture=architecture,
+        path=request.path,
+        instruction=request.instructions,
+        current_content=request.current_content,
     )
-
-    prompt = f"""Você é um engenheiro de software sênior. Gere o CONTEÚDO COMPLETO de um único arquivo de código.
-
-## REGRA INEGOCIÁVEL — DOCSTRINGS OBRIGATÓRIAS
-Todo módulo, classe e função pública DEVE ter docstring (PEP 257 para Python, JSDoc para TS/JS, godoc, Javadoc).
-
-## Projeto
-- Nome: {project.name}
-- Descrição: {project.description or 'Sem descrição'}
-
-## Stack (do OCG)
-{json.dumps(stack, indent=2, ensure_ascii=False) if stack else 'Não definida'}
-
-## Arquitetura (do OCG)
-{json.dumps(architecture, indent=2, ensure_ascii=False) if architecture else 'Padrão: Clean Architecture'}
-
-## Arquivo a gerar
-Caminho: `{request.path}`
-
-## Instrução
-{extra}
-{current_block}
-
-## FORMATO DE RESPOSTA
-Responda APENAS com JSON válido, sem markdown:
-{{
-  "content": "conteúdo completo do arquivo (use \\n para quebras)",
-  "status": "complete"
-}}
-
-Status possíveis:
-- "complete": funcional
-- "todo": estrutura + TODOs
-- "nmi": faltam informações do projeto
-"""
 
     api_key = app_settings.ANTHROPIC_API_KEY
     if not api_key:
