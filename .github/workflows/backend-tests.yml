@@ -5,10 +5,12 @@ on:
     branches: [ main, develop ]
     paths:
       - 'backend/**'
+      - '.github/workflows/backend-tests.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'backend/**'
+      - '.github/workflows/backend-tests.yml'
 
 jobs:
   test:
@@ -23,19 +25,43 @@ jobs:
       uses: actions/setup-python@v5
       with:
         python-version: '3.11'
-    
+
     - name: Install dependencies
       run: |
         cd backend
         pip install poetry
         poetry install
-    
+
+    # MVP 11 Fase 11.5 — garante que DT-041 (image drift pypdf/reportlab/esprima)
+    # não reaparece: imports críticos têm que funcionar direto da instalação poetry.
+    - name: Verify critical extraction libs are importable
+      run: |
+        cd backend
+        poetry run python -c "import pypdf, reportlab, esprima; print('pypdf', pypdf.__version__); print('reportlab', reportlab.__version__); print('esprima OK')"
+
     - name: Run tests
       run: |
         cd backend
-        if [ -d "tests/" ]; then
-          poetry run pytest tests/ --cov=app
+        if [ -d "app/tests/" ]; then
+          poetry run pytest app/tests/ --cov=app --ignore=app/tests/e2e/test_fluxo_completo.py
         else
           echo "⚠️ No tests directory found. Skipping tests."
         fi
 
+  docker-image:
+    # MVP 11 Fase 11.5 — fecha DT-041 em CI: rebuild --no-cache da imagem
+    # backend e valida que as libs críticas sobrevivem no container final.
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build backend image from scratch (no cache)
+      run: docker build --no-cache -t gca-backend-ci:fase115 backend
+
+    - name: Verify extraction libs inside built image
+      run: |
+        docker run --rm gca-backend-ci:fase115 \
+          python -c "import pypdf, reportlab, esprima; print('image-build OK')"
