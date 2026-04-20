@@ -15,6 +15,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { Loader2, ArrowLeft, ArrowRight, CheckCircle2, FilePlus } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getQuestionsForType, type Question } from '@/data/projectRequestQuestions'
+import { getErrorMessage } from '@/lib/errors'
 
 const DELIVERABLE_TYPES = [
   { value: 'new_system', label: 'Novo sistema' },
@@ -112,9 +113,9 @@ export function SolicitarProjetoPage() {
       }
       const res = await apiClient.post('/public/project-requests', payload)
       setSuccess({ id: res.data.id, slug: res.data.slug })
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail
-      setError(typeof detail === 'string' ? detail : (err?.message || 'Falha ao enviar solicitação'))
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err)
+      setError(typeof detail === 'string' ? detail : (getErrorMessage(err)))
     } finally {
       setSubmitting(false)
     }

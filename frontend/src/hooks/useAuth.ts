@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 import { useToastStore } from '@/stores/toastStore'
 import api from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 export const useAuth = () => {
   const { token, user, isLoggedIn, setToken, setUser, logout } = useAuthStore()
@@ -19,8 +20,8 @@ export const useAuth = () => {
         }
         addToast('Login realizado com sucesso!', 'success')
         return true
-      } catch (error: any) {
-        const message = error.message || 'Erro ao fazer login'
+      } catch (error: unknown) {
+        const message = getErrorMessage(error)
         addToast(message, 'error')
         return false
       }

@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { pillarMeta, pillarKey, PILLAR_ORDER } from '@/data/pillarMeta'
+import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 
 interface OCGData {
   ocg_id: string
@@ -200,8 +201,8 @@ export function OCGPage() {
       } else {
         setOcg(raw)
       }
-    } catch (err: any) {
-      if (err?.status === 404 || err?.response?.status === 404) {
+    } catch (err: unknown) {
+      if ((err as ApiError)?.status === 404 || getErrorStatus(err) === 404) {
         setOcg(null) // OCG não gerado ainda
       } else {
         setError('Erro ao carregar OCG')
@@ -410,8 +411,8 @@ export function OCGPage() {
                         try {
                           await apiClient.post(`/projects/${id}/ocg/rollback/${h.version_to}`)
                           await loadData()
-                        } catch (e: any) {
-                          alert(e?.response?.data?.detail || 'Erro ao reverter')
+                        } catch (e: unknown) {
+                          alert(getErrorMessage(e) || 'Erro ao reverter')
                         }
                       }}
                       className="mt-2 text-xs px-2 py-1 rounded bg-amber-600/20 border border-amber-600/30 text-amber-300 hover:bg-amber-600/30 transition-colors"
@@ -460,8 +461,8 @@ export function OCGPage() {
                 const res: any = await apiClient.post(`/projects/${id}/ocg/reconsolidate`, {})
                 alert(res?.data?.message || 'Reconsolidação disparada')
                 await loadData()
-              } catch (err: any) {
-                alert(`Falha: ${err?.response?.data?.detail || err?.message}`)
+              } catch (err: unknown) {
+                alert(`Falha: ${getErrorMessage(err)}`)
               } finally {
                 setReconsolidating(false)
               }
@@ -482,8 +483,8 @@ export function OCGPage() {
                 const res: any = await apiClient.post(`/projects/${id}/ocg/regenerate?confirm=true`, {})
                 alert(res?.data?.message || 'Regeneração disparada em background. Verifique em alguns minutos.')
                 await loadData()
-              } catch (err: any) {
-                alert(`Falha: ${err?.response?.data?.detail || err?.message}`)
+              } catch (err: unknown) {
+                alert(`Falha: ${getErrorMessage(err)}`)
               } finally {
                 setRegenerating(false)
               }

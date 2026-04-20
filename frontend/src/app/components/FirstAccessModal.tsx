@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Shield, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/errors'
 
 interface FirstAccessModalProps {
   isOpen: boolean
@@ -55,8 +56,8 @@ export function FirstAccessModal({ isOpen, temporaryPassword, onPasswordChanged 
       }
 
       onPasswordChanged()
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao alterar senha')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

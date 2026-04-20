@@ -10,6 +10,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { OperationBar, PulseIndicator } from '@/components/ui/PipelineProgress'
+import { getErrorMessage } from '@/lib/errors'
 
 // ============================================================================
 // Tipos
@@ -294,8 +295,8 @@ export function CodeGeneratorPage() {
         setOriginalContent(newMap.get(firstFile)?.content || '')
         setHasChanges(false)
       }
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || err?.message || 'Erro ao gerar scaffold'
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err)
       alert(`Falha na geração: ${detail}`)
     } finally {
       setScaffoldGenerating(false)
@@ -329,8 +330,8 @@ export function CodeGeneratorPage() {
       )
       setScaffoldPendingApply(false)
       loadTree()
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || err?.message || 'Erro ao aplicar scaffold'
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err)
       alert(`Falha ao aplicar: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
     } finally {
       setScaffoldApplying(false)
@@ -351,7 +352,7 @@ export function CodeGeneratorPage() {
         setNewFilePath(res.data.title || 'generated_module')
         setGeneratedFromBacklog(true)
         setHasChanges(true)
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Erro ao gerar código:', err)
       } finally {
         setGenerating(false)
@@ -509,8 +510,8 @@ export function CodeGeneratorPage() {
         setNewFilePath('')
         loadTree()
       }
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || err?.message || 'Erro ao salvar arquivo')
+    } catch (err: unknown) {
+      alert(getErrorMessage(err))
     } finally {
       setSaving(false)
     }
@@ -565,8 +566,8 @@ export function CodeGeneratorPage() {
       }
       applyMarkers([])
       setValidationErrors([])
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Falha ao validar código')
+    } catch (err: unknown) {
+      alert(getErrorMessage(err) || 'Falha ao validar código')
     } finally {
       setValidating(false)
     }
@@ -643,8 +644,8 @@ export function CodeGeneratorPage() {
         setSaveSuccess(true)
         setTimeout(() => setSaveSuccess(false), 2500)
       }
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Falha ao regenerar arquivo')
+    } catch (err: unknown) {
+      alert(getErrorMessage(err) || 'Falha ao regenerar arquivo')
     } finally {
       setRegenerating(false)
     }

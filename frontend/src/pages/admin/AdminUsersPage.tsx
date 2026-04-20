@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { Search, Loader2, Zap, Trash2, Shield, FolderOpen, UserPlus, ShieldOff, X } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/errors'
 
 interface ProjectRole {
   project_id: string
@@ -54,8 +55,8 @@ export function AdminUsersPage() {
       await apiClient.post(`/admin/users/${userId}/${action}`)
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: !(u.is_active !== false) } : u))
       showToast(`Usuário ${user?.is_active !== false ? 'desativado' : 'reativado'}`, 'success')
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao alterar status', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
     }
@@ -70,8 +71,8 @@ export function AdminUsersPage() {
       await apiClient.patch(`/admin/users/${userId}/admin-flag`, { is_admin: next })
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_admin: next } : u))
       showToast(`"${userName}" ${next ? 'promovido a Admin' : 'rebaixado'}`, 'success')
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || err?.message || 'Erro ao alterar papel Admin', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
     }
@@ -84,8 +85,8 @@ export function AdminUsersPage() {
       await apiClient.delete(`/admin/users/${userId}`)
       setUsers(prev => prev.filter(u => u.id !== userId))
       showToast(`Usuário "${userName}" excluído`, 'success')
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao excluir usuário', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
     }
@@ -357,8 +358,8 @@ function InviteAdminModal({
           'success',
         )
       }
-    } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Falha ao convidar administrador.')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err) || 'Falha ao convidar administrador.')
     } finally {
       setSubmitting(false)
     }

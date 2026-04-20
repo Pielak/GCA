@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface AccessAttempt {
   id: string
@@ -43,8 +44,8 @@ export const useSuspiciousAccess = (blockedOnly: boolean = true) => {
           return data.filter(a => a.blocked)
         }
         return data
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar acessos suspeitos')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -61,7 +62,7 @@ export const useUnblockAccess = () => {
       try {
         const response = await apiClient.post(`/admin/suspicious-access/${attemptId}/unblock`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -69,8 +70,8 @@ export const useUnblockAccess = () => {
       queryClient.invalidateQueries({ queryKey: ['suspicious-access'] })
       toast.success('Acesso desbloqueado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao desbloquear acesso')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

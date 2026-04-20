@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download, Sparkles, Globe, ExternalLink } from 'lucide-react'
 import api, { apiClient } from '@/lib/api'
+import { getErrorMessage, getErrorStatus } from '@/lib/errors'
 
 /**
  * MVP 9 Fase 9.2 — Modal de detalhamento on-demand de item do Roadmap.
@@ -85,14 +86,14 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
         : `/projects/${projectId}/modules/${moduleId}/details`
       const res = await apiClient.get<ModuleDetails>(url)
       setDetails(res.data)
-    } catch (err: any) {
-      const status = err.status
+    } catch (err: unknown) {
+      const status = getErrorStatus(err)
       if (status === 503) {
         setError('Ollama (LLM local) não está configurado para este projeto. Configure em Settings → IA para usar detalhamento on-demand.')
       } else if (status === 404) {
         setError('Módulo não encontrado.')
       } else {
-        setError(err.message || 'Erro ao gerar detalhamento.')
+        setError(getErrorMessage(err))
       }
     } finally {
       setLoading(false)
@@ -305,12 +306,12 @@ function DownloadTemplateButton({
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    } catch (err: any) {
-      const status = err?.response?.status || err?.status
+    } catch (err: unknown) {
+      const status = getErrorStatus(err)
       if (status === 503) {
         setError('Ollama não configurado. Configure em Settings → IA.')
       } else {
-        setError(err?.message || 'Erro ao gerar template.')
+        setError(getErrorMessage(err))
       }
     } finally {
       setDownloading(false)
@@ -357,8 +358,8 @@ function ExternalReferenceBlock({
       )
       setEditing(false)
       onChanged()
-    } catch (e: any) {
-      setErr(e?.response?.data?.detail || e?.message || 'Falha ao salvar URL.')
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e))
     } finally { setBusy(false) }
   }
 
@@ -367,8 +368,8 @@ function ExternalReferenceBlock({
     try {
       await api.post(`/projects/${projectId}/modules/${moduleId}/fetch-external`)
       onChanged()
-    } catch (e: any) {
-      const det = e?.response?.data?.detail || e?.message
+    } catch (e: unknown) {
+      const det = getErrorMessage(e)
       setErr(det || 'Falha no fetch.')
     } finally { setBusy(false) }
   }
@@ -531,14 +532,14 @@ function ReadinessBlock({
     try {
       await api.post(`/projects/${projectId}/modules/${moduleId}/evaluate-readiness`)
       onChanged()
-    } catch (e: any) {
-      const status = e?.response?.status || e?.status
+    } catch (e: unknown) {
+      const status = getErrorStatus(e)
       if (status === 503) {
         setErr('Provider Premium não configurado. Configure Anthropic ou OpenAI em Settings → IA.')
       } else if (status === 403) {
         setErr('Sem permissão. GP do projeto precisa disparar.')
       } else {
-        setErr(e?.message || 'Falha na avaliação.')
+        setErr(getErrorMessage(e))
       }
     } finally { setBusy(false) }
   }

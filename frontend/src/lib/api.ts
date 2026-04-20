@@ -1,4 +1,5 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 
 // Detect API URL based on how the frontend is being accessed
 export function getApiBaseUrl(): string {
@@ -63,7 +64,7 @@ api.interceptors.response.use(
     // Não redirecionar se já estiver em qualquer tela de login (/login,
     // /p/<slug>, /reset-password) — caso contrário o redirect blinda
     // o estado de erro do form e o usuário fica sem feedback.
-    if (error.response?.status === 401) {
+    if (getErrorStatus(error) === 401) {
       const path = window.location.pathname
       const isAuthPage =
         path === '/login' ||
@@ -95,12 +96,11 @@ api.interceptors.response.use(
     } else {
       errorMessage =
         (error.response?.data as any)?.message ||
-        error.message ||
-        'Erro ao processar requisição'
+        getErrorMessage(error)
     }
 
     return Promise.reject({
-      status: error.response?.status,
+      status: getErrorStatus(error),
       message: errorMessage,
       data: error.response?.data,
     })

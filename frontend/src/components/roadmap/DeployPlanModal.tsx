@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Loader2, X, Download, ListOrdered, AlertTriangle, GitCommit } from 'lucide-react'
 import api, { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 /**
  * MVP 9 Fase 9.4 — Modal "Plano de Deploy".
@@ -74,8 +75,8 @@ export function DeployPlanModal({ projectId, onClose }: Props) {
       try {
         const r = await apiClient.get<DeployPlan>(`/projects/${projectId}/roadmap/deploy-plan`)
         if (!cancelled) setPlan(r.data)
-      } catch (e: any) {
-        if (!cancelled) setErr(e?.message || 'Falha ao montar plano.')
+      } catch (e: unknown) {
+        if (!cancelled) setErr(getErrorMessage(e))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -100,8 +101,8 @@ export function DeployPlanModal({ projectId, onClose }: Props) {
       a.click()
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
-    } catch (e: any) {
-      setErr(e?.message || 'Falha ao exportar Markdown.')
+    } catch (e: unknown) {
+      setErr(getErrorMessage(e))
     } finally {
       setExporting(false)
     }

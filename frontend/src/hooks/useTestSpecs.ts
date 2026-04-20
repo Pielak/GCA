@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage, getErrorStatus } from '@/lib/errors'
 
 /**
  * MVP 10 Fase 10.5 — Hooks pros Planos de Teste (TestSpec).
@@ -147,14 +148,14 @@ export const useGenerateModuleSpec = (projectId: string | undefined) => {
       qc.invalidateQueries({ queryKey: ['test-specs', projectId] })
       toast.success('Spec gerado via Ollama.')
     },
-    onError: (err: any) => {
-      const status = err?.status || err?.response?.status
+    onError: (err: unknown) => {
+      const status = getErrorStatus(err)
       if (status === 503) {
         toast.error('Ollama não configurado no projeto. Settings → IA.')
       } else if (status === 400) {
-        toast.error(err?.message || 'Tipo de spec inválido.')
+        toast.error(getErrorMessage(err))
       } else {
-        toast.error(err?.message || 'Falha ao gerar spec.')
+        toast.error(getErrorMessage(err))
       }
     },
   })
@@ -174,14 +175,14 @@ export const useGenerateGlobalSpec = (projectId: string | undefined) => {
       qc.invalidateQueries({ queryKey: ['test-specs', projectId] })
       toast.success(`Spec ${specType} gerado via Premium.`)
     },
-    onError: (err: any) => {
-      const status = err?.status || err?.response?.status
+    onError: (err: unknown) => {
+      const status = getErrorStatus(err)
       if (status === 503) {
         toast.error('Provider Premium (Anthropic/OpenAI) não configurado.')
       } else if (status === 400) {
-        toast.error(err?.message || 'Validação falhou.')
+        toast.error(getErrorMessage(err))
       } else {
-        toast.error(err?.message || 'Falha ao gerar spec global.')
+        toast.error(getErrorMessage(err))
       }
     },
   })
@@ -212,8 +213,8 @@ export const useBulkRegenerateTestSpecs = (projectId: string | undefined) => {
         toast.info(`${report.generated} gerados, ${report.failed} com falha.`)
       }
     },
-    onError: (err: any) => {
-      toast.error(err?.message || 'Falha no bulk regenerate.')
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err))
     },
   })
 }
@@ -236,14 +237,14 @@ export const useApproveTestSpec = (projectId: string | undefined) => {
       qc.invalidateQueries({ queryKey: ['test-specs', projectId] })
       toast.success('Spec aprovado.')
     },
-    onError: (err: any) => {
-      const status = err?.status || err?.response?.status
+    onError: (err: unknown) => {
+      const status = getErrorStatus(err)
       if (status === 403) {
         toast.error('Aprovar requer papel GP ou QA.')
       } else if (status === 400) {
-        toast.error(err?.message || 'Transição inválida — regenere antes.')
+        toast.error(getErrorMessage(err))
       } else {
-        toast.error(err?.message || 'Falha ao aprovar.')
+        toast.error(getErrorMessage(err))
       }
     },
   })
@@ -264,14 +265,14 @@ export const useRejectTestSpec = (projectId: string | undefined) => {
       qc.invalidateQueries({ queryKey: ['test-specs', projectId] })
       toast.success('Spec rejeitado com motivo registrado.')
     },
-    onError: (err: any) => {
-      const status = err?.status || err?.response?.status
+    onError: (err: unknown) => {
+      const status = getErrorStatus(err)
       if (status === 403) {
         toast.error('Rejeitar requer papel GP ou QA.')
       } else if (status === 400) {
-        toast.error(err?.message || 'Motivo muito curto ou transição inválida.')
+        toast.error(getErrorMessage(err))
       } else {
-        toast.error(err?.message || 'Falha ao rejeitar.')
+        toast.error(getErrorMessage(err))
       }
     },
   })
@@ -299,8 +300,8 @@ export const useBulkRegenerateGlobalSpecs = (projectId: string | undefined) => {
         toast.info(`${report.generated} gerados, ${report.failed} com falha.`)
       }
     },
-    onError: (err: any) => {
-      toast.error(err?.message || 'Falha ao regerar specs globais.')
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err))
     },
   })
 }

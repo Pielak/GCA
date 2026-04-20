@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X, Bug, Loader2, AlertCircle, Paperclip, Trash2 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface Props {
   projectId: string
@@ -104,8 +105,8 @@ export function NewIncidentModal({ projectId, onClose, onCreated }: Props) {
       }
 
       onCreated()
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Falha ao abrir ticket.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Falha ao abrir ticket.')
     } finally {
       setSubmitting(false)
       setUploadProgress(null)

@@ -4,6 +4,7 @@ import {
   Search, CheckCircle2,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface SupportUser {
   id: string
@@ -43,8 +44,8 @@ export function AdminSupportPage() {
       const userList = usersRes.data.users || usersRes.data.items || []
       setAllUsers(Array.isArray(userList) ? userList : [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar Equipe Sustentação.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar Equipe Sustentação.')
     } finally {
       setLoading(false)
     }
@@ -57,8 +58,8 @@ export function AdminSupportPage() {
     try {
       await apiClient.patch(`/admin/support/${targetId}`, { is_support: next })
       await load()
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Falha ao atualizar.')
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || 'Falha ao atualizar.')
     } finally {
       setTogglingId(null)
     }

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface TicketResponse {
   id: string
@@ -62,8 +63,8 @@ export const useTickets = (
         }
 
         return response.data as TicketsResponse
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar tickets')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -81,8 +82,8 @@ export const useTicketDetail = (ticketId: string | null) => {
       try {
         const response = await apiClient.get<SupportTicket>(`/admin/tickets/${ticketId}`)
         return response.data
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar ticket')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -111,7 +112,7 @@ export const useRespondToTicket = () => {
           is_resolution: isResolution,
         })
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -120,8 +121,8 @@ export const useRespondToTicket = () => {
       queryClient.invalidateQueries({ queryKey: ['ticket', variables.ticketId] })
       toast.success('Resposta enviada com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao enviar resposta')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

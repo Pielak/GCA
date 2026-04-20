@@ -15,6 +15,7 @@ import {
 
 import { cn } from "./utils";
 import { Label } from "./label";
+import { getErrorMessage } from '@/lib/errors'
 
 const Form = FormProvider;
 
@@ -138,7 +139,7 @@ function FormDescription({ className, ...props }: React.ComponentProps<"p">) {
 
 function FormMessage({ className, ...props }: React.ComponentProps<"p">) {
   const { error, formMessageId } = useFormField();
-  const body = error ? String(error?.message ?? "") : props.children;
+  const body = error ? String(getErrorMessage(error) ?? "") : props.children;
 
   if (!body) {
     return null;

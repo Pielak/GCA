@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface User {
   id: string
@@ -44,8 +45,8 @@ export const useUsers = (page: number = 1, filter: 'all' | 'active' | 'inactive'
         }
 
         return response.data as UsersResponse
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar usuários')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -62,7 +63,7 @@ export const useLockUser = () => {
       try {
         const response = await apiClient.post(`/admin/users/${userId}/lock`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -70,8 +71,8 @@ export const useLockUser = () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.success('Usuário bloqueado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao bloquear usuário')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -85,7 +86,7 @@ export const useUnlockUser = () => {
       try {
         const response = await apiClient.post(`/admin/users/${userId}/unlock`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -93,8 +94,8 @@ export const useUnlockUser = () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.success('Usuário desbloqueado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao desbloquear usuário')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -108,7 +109,7 @@ export const useResetPassword = () => {
       try {
         const response = await apiClient.post(`/admin/users/${userId}/reset-password`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -116,8 +117,8 @@ export const useResetPassword = () => {
       queryClient.invalidateQueries({ queryKey: ['users'] })
       toast.success('Senha resetada com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao resetar senha')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

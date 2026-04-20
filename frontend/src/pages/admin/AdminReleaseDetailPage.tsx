@@ -5,6 +5,7 @@ import {
   CheckCircle2, Clock, Camera, RotateCcw, PlayCircle, FileText,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface ReleaseItem {
   id: string
@@ -85,8 +86,8 @@ export function AdminReleaseDetailPage() {
       setItems(detailRes.data.items || [])
       setLog(logRes.data.entries || [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar release.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar release.')
     } finally {
       setLoading(false)
     }
@@ -113,8 +114,8 @@ export function AdminReleaseDetailPage() {
         `Projetos afetados: ${res.data.affected_projects}`,
       )
       await load()
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Falha ao aplicar release.')
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || 'Falha ao aplicar release.')
     } finally {
       setApplying(false)
     }

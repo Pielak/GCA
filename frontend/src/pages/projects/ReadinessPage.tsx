@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
+import { getErrorMessage } from '@/lib/errors'
 
 interface Deliverable {
   id: string
@@ -115,13 +116,8 @@ export function ReadinessPage() {
         const dl = `/api/v1/projects/${projectId}/releases/${res.data.version}/download`
         window.open(dl, '_blank')
       }
-    } catch (e: any) {
-      const detail = e?.response?.data?.detail
-      if (typeof detail === 'object' && detail?.message) {
-        setReleaseError(detail.message)
-      } else {
-        setReleaseError(e?.message || 'Falha ao criar release')
-      }
+    } catch (e: unknown) {
+      setReleaseError(getErrorMessage(e))
     } finally {
       setCreatingRelease(false)
     }
@@ -160,8 +156,8 @@ export function ReadinessPage() {
       const kept = c.kept ?? 0
       setSyncMsg(`Sync: +${inserted} novo(s), ${reactivated} reativado(s), ${waived} arquivado(s), ${kept} mantido(s).`)
       await load()
-    } catch (e: any) {
-      setSyncMsg(e?.response?.data?.detail || e?.message || 'Falha ao sincronizar.')
+    } catch (e: unknown) {
+      setSyncMsg(getErrorMessage(e))
     } finally {
       setSyncing(false)
     }
@@ -492,8 +488,8 @@ function AttestModal({ projectId, deliverable, onClose, onSuccess }: {
         evidence_ref: evidenceRef.trim() || null,
       })
       onSuccess()
-    } catch (e: any) {
-      setError(e?.message || 'Erro ao atestar')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e))
     } finally {
       setSubmitting(false)
     }

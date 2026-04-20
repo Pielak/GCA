@@ -4,6 +4,7 @@ import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, X } from 'luc
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 import { apiClient as api } from '@/lib/api'
+import { getErrorMessage, type ApiError } from '@/lib/errors'
 
 // ═══════════════════════════════════════════════════════════════════════
 // Particle Network — canvas animado de fundo
@@ -249,29 +250,29 @@ export function LoginPage() {
           setError('Email ou senha incorretos')
         }
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       // O api.ts interceptor já achata o erro em { status, message, data }.
-      // err.data é o body da resposta (com .detail).
-      const detail = err?.data?.detail
+      // (err as ApiError).data é o body da resposta (com .detail).
+      const detail = (err as ApiError)?.data?.detail
       const detailStr = typeof detail === 'string' ? detail : ''
 
-      if (err?.status === 401) {
+      if ((err as ApiError)?.status === 401) {
         setError('Email ou senha inválidos.')
-      } else if (err?.status === 403) {
+      } else if ((err as ApiError)?.status === 403) {
         // 403 com code='project_required' = não-admin tentou entrar sem projeto.
-        if (typeof detail === 'object' && detail?.code === 'project_required') {
+        if (detail && typeof detail === 'object' && !Array.isArray(detail) && detail.code === 'project_required') {
           setError('Selecione seu projeto no combo acima — apenas administradores podem entrar sem projeto.')
         } else if (detailStr.toLowerCase().includes('membro')) {
           setError('Você não é membro deste projeto. Verifique com o GP do projeto se foi adicionado à equipe.')
         } else {
           setError(detailStr || 'Acesso negado. Contate o administrador.')
         }
-      } else if (err?.status === 404) {
+      } else if ((err as ApiError)?.status === 404) {
         setError('Projeto não encontrado.')
-      } else if (err?.status === 410) {
+      } else if ((err as ApiError)?.status === 410) {
         setError('Projeto arquivado.')
       } else {
-        setError(detailStr || err?.message || 'Erro ao fazer login.')
+        setError(detailStr || getErrorMessage(err))
       }
     } finally {
       setLoading(false)

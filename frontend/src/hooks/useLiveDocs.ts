@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage, getErrorStatus } from '@/lib/errors'
 
 /**
  * MVP 10 Fase 10.7 — Hooks pra LiveDocs reais (docs vivas).
@@ -107,14 +108,14 @@ export const useGenerateModuleDoc = (projectId: string | undefined) => {
       qc.invalidateQueries({ queryKey: ['live-docs', projectId] })
       toast.success('Documentação do módulo gerada via Ollama.')
     },
-    onError: (err: any) => {
-      const status = err?.status || err?.response?.status
+    onError: (err: unknown) => {
+      const status = getErrorStatus(err)
       if (status === 503) {
         toast.error('Ollama não configurado no projeto. Settings → IA.')
       } else if (status === 400) {
-        toast.error(err?.message || 'Falha na validação.')
+        toast.error(getErrorMessage(err))
       } else {
-        toast.error(err?.message || 'Falha ao gerar documentação.')
+        toast.error(getErrorMessage(err))
       }
     },
   })
@@ -134,14 +135,14 @@ export const useGenerateConsolidatedDoc = (projectId: string | undefined) => {
       qc.invalidateQueries({ queryKey: ['live-docs', projectId] })
       toast.success(`Doc ${docType} gerada via Premium.`)
     },
-    onError: (err: any) => {
-      const status = err?.status || err?.response?.status
+    onError: (err: unknown) => {
+      const status = getErrorStatus(err)
       if (status === 503) {
         toast.error('Provider Premium (Anthropic/OpenAI) não configurado.')
       } else if (status === 400) {
-        toast.error(err?.message || 'Validação falhou.')
+        toast.error(getErrorMessage(err))
       } else {
-        toast.error(err?.message || 'Falha ao gerar doc consolidada.')
+        toast.error(getErrorMessage(err))
       }
     },
   })
@@ -170,8 +171,8 @@ export const useBulkRegenerateModuleDocs = (projectId: string | undefined) => {
         toast.info(`${report.generated} gerados, ${report.failed} com falha.`)
       }
     },
-    onError: (err: any) => {
-      toast.error(err?.message || 'Falha no bulk regenerate.')
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err))
     },
   })
 }
@@ -198,8 +199,8 @@ export const useBulkRegenerateConsolidatedDocs = (projectId: string | undefined)
         toast.info(`${report.generated} gerados, ${report.failed} com falha.`)
       }
     },
-    onError: (err: any) => {
-      toast.error(err?.message || 'Falha ao regerar docs consolidadas.')
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err))
     },
   })
 }

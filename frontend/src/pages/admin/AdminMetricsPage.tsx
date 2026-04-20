@@ -11,6 +11,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 // Tipos espelham o retorno de GET /api/v1/metrics/dashboard (DT-060).
 interface AIUsageRow {
@@ -87,7 +88,7 @@ export function AdminMetricsPage() {
       setPerProject(perProjectRes.data)
     } catch (err: unknown) {
       const e = err as { response?: { data?: { detail?: string } }; message?: string }
-      setError(e?.response?.data?.detail || e?.message || 'Erro ao carregar métricas')
+      setError(getErrorMessage(e))
     } finally {
       setLoading(false)
       setRefreshing(false)

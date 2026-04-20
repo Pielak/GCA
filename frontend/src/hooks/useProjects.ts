@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface ProjectRequest {
   id: string
@@ -40,8 +41,8 @@ export const usePendingProjects = () => {
           return response.data.projects
         }
         return response.data
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar projetos pendentes')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -66,8 +67,8 @@ export const useAllProjects = () => {
           return response.data.projects
         }
         return response.data
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar projetos')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -84,7 +85,7 @@ export const useCreateProject = () => {
       try {
         const response = await apiClient.post('/admin/projects', input)
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -92,8 +93,8 @@ export const useCreateProject = () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success(`Projeto "${data.project_name}" criado com sucesso`)
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao criar projeto')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -107,7 +108,7 @@ export const useApproveProject = () => {
       try {
         const response = await apiClient.post(`/admin/projects/${projectId}/approve`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -115,8 +116,8 @@ export const useApproveProject = () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success('Projeto aprovado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao aprovar projeto')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -132,7 +133,7 @@ export const useRejectProject = () => {
           reason,
         })
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -140,8 +141,8 @@ export const useRejectProject = () => {
       queryClient.invalidateQueries({ queryKey: ['projects'] })
       toast.success('Projeto rejeitado')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao rejeitar projeto')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

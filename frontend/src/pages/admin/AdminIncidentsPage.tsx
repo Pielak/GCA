@@ -5,6 +5,7 @@ import {
   CheckCircle2, XCircle, PlayCircle,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface Ticket {
   id: string
@@ -60,8 +61,8 @@ export function AdminIncidentsPage() {
       const res = await apiClient.get(`/admin/incidents${q}`)
       setItems(res.data.items || [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar tickets.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar tickets.')
     } finally {
       setLoading(false)
     }

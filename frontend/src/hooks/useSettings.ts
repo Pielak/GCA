@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface SMTPSettings {
   smtp_server: string
@@ -39,15 +40,15 @@ export const useUpdateSMTPSettings = () => {
       try {
         const response = await apiClient.post('/admin/settings/smtp', settings)
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
     onSuccess: () => {
       toast.success('SMTP configurado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao configurar SMTP')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -60,7 +61,7 @@ export const useUpdateIAProviderSettings = () => {
       try {
         const response = await apiClient.post('/admin/settings/ia-provider', settings)
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -69,8 +70,8 @@ export const useUpdateIAProviderSettings = () => {
         toast.success(`${data.provider} configurado com sucesso`)
       }
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao configurar IA Provider')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -83,15 +84,15 @@ export const useUpdateN8NSettings = () => {
       try {
         const response = await apiClient.post('/admin/settings/n8n', settings)
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
     onSuccess: () => {
       toast.success('N8N configurado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao configurar N8N')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -104,15 +105,15 @@ export const useTestSMTP = () => {
       try {
         const response = await apiClient.post('/admin/settings/smtp/test', {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
     onSuccess: () => {
       toast.success('Email de teste enviado com sucesso!')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao enviar email de teste')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -125,15 +126,15 @@ export const useTestIAProvider = () => {
       try {
         const response = await apiClient.post(`/admin/settings/ia-provider/${provider}/test`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
     onSuccess: (data, provider) => {
       toast.success(`${provider} testado com sucesso`)
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao testar IA Provider')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -146,15 +147,15 @@ export const useTestN8N = () => {
       try {
         const response = await apiClient.post('/admin/settings/n8n/test', {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
     onSuccess: () => {
       toast.success('N8N conectado com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao conectar N8N')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

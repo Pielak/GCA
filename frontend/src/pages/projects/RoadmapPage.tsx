@@ -127,7 +127,7 @@ export function RoadmapPage() {
     try {
       const res = await apiClient.get(`/projects/${id}/roadmap`)
       setData(res.data)
-    } catch (err: any) {
+    } catch (err: unknown) {
       setError('Erro ao carregar roadmap')
     } finally {
       setLoading(false)

@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
 import { RoleAssumptionPrompt } from '@/components/projects/RoleAssumptionPrompt'
 import { BacklogIssuePanel } from '@/components/projects/BacklogIssuePanel'
+import { getErrorMessage, type ApiError } from '@/lib/errors'
 
 interface BacklogItem {
   id: string
@@ -91,8 +92,8 @@ export function BacklogPage() {
       const res = await apiClient.post(`/projects/${projectId}/backlog/regenerate`)
       showToast(`Backlog regenerado: ${res.data.regenerated} itens`, 'success')
       await loadData()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao regenerar', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao regenerar', 'error')
     }
     setRefreshing(false)
   }
@@ -104,11 +105,11 @@ export function BacklogPage() {
     return async () => {
       try {
         await fn()
-      } catch (err: any) {
-        if (err?.status === 403) {
+      } catch (err: unknown) {
+        if ((err as ApiError)?.status === 403) {
           setRolePrompt({ action, retry: () => { setRolePrompt(null); fn().then(() => loadData()) } })
         } else {
-          showToast(err?.message || 'Erro', 'error')
+          showToast(getErrorMessage(err), 'error')
         }
       }
     }
@@ -119,8 +120,8 @@ export function BacklogPage() {
       const res = await apiClient.post(`/projects/${projectId}/backlog/generate`)
       showToast(`Backlog inteligente: ${res.data.ocg_items} OCG + ${res.data.arguider_items} Arguider. ${res.data.ready} prontos, ${res.data.blocked} bloqueados.`, 'success')
       await loadData()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao gerar', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao gerar', 'error')
     }
     setGenerating(false)
   }

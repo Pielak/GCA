@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate, Link } from 'react-router-dom'
 import { Code2, Mail, Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, ArrowLeft } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 type Step = 'request' | 'verify' | 'confirm'
 
@@ -51,8 +52,8 @@ export function ResetPasswordPage() {
         setError('Token invalido ou expirado. Solicite um novo link.')
         setStep('request')
       }
-    } catch (err: any) {
-      setError(err?.message || 'Token invalido ou expirado')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
       setStep('request')
     } finally {
       setLoading(false)
@@ -67,8 +68,8 @@ export function ResetPasswordPage() {
       await apiClient.post('/auth/reset-password', { email })
       setSuccess('Se o email existir no sistema, você receberá um link de recuperação.')
       setTimeout(() => setSuccess(null), 5000)
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao solicitar reset')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -85,8 +86,8 @@ export function ResetPasswordPage() {
       })
       setSuccess('Senha alterada com sucesso! Redirecionando...')
       setTimeout(() => navigate('/login'), 2000)
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao alterar senha')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

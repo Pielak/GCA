@@ -8,6 +8,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { questionLabel } from '@/data/questionLabels'
 import { QUESTION_SCHEMA, type QuestionDef } from '@/data/questionSchema'
+import { getErrorMessage, type ApiError } from '@/lib/errors'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -93,8 +94,8 @@ export function QuestionnairePage() {
       a.download = `Questionario_GCA_${projectId}.pdf`
       a.click()
       URL.revokeObjectURL(url)
-    } catch (err: any) {
-      alert(`Erro ao baixar PDF: ${err?.message || 'desconhecido'}`)
+    } catch (err: unknown) {
+      alert(`Erro ao baixar PDF: ${getErrorMessage(err)}`)
     } finally {
       setDownloading(false)
     }
@@ -113,8 +114,8 @@ export function QuestionnairePage() {
       alert(res?.data?.message || 'Questionário submetido para análise.')
       invalidateSetup()
       window.location.reload()
-    } catch (err: any) {
-      const detail = err?.data?.detail || err?.message || 'Erro ao processar PDF'
+    } catch (err: unknown) {
+      const detail = (err as ApiError)?.data?.detail || getErrorMessage(err)
       alert(`Erro: ${detail}`)
     } finally {
       setUploading(false)
@@ -526,10 +527,10 @@ function InlineFixPanel({
         })
       }
       await onSaved()
-    } catch (err: any) {
+    } catch (err: unknown) {
       setResult({
         ok: false,
-        message: err?.response?.data?.detail || err?.message || 'Falha ao salvar correções',
+        message: getErrorMessage(err),
       })
     }
     setSaving(false)

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
 import { Code2, Lock, Eye, EyeOff, CheckCircle2, AlertCircle, Loader2, Shield } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 type Step = 'validate' | 'setPassword' | 'success'
 
@@ -55,8 +56,8 @@ export function AcceptInvitationPage() {
       } else {
         setError(res.data.message || 'Senha temporária invalida')
       }
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao validar senha temporária')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -74,8 +75,8 @@ export function AcceptInvitationPage() {
       })
       setStep('success')
       setTimeout(() => navigate('/login'), 3000)
-    } catch (err: any) {
-      setError(err?.message || 'Erro ao definir senha')
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
     }

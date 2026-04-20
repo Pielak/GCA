@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useSetupStatus } from '@/hooks/useSetupStatus'
 import { RepositoryPage } from '@/pages/projects/RepositoryPage'
 import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
+import { getErrorMessage } from '@/lib/errors'
 
 type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario'
 const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario']
@@ -156,8 +157,8 @@ export function ProjectSettingsPage() {
       setAddingLlm(false)
       await loadSettings()
       invalidateSetup()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao adicionar', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao adicionar', 'error')
     }
     setSaving(false)
   }
@@ -195,12 +196,12 @@ export function ProjectSettingsPage() {
       }
       setLlmTestResults(prev => ({ ...prev, [provider]: result }))
       await loadSettings() // re-pega last_validated_at/ok atualizados
-    } catch (err: any) {
+    } catch (err: unknown) {
       setLlmTestResults(prev => ({
         ...prev,
         [provider]: {
           ok: false,
-          message: err?.response?.data?.detail || err?.message || 'Falha ao contatar o servidor',
+          message: getErrorMessage(err),
           provider,
         },
       }))
@@ -216,8 +217,8 @@ export function ProjectSettingsPage() {
       showToast(`${provider} definido como padrão do projeto`, 'success')
       await loadSettings()
       invalidateSetup()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao definir padrão', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao definir padrão', 'error')
     }
     setSettingDefault(null)
   }
@@ -236,8 +237,8 @@ export function ProjectSettingsPage() {
       })
       await loadSettings()
       invalidateSetup()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao remover', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao remover', 'error')
     }
     setRemovingProvider(null)
   }
@@ -256,8 +257,8 @@ export function ProjectSettingsPage() {
       setSmtpPass('')
       await loadSettings()
       invalidateSetup()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao salvar', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao salvar', 'error')
     }
     setSaving(false)
   }
@@ -278,10 +279,10 @@ export function ProjectSettingsPage() {
         ok: true,
         message: `Email de teste enviado para ${currentUserEmail}. Verifique sua caixa nos próximos minutos.`,
       })
-    } catch (err: any) {
+    } catch (err: unknown) {
       setSmtpTestResult({
         ok: false,
-        message: err?.response?.data?.detail || err?.message || 'Falha ao enviar email de teste',
+        message: getErrorMessage(err),
       })
     }
     setTestingSmtp(false)

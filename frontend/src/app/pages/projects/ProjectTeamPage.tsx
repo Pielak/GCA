@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { UserPlus, Loader2, CheckCircle2, Clock, Lightbulb, Users } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
+import { getErrorMessage } from '@/lib/errors'
 
 interface PendingInvite {
   invite_id: string
@@ -138,8 +139,8 @@ export function ProjectTeamPage() {
       setRole('dev')
       await loadTeamData()
       setTimeout(() => setInviteSuccess(null), 3000)
-    } catch (err: any) {
-      setInviteError(err?.message || 'Erro ao enviar convite')
+    } catch (err: unknown) {
+      setInviteError(getErrorMessage(err))
     } finally {
       setInviteLoading(false)
     }

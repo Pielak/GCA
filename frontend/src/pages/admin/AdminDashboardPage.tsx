@@ -7,6 +7,7 @@ import {
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { apiClient } from '@/lib/api'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
+import { getErrorMessage } from '@/lib/errors'
 
 interface DashboardMetrics {
   totalProjects: number
@@ -256,8 +257,8 @@ function AIProvidersTab() {
       setEditingProvider(null)
       setApiKeyInput('')
       await loadProviders()
-    } catch (err: any) {
-      showToast(err.message || 'Erro ao salvar', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setSaving(false)
     }
@@ -282,8 +283,8 @@ function AIProvidersTab() {
         showToast(res.data.message, 'error')
       }
       await loadProviders()
-    } catch (err: any) {
-      showToast(err.message || 'Erro no teste', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setTesting(null)
     }
@@ -294,8 +295,8 @@ function AIProvidersTab() {
       await apiClient.put('/admin/gca/ai-providers/default', { provider: providerId })
       showToast('Provedor padrão definido', 'success')
       await loadProviders()
-    } catch (err: any) {
-      showToast(err.message || 'Erro', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     }
   }
 

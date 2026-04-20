@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface GatekeeperItem {
   id: string
@@ -64,8 +65,8 @@ export const useResolveItem = (projectId: string | undefined) => {
       queryClient.invalidateQueries({ queryKey: ['gatekeeper', projectId] })
       toast.success('Item resolvido com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao resolver item')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }
@@ -86,8 +87,8 @@ export const useIgnoreItem = (projectId: string | undefined) => {
       queryClient.invalidateQueries({ queryKey: ['gatekeeper', projectId] })
       toast.success('Item ignorado')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao ignorar item')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

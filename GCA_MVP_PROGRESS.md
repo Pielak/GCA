@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.21  
+Versão: 3.22  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 / 12.4 / 12.5 / 12.6 FECHADAS 2026-04-20**. Fase 12.6 (canário e2e + remoção `continue-on-error`): novo `backend/scripts/seed_e2e.py` cria admin canônico `admin@gca.local` + project UUID fixo + membership GP de forma idempotente; CI `backend-tests.yml` lane `e2e` passa a rodar seed antes do teste; `continue-on-error: true` removido — lane agora é gate real. 3 testes (seed cria estado correto, seed é idempotente, workflow sem continue-on-error). Fases 12.7-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1-12.7 FECHADAS 2026-04-20**. Fase 12.7 (type safety frontend): novo `frontend/src/lib/errors.ts` com helpers canônicos `getErrorMessage`, `getErrorStatus`, `isAxiosError` + type `ApiError`; substituição em massa `catch (err: any)` → `catch (err: unknown)` + `err.response?.data?.detail` → `getErrorMessage(err)` + `err.response?.status` → `getErrorStatus(err)` em ~40 arquivos TS; uso de `ApiError` cast onde código depende do shape do interceptor de `lib/api.ts`. Redução **237 → 91 ocorrências de `any`** (−61,6%); tsc errors mantidos em 57 baseline (zero erros novos — os restantes são pré-existentes: módulos radix-ui não instalados, `TestArtifact` mismatches, etc.). Fases 12.8-12.10 seguem definidas.
 
 ---
 
@@ -16,7 +16,7 @@ Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em exe
 2. **Tema B — Configurabilidade operacional:** ✅ Fase 12.2 timezone configurável em BackupScheduler (env `BACKUP_TIMEZONE`; fallback em valor inválido; 10 testes).
 3. **Tema C — Higiene de schema + cleanup:** ✅ Fase 12.3 consolidar `accepted_at`/`joined_at` (fix + helpers + docstring; 11 testes); 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
 4. **Tema D — CI maturity:** ✅ Fase 12.6 canário `seed_e2e.py` idempotente + CI roda seed + `continue-on-error` removido (3 testes).
-5. **Tema E — Type safety frontend:** 12.7 remoção de `any` em ~20 arquivos TS.
+5. **Tema E — Type safety frontend:** ✅ Fase 12.7 redução de `any` (237→91, −61,6%) via helpers canônicos `getErrorMessage`/`getErrorStatus`/`ApiError` em `lib/errors.ts` + substituição em massa em ~40 arquivos.
 6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis (pipeline arguider/ocg_updater/codegen); 12.9 consolidação de helper de prompt CodeGen.
 7. **Tema G — Observabilidade compliance:** 12.10 cobertura completa de `audit_log_global` (projeto, questionário, OCG, CodeGen).
 

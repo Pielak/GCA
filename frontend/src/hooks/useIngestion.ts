@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage, type ApiError } from '@/lib/errors'
 
 // MVP 8 Fase 1 — estágios canônicos do pipeline de ingestão/análise
 export type ArguiderStage =
@@ -208,13 +209,13 @@ export const useUploadDocument = (projectId: string | undefined) => {
       queryClient.invalidateQueries({ queryKey: ['ingestion', projectId] })
       toast.success(`Documento recebido. Análise iniciada.`)
     },
-    onError: (error: any) => {
-      if (error.status === 409) {
+    onError: (error: unknown) => {
+      if ((error as ApiError).status === 409) {
         toast.error('Documento já foi ingerido neste projeto (duplicata).')
-      } else if (error.status === 413) {
+      } else if ((error as ApiError).status === 413) {
         toast.error('Arquivo excede o tamanho máximo de 50MB.')
       } else {
-        toast.error(error.message || 'Erro ao enviar documento')
+        toast.error(getErrorMessage(error))
       }
     },
   })
@@ -234,8 +235,8 @@ export const useDeleteDocument = (projectId: string | undefined) => {
       queryClient.invalidateQueries({ queryKey: ['ingestion', projectId] })
       toast.success('Documento removido com sucesso')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao remover documento')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

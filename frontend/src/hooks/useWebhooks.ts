@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface WebhookTestResponse {
   status: string
@@ -29,7 +30,7 @@ export const useTestWebhook = () => {
           }
         )
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -40,8 +41,8 @@ export const useTestWebhook = () => {
         toast.warning(`Webhook retornou: ${data.message}`)
       }
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao testar webhook')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

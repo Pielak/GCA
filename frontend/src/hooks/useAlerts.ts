@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiClient } from '@/lib/api'
 import { useToast } from '@/hooks/useToast'
+import { getErrorMessage } from '@/lib/errors'
 
 export interface SystemAlert {
   id: string
@@ -57,8 +58,8 @@ export const useAlerts = (
         }
 
         return response.data as AlertsResponse
-      } catch (error: any) {
-        toast.error(error.message || 'Erro ao carregar alertas')
+      } catch (error: unknown) {
+        toast.error(getErrorMessage(error))
         throw error
       }
     },
@@ -76,7 +77,7 @@ export const useAcknowledgeAlert = () => {
       try {
         const response = await apiClient.post(`/admin/alerts/${alertId}/acknowledge`, {})
         return response.data
-      } catch (error: any) {
+      } catch (error: unknown) {
         throw error
       }
     },
@@ -84,8 +85,8 @@ export const useAcknowledgeAlert = () => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] })
       toast.success('Alerta reconhecido')
     },
-    onError: (error: any) => {
-      toast.error(error.message || 'Erro ao reconhecer alerta')
+    onError: (error: unknown) => {
+      toast.error(getErrorMessage(error))
     },
   })
 }

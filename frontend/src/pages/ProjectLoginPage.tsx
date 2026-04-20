@@ -8,6 +8,7 @@ import { useAuth } from '@/hooks/useAuth'
 import api from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage, type ApiError } from '@/lib/errors'
 
 // ═══════════════════════════════════════════════════════════════════════
 // Particle Network — canvas animado de fundo (reutilizado do LoginPage)
@@ -170,7 +171,7 @@ export function ProjectLoginPage() {
     try {
       await api.post('/auth/reset-password', { email: resetEmail })
       setPageState('reset-sent')
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Não revelar se email existe ou não — sempre mostrar sucesso
       setPageState('reset-sent')
     } finally {
@@ -242,15 +243,15 @@ export function ProjectLoginPage() {
       } else {
         navigate(`/projects/${result.project_id}`)
       }
-    } catch (err: any) {
-      if (err?.status === 404) {
+    } catch (err: unknown) {
+      if ((err as ApiError)?.status === 404) {
         setError('Projeto não encontrado.')
-      } else if (err?.status === 403) {
+      } else if ((err as ApiError)?.status === 403) {
         setError('Você não é membro deste projeto.')
-      } else if (err?.status === 401) {
+      } else if ((err as ApiError)?.status === 401) {
         setError('Email ou senha incorretos.')
       } else {
-        setError(err?.message || 'Erro ao fazer login.')
+        setError(getErrorMessage(err))
       }
     } finally {
       setLoading(false)
@@ -281,8 +282,8 @@ export function ProjectLoginPage() {
       if (pendingProjectId) {
         navigate(`/projects/${pendingProjectId}`)
       }
-    } catch (err: any) {
-      setChangeError(err?.message || 'Erro ao alterar senha.')
+    } catch (err: unknown) {
+      setChangeError(getErrorMessage(err))
     } finally {
       setChangingPassword(false)
     }

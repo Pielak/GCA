@@ -5,6 +5,7 @@ import {
   CheckCircle2, Clock, ChevronRight,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface ReleaseItem {
   id: string
@@ -37,8 +38,8 @@ export function AdminReleasesPage() {
       const res = await apiClient.get('/admin/releases')
       setItems(res.data.items || [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar releases.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar releases.')
     } finally {
       setLoading(false)
     }

@@ -7,6 +7,7 @@ import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/Pi
 import { IngestionProgressBar } from '@/components/ingestion/IngestionProgressBar';
 import { ExtractionReportCard } from '@/components/ingestion/ExtractionReportCard';
 import { apiClient } from '@/lib/api';
+import { getErrorMessage } from '@/lib/errors'
 
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
 
@@ -84,8 +85,8 @@ export function IngestionPage() {
     try {
       await apiClient.post(`/projects/${projectId}/ingestion/${docId}/reanalyze`, {});
       await refetch();
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || err?.message || 'Falha ao disparar reanálise';
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err);
       alert(`Reanálise falhou: ${detail}`);
     } finally {
       setReanalyzing(prev => ({ ...prev, [docId]: false }));
@@ -102,8 +103,8 @@ export function IngestionPage() {
     try {
       await apiClient.post(`/projects/${projectId}/ingestion/${docId}/release`, {});
       await refetch();
-    } catch (err: any) {
-      const detail = err?.response?.data?.detail || err?.message || 'Falha ao liberar';
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err);
       alert(`Liberação falhou: ${detail}`);
     } finally {
       setReleasing(prev => ({ ...prev, [docId]: false }));

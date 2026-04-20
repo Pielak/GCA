@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { NewIncidentModal } from '@/components/incidents/NewIncidentModal'
+import { getErrorMessage } from '@/lib/errors'
 
 interface Ticket {
   id: string
@@ -61,8 +62,8 @@ export function IncidentListPage() {
       const res = await apiClient.get(`/projects/${projectId}/incidents${q}`)
       setItems(res.data.items || [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar tickets.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar tickets.')
     } finally {
       setLoading(false)
     }

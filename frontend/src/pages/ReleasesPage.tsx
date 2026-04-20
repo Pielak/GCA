@@ -3,6 +3,7 @@ import {
   Package, Loader2, AlertCircle, Sparkles, ChevronDown, ChevronRight,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface ReleaseItemDetail {
   id: string
@@ -56,8 +57,8 @@ export function ReleasesPage() {
       const res = await apiClient.get('/releases')
       setItems(res.data.items || [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar releases.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar releases.')
     } finally {
       setLoading(false)
     }
@@ -76,7 +77,7 @@ export function ReleasesPage() {
     try {
       const res = await apiClient.get(`/releases/${releaseId}`)
       setExpandedItems(res.data.items || [])
-    } catch (e: any) {
+    } catch (e: unknown) {
       setExpandedItems([])
     }
   }

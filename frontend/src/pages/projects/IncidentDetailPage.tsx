@@ -8,6 +8,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/errors'
 
 interface Ticket {
   id: string
@@ -108,8 +109,8 @@ export function IncidentDetailPage() {
       setComments(res.data.comments || [])
       setAttachments(res.data.attachments || [])
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar ticket.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar ticket.')
     } finally {
       setLoading(false)
     }
@@ -125,8 +126,8 @@ export function IncidentDetailPage() {
       await apiClient.post(`/incidents/${ticketId}/comments`, { body: commentBody.trim() })
       setCommentBody('')
       await load()
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Falha ao publicar comentário.')
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || 'Falha ao publicar comentário.')
     } finally {
       setSubmittingComment(false)
     }
@@ -138,8 +139,8 @@ export function IncidentDetailPage() {
     try {
       await apiClient.patch(`/incidents/${ticketId}/status`, { status: newStatus })
       await load()
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Falha ao mudar status.')
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || 'Falha ao mudar status.')
     } finally {
       setUpdatingStatus(false)
     }
@@ -160,8 +161,8 @@ export function IncidentDetailPage() {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       await load()
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Falha ao enviar anexo.')
+    } catch (err: unknown) {
+      alert(getErrorMessage(err) || 'Falha ao enviar anexo.')
     } finally {
       setUploadingAttachment(false)
       e.target.value = ''
@@ -174,8 +175,8 @@ export function IncidentDetailPage() {
     try {
       await apiClient.delete(`/incidents/${ticketId}/attachments/${att.id}`)
       await load()
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Falha ao excluir anexo.')
+    } catch (err: unknown) {
+      alert(getErrorMessage(err) || 'Falha ao excluir anexo.')
     }
   }
 
@@ -192,8 +193,8 @@ export function IncidentDetailPage() {
       a.download = att.filename
       a.click()
       URL.revokeObjectURL(url)
-    } catch (err: any) {
-      alert(err?.response?.data?.detail || 'Falha ao baixar anexo.')
+    } catch (err: unknown) {
+      alert(getErrorMessage(err) || 'Falha ao baixar anexo.')
     }
   }
 

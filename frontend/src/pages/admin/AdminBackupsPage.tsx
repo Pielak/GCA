@@ -5,6 +5,7 @@ import {
   Filter, Zap, Download,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface BackupItem {
   id: string
@@ -46,8 +47,8 @@ export function AdminBackupsPage() {
     try {
       const res = await apiClient.get('/admin/backups')
       setItems(res.data.items || [])
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar backups')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar backups')
     } finally {
       setLoading(false)
     }
@@ -87,8 +88,8 @@ export function AdminBackupsPage() {
     try {
       await apiClient.post(`/projects/${pid}/backups`)
       await load()
-    } catch (e: any) {
-      alert(e?.response?.data?.detail || 'Falha ao disparar')
+    } catch (e: unknown) {
+      alert(getErrorMessage(e) || 'Falha ao disparar')
     } finally {
       setTriggeringPid(null)
     }

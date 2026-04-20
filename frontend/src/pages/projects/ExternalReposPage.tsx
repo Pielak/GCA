@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { GitBranch, Plus, Trash2, Play, Loader2, CheckCircle, AlertTriangle, Clock, RefreshCw, Eye, EyeOff, BarChart3, X, ChevronDown, ChevronRight, FileText, Shield, Layers, FolderTree, BookOpen } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface AnalysisResult {
   stack: Record<string, any>
@@ -124,8 +125,8 @@ export function ExternalReposPage() {
     try {
       const res = await apiClient.get(`/projects/${projectId}/external-repos/${repoId}/analysis`)
       setAnalysisData(res.data)
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao carregar análise', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao carregar análise', 'error')
       setShowAnalysis(null)
     }
     setAnalysisLoading(false)
@@ -147,8 +148,8 @@ export function ExternalReposPage() {
       setAccessToken('')
       setBranch('main')
       await loadRepos()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao cadastrar repositório', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao cadastrar repositório', 'error')
     }
     setSaving(false)
   }
@@ -159,8 +160,8 @@ export function ExternalReposPage() {
       await apiClient.post(`/projects/${projectId}/external-repos/${repo.id}/read`)
       showToast(`Leitura iniciada: ${repo.repo_url}`, 'success')
       await loadRepos()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao iniciar leitura', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao iniciar leitura', 'error')
     }
     setActionLoading(null)
   }
@@ -172,8 +173,8 @@ export function ExternalReposPage() {
       await apiClient.delete(`/projects/${projectId}/external-repos/${repo.id}`)
       showToast('Repositório removido', 'success')
       await loadRepos()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao remover', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao remover', 'error')
     }
     setActionLoading(null)
   }

@@ -4,6 +4,7 @@ import {
   Activity, AlertCircle, Brain, DollarSign, Loader2, RefreshCw, Zap,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface AIUsageRow {
   provider: string
@@ -47,8 +48,8 @@ export function ProjectMetricsPage() {
       const res = await apiClient.get(`/projects/${projectId}/metrics/dashboard?hours=${hours}`)
       setData(res.data)
       setError(null)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar métricas do projeto.')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar métricas do projeto.')
       setData(null)
     } finally {
       setLoading(false)

@@ -7,6 +7,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
+import { getErrorMessage } from '@/lib/errors'
 
 interface BackupItem {
   id: string
@@ -57,8 +58,8 @@ export function ProjectBackupPage() {
       const res = await apiClient.get(`/projects/${projectId}/backups`)
       setItems(res.data.items || [])
       setRetentionLimit(res.data.retention_limit ?? 10)
-    } catch (e: any) {
-      setError(e?.response?.data?.detail || 'Erro ao carregar backups')
+    } catch (e: unknown) {
+      setError(getErrorMessage(e) || 'Erro ao carregar backups')
     } finally {
       setLoading(false)
     }
@@ -82,8 +83,8 @@ export function ProjectBackupPage() {
       await apiClient.post(`/projects/${projectId}/backups`)
       setToast({ kind: 'ok', msg: 'Backup iniciado.' })
       await load()
-    } catch (e: any) {
-      const msg = e?.response?.data?.detail || 'Falha ao disparar backup'
+    } catch (e: unknown) {
+      const msg = getErrorMessage(e) || 'Falha ao disparar backup'
       setError(msg)
       setToast({ kind: 'err', msg })
     } finally {
@@ -105,8 +106,8 @@ export function ProjectBackupPage() {
       await apiClient.post(`/projects/${projectId}/backups/${backupId}/restore?confirm=true`)
       setToast({ kind: 'ok', msg: 'Restore concluído.' })
       await load()
-    } catch (e: any) {
-      const msg = e?.response?.data?.detail || 'Falha no restore'
+    } catch (e: unknown) {
+      const msg = getErrorMessage(e) || 'Falha no restore'
       setError(msg)
       setToast({ kind: 'err', msg })
     } finally {

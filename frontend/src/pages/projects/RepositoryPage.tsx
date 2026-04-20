@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { GitBranch, Check, AlertTriangle, Loader2, RefreshCw, Trash2, Eye, EyeOff, Shield } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { getErrorMessage } from '@/lib/errors'
 
 interface GitStatus {
   connected: boolean
@@ -87,8 +88,8 @@ export function RepositoryPage() {
       setPat('')
       await loadStatus()
       invalidateSetup()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao conectar repositório', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao conectar repositório', 'error')
     }
     setSaving(false)
   }
@@ -103,8 +104,8 @@ export function RepositoryPage() {
         showToast(res.data.message || 'Falha na verificação', 'error')
       }
       await loadStatus()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro na verificação', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro na verificação', 'error')
     }
     setVerifying(false)
   }
@@ -119,8 +120,8 @@ export function RepositoryPage() {
       setBranch('main')
       await loadStatus()
       invalidateSetup()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || 'Erro ao desconectar', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err) || 'Erro ao desconectar', 'error')
     }
   }
 

@@ -4,6 +4,7 @@ import { Search, CheckCircle, XCircle, Loader2, Trash2, Mail, Pencil, Clock, Eye
 import { apiClient } from '@/lib/api'
 import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
 import { getQuestionsForType } from '@/data/projectRequestQuestions'
+import { getErrorMessage } from '@/lib/errors'
 
 interface PendingProject {
   id: string
@@ -139,8 +140,8 @@ export function AdminProjectsPage() {
       } else {
         setGpModal(null)
       }
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao adicionar novo GP', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setGpSubLoading(false)
     }
@@ -158,8 +159,8 @@ export function AdminProjectsPage() {
       showToast('GP anterior removido do projeto', 'success')
       setGpModal(null)
       await loadData()
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao remover GP', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setGpSubLoading(false)
     }
@@ -189,9 +190,9 @@ export function AdminProjectsPage() {
       await apiClient.post(`/admin/projects/${p.id}/approve`)
       setOperationMsg({ message: 'Projeto aprovado', detail: `${p.project_name} — tenant provisionado com sucesso`, status: 'success' })
       await loadData()
-    } catch (err: any) {
-      setOperationMsg({ message: 'Erro na aprovação', detail: err?.message || 'Falha ao provisionar tenant', status: 'error' })
-      showToast(err?.message || 'Erro ao aprovar projeto', 'error')
+    } catch (err: unknown) {
+      setOperationMsg({ message: 'Erro na aprovação', detail: getErrorMessage(err), status: 'error' })
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
       setTimeout(() => setOperationMsg(null), 4000)
@@ -205,8 +206,8 @@ export function AdminProjectsPage() {
       await apiClient.delete(`/admin/projects/${p.id}`)
       showToast(`Solicitação "${p.project_name}" excluída`, 'success')
       await loadData()
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao excluir', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
     }
@@ -224,8 +225,8 @@ export function AdminProjectsPage() {
       await apiClient.patch(`/admin/projects/${p.project_id}/status`, { status: newStatus })
       showToast(`"${p.project_name}" — status: ${newStatus}`, 'success')
       await loadData()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || err?.message || 'Erro ao mudar status', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
     }
@@ -239,8 +240,8 @@ export function AdminProjectsPage() {
       await apiClient.post(`/admin/projects/requests/${p.id}/cleanup-orphan`)
       showToast(`Solicitação órfã "${p.project_name}" removida`, 'success')
       await loadData()
-    } catch (err: any) {
-      showToast(err?.response?.data?.detail || err?.message || 'Erro ao limpar órfão', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setActionLoading(null)
     }
@@ -257,8 +258,8 @@ export function AdminProjectsPage() {
       setRejectModal(null)
       setRejectReason('')
       await loadData()
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao rejeitar solicitação', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setRejecting(false)
     }
@@ -275,8 +276,8 @@ export function AdminProjectsPage() {
       showToast(res.data.message || 'Mensagem enviada', 'success')
       setMessageModal(null)
       setMessageText('')
-    } catch (err: any) {
-      showToast(err?.message || 'Erro ao enviar mensagem', 'error')
+    } catch (err: unknown) {
+      showToast(getErrorMessage(err), 'error')
     } finally {
       setSendingMessage(false)
     }
