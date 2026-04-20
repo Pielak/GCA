@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.19  
+Versão: 3.20  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 / 12.4 FECHADAS 2026-04-20**. Fase 12.4 (deprecar `ProjectRequest.initial_password_hash`): coluna marcada como DEPRECADA via docstring no modelo; 2 escritas órfãs removidas (`admin_service.approve_project_request:132` + `onboarding_service:82`); temp_password já viajava por caminho separado (User.password_hash + email) — zero impacto funcional; 3 testes de regressão documental. Coluna preservada fisicamente até V2 com remoção destrutiva planejada (§7 MVP 7). Suite pós-12.4: **1384/1384 passing, 3 skipped** (+3 Fase 12.4 sem alterar totalizador pois substituem 0 passings anteriores). Fases 12.5-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 / 12.4 / 12.5 FECHADAS 2026-04-20**. Fase 12.5 (remover/redirecionar TODOs SMTP de fluxo deprecado): `POST /api/v1/onboarding/{id}/step-3/team` passa a retornar **410 Gone** apontando caminho canônico `POST /api/v1/projects/{id}/invite`; TODOs históricos "Criar OGC inicial" e "Criar pillar_configuration" em `complete_step_5_stack_selection` substituídos por comentário canônico explicando que OCG nasce do questionário (contrato §5); corpo antigo preservado como referência histórica; 2 testes. Fases 12.6-12.10 seguem definidas.
 
 ---
 

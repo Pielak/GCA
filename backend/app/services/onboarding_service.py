@@ -492,8 +492,16 @@ class OnboardingService:
             await self.db.commit()
             await self.db.refresh(progress)
 
-            # TODO: Criar OGC inicial no tenant schema
-            # TODO: Criar pillar_configuration padrão no tenant
+            # MVP 12 Fase 12.5: os TODOs históricos de "Criar OCG inicial no
+            # tenant schema" e "Criar pillar_configuration padrão no
+            # tenant" foram descontinuados. O caminho canônico de criação
+            # de OCG é via `QuestionnaireService.submit_questionnaire` →
+            # pipeline de agentes IA (contrato §5 OCG). Este fluxo
+            # `complete_step_5_stack` pertence ao onboarding wizard
+            # legado e está deprecado pela Fase 12.5 (`setup_team`
+            # retorna 410 Gone); mantemos aqui apenas a persistência do
+            # progresso para compatibilidade retroativa com registros
+            # antigos.
 
             logger.info("onboarding.step_5_completed",
                        selected_stack=selected_stack,

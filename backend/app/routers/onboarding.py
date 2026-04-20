@@ -127,25 +127,37 @@ async def setup_team(
     req: TeamSetupRequest,
     db: AsyncSession = Depends(get_db)
 ):
+    """GP define equipe e envia convites.
+
+    MVP 12 Fase 12.5: endpoint deprecado. Não tem consumer vivo no
+    frontend; fluxo canônico de convite de time é
+    `POST /api/v1/projects/{project_id}/invite` em `projects.py`
+    (protegido por `require_action('project:manage_team')`; emite
+    email via EmailService real; grava audit via Fase 11.4). Qualquer
+    consumer externo não-documentado recebe 410 Gone orientando a
+    migração.
     """
-    GP define equipe e envia convites
-    """
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "Endpoint deprecado (MVP 12 Fase 12.5). Use "
+            "POST /api/v1/projects/{project_id}/invite para convidar "
+            "membros do projeto (requer papel GP + require_action "
+            "'project:manage_team')."
+        ),
+    )
+
+    # Corpo original preservado abaixo como referência histórica.
+    # Não é executado — branch acima levanta 410.
     try:
         service = OnboardingService(db)
-
-        # Converte request para dict
         members = [m.model_dump() for m in req.members]
-
-        # TODO: Implementar envio de email via SMTP
-        smtp_config = {}  # Será carregado do DB na implementação real
-
         result = await service.complete_step_3_team(
             onboarding_id=onboarding_id,
             members=members,
-            smtp_config=smtp_config
+            smtp_config={},
         )
         return result
-
     except ValueError as e:
         logger.warning("onboarding.step_3_validation_error", error=str(e))
         raise HTTPException(
