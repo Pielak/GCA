@@ -56,6 +56,27 @@ async def _count_active_admins(db: AsyncSession) -> int:
     )).scalar() or 0)
 
 
+async def guard_last_admin_on_action(db: AsyncSession, target_user: User) -> None:
+    """MVP 11 Fase 11.3 — pré-check canônico de último Admin ativo.
+
+    Usado antes de qualquer ação que removeria `target_user` do pool de
+    administradores ativos (lock, delete, demote, deactivate). Se o target
+    NÃO é admin ativo, a ação não afeta o pool — retorna sem erro. Se é
+    admin ativo, verifica que restam outros — senão levanta
+    `PermissionError` com a mensagem canônica. Pré-check antes de
+    autorizar a ação (contrato §7 MVP 11 Fase 11.3), nunca recuperação
+    posterior.
+    """
+    if not target_user.is_admin or not target_user.is_active:
+        return
+    count = await _count_active_admins(db)
+    if count - 1 <= 0:
+        raise PermissionError(
+            f"Operação bloqueada: {target_user.email} é o último "
+            "administrador ativo — a instância ficaria sem soberania."
+        )
+
+
 async def set_admin_flag(
     db: AsyncSession,
     *,

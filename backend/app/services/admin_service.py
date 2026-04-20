@@ -693,11 +693,17 @@ class AdminService:
     async def lock_user(self, user_id: UUID, actor_id: Optional[UUID] = None) -> dict:
         """Lock (deactivate) a user account.
 
+        MVP 11 Fase 11.3: se `target` é admin ativo e for o último da
+        instância, a operação é **bloqueada** por `PermissionError`
+        (preserva soberania da camada administrativa).
+        MVP 11 Fase 11.3 (self-protection): se `actor_id == user_id`, a
+        operação também é bloqueada — Admin não pode desativar a si
+        mesmo por este caminho (caminho canônico é rebaixar via
+        set_admin_flag + lock, nunca lock direto).
         MVP 11 Fase 11.4: quando `actor_id` é fornecido, emite evento
         canônico `role_revoked` com `phase='user_deactivated'` em
         `audit_log_global`. `old_role` reflete o papel mais alto que o
-        user tinha (admin > gp > user) — quem analisa entende em que
-        nível a desativação impactou.
+        user tinha (admin > gp > user).
         """
         user = await self.db.get(User, user_id)
         if not user:
@@ -705,6 +711,16 @@ class AdminService:
 
         if not user.is_active:
             raise ValueError("User is already locked")
+
+        # Fase 11.3 — self-lock bloqueado
+        if actor_id is not None and user.id == actor_id:
+            raise PermissionError(
+                "Você não pode desativar sua própria conta. Use rotas específicas de gestão de admins."
+            )
+
+        # Fase 11.3 — guard pré-check de último admin ativo
+        from app.services.admin_management_service import guard_last_admin_on_action
+        await guard_last_admin_on_action(self.db, user)
 
         # Snapshot do papel mais alto do user antes da desativação (para audit)
         was_admin = bool(user.is_admin)

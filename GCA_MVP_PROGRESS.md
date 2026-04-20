@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.10  
+Versão: 3.11  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em execução.** **Fase 11.1 FECHADA** (GP→GP convite compartimentalizado; whitelist `Literal[dev,tester,qa,gp]`; 13 testes). **Fase 11.4 FECHADA** (auditoria canônica de role events; 3 eventos + helper + 6 pontos de emissão; 8 testes). **Fase 11.2 FECHADA 2026-04-20** (GP transferir soberania: endpoint `POST /projects/{id}/transfer-gp/{user_id}` com inversão atômica de papéis + 2 eventos `role_transferred` com correlation_id; 9 testes cobrindo caminho feliz + 5 pré-condições negadas + RBAC 3 papéis). Suite pós-11.2: **1296/1296 passing** (+30 total 11.1+11.4+11.2). Fases 11.3/11.5/11.6/11.7 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em execução.** Fases **11.1 / 11.4 / 11.2 / 11.3 FECHADAS 2026-04-20**. **Fase 11.3** (Guard reforçado de último Admin ativo): helper `guard_last_admin_on_action` em `admin_management_service.py`; pré-check injetado em `admin_service.lock_user` + `block_user` router + `delete_user` router; `lock_user` também bloqueia self-lock; 6 testes + 1 skip (HTTP de block_user não isola cenário sem quebrar auth — coberto via test unitário do guard). Suite pós-11.3: **1302/1302 passing** (+36 total MVP 11 até aqui). Fases 11.5/11.6/11.7 (higiene operacional residual) seguem definidas.
 
 ---
 
@@ -14,7 +14,7 @@ Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em exe
 **Fases:**
 - **Fase 11.1 — GP convida outro GP do mesmo projeto** — **FECHADA 2026-04-20**. Backend: `InviteTeamMemberRequest.role` virou `Literal["dev","tester","qa","gp"]` em `backend/app/routers/projects.py`; whitelist canônica rejeita lixo (admin/tech_lead/vazio/"GP" maiúsculo → 422). Frontend: `ProjectTeamPage.tsx` adicionou `'gp'` ao type `InviteRole` e ao `ROLE_OPTIONS` com label "GP (co-gestor do projeto)". Compartimentalização preservada: `require_action('project:manage_team')` resolvido dentro do `project_id` do path + check no serviço de que o chamador é GP **daquele** projeto. Audit do DB de produção: só role `gp` em uso (1 membro) — zero risco de backwards-incompat. Testes: `test_mvp11_fase111_gp_invite.py` com 13 casos (feliz GP→GP, whitelist 5 inválidos × sanidade 4 canônicos, RBAC 3 papéis). Suite pós-11.1: **1279/1279 passing** (+13).
 - **Fase 11.2 — GP transferir soberania do projeto** — **FECHADA 2026-04-20**. Endpoint `POST /projects/{id}/transfer-gp/{target_user_id}` (RBAC `project:manage_team`). Novo método `ProjectTeamService.transfer_gp_sovereignty` inverte papéis atomicamente: chamador vira `dev`, alvo vira `gp`. Pré-condições: chamador é GP ativo; alvo é membro ativo **integrado** (`joined_at != null`); alvo não é GP; alvo != chamador. Emite 2 eventos `role_transferred` (phase='transferred') com mesmo `correlation_id`, `extra.direction` ∈ {outgoing, incoming}. Testes: `test_mvp11_fase112_transfer_gp.py` (9 casos — caminho feliz + audit de correlation_id + 5 pré-condições negadas + 3 RBAC). Suite pós-11.2: **1296/1296 passing** (+9).
-- Fase 11.3 Guard reforçado de último Admin ativo — **definida**.
+- **Fase 11.3 — Guard reforçado de último Admin ativo** — **FECHADA 2026-04-20**. Helper canônico `guard_last_admin_on_action(db, target_user)` em `admin_management_service.py`: se target é admin ativo e restariam 0 após a ação, levanta `PermissionError` (pré-check antes de autorizar). Integração em 3 caminhos: (a) `admin_service.lock_user` importa e chama o guard + também bloqueia self-lock quando `actor_id == user_id`; (b) `block_user` router (admin.py) chama o guard; (c) `delete_user` router chama o guard. `set_admin_flag(False)` mantém guard pré-existente. Router `lock_user` traduz `PermissionError` em HTTP 403. Testes: `test_mvp11_fase113_last_admin_guard.py` com 7 casos — 6 passing (set_admin_flag last-self, lock_user self, lock_user last-admin via service, delete_user last-admin via guard helper, guard noop para não-admin, guard noop para admin inativo) + 1 skip (block_user via HTTP não isola "último" sem quebrar `require_admin`; coberto pelo test unitário do guard). Suite pós-11.3: **1302/1302 passing** (+6).
 - **Fase 11.4 — Auditoria canônica de role events em `audit_log_global`** — **FECHADA 2026-04-20**. 3 eventos canônicos registrados em `AuditEvents` (`ROLE_GRANTED`/`ROLE_REVOKED`/`ROLE_TRANSFERRED`). Novo helper `AuditService.log_role_event` com whitelist de event_type + payload canônico `{target_user_id, project_id (nullable na instância), old_role, new_role, phase, timestamp, extra?}`. 6 pontos de emissão injetados: (a) `project_team_service.invite_team_member` → role_granted phase=invited; (b) `accept_invite` → role_granted phase=accepted (actor é o próprio convidado); (c) `revoke_invite` → role_revoked phase=revoked; (d) `admin_management_service.set_admin_flag(True)` → role_granted phase=admin_promoted (project_id=None); (e) `set_admin_flag(False)` → role_revoked phase=admin_demoted; (f) `invite_admin` → role_granted phase=invited|admin_promoted; (g) `admin_service.lock_user(..., actor_id)` → role_revoked phase=user_deactivated com extra `{was_admin, had_gp_role, active_memberships_count}`. Router `admin.py` passa `current_user_id` para `lock_user` como `actor_id`. `ROLE_TRANSFERRED` reservado (Fase 11.2 emite). Testes: `test_mvp11_fase114_role_audit.py` com 8 casos (6 pontos de emissão + catálogo + whitelist do helper). Suite pós-11.4: **1287/1287 passing** (+8).
 - Fase 11.5 DT-041 image drift — **definida**.
 - Fase 11.6 DT-076 V2 cobertura multi-DB — **definida**.
@@ -657,6 +657,15 @@ registradas como pós-MVP 4 e já quitadas em 4.
   `role_transferred` com mesmo `correlation_id` e direções
   outgoing/incoming. 9 testes em `test_mvp11_fase112_transfer_gp.py`.
   Suite 1296/1296 passing. Gate §9 atendido.
+- MVP 11 Fase 11.3 → **FECHADA 2026-04-20**. Helper canônico
+  `guard_last_admin_on_action` em `admin_management_service.py` +
+  injeção em 3 caminhos (`lock_user`, `block_user` router,
+  `delete_user` router). `lock_user` também bloqueia self-lock.
+  `set_admin_flag(False)` mantém guard pré-existente. Testes em
+  `test_mvp11_fase113_last_admin_guard.py` — 6 passing + 1 skip
+  (limitação de HTTP para isolar "último admin" sem quebrar
+  `require_admin`; coberto pelo test unitário do guard helper).
+  Suite 1302/1302 passing. Gate §9 atendido.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta

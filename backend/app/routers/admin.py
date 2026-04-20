@@ -544,6 +544,13 @@ async def lock_user(
             "message": "Conta do usuário bloqueada. Não poderá fazer login até ser desbloqueada."
         }
 
+    except PermissionError as e:
+        # MVP 11 Fase 11.3 — guard de último Admin ou self-lock
+        logger.warning("admin.lock_user_blocked", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(e),
+        )
     except ValueError as e:
         logger.warning("admin.lock_user_validation_error", error=str(e))
         raise HTTPException(
@@ -1216,13 +1223,25 @@ async def block_user(
     current_user_id: UUID = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    """Desativar usuário (apenas admin). Não pode desativar a si mesmo."""
+    """Desativar usuário (apenas admin). Não pode desativar a si mesmo.
+
+    MVP 11 Fase 11.3: bloqueia pré-ação caso o target seja o último
+    Admin ativo da instância (preserva soberania).
+    """
     if user_id == current_user_id:
         raise HTTPException(status_code=400, detail="Você não pode desativar sua própria conta")
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
+
+    # Fase 11.3 — guard pré-check de último admin ativo
+    from app.services.admin_management_service import guard_last_admin_on_action
+    try:
+        await guard_last_admin_on_action(db, user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
     user.is_active = False
     await db.commit()
     logger.info("admin.user_blocked", user_id=str(user_id), email=user.email)
@@ -1274,6 +1293,13 @@ async def delete_user(
     if not user:
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     email = user.email
+
+    # MVP 11 Fase 11.3 — guard pré-check de último admin ativo
+    from app.services.admin_management_service import guard_last_admin_on_action
+    try:
+        await guard_last_admin_on_action(db, user)
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
     # === BLOQUEIO 1: GP de project_request APPROVED ou ACTIVE ===
     blocking_reqs = (await db.execute(
