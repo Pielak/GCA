@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.15  
+Versão: 3.16  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 aberto 2026-04-20 pelo protocolo §7.0** (autorização do stakeholder-soberano) com 10 fases (saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema, CI maturity, type safety, robustez estrutural, observabilidade compliance). **Estado inicial: definido — não iniciado.** Baseline de entrada: suite **1360/1360 passing, 3 skipped** contra `gca_test` isolado.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** **Fase 12.1 FECHADA 2026-04-20** (rate limit anti-abuse em `POST /public/project-requests` via `slowapi`: env `PUBLIC_RATE_LIMIT` default `5/minute`, key por IP, 3 testes — limite aplica, limite alto passa livre, idempotência preservada). Suite pós-12.1: **1363/1363 passing, 3 skipped** (+3). Fases 12.2-12.10 seguem definidas.
 
 ---
 
@@ -12,7 +12,7 @@ Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 aberto
 **MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** — **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano. Escopo consolidado: 6 DTs de auditoria 2026-04-20 + 4 dívidas estruturais mais antigas (type safety frontend, fila persistente diferida, helper prompt CodeGen duplicado, cobertura incompleta de hash chain) que seguiam como backlog indefinido.
 
 **Objetivo:** fechar em ordem A→B→C→D→E→F→G —
-1. **Tema A — Segurança de fronteira:** Fase 12.1 rate limit em `/public/request-project`.
+1. **Tema A — Segurança de fronteira:** ✅ Fase 12.1 rate limit em `POST /public/project-requests` (slowapi + env `PUBLIC_RATE_LIMIT`; 3 testes).
 2. **Tema B — Configurabilidade operacional:** Fase 12.2 timezone configurável em BackupScheduler.
 3. **Tema C — Higiene de schema + cleanup:** 12.3 consolidar `accepted_at`/`joined_at`; 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
 4. **Tema D — CI maturity:** 12.6 canário real + remoção `continue-on-error` da lane e2e.

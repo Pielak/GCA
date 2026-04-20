@@ -15,14 +15,17 @@ Anti-abuse mínimo:
     - Mesmo email + mesmo project_name em <60s = duplicate skipped (idempotente).
 """
 import json
+import os
 import re
 import unicodedata
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Optional
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
@@ -38,6 +41,12 @@ from app.core.security import hash_password
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/public", tags=["public"])
+
+# MVP 12 Fase 12.1 — rate limit local do router. Usa mesmo key_func do
+# app (IP do cliente). O default é controlado via env `PUBLIC_RATE_LIMIT`
+# — permite afrouxar em ambientes de teste sem tocar código.
+_PUBLIC_RATE_LIMIT = os.environ.get("PUBLIC_RATE_LIMIT", "5/minute")
+limiter = Limiter(key_func=get_remote_address)
 
 
 def _slugify(text: str, max_len: int = 80) -> str:
@@ -102,7 +111,9 @@ class ProjectRequestPublic(BaseModel):
 
 
 @router.post("/project-requests", status_code=201)
+@limiter.limit(_PUBLIC_RATE_LIMIT)
 async def create_public_project_request(
+    request: Request,  # Required by slowapi para key_func resolver IP
     req: ProjectRequestPublic,
     db: AsyncSession = Depends(get_db),
 ):
