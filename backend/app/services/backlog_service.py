@@ -180,6 +180,48 @@ class BacklogService:
                                 priority, "ocg", version,
                             ))
 
+        # === DATA_MODEL (DT-076 Fase 4) — items de refinamento de schema ===
+        # Cada tabela do modelo inicial vira 1 item no backlog na categoria
+        # 'modules'. Quando há warnings (engine não suportado, FK inválida)
+        # eles viram items 'critical'. GP refina via edição inline.
+        data_model = ocg_data.get("DATA_MODEL") or {}
+        if isinstance(data_model, dict):
+            engine = data_model.get("engine")
+            # Warnings do modelo → items critical pra GP endereçar primeiro
+            for warning in (data_model.get("warnings") or [])[:5]:
+                if isinstance(warning, str) and warning:
+                    items_created.append(self._create_item(
+                        project_id, "modules",
+                        f"Modelo de dados: {warning[:150]}",
+                        "Resolver antes do CodeGen emitir scaffold.",
+                        "critical", "ocg", version,
+                    ))
+
+            # Tabelas inferidas → items de refinamento
+            tables = data_model.get("tables") or []
+            if tables and engine:
+                items_created.append(self._create_item(
+                    project_id, "modules",
+                    f"Revisar modelo de dados ({engine}, {len(tables)} tabelas)",
+                    f"DATA_MODEL inferido do initiative_type. Refine colunas, "
+                    f"tipos, índices e FKs antes do CodeGen. Tabelas: "
+                    f"{', '.join(t.get('name', '?') for t in tables[:8])}"
+                    + ("…" if len(tables) > 8 else ""),
+                    "high", "ocg", version,
+                ))
+                # Itens específicos por tabela não-núcleo (pula users/sessions/config)
+                core = {"users", "sessions", "config", "audit_log", "consent"}
+                for t in tables:
+                    name = (t.get("name") or "").strip()
+                    if not name or name in core:
+                        continue
+                    items_created.append(self._create_item(
+                        project_id, "modules",
+                        f"Tabela {name}: ajustar colunas/índices ao domínio",
+                        t.get("comment") or "Tabela inferida do DATA_MODEL.",
+                        "medium", "ocg", version,
+                    ))
+
         # === DELIVERABLES ===
         deliverables = ocg_data.get("DELIVERABLES", [])
         if isinstance(deliverables, list):
