@@ -78,8 +78,10 @@ class OnboardingService:
             raise ValueError(f"Cannot approve request in status: {request.status}")
 
         # Gera senha temporária
+        # MVP 12 Fase 12.4: `request.initial_password_hash` é DEPRECADA —
+        # nunca era lida. Escrita removida. Senha segue em `temp_password`
+        # local (consumido abaixo em notificações / response).
         temp_password = secrets.token_urlsafe(12)
-        request.initial_password_hash = hash_password(temp_password)
 
         # Aprova
         request.status = ProjectRequestStatus.APPROVED

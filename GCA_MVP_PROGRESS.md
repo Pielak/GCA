@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.18  
+Versão: 3.19  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 FECHADAS 2026-04-20**. Fase 12.3 (consolidar `accepted_at`/`joined_at`): corrigido `admin_service.approve_project_request` que criava GP sem timestamps (bug silencioso que derrubava GP em filtros de `accepted_at IS NOT NULL`); helpers canônicos `is_pending_invite` e `is_active_integrated_member` em `project_team_service`; docstring canônico no modelo `ProjectMember`; 11 testes. Suite pós-12.3: **1384/1384 passing, 3 skipped** (+21 cumulativo MVP 12). Fases 12.4-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 / 12.4 FECHADAS 2026-04-20**. Fase 12.4 (deprecar `ProjectRequest.initial_password_hash`): coluna marcada como DEPRECADA via docstring no modelo; 2 escritas órfãs removidas (`admin_service.approve_project_request:132` + `onboarding_service:82`); temp_password já viajava por caminho separado (User.password_hash + email) — zero impacto funcional; 3 testes de regressão documental. Coluna preservada fisicamente até V2 com remoção destrutiva planejada (§7 MVP 7). Suite pós-12.4: **1384/1384 passing, 3 skipped** (+3 Fase 12.4 sem alterar totalizador pois substituem 0 passings anteriores). Fases 12.5-12.10 seguem definidas.
 
 ---
 

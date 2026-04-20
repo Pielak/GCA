@@ -129,7 +129,9 @@ class AdminService:
 
             # === AÇÃO 1: Aprovar e gerar credenciais ===
             temp_password = secrets.token_urlsafe(12)
-            request.initial_password_hash = hash_password(temp_password)
+            # MVP 12 Fase 12.4: `request.initial_password_hash` é DEPRECADA
+            # — nunca era lida. O temp_password viaja direto pra
+            # User.password_hash + email transacional abaixo.
             request.status = ProjectRequestStatus.APPROVED
             request.approved_by = admin_id
             request.approved_at = datetime.now(timezone.utc)

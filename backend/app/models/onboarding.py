@@ -88,7 +88,15 @@ class ProjectRequest(Base):
     rejection_reason = Column(Text)
 
     # Credenciais iniciais
-    initial_password_hash = Column(String(255))
+    # MVP 12 Fase 12.4 — `initial_password_hash` é DEPRECADA desde
+    # 2026-04-20. O temp password gerado na aprovação/convite viaja
+    # diretamente para `User.password_hash` + email transacional; esta
+    # coluna nunca foi lida em nenhum caminho. Escritas foram removidas
+    # na Fase 12.4 (admin_service.approve_project_request e
+    # onboarding_service.create_project_request). Remoção física da
+    # coluna fica para V2 com migração destrutiva planejada (§7 MVP 7
+    # cobre o contrato de release destrutiva).
+    initial_password_hash = Column(String(255))  # deprecated 2026-04-20 — remove em V2
     password_changed = Column(Boolean, default=False)
 
     # Datas
