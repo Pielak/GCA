@@ -226,3 +226,172 @@ async def get_test_logs(
     """Logs de execução de um teste específico."""
     svc = TesterReviewService(db)
     return await svc.get_execution_logs(test_id)
+
+
+# ============================================================================
+# MVP 10 Fase 10.2 — Planos de teste gerados por LLM
+# ============================================================================
+
+@router.get("/projects/{project_id}/test-specs")
+async def list_test_specs(
+    project_id: UUID,
+    spec_type: Optional[str] = Query(None, description="unit|integration|security|compliance|e2e"),
+    module_id: Optional[UUID] = Query(None, description="filtra por módulo"),
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista TestSpecs do projeto com filtros opcionais.
+
+    Retorna lista ordenada por (module_id, spec_type). Cada item traz
+    metadata (provenance/stale) pra UI — não expõe content completo
+    (GET /test-specs/{id} pra isso).
+    """
+    from sqlalchemy import select as _select
+    from app.models.base import TestSpec
+
+    query = _select(TestSpec).where(TestSpec.project_id == project_id)
+    if spec_type:
+        query = query.where(TestSpec.spec_type == spec_type)
+    if module_id is not None:
+        query = query.where(TestSpec.module_id == module_id)
+
+    rows = await db.execute(query)
+    items = rows.scalars().all()
+
+    return [
+        {
+            "id": str(s.id),
+            "project_id": str(s.project_id),
+            "module_id": str(s.module_id) if s.module_id else None,
+            "spec_type": s.spec_type,
+            "status": s.status,
+            "content_preview": (s.content or "")[:200],
+            "content_chars": len(s.content or ""),
+            "ocg_version_at_generation": s.ocg_version_at_generation,
+            "generated_at": s.generated_at.isoformat() if s.generated_at else None,
+            "generator_provider": s.generator_provider,
+            "generator_model": s.generator_model,
+            "approved_by": str(s.approved_by) if s.approved_by else None,
+            "approved_at": s.approved_at.isoformat() if s.approved_at else None,
+        }
+        for s in items
+    ]
+
+
+@router.get("/projects/{project_id}/test-specs/{spec_id}")
+async def get_test_spec(
+    project_id: UUID,
+    spec_id: UUID,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna conteúdo completo do spec + provenance pro modal da UI."""
+    from app.models.base import TestSpec
+    import json as _json
+
+    spec = await db.get(TestSpec, spec_id)
+    if not spec or spec.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Spec não encontrado")
+
+    provenance = None
+    if spec.provenance_json:
+        try:
+            provenance = _json.loads(spec.provenance_json)
+        except (ValueError, TypeError):
+            provenance = None
+
+    return {
+        "id": str(spec.id),
+        "project_id": str(spec.project_id),
+        "module_id": str(spec.module_id) if spec.module_id else None,
+        "spec_type": spec.spec_type,
+        "status": spec.status,
+        "content": spec.content or "",
+        "provenance": provenance,
+        "ocg_version_at_generation": spec.ocg_version_at_generation,
+        "generated_at": spec.generated_at.isoformat() if spec.generated_at else None,
+        "generator_provider": spec.generator_provider,
+        "generator_model": spec.generator_model,
+        "rejection_reason": spec.rejection_reason,
+    }
+
+
+@router.post("/projects/{project_id}/modules/{module_id}/test-specs/generate")
+async def generate_single_test_spec(
+    project_id: UUID,
+    module_id: UUID,
+    spec_type: str = Query(..., description="unit|integration|e2e"),
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 10 Fase 10.2 — Gera (ou regera) TestSpec de 1 módulo + tipo.
+
+    Rebaixa status pra 'draft' se existia approved/rejected — regeneração
+    exige re-revisão (regra dura §7 MVP 10).
+
+    503 se Ollama não configurado.
+    """
+    try:
+        spec = await generate_module_spec(db, project_id, module_id, spec_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        logger.warning(
+            "test_spec.generate_unexpected_error",
+            project_id=str(project_id), module_id=str(module_id),
+            error_type=type(exc).__name__, error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gerar spec ({type(exc).__name__}): {exc!r}",
+        )
+
+    return {
+        "id": str(spec.id),
+        "spec_type": spec.spec_type,
+        "status": spec.status,
+        "content_chars": len(spec.content or ""),
+        "generated_at": spec.generated_at.isoformat() if spec.generated_at else None,
+    }
+
+
+@router.post("/projects/{project_id}/test-specs/regenerate")
+async def bulk_regenerate_test_specs(
+    project_id: UUID,
+    spec_types: str = Query("unit,integration", description="CSV de tipos"),
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 10 Fase 10.2 — Regenera specs em bulk pra todos os módulos.
+
+    Itera módulos canônicos do Roadmap × tipos solicitados. Tolera
+    falhas individuais (acumula em `errors`). Útil pra o botão
+    'Regenerar Tudo' da Fase 10.5.
+    """
+    types_tuple = tuple(
+        t.strip() for t in spec_types.split(",")
+        if t.strip() in SUPPORTED_TYPES_LOCAL
+    )
+    if not types_tuple:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nenhum spec_type válido em '{spec_types}'. "
+                   f"Aceitos: {SUPPORTED_TYPES_LOCAL}",
+        )
+
+    try:
+        report = await regenerate_project_specs(db, project_id, spec_types=types_tuple)
+    except Exception as exc:
+        import traceback
+        logger.error(
+            "test_spec.bulk_regenerate_failed",
+            project_id=str(project_id), error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(status_code=500, detail=f"Erro no bulk: {exc!r}")
+
+    return report
