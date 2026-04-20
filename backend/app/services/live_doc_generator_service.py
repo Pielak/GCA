@@ -170,6 +170,9 @@ técnico, arquiteto, auditoria.
 ### Módulos por camada
 {modules_by_layer_block}
 
+### Modelo de dados (DATA_MODEL)
+{data_model_block}
+
 ---
 
 Estrutura obrigatória (markdown):
@@ -188,6 +191,16 @@ middleware, backend_service, feature, deploy_pipeline):
 ## Fluxo de execução principal
 Sequência dos passos que um request/comando percorre desde a entrada
 até a persistência/resposta. 4-8 passos, numerados.
+
+## Modelo de dados
+Com base no DATA_MODEL acima:
+- Engine e dialeto.
+- Tabelas principais agrupadas por propósito (identidade, auditoria,
+  domínio do projeto, operacional).
+- Relações importantes (FKs críticas).
+- Convenções adotadas (UUID, timestamps, soft delete, audit_log
+  append-only, etc).
+Se o DATA_MODEL reportou warnings, liste-os como pendências.
 
 ## Decisões arquiteturais
 Lista numerada de decisões explícitas (ex: "Banco PostgreSQL
@@ -529,6 +542,7 @@ def _build_architecture_prompt(
         architecture_block=_render_architecture(data.get("ARCHITECTURE_OVERVIEW") or {}),
         pillars_block=_render_pillars(data.get("PILLAR_SCORES") or {}),
         modules_by_layer_block=_render_modules_by_layer(modules),
+        data_model_block=_render_data_model(data.get("DATA_MODEL") or {}),
     )
 
 
@@ -623,6 +637,47 @@ def _render_modules(modules: list[dict[str, Any]]) -> str:
         f"- {m['name']} ({m['module_type']}, {m['priority']}, readiness={m.get('readiness_status') or 'n/a'})"
         for m in modules
     )
+
+
+def _render_data_model(dm: Any) -> str:
+    """DT-076 Fase 5 — Renderiza DATA_MODEL como texto pro prompt Premium.
+
+    Mostra engine, contagem, tabelas com colunas principais e FKs.
+    Warnings também aparecem pra LLM mencionar como pendências.
+    """
+    if not isinstance(dm, dict) or not dm:
+        return "(sem DATA_MODEL — dialecto do banco não foi inferido)"
+    engine = dm.get("engine_raw") or dm.get("engine") or "(não declarado)"
+    supported = dm.get("dialect_supported", False)
+    warnings = dm.get("warnings") or []
+    tables = dm.get("tables") or []
+    fks = dm.get("foreign_keys") or []
+
+    lines = [f"- Engine: {engine} (suporte automático: {'sim' if supported else 'não'})"]
+    lines.append(f"- Tabelas: {len(tables)}")
+    if warnings:
+        lines.append("- Warnings:")
+        for w in warnings[:5]:
+            lines.append(f"  - {w}")
+    if not tables:
+        return "\n".join(lines)
+
+    lines.append("- Principais tabelas:")
+    for t in tables[:12]:
+        name = t.get("name", "?")
+        n_cols = len(t.get("columns") or [])
+        comment = (t.get("comment") or "").strip()
+        if comment:
+            lines.append(f"  - `{name}` ({n_cols} colunas): {comment}")
+        else:
+            lines.append(f"  - `{name}` ({n_cols} colunas)")
+    if len(tables) > 12:
+        lines.append(f"  - (… e mais {len(tables) - 12} tabela(s))")
+
+    if fks:
+        lines.append(f"- Relações (FKs): {len(fks)} restrições configuradas")
+
+    return "\n".join(lines)
 
 
 def _render_modules_by_layer(modules: list[dict[str, Any]]) -> str:
