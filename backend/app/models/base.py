@@ -1483,6 +1483,85 @@ class TestExecutionLog(Base):
     )
 
 
+class TestSpec(Base):
+    """MVP 10 Fase 10.1 — Plano/spec de teste gerado por LLM.
+
+    Camada **separada** de `TestArtifact` (implementação concreta CRUD manual)
+    e `TestFile` (blueprint pós-CodeGen). Usa plain text markdown.
+
+    Granularidade:
+    - `module_id` preenchido = spec por módulo (unit/integration/e2e).
+    - `module_id=NULL` = spec global consolidando OCG inteiro (security/compliance).
+
+    Idempotência: `UniqueConstraint(project_id, module_id, spec_type)`.
+
+    Stale detection (Fase 10.4): `ocg_version_at_generation` comparado com
+    OCG atual — status vira 'stale' quando OCG avança.
+    """
+    # pytest vê classe iniciando por "Test" e tenta coletar como teste;
+    # __test__ = False impede isso. É model SQLAlchemy, não test class.
+    __test__ = False
+
+    __tablename__ = "test_specs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    module_id = Column(UUID(as_uuid=True), ForeignKey("module_candidates.id", ondelete="CASCADE"), nullable=True)
+    spec_type = Column(String(20), nullable=False)  # unit|integration|security|compliance|e2e
+    content = Column(Text, nullable=False, default="")  # markdown plain text
+    provenance_json = Column(Text, nullable=True)  # JSON com OCG version, questionário, ingestões, LLM
+    ocg_version_at_generation = Column(Integer, nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=True)
+    generator_provider = Column(String(50), nullable=True)
+    generator_model = Column(String(100), nullable=True)
+    status = Column(String(20), nullable=False, default="draft")  # draft|approved|rejected|stale
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    rejected_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejection_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "module_id", "spec_type", name="uq_test_spec_unique"),
+        Index("idx_test_specs_project_type", "project_id", "spec_type"),
+        Index("idx_test_specs_status", "project_id", "status"),
+    )
+
+
+class LiveDoc(Base):
+    """MVP 10 Fase 10.1 — Documentação viva gerada por LLM.
+
+    - `doc_type='module_doc'` exige `module_id` preenchido (Ollama, baixa crit).
+    - `doc_type='index'` ou `'architecture'` usa `module_id=NULL` (Premium, alta crit — consolidação).
+
+    Não substitui docs em Git (README, ARCHITECTURE.md já publicados) —
+    complementa com doc por módulo reativa ao OCG. Stale detection igual
+    ao TestSpec (compara `ocg_version_at_generation`).
+    """
+    __tablename__ = "live_docs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    module_id = Column(UUID(as_uuid=True), ForeignKey("module_candidates.id", ondelete="CASCADE"), nullable=True)
+    doc_type = Column(String(30), nullable=False)  # module_doc|index|architecture
+    content = Column(Text, nullable=False, default="")
+    provenance_json = Column(Text, nullable=True)
+    ocg_version_at_generation = Column(Integer, nullable=True)
+    generated_at = Column(DateTime(timezone=True), nullable=True)
+    generator_provider = Column(String(50), nullable=True)
+    generator_model = Column(String(100), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("project_id", "module_id", "doc_type", name="uq_live_doc_unique"),
+        Index("idx_live_docs_project_type", "project_id", "doc_type"),
+    )
+
+
 class ProjectRelease(Base):
     """Release Bundle versionado de um projeto.
 
