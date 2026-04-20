@@ -242,12 +242,13 @@ async def list_test_specs(
 ):
     """Lista TestSpecs do projeto com filtros opcionais.
 
-    Retorna lista ordenada por (module_id, spec_type). Cada item traz
-    metadata (provenance/stale) pra UI — não expõe content completo
-    (GET /test-specs/{id} pra isso).
+    MVP 10 Fase 10.4 — cada item vem com `is_stale` + `stale_reason`
+    computados on-the-fly comparando `ocg_version_at_generation` com
+    OCG atual. Zero mutação no DB.
     """
     from sqlalchemy import select as _select
     from app.models.base import TestSpec
+    from app.services.stale_detection_service import evaluate_test_spec_staleness
 
     query = _select(TestSpec).where(TestSpec.project_id == project_id)
     if spec_type:
@@ -257,6 +258,8 @@ async def list_test_specs(
 
     rows = await db.execute(query)
     items = rows.scalars().all()
+
+    staleness = await evaluate_test_spec_staleness(db, project_id)
 
     return [
         {
@@ -273,9 +276,29 @@ async def list_test_specs(
             "generator_model": s.generator_model,
             "approved_by": str(s.approved_by) if s.approved_by else None,
             "approved_at": s.approved_at.isoformat() if s.approved_at else None,
+            # MVP 10 Fase 10.4
+            "is_stale": staleness.get(s.id).is_stale if s.id in staleness else False,
+            "stale_reason": (
+                staleness.get(s.id).reason if s.id in staleness and staleness[s.id].reason else None
+            ),
         }
         for s in items
     ]
+
+
+@router.get("/projects/{project_id}/test-specs/stale-summary")
+async def get_stale_summary(
+    project_id: UUID,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 10 Fase 10.4 — Agregado de staleness pra banner da aba Testes.
+
+    Retorna counts por tipo (test_specs + live_docs) + flag
+    `needs_regeneration`. Zero mutação — só leitura.
+    """
+    from app.services.stale_detection_service import build_stale_summary
+    return await build_stale_summary(db, project_id)
 
 
 @router.get("/projects/{project_id}/test-specs/{spec_id}")
@@ -300,6 +323,11 @@ async def get_test_spec(
         except (ValueError, TypeError):
             provenance = None
 
+    # MVP 10 Fase 10.4 — stale on-the-fly pra este spec
+    from app.services.stale_detection_service import evaluate_test_spec_staleness
+    staleness_map = await evaluate_test_spec_staleness(db, project_id)
+    stale_info = staleness_map.get(spec.id)
+
     return {
         "id": str(spec.id),
         "project_id": str(spec.project_id),
@@ -313,6 +341,9 @@ async def get_test_spec(
         "generator_provider": spec.generator_provider,
         "generator_model": spec.generator_model,
         "rejection_reason": spec.rejection_reason,
+        "is_stale": stale_info.is_stale if stale_info else False,
+        "stale_reason": stale_info.reason if stale_info else None,
+        "current_ocg_version": stale_info.current_ocg_version if stale_info else None,
     }
 
 
