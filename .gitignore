@@ -42,6 +42,10 @@ env/
 screenshots/
 *.docx
 
+# Fixtures de regressão MVP 8 Fase 6 — exceção controlada ao
+# *.docx acima. Arquivos reais do dogfood ≤ 100 KB versionados.
+!backend/tests/fixtures/mvp8/*.docx
+
 # IDE
 .vscode/
 .idea/
