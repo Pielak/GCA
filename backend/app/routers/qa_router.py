@@ -390,6 +390,128 @@ async def generate_single_test_spec(
     }
 
 
+class _RejectSpecBody(BaseModel):
+    reason: str
+
+
+@router.post("/projects/{project_id}/test-specs/{spec_id}/approve")
+async def approve_test_spec(
+    project_id: UUID,
+    spec_id: UUID,
+    _perm: dict = Depends(require_action("qa:approve")),
+    db: AsyncSession = Depends(get_db),
+    current_user_id: UUID = Depends(get_current_user_from_token),
+):
+    """MVP 10 Fase 10.6 — Aprova TestSpec (GP/QA).
+
+    Transições aceitas:
+      - draft → approved
+      - rejected → approved (GP/QA reabriu e reverteu rejeição)
+
+    No-op se já approved (retorna payload idêntico).
+    Proibida: approved → approved em spec diferente; stale → approved
+    (requer regenerar antes).
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.base import TestSpec
+
+    spec = await db.get(TestSpec, spec_id)
+    if not spec or spec.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Spec não encontrado")
+
+    if spec.status not in ("draft", "rejected", "approved"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Transição inválida: spec com status '{spec.status}' não pode ser aprovado. "
+                f"Regenere (via Ollama/Premium) antes de aprovar."
+            ),
+        )
+
+    if spec.status != "approved":
+        spec.status = "approved"
+        spec.approved_by = current_user_id
+        spec.approved_at = _dt.now(_tz.utc)
+        # Limpa rejection pra coerência
+        spec.rejected_by = None
+        spec.rejection_reason = None
+        await db.commit()
+
+    logger.info(
+        "test_spec.approved",
+        spec_id=str(spec_id), project_id=str(project_id),
+        user_id=str(current_user_id),
+    )
+    return {
+        "id": str(spec.id),
+        "status": spec.status,
+        "approved_by": str(spec.approved_by) if spec.approved_by else None,
+        "approved_at": spec.approved_at.isoformat() if spec.approved_at else None,
+    }
+
+
+@router.post("/projects/{project_id}/test-specs/{spec_id}/reject")
+async def reject_test_spec(
+    project_id: UUID,
+    spec_id: UUID,
+    body: _RejectSpecBody,
+    _perm: dict = Depends(require_action("qa:approve")),
+    db: AsyncSession = Depends(get_db),
+    current_user_id: UUID = Depends(get_current_user_from_token),
+):
+    """MVP 10 Fase 10.6 — Rejeita TestSpec (GP/QA) com motivo obrigatório.
+
+    `reason` tem que ter ≥ 10 chars (evita rejeição sem contexto que
+    atrapalha o Tester).
+
+    Transições aceitas:
+      - draft → rejected
+      - approved → rejected (GP/QA reverteu aprovação)
+    """
+    from datetime import datetime as _dt, timezone as _tz
+    from app.models.base import TestSpec
+
+    reason = (body.reason or "").strip()
+    if len(reason) < 10:
+        raise HTTPException(
+            status_code=400,
+            detail="Motivo da rejeição deve ter pelo menos 10 caracteres.",
+        )
+
+    spec = await db.get(TestSpec, spec_id)
+    if not spec or spec.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Spec não encontrado")
+
+    if spec.status not in ("draft", "approved", "rejected"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Transição inválida: spec com status '{spec.status}' não pode ser rejeitado. "
+                f"Regenere antes."
+            ),
+        )
+
+    spec.status = "rejected"
+    spec.rejected_by = current_user_id
+    spec.rejection_reason = reason
+    spec.approved_by = None
+    spec.approved_at = None
+    await db.commit()
+
+    logger.info(
+        "test_spec.rejected",
+        spec_id=str(spec_id), project_id=str(project_id),
+        user_id=str(current_user_id),
+        reason_preview=reason[:80],
+    )
+    return {
+        "id": str(spec.id),
+        "status": spec.status,
+        "rejected_by": str(spec.rejected_by) if spec.rejected_by else None,
+        "rejection_reason": spec.rejection_reason,
+    }
+
+
 @router.post("/projects/{project_id}/test-specs/generate-global")
 async def generate_global_test_spec(
     project_id: UUID,

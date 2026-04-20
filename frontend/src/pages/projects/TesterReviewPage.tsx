@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, FlaskConical, X, AlertTriangle } from 'lucide-react'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { TestArtifactCard } from '@/components/qa/TestArtifactCard'
+import { TestSpecsSection } from '@/components/qa/TestSpecsSection'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -30,6 +31,7 @@ interface TestLog {
 }
 
 const TEST_TABS = [
+  { key: 'specs', label: 'Specs (planos)' },  // MVP 10 Fase 10.6
   { key: 'unit', label: 'Unit' },
   { key: 'integration', label: 'Integration' },
   { key: 'e2e', label: 'E2E' },
@@ -93,6 +95,12 @@ export function TesterReviewPage() {
 
   const loadTests = useCallback(async () => {
     if (!id) return
+    // MVP 10 Fase 10.6 — tab 'specs' não usa endpoint /tests (usa TestSpecsSection próprio)
+    if (activeTab === 'specs') {
+      setLoading(false)
+      setTests([])
+      return
+    }
     setLoading(true)
     try {
       const res = await apiClient.get(`/projects/${id}/tests`, { params: { test_type: activeTab } })
@@ -218,8 +226,12 @@ export function TesterReviewPage() {
         ))}
       </div>
 
-      {/* Content */}
-      {loading ? (
+      {/* MVP 10 Fase 10.6 — Tab "Specs" reusa TestSpecsSection com approve/reject */}
+      {activeTab === 'specs' ? (
+        id ? (
+          <TestSpecsSection projectId={id} />
+        ) : null
+      ) : loading ? (
         <div className="flex items-center justify-center h-64">
           <Loader2 className="w-6 h-6 text-violet-400 animate-spin" />
         </div>

@@ -218,6 +218,65 @@ export const useBulkRegenerateTestSpecs = (projectId: string | undefined) => {
   })
 }
 
+// ============================================================================
+// Mutations — approve/reject (Fase 10.6)
+// ============================================================================
+
+export const useApproveTestSpec = (projectId: string | undefined) => {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: async (specId: string) => {
+      const r = await apiClient.post(
+        `/projects/${projectId}/test-specs/${specId}/approve`,
+      )
+      return r.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['test-specs', projectId] })
+      toast.success('Spec aprovado.')
+    },
+    onError: (err: any) => {
+      const status = err?.status || err?.response?.status
+      if (status === 403) {
+        toast.error('Aprovar requer papel GP ou QA.')
+      } else if (status === 400) {
+        toast.error(err?.message || 'Transição inválida — regenere antes.')
+      } else {
+        toast.error(err?.message || 'Falha ao aprovar.')
+      }
+    },
+  })
+}
+
+export const useRejectTestSpec = (projectId: string | undefined) => {
+  const qc = useQueryClient()
+  const toast = useToast()
+  return useMutation({
+    mutationFn: async (args: { specId: string; reason: string }) => {
+      const r = await apiClient.post(
+        `/projects/${projectId}/test-specs/${args.specId}/reject`,
+        { reason: args.reason },
+      )
+      return r.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['test-specs', projectId] })
+      toast.success('Spec rejeitado com motivo registrado.')
+    },
+    onError: (err: any) => {
+      const status = err?.status || err?.response?.status
+      if (status === 403) {
+        toast.error('Rejeitar requer papel GP ou QA.')
+      } else if (status === 400) {
+        toast.error(err?.message || 'Motivo muito curto ou transição inválida.')
+      } else {
+        toast.error(err?.message || 'Falha ao rejeitar.')
+      }
+    },
+  })
+}
+
 export const useBulkRegenerateGlobalSpecs = (projectId: string | undefined) => {
   const qc = useQueryClient()
   const toast = useToast()

@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Loader2, X, AlertTriangle, Clock, Sparkles, FileText, Cpu, Info } from 'lucide-react'
-import { useTestSpecDetail, type TestSpecType } from '@/hooks/useTestSpecs'
+import { Loader2, X, AlertTriangle, Clock, Sparkles, FileText, Cpu, Info, CheckCircle2, XCircle } from 'lucide-react'
+import { useTestSpecDetail, useApproveTestSpec, useRejectTestSpec, type TestSpecType } from '@/hooks/useTestSpecs'
+import { useAuthStore } from '@/stores/authStore'
 
 /**
  * MVP 10 Fase 10.5 — Modal de detalhe do TestSpec.
@@ -46,6 +47,25 @@ interface Props {
 export function TestSpecModal({ projectId, specId, onClose }: Props) {
   const { data: spec, isLoading, error } = useTestSpecDetail(projectId, specId)
   const [showProvenance, setShowProvenance] = useState(false)
+  const [rejectDialog, setRejectDialog] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
+  const approve = useApproveTestSpec(projectId)
+  const reject = useRejectTestSpec(projectId)
+
+  // GP e QA aprovam (contrato §4.1 + RBAC qa:approve)
+  const { user } = useAuthStore()
+  const roles = (user?.project_roles || [])
+    .filter((r: any) => r.project_id === projectId)
+    .map((r: any) => r.role)
+  const canApprove = user?.is_admin || roles.includes('gp') || roles.includes('qa')
+
+  const handleReject = () => {
+    if (rejectReason.trim().length < 10) return
+    reject.mutate(
+      { specId, reason: rejectReason.trim() },
+      { onSuccess: () => { setRejectDialog(false); setRejectReason(''); } },
+    )
+  }
 
   return (
     <div
@@ -266,7 +286,91 @@ export function TestSpecModal({ projectId, specId, onClose }: Props) {
             </>
           )}
         </div>
+
+        {/* Footer — ações GP/QA (Fase 10.6) */}
+        {spec && canApprove && spec.status !== 'stale' && (
+          <div className="px-5 py-3 border-t border-slate-800 bg-slate-900/40 flex items-center justify-between gap-3 flex-wrap">
+            <div className="text-[11px] text-slate-500">
+              {spec.status === 'approved' && '✓ Aprovado — Tester pode usar como insumo.'}
+              {spec.status === 'rejected' && '✗ Rejeitado — regenere ou reabra.'}
+              {spec.status === 'draft' && 'Aguardando revisão GP/QA.'}
+            </div>
+            <div className="flex items-center gap-2">
+              {spec.status !== 'rejected' && (
+                <button
+                  type="button"
+                  onClick={() => setRejectDialog(true)}
+                  disabled={reject.isPending}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-red-500/40 text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  <XCircle className="w-3.5 h-3.5" />
+                  Rejeitar
+                </button>
+              )}
+              {spec.status !== 'approved' && (
+                <button
+                  type="button"
+                  onClick={() => approve.mutate(specId)}
+                  disabled={approve.isPending}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium disabled:opacity-50"
+                >
+                  {approve.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {spec.status === 'rejected' ? 'Reabrir e aprovar' : 'Aprovar'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Dialog de rejeição — motivo mínimo 10 chars */}
+      {rejectDialog && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => !reject.isPending && setRejectDialog(false)}
+        >
+          <div
+            className="bg-slate-950 border border-red-500/40 rounded-xl max-w-md w-full p-5 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 className="text-sm font-semibold text-slate-100">Motivo da rejeição</h4>
+            <p className="text-[11px] text-slate-400">
+              Descreva o que precisa ser ajustado. Mínimo 10 caracteres.
+              O Tester verá esse texto ao abrir o spec e na aba Revisão de Testes.
+            </p>
+            <textarea
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              rows={4}
+              placeholder="Ex: Faltam casos de erro do integração com DataJud quando..."
+              className="w-full bg-slate-900 border border-slate-700 rounded px-3 py-2 text-sm text-slate-200 focus:border-red-500/60 focus:outline-none"
+            />
+            <div className="flex items-center justify-between text-[10px] text-slate-500">
+              <span>{rejectReason.trim().length} caracteres</span>
+              <span>mín. 10</span>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRejectDialog(false)}
+                disabled={reject.isPending}
+                className="text-xs px-3 py-1.5 rounded text-slate-400 hover:text-slate-200"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleReject}
+                disabled={reject.isPending || rejectReason.trim().length < 10}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-red-600 hover:bg-red-500 text-white disabled:opacity-50"
+              >
+                {reject.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <XCircle className="w-3.5 h-3.5" />}
+                Confirmar rejeição
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
