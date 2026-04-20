@@ -217,10 +217,19 @@ class AdminService:
             self.db.add(project)
             await self.db.flush()
 
+            # MVP 12 Fase 12.3 — GP criado por aprovação de solicitação é
+            # soberano direto (não passa por fluxo de aceite). Preenche
+            # `accepted_at` + `joined_at` com o mesmo timestamp para
+            # aparecer corretamente em todos os filtros de membro ativo.
+            _now = datetime.now(timezone.utc)
             member = ProjectMember(
                 project_id=project.id,
                 user_id=request.gp_id,
                 role="gp",
+                invited_at=_now,
+                accepted_at=_now,
+                joined_at=_now,
+                is_active=True,
             )
             self.db.add(member)
             await self.db.commit()

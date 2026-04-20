@@ -16,6 +16,38 @@ from app.services.audit_service import AuditService, AuditEvents
 logger = structlog.get_logger(__name__)
 
 
+# ─── MVP 12 Fase 12.3 — helpers canônicos de semântica de membro ─────
+
+def is_pending_invite(member: ProjectMember) -> bool:
+    """True quando o ProjectMember é um convite ainda não aceito.
+
+    Regra canônica (contrato §7 MVP 12 Fase 12.3 + docstring do modelo):
+    `is_active=True AND invite_token IS NOT NULL AND joined_at IS NULL
+    AND revoked_at IS NULL`. Filtrar só por `accepted_at IS NULL`
+    incluiria GPs criados por caminho direto (aprovação de projeto) —
+    é bug clássico. Use este helper em listagens de "convites pendentes".
+    """
+    return bool(
+        member
+        and member.is_active
+        and member.invite_token is not None
+        and member.joined_at is None
+        and member.revoked_at is None
+    )
+
+
+def is_active_integrated_member(member: ProjectMember) -> bool:
+    """True quando o ProjectMember está integrado no projeto.
+
+    Regra canônica: `is_active AND joined_at IS NOT NULL`. Cobre tanto
+    convidados que aceitaram quanto GPs criados por caminho direto
+    (admin approve → gp_management_service._create_gp_member).
+    `accepted_at` sozinho não basta — gotcha histórico. Use este helper
+    em qualquer filtro de "quem é membro ativo do projeto".
+    """
+    return bool(member and member.is_active and member.joined_at is not None)
+
+
 class ProjectTeamService:
     """Service for managing project team members and invitations"""
 

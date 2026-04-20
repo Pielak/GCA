@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.17  
+Versão: 3.18  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** **Fase 12.1 FECHADA** (rate limit `POST /public/project-requests` via slowapi; +3 testes). **Fase 12.2 FECHADA 2026-04-20** (timezone configurável em BackupScheduler via env `BACKUP_TIMEZONE`; default `America/Sao_Paulo` mantido; fallback silencioso em valor inválido; 10 testes cobrindo default/valid/empty/invalid/multi-zone/runtime). Fases 12.3-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 FECHADAS 2026-04-20**. Fase 12.3 (consolidar `accepted_at`/`joined_at`): corrigido `admin_service.approve_project_request` que criava GP sem timestamps (bug silencioso que derrubava GP em filtros de `accepted_at IS NOT NULL`); helpers canônicos `is_pending_invite` e `is_active_integrated_member` em `project_team_service`; docstring canônico no modelo `ProjectMember`; 11 testes. Suite pós-12.3: **1384/1384 passing, 3 skipped** (+21 cumulativo MVP 12). Fases 12.4-12.10 seguem definidas.
 
 ---
 
@@ -14,7 +14,7 @@ Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em exe
 **Objetivo:** fechar em ordem A→B→C→D→E→F→G —
 1. **Tema A — Segurança de fronteira:** ✅ Fase 12.1 rate limit em `POST /public/project-requests` (slowapi + env `PUBLIC_RATE_LIMIT`; 3 testes).
 2. **Tema B — Configurabilidade operacional:** ✅ Fase 12.2 timezone configurável em BackupScheduler (env `BACKUP_TIMEZONE`; fallback em valor inválido; 10 testes).
-3. **Tema C — Higiene de schema + cleanup:** 12.3 consolidar `accepted_at`/`joined_at`; 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
+3. **Tema C — Higiene de schema + cleanup:** ✅ Fase 12.3 consolidar `accepted_at`/`joined_at` (fix + helpers + docstring; 11 testes); 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
 4. **Tema D — CI maturity:** 12.6 canário real + remoção `continue-on-error` da lane e2e.
 5. **Tema E — Type safety frontend:** 12.7 remoção de `any` em ~20 arquivos TS.
 6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis (pipeline arguider/ocg_updater/codegen); 12.9 consolidação de helper de prompt CodeGen.

@@ -193,7 +193,27 @@ class ProjectBackup(Base):
 
 
 class ProjectMember(Base):
-    """Project membership with roles"""
+    """Project membership with roles.
+
+    MVP 12 Fase 12.3 — semântica canônica dos timestamps:
+    - `invited_at`: sempre preenchido no momento da criação (default now).
+    - `accepted_at`: preenchido quando o convidado **aceita** o convite
+      (caminho via `POST /accept-invite`). GPs criados por caminho
+      direto (aprovação de solicitação-de-projeto; _create_gp_member
+      interno) devem preencher AMBOS `accepted_at` e `joined_at` com o
+      mesmo timestamp — soberanos não passam por fluxo de aceite.
+    - `joined_at`: preenchido quando o membro está efetivamente ativo no
+      projeto (ou via aceite, ou via criação direta).
+    - `revoked_at`: preenchido quando GP revoga o convite antes do
+      aceite, ou quando membro é removido do projeto.
+
+    Regra canônica de query (usar helpers em `project_team_service`):
+    - Membro ativo integrado → `is_active AND joined_at IS NOT NULL`.
+    - Convite pendente → `is_active AND invite_token IS NOT NULL
+      AND joined_at IS NULL AND revoked_at IS NULL`.
+    Nunca filtrar só por `accepted_at IS NULL` — retorna GPs ativos
+    criados por caminho direto como se fossem convites pendentes.
+    """
     __tablename__ = "project_members"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
