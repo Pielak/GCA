@@ -667,10 +667,12 @@ Este MVP tem caráter **majoritariamente de saneamento e hardening** — não in
 
 **Tema F — Robustez estrutural:**
 - **Fase 12.8** Fila persistente (ex-DT-075 reclassificada). Migração de tarefas async de `asyncio.create_task` para Celery (Redis já está no docker-compose). Cobertura: apenas pipeline `Arguidor` + `ocg_updater` + `codegen` — tarefas de ingestão mantêm `asyncio` nesta fase (watchdog DT-073 cobre). Se escopo mostrar-se excessivo em diagnóstico inicial, reportar e pedir decisão binária antes de continuar.
+  - **DIFERIDA 2026-04-20** pela regra de parada: diagnóstico inicial revelou escopo estrutural (3-4 dias, 5 frentes: Celery setup + tasks, lifespan integration, refactor pipeline, migração de testes, monitoring+retry). Re-escopada para **MVP 13 — Robustez estrutural** quando autorizado. Watchdog DT-073 continua cobrindo o sintoma operacional (doc preso em `processing`).
 - **Fase 12.9** Consolidação do helper de prompt do CodeGen. Hoje `/scaffold` e `/regenerate-file` duplicam lógica de build de prompt em `code_generation.py`. Extrair `_build_scaffold_prompt(project, ocg_data, scope)` compartilhado. Facilita mock em testes e garante consistência dos prompts.
 
 **Tema G — Observabilidade compliance:**
 - **Fase 12.10** Completar cobertura de `audit_log_global` na hash chain. Auditoria: identificar endpoints/ações críticas que ainda não gravam em `audit_log_global` (além do que a Fase 11.4 cobriu). Expandir cobertura para ações de projeto (aprovação, desativação, transferência), questionário (submissão, aprovação), OCG (geração, consolidação, rollback), CodeGen (scaffold/apply, regenerate-file). Validação: teste de ponta-a-ponta que verifica chain integrity pós-série-de-ações.
+  - **DIFERIDA 2026-04-20** pela mesma regra de parada: cobertura e2e exige inventariar ~20+ endpoints e injetar `log_role_event`/`log_event` com payload canônico em cada, mais teste de cadeia integral. Re-escopada para **MVP 13 — Robustez estrutural** junto com 12.8. A cobertura parcial da Fase 11.4 (role events) continua operando.
 
 #### Regras duras
 - Nenhuma fase introduz feature nova além do saneamento declarado. Qualquer feature encontrada durante execução deve ser escopada em MVP futuro.
