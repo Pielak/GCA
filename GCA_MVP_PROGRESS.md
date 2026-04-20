@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.13  
+Versão: 3.14  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em execução.** Fases **11.1 / 11.4 / 11.2 / 11.3 / 11.5 / 11.6 FECHADAS 2026-04-20**. Fase 11.6 (DT-076 V2 cobertura multi-DB): `ddl_generator_service` expandido com SQLite, SQL Server, Oracle e MongoDB; `SCHEMA_HEADER` + `_TYPE_MAP` + `_dialect_default` + `_render_create_table` + `_render_create_index` + `_render_insert` ganham branch por dialeto; novo `_render_mongodb_artifacts` emite `collections.json` (JSON Schema) + `seed.js` (upsert idempotente); matriz framework×dialeto documentada (Laravel skipa Oracle; Alembic/Flyway/Knex/Laravel/go-migrate skipam Mongo; TypeORM e EFCore emitem stubs Mongo nativos). 56 testes novos cobrindo geração básica + FK + constraint + idempotência + matriz de compat. Suite pós-11.6: **1360/1360 passing** (+58 total V1 herdado). Fase 11.7 (Playwright GUI E2E) segue definida.
+Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 FECHADO 2026-04-20** (todas as 7 fases: 11.1 / 11.2 / 11.3 / 11.4 / 11.5 / 11.6 / 11.7). Fase 11.7 (Playwright GUI E2E): `test_fluxo_completo.py` sai do `--ignore` e integra-se à suite via marker `e2e`; URLs configuráveis por env var; `pytest.importorskip("playwright")` no topo; lane dedicada no CI (`e2e` job) instala chromium on-demand. Suite default do backend agora roda via `-m "not e2e"` em vez de `--ignore` — **1360 passed, 3 skipped** (3º skip é o arquivo e2e escaneado+skipado via importorskip quando playwright ausente). Gate §9 atendido em cada fase.
 
 ---
 
@@ -18,7 +18,7 @@ Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em exe
 - **Fase 11.4 — Auditoria canônica de role events em `audit_log_global`** — **FECHADA 2026-04-20**. 3 eventos canônicos registrados em `AuditEvents` (`ROLE_GRANTED`/`ROLE_REVOKED`/`ROLE_TRANSFERRED`). Novo helper `AuditService.log_role_event` com whitelist de event_type + payload canônico `{target_user_id, project_id (nullable na instância), old_role, new_role, phase, timestamp, extra?}`. 6 pontos de emissão injetados: (a) `project_team_service.invite_team_member` → role_granted phase=invited; (b) `accept_invite` → role_granted phase=accepted (actor é o próprio convidado); (c) `revoke_invite` → role_revoked phase=revoked; (d) `admin_management_service.set_admin_flag(True)` → role_granted phase=admin_promoted (project_id=None); (e) `set_admin_flag(False)` → role_revoked phase=admin_demoted; (f) `invite_admin` → role_granted phase=invited|admin_promoted; (g) `admin_service.lock_user(..., actor_id)` → role_revoked phase=user_deactivated com extra `{was_admin, had_gp_role, active_memberships_count}`. Router `admin.py` passa `current_user_id` para `lock_user` como `actor_id`. `ROLE_TRANSFERRED` reservado (Fase 11.2 emite). Testes: `test_mvp11_fase114_role_audit.py` com 8 casos (6 pontos de emissão + catálogo + whitelist do helper). Suite pós-11.4: **1287/1287 passing** (+8).
 - **Fase 11.5 — DT-041 image drift** — **FECHADA 2026-04-20**. Rebuild `docker compose build --no-cache backend` validado: `pypdf 4.3.1`, `reportlab 4.4.10`, `esprima 4.0.1` importáveis diretamente da imagem construída a partir do `pyproject.toml` (linhas 60-64). Paliativo runtime removido (não é mais necessário `pip install` pós-container-up). CI (`.github/workflows/backend-tests.yml`) ganha: (a) step `Verify critical extraction libs are importable` no job `test` — garante que alteração no `pyproject.toml` que quebre as libs falha o CI; (b) job novo `docker-image` que roda `docker build --no-cache` da imagem e valida `python -c "import pypdf, reportlab, esprima"` dentro do container construído. Também corrige path do pytest no job test: `tests/` → `app/tests/` com `--ignore=app/tests/e2e/test_fluxo_completo.py` (playwright ainda fora do CI — fechado na Fase 11.7). Suite backend inalterada: **1302/1302 passing** (11.5 é fase de infra; nenhum teste unitário novo, validação é o rebuild real + CI).
 - **Fase 11.6 — DT-076 V2 cobertura multi-DB** — **FECHADA 2026-04-20**. `ddl_generator_service.py` ganha suporte real a SQLite, SQL Server, Oracle e MongoDB — V1 (pg/mysql) preservada sem regressão. Mapeamento canônico→dialeto expandido em `_TYPE_MAP` (5 dialetos); `SCHEMA_HEADER` ganha 3 entradas novas (sqlite/sqlserver/oracle); `_render_create_table` agora trata `IF OBJECT_ID` (T-SQL) e bloco anônimo com `EXCEPTION` (PL/SQL); `_render_create_index` faz check via `sys.indexes` (T-SQL) e bloco com ORA-00955 tolerance (Oracle); `_render_insert` dialetiza idempotência (`ON CONFLICT` / `INSERT IGNORE` / `INSERT OR IGNORE` / `IF NOT EXISTS + SELECT` / `SELECT FROM DUAL WHERE NOT EXISTS`). Novo `_render_mongodb_artifacts` emite `collections.json` com JSON Schema validators + `seed.js` com `updateOne({...}, {$setOnInsert}, {upsert: true})` para idempotência + `createIndex` por índice declarado. Matriz framework×dialeto: Alembic/Flyway/Knex/TypeORM/EFCore/go-migrate cobrem 5 SQL; Laravel cobre 4 (skipa Oracle); mongo retorna None em frameworks SQL-only e emite stubs nativos em TypeORM (driver mongo via `createCollection`) + EFCore (Cosmos provider no-op). V1 testes atualizados (oracle/sqlite agora emitem artefatos). Testes novos: `test_mvp11_fase116_multi_db.py` com 56 casos (5 dialetos × schema/seed + MongoDB upsert + FK em todos SQL + matriz 6 frameworks × 5 SQL + skips Laravel-Oracle + skips SQL-frameworks-Mongo + TypeORM/EFCore stubs Mongo). Suite pós-11.6: **1360/1360 passing** (+58 vs baseline F113).
-- Fase 11.7 Playwright GUI E2E — **definida**.
+- **Fase 11.7 — Playwright GUI E2E** — **FECHADA 2026-04-20**. `test_fluxo_completo.py` sai do `--ignore` (antes era explicitamente removido da coleta por ausência de `playwright`) e passa a integrar a suíte canônica via marker `e2e` declarado em `backend/pyproject.toml`. Arquivo ganha: (a) `pytest.importorskip("playwright")` no topo — em ambiente sem playwright (caso do container default), o módulo é skipado limpamente na coleta; (b) `pytestmark = pytest.mark.e2e` — aplica marker em todos os testes do módulo; (c) URLs configuráveis via env vars `E2E_BASE_URL`/`E2E_API_URL`/`E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASS`/`E2E_PROJECT_ID` (defaults apontam para serviços internos da stack docker — elimina IP hardcoded 192.168.1.3 que era dogfood LAN). CI (`backend-tests.yml`): job `test` roda `-m "not e2e"` (substituindo `--ignore=app/tests/e2e/test_fluxo_completo.py`); job novo `e2e` instala `playwright` + `chromium --with-deps` on-demand, sobe stack docker, aguarda `/setup/status` e roda `-m e2e`. Lane e2e é `continue-on-error: true` nesta iteração (fail não bloqueia merge enquanto seed canônico do CI não está estabilizado — teste continua visível e executável, não mais invisível). Suite default: **1360 passed, 3 skipped** (3º skip é o e2e via importorskip).
 
 **Objetivo:** resolver em dois temas, sem misturar —
 1. **Simetria de soberania RBAC (compartimentalizada):** Fases 11.1 (✅), 11.2, 11.3, 11.4.
@@ -480,34 +480,27 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (MVP 11 — abertura)
-**ABERTO PARA AVALIAÇÃO — MVP 11 definido, não iniciado.**
+### Situação atual do gate (MVP 11 — encerramento)
+**ABERTO — MVP 11 fechado em todas as 7 fases.**
 
-Os MVPs 1-10 foram fechados com gate §9 atendido em cada transição
-(rastreabilidade no histórico abaixo). A baseline de suíte pós-DT-076
-é **1266 passed / 0 failed** (+104 testes somados por DT-076),
-confirmada empiricamente em 2026-04-20 em 4m15s contra `gca_test`
-isolado. Frontend build íntegro em 7.12s (2393 módulos).
+Os MVPs 1-11 foram fechados com gate §9 atendido em cada transição
+(rastreabilidade no histórico abaixo). Baseline de suíte pós-MVP 11:
+**1360 passed, 3 skipped** em 275s contra `gca_test` isolado
+(3 skips: 2 pré-existentes + 1 novo do e2e via `importorskip`, conforme
+Fase 11.7). Frontend build íntegro.
 
-MVP 11 nasce com gate §9 **aberto** (critério binário 1-9 todos SIM
-neste instante): nenhum blocker/critical/contradição herdado do
-MVP 10; suíte verde; build verde; RBAC ambíguo no tema do MVP 11
-é **o próprio escopo** (GP→GP), portanto não é debt herdada, é
-trabalho a executar dentro do MVP. Nenhuma implementação começa
-antes de autorização explícita do stakeholder-soberano por fase
-(§7.0 regra 3). Operacional:
-- `--ignore=app/tests/e2e/test_fluxo_completo.py` (exige playwright,
-  fora do caminho canônico do backend);
+Operacional:
+- MVP 11 Fase 11.7 substituiu `--ignore=app/tests/e2e/test_fluxo_completo.py`
+  por marker `e2e`. Execução default agora usa `-m "not e2e"` — e2e fica
+  na suite mas é desselecionado por marker (ou skipado via
+  `importorskip` quando playwright não instalado).
 - `TEST_DATABASE_URL` explícito apontando para `gca-postgres` quando
   pytest roda dentro do container (armadilha de `localhost`; ver §7).
 
 **Veredito binário:** sem blocker, sem critical, sem contradição
-estrutural entre código e contrato após o saneamento documental
-2026-04-20 e abertura do MVP 11 pelo protocolo §7.0. Gate **aberto**
-para MVP 10 (encerrado); gate **aberto** para MVP 11 no estado
-"definido — não iniciado" — vira "fechado" assim que uma das 7
-fases começar a ser executada e durante a execução até que todos
-os critérios §9 voltem a SIM.
+estrutural entre código e contrato. Gate **aberto** em todo o
+histórico MVP 1-11. Próximo marco: autorização explícita do
+stakeholder-soberano para abrir MVP 12 pelo protocolo §7.0.
 
 ### Motivo do último gate avaliado (MVP 4, preservado para rastreabilidade)
 Base do MVP 4 instalada e testes verde:
@@ -666,6 +659,26 @@ registradas como pós-MVP 4 e já quitadas em 4.
   (limitação de HTTP para isolar "último admin" sem quebrar
   `require_admin`; coberto pelo test unitário do guard helper).
   Suite 1302/1302 passing. Gate §9 atendido.
+- MVP 11 Fase 11.5 → **FECHADA 2026-04-20**. DT-041 image drift:
+  rebuild `--no-cache` da imagem `gca-backend` validado; paliativo
+  runtime removido; CI (`backend-tests.yml`) ganha step de
+  verificação + job novo `docker-image` rebuildando do zero.
+- MVP 11 Fase 11.6 → **FECHADA 2026-04-20**. DT-076 V2 multi-DB:
+  `ddl_generator_service` ganha SQLite/SQL Server/Oracle/MongoDB
+  além da V1 (pg/mysql). Matriz 6 frameworks × 5 SQL + stubs Mongo
+  para TypeORM e EFCore. 56 testes novos. Suite 1360/1360 passing.
+- MVP 11 Fase 11.7 → **FECHADA 2026-04-20**. Playwright GUI E2E:
+  `test_fluxo_completo.py` sai do `--ignore`, ganha marker `e2e`
+  registrado em `pyproject.toml` + `importorskip("playwright")` +
+  URLs por env var; CI ganha job `e2e` com chromium on-demand.
+  Suite default usa `-m "not e2e"` — **1360 passed, 3 skipped**.
+- Pós-MVP 11 (2026-04-20) → **MVP 11 fechado em todas as 7 fases.**
+  Tema 1 simetria RBAC compartimentalizada (11.1 GP→GP, 11.2
+  transferir soberania, 11.3 guard último Admin, 11.4 auditoria
+  role events) + Tema 2 higiene operacional (11.5 image drift,
+  11.6 DDL multi-DB, 11.7 Playwright). Baseline suite 1360 passed
+  (+58 vs pré-MVP 11 1302). Gate só volta a ser avaliado quando
+  novo MVP 12 for autorizado pelo stakeholder-soberano.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -678,16 +691,13 @@ automaticamente a **NÃO AVANÇAR** até quitação.
 Sem MVP em execução, não há ordem canônica de saneamento por fase.
 O que resta é operacional e **não-bloqueador**:
 
-1. **DT-041 — deploy image drift** (Minor, operacional)
-   - `docker compose build --no-cache gca-backend` e validar que `pypdf`,
-     `reportlab` e `esprima` persistem na imagem. Paliativo em runtime
-     continua cobrindo o ambiente atual.
+1. **DT-041 — deploy image drift** — **QUITADA na Fase 11.5**.
+   Rebuild `--no-cache` validado; CI cobre o passo.
 
-2. **Playwright para `test_fluxo_completo.py`** (opcional)
-   - Teste de GUI E2E é ignorado por ausência do pacote `playwright` no
-     container backend. Se o GCA ganhar pipeline de GUI E2E, instalar o
-     pacote + browsers e remover o `--ignore` no CI. Fora do caminho
-     canônico do backend.
+2. **Playwright para `test_fluxo_completo.py`** — **QUITADA na Fase 11.7**.
+   Marker `e2e` no pyproject + lane dedicada no CI. Teste continua
+   executável (não ignorado); `continue-on-error` enquanto seed do CI
+   não estabiliza.
 
 3. **Armadilha de host do `TEST_DATABASE_URL`** (nota operacional)
    - `conftest.py` usa `localhost:5432` como default — correto quando o
@@ -742,26 +752,18 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-MVP 11 aberto no contrato §7 em 2026-04-20 no estado **definido —
-não iniciado**. O próximo marco é **autorização explícita do
-stakeholder-soberano para iniciar a primeira fase** (§7.0 regra 3).
+Com MVPs 1-11 fechados e nenhum MVP 12 autorizado no contrato §7,
+não há marco de saída canônico pendente. O próximo marco é **externo
+ao documento**: solicitação formal do stakeholder-soberano abrindo
+`### MVP 12` no contrato, pelo protocolo §7.0 (commit atômico
+alterando `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`).
 
-Ordem canônica sugerida de execução (o stakeholder decide a ordem
-real, as fases são independentes entre si):
-1. **Fase 11.1** — GP convida outro GP do mesmo projeto (backend
-   `project_team_service` + frontend `ProjectTeamPage.tsx` + token
-   compartimentalizado + teste).
-2. **Fase 11.4** — auditoria de role events primeiro, para que
-   11.1/11.2/11.3 já gravem eventos desde o início.
-3. **Fase 11.2** — GP transferir soberania do projeto.
-4. **Fase 11.3** — guard reforçado de último Admin ativo.
-5. **Fase 11.5–11.7** — higiene operacional residual (DT-041,
-   DT-076 V2, Playwright GUI E2E) em qualquer ordem.
-
-Regras duras durante a execução do MVP 11:
-- Cada fase exige revalidação §9 antes de passar para a próxima.
-- Nenhuma implementação silenciosa; cada fase tem commit próprio
-  com escopo binário.
-- Escopo fechado no contrato §7 MVP 11; qualquer item fora disso
-  exige nova emenda do contrato (não encaixa neste MVP por
-  "proximidade de tema").
+Enquanto isso não ocorrer:
+- não há gate a fechar;
+- nenhuma feature nova entra em produção sem trilha formal (deve
+  ser roteada como nova DT dentro de um MVP existente, ou como
+  solicitação formal de novo MVP — nunca implementação silenciosa);
+- DTs residuais minor (reobservação do CI e2e quando seed
+  estabilizar; `continue-on-error` removível da lane e2e depois
+  que canário real passar) podem ser endereçadas como follow-up
+  operacional, sem gate associado.

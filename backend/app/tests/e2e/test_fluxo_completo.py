@@ -4,17 +4,35 @@ Testes E2E do fluxo completo do GCA — pós Fase 6.
 Cobre: Login → Dashboard → Projeto → Ingestão → Gatekeeper →
        LiveDocs → Roadmap → Code Generator → Legacy → Merge.
 
-Pré-requisito: docker compose up -d (todos os serviços rodando).
-URL base: http://192.168.1.3:3000
+MVP 11 Fase 11.7: arquivo sai do `--ignore` e integra-se à suite via
+marker `e2e`. Execução default de `pytest` (caminho canônico do
+backend) roda com `-m "not e2e"` — portanto este arquivo é coletado mas
+os testes são pulados. Lane dedicada `-m e2e` executa em pipeline
+separado com playwright instalado e ambiente gca-frontend/backend up.
+
+Configurável via env vars:
+  E2E_BASE_URL (default http://gca-frontend:4173)
+  E2E_API_URL  (default http://gca-backend:8000)
+  E2E_ADMIN_EMAIL / E2E_ADMIN_PASS
+  E2E_PROJECT_ID
 """
+import os
+
 import pytest
+
+# playwright é dependência opcional — só instalada na lane e2e dedicada.
+# Em ambientes sem playwright, o módulo inteiro é pulado na coleta.
+pytest.importorskip("playwright", reason="playwright não instalado (lane e2e dedicada)")
 from playwright.async_api import async_playwright, Page, Browser
 
-BASE_URL = "http://192.168.1.3:3000"
-API_URL = "http://192.168.1.3:8000"
-ADMIN_EMAIL = "admin@gca.local"
-ADMIN_PASS = "SenhaAdmin@2026"
-PROJECT_ID = "1"
+# MVP 11 Fase 11.7 — marker aplicado no módulo inteiro.
+pytestmark = pytest.mark.e2e
+
+BASE_URL = os.environ.get("E2E_BASE_URL", "http://gca-frontend:4173")
+API_URL = os.environ.get("E2E_API_URL", "http://gca-backend:8000")
+ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL", "admin@gca.local")
+ADMIN_PASS = os.environ.get("E2E_ADMIN_PASS", "SenhaAdmin@2026")
+PROJECT_ID = os.environ.get("E2E_PROJECT_ID", "1")
 
 
 # ──── Fixtures ────────────────────────────────────────────────────────────────

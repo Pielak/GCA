@@ -105,6 +105,7 @@ markers = [
     "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
     "integration: marks tests as integration tests",
     "unit: marks tests as unit tests",
+    "e2e: MVP 11 Fase 11.7 — testes GUI E2E via Playwright (lane dedicada; rodar com '-m e2e')",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
