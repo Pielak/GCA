@@ -100,6 +100,26 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("ingestion.startup_watchdog_failed", error=str(e))
 
+    # MVP 13 Fase 13.2: smoke do broker Celery no startup.
+    # Worker roda em processo separado (gca-celery-worker). Aqui só
+    # checamos conectividade do broker. Falha de broker é aviso, não
+    # fatal — backend continua operacional para endpoints que não
+    # dependem de fila.
+    if "PYTEST_CURRENT_TEST" not in _os.environ:
+        try:
+            from app.celery_app import check_broker_connection
+            broker_status = check_broker_connection(timeout=2.0)
+            if broker_status["reachable"]:
+                logger.info("celery.broker_reachable", broker=broker_status["broker"])
+            else:
+                logger.warning(
+                    "celery.broker_unreachable",
+                    broker=broker_status["broker"],
+                    error=broker_status["error"],
+                )
+        except Exception as e:
+            logger.error("celery.broker_check_failed", error=str(e))
+
     yield
 
     # Shutdown
@@ -198,8 +218,28 @@ app.include_router(release_user_router, prefix=f"{settings.API_PREFIX}", tags=["
 
 @app.get("/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "ok", "version": settings.APP_VERSION}
+    """Health check endpoint.
+
+    MVP 13 Fase 13.2 — inclui status do broker Celery e contagem de
+    workers online. Se o broker estiver fora, o backend segue respondendo
+    (status="ok") mas `celery.broker.reachable=False` sinaliza a
+    degradação para LB/Prometheus/uptime monitor.
+    """
+    from app.celery_app import check_broker_connection, check_workers_alive
+
+    broker = check_broker_connection(timeout=1.0)
+    workers_info = (
+        check_workers_alive(timeout=1.0) if broker["reachable"]
+        else {"workers": 0, "nodes": [], "error": "broker_unreachable"}
+    )
+    return {
+        "status": "ok",
+        "version": settings.APP_VERSION,
+        "celery": {
+            "broker": broker,
+            "workers": workers_info,
+        },
+    }
 
 
 @app.get("/")

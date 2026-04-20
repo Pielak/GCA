@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.26  
+Versão: 3.27  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** **Fase 13.1 FECHADA 2026-04-20** (setup Celery + infra): `celery[redis]` em pyproject/requirements; `backend/app/celery_app.py` com broker Redis DB 1 + result backend DB 2 + timezone alinhado ao `BACKUP_TIMEZONE` + serialização JSON-only + retry policy bounded + task `ping` de smoke; serviço `gca-celery-worker` no docker-compose (concurrency=2, healthcheck via `inspect ping`); smoke test validado: `ping.delay()` retorna "pong" + `inspect ping` retorna 1 node online. 15 testes novos. Fases 13.2-13.7 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** **Fases 13.1 + 13.2 FECHADAS 2026-04-20**. Fase 13.2 (lifespan + worker lifecycle): helpers `check_broker_connection` e `check_workers_alive` em `celery_app.py`; smoke do broker no startup do lifespan (não-fatal se fora); `/health` expandido com bloco `celery` contendo broker.reachable + workers.count/nodes; 7 testes novos. Smoke manual: `/health` retorna `workers=1, nodes=[celery@...]`. Fases 13.3-13.7 seguem definidas.
 
 ---
 
@@ -15,7 +15,7 @@ Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em exe
 
 **Tema A — Fila persistente Celery/Redis (4 fases):**
 - ✅ **Fase 13.1** Setup Celery + infra — **FECHADA 2026-04-20**. `celery[redis]` em pyproject/requirements; `celery_app.py` com broker DB 1 / result DB 2 / task `ping` / timezone via `BACKUP_TIMEZONE` / JSON-only / retry bounded; serviço `gca-celery-worker` no docker-compose (concurrency=2, healthcheck `inspect ping`). Smoke validado: `ping.delay().get() == "pong"`; `celery inspect ping` retorna 1 node online. 15 testes novos.
-- **Fase 13.2** Lifespan + worker lifecycle (integrar no `main.py`; health check expandido no `/health`; worker como processo separado).
+- ✅ **Fase 13.2** Lifespan + worker lifecycle — **FECHADA 2026-04-20**. `check_broker_connection` e `check_workers_alive` em `celery_app.py`; smoke não-fatal do broker no startup; `/health` expandido com bloco `celery.broker.reachable` + `celery.workers.workers/nodes`; 7 testes. Worker segue em processo separado (`gca-celery-worker`).
 - **Fase 13.3** Refactor pipeline Arguider + OCG Updater + auto-CodeGen (migrar os 8 `asyncio.create_task` mapeados). **Ponto de maior risco** — tem autorização de sub-divisão (13.3a/b/c) se diagnóstico revelar mais entrelaçamento que o esperado.
 - **Fase 13.4** Testes (`CELERY_TASK_ALWAYS_EAGER`) + monitoring + retry policy (max_retries=3, DLQ `celery_dlq`, logs estruturados).
 

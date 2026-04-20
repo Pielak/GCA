@@ -123,3 +123,55 @@ def ping() -> str:
     se o broker estiver inalcançável ou o worker offline.
     """
     return "pong"
+
+
+# ─── Helpers de health check (MVP 13 Fase 13.2) ───────────────────────
+
+
+def check_broker_connection(timeout: float = 2.0) -> dict:
+    """Verifica conectividade com o broker Redis.
+
+    Retorna dict com status + detalhes. Não levanta exceção — designed
+    para ser chamado do endpoint /health sem derrubar a resposta quando
+    o broker está fora.
+
+    {
+      "broker": "redis://redis:6379/1",
+      "reachable": bool,
+      "error": str | None,
+    }
+    """
+    broker_url = celery_app.conf.broker_url
+    result = {"broker": broker_url, "reachable": False, "error": None}
+    try:
+        # Usa a conexão do Celery diretamente (mesmo client do worker).
+        with celery_app.connection_for_read() as conn:
+            conn.ensure_connection(max_retries=0, timeout=timeout)
+            result["reachable"] = True
+    except Exception as e:  # noqa: BLE001 — queremos capturar tudo
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
+
+
+def check_workers_alive(timeout: float = 1.0) -> dict:
+    """Verifica se há worker(s) Celery online respondendo a `inspect ping`.
+
+    Retorna dict com status + contagem. Quando o broker está fora, pula
+    o ping e reporta `reachable=False`. Quando não há worker, reporta
+    `workers=0`.
+
+    {
+      "workers": int,
+      "nodes": list[str],
+      "error": str | None,
+    }
+    """
+    result: dict = {"workers": 0, "nodes": [], "error": None}
+    try:
+        insp = celery_app.control.inspect(timeout=timeout)
+        pong = insp.ping() or {}
+        result["nodes"] = sorted(pong.keys())
+        result["workers"] = len(pong)
+    except Exception as e:  # noqa: BLE001
+        result["error"] = f"{type(e).__name__}: {e}"
+    return result
