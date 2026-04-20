@@ -228,3 +228,59 @@ async def _run_reevaluate_gatekeeper(project_id: str, ocg_version, trigger: str)
         ocg_version=ocg_version,
         trigger=trigger,
     )
+
+
+# ─── Fase 13.3c: auto_generate (OCG updater) + external_repos fallback ──
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.auto_generate_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def auto_generate_task(self, project_id: str, updated_ocg: dict) -> dict:
+    """Dispara generators de deliverables pós-OCG update.
+
+    Substitui `asyncio.create_task(_auto_generate_in_background(...))`
+    em ocg_updater_service linha 369 pré-13.3c. O payload `updated_ocg`
+    pode ser grande mas é serializável JSON — trafega OK pelo broker.
+    Se tamanho virar gargalo, migrar pra fetch no DB via project_id.
+    """
+    try:
+        _run_coro_isolated(_run_auto_generate(project_id, updated_ocg))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("auto_generate_task.failed", project_id=project_id, error=str(exc))
+        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+    return {"status": "ok", "project_id": project_id}
+
+
+async def _run_auto_generate(project_id: str, updated_ocg: dict) -> None:
+    from app.services.ocg_updater_service import _auto_generate_in_background
+    await _auto_generate_in_background(UUID(project_id), updated_ocg)
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.external_repo_fallback_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=60,
+)
+def external_repo_fallback_task(self, project_id: str, repo_id: str) -> dict:
+    """Análise direta de repo externo quando n8n falha.
+
+    Substitui os 2 `asyncio.create_task(_run_analysis_fallback(...))`
+    em external_repos_router (linhas 199 e 205 pré-13.3c). Retry mais
+    conservador (60s) — repo clone + análise leva minutos.
+    """
+    try:
+        _run_coro_isolated(_run_external_fallback(project_id, repo_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("external_repo_fallback_task.failed", repo_id=repo_id, error=str(exc))
+        raise self.retry(exc=exc, countdown=60 + 60 * self.request.retries)
+    return {"status": "ok", "repo_id": repo_id}
+
+
+async def _run_external_fallback(project_id: str, repo_id: str) -> None:
+    from app.routers.external_repos_router import _run_analysis_fallback
+    await _run_analysis_fallback(UUID(project_id), UUID(repo_id))

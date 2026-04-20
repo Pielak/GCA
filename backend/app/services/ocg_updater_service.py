@@ -361,14 +361,10 @@ class OCGUpdaterService:
                 exc_info=True,
             )
 
-        # Auto-trigger generators em BACKGROUND (asyncio.create_task com
-        # sessão própria). Roda generators para deliverables 'declared'
-        # ou 'missing' que tenham generator registrado. Re-verifica após.
-        # Fire-and-forget — falha aqui NÃO derruba o flow do OCG.
-        import asyncio as _asyncio
-        _asyncio.create_task(
-            _auto_generate_in_background(project_id, updated_ocg)
-        )
+        # MVP 13 Fase 13.3c: auto-trigger via Celery. Retry bounded +
+        # ACK late preservam a execução se worker cair no meio.
+        from app.tasks.pipeline import auto_generate_task
+        auto_generate_task.delay(str(project_id), updated_ocg)
 
         # Notificar GPs do projeto sobre atualização do OCG
         try:
