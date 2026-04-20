@@ -19,6 +19,7 @@ por 13.3b/c ou pelo watchdog DT-073 até lá.
 from __future__ import annotations
 
 import asyncio
+from typing import Any, Coroutine
 from uuid import UUID
 
 import structlog
@@ -26,6 +27,26 @@ import structlog
 from app.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
+
+
+def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
+    """Roda corrotina num event loop isolado.
+
+    Substitui `asyncio.run()` que falha em eager mode (pytest-asyncio)
+    quando já há loop rodando. Em worker Celery de verdade (processo
+    separado sem loop), funciona igual a `asyncio.run()`.
+    """
+    try:
+        loop = asyncio.new_event_loop()
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    except RuntimeError:
+        # Fallback extremo: se mesmo new_event_loop falhar, tenta o
+        # loop atual (caminho pytest-asyncio com loop em execução).
+        loop = asyncio.get_event_loop()
+        return loop.run_until_complete(coro)
 
 
 @celery_app.task(
@@ -56,7 +77,7 @@ def pipeline_ingest_task(self, document_id: str, project_id: str, file_type: str
     t0 = time.time()
 
     try:
-        asyncio.run(_run_analyze_async(document_id, project_id, file_type))
+        _run_coro_isolated(_run_analyze_async(document_id, project_id, file_type))
     except Exception as exc:  # noqa: BLE001
         logger.error(
             "pipeline_ingest_task.failed",
@@ -119,3 +140,91 @@ async def _run_analyze_async(document_id: str, project_id: str, file_type: str) 
             file_bytes,
             file_type or doc.file_type,
         )
+
+
+# ─── Fase 13.3b: propagate / regenerate_backlog / reevaluate_gatekeeper ──
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.propagate_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def propagate_task(self, project_id: str, changes: list, ocg_version) -> dict:
+    """Propaga mudanças do OCG (backlog/codegen/livedocs) via Celery.
+
+    Substitui `asyncio.create_task(_propagate_async(...))` em
+    ingestion_service (linhas 247 e 1327 pré-13.3b).
+    """
+    try:
+        _run_coro_isolated(_run_propagate(project_id, changes, ocg_version))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("propagate_task.failed", project_id=project_id, error=str(exc))
+        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+    return {"status": "ok", "project_id": project_id}
+
+
+async def _run_propagate(project_id: str, changes: list, ocg_version) -> None:
+    from app.services.ingestion_service import _propagate_async
+    await _propagate_async(
+        project_id=UUID(project_id),
+        changes=changes,
+        ocg_version=ocg_version,
+    )
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.regenerate_backlog_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def regenerate_backlog_task(self, project_id: str, ocg_version, trigger: str) -> dict:
+    """Regenera backlog a partir do OCG atual. Substitui
+    `asyncio.create_task(_regenerate_backlog_async(...))` em
+    ingestion_service linha 255 pré-13.3b.
+    """
+    try:
+        _run_coro_isolated(_run_regenerate_backlog(project_id, ocg_version, trigger))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("regenerate_backlog_task.failed", project_id=project_id, error=str(exc))
+        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+    return {"status": "ok", "project_id": project_id}
+
+
+async def _run_regenerate_backlog(project_id: str, ocg_version, trigger: str) -> None:
+    from app.services.ingestion_service import _regenerate_backlog_async
+    await _regenerate_backlog_async(
+        project_id=UUID(project_id),
+        ocg_version=ocg_version,
+        trigger=trigger,
+    )
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.reevaluate_gatekeeper_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def reevaluate_gatekeeper_task(self, project_id: str, ocg_version, trigger: str) -> dict:
+    """Reavalia Gatekeeper pós-OCG. Substitui
+    `asyncio.create_task(_reevaluate_gatekeeper_async(...))` em
+    ingestion_service linhas 263 e 1338 pré-13.3b.
+    """
+    try:
+        _run_coro_isolated(_run_reevaluate_gatekeeper(project_id, ocg_version, trigger))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("reevaluate_gatekeeper_task.failed", project_id=project_id, error=str(exc))
+        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+    return {"status": "ok", "project_id": project_id}
+
+
+async def _run_reevaluate_gatekeeper(project_id: str, ocg_version, trigger: str) -> None:
+    from app.services.ingestion_service import _reevaluate_gatekeeper_async
+    await _reevaluate_gatekeeper_async(
+        project_id=UUID(project_id),
+        ocg_version=ocg_version,
+        trigger=trigger,
+    )

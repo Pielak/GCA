@@ -243,30 +243,19 @@ async def _fire_ocg_change_hooks(
 
     Todos os hooks são fire-and-forget com sessão própria e erros isolados.
     """
-    if changes:
-        asyncio.create_task(
-            _propagate_async(
-                project_id=project_id,
-                changes=changes,
-                ocg_version=ocg_version,
-            )
-        )
-    else:
-        asyncio.create_task(
-            _regenerate_backlog_async(
-                project_id=project_id,
-                ocg_version=ocg_version,
-                trigger=trigger,
-            )
-        )
-
-    asyncio.create_task(
-        _reevaluate_gatekeeper_async(
-            project_id=project_id,
-            ocg_version=ocg_version,
-            trigger=trigger,
-        )
+    # MVP 13 Fase 13.3b: migrado para Celery. Bytes/state ficam no DB,
+    # apenas IDs passam pelo broker. Retry bounded + ACK late.
+    from app.tasks.pipeline import (
+        propagate_task,
+        regenerate_backlog_task,
+        reevaluate_gatekeeper_task,
     )
+    if changes:
+        propagate_task.delay(str(project_id), list(changes), ocg_version)
+    else:
+        regenerate_backlog_task.delay(str(project_id), ocg_version, trigger)
+
+    reevaluate_gatekeeper_task.delay(str(project_id), ocg_version, trigger)
 
 
 class IngestionService:
@@ -394,13 +383,12 @@ class IngestionService:
                 "status_code": 200,
             }
 
-        # Disparar análise assíncrona (somente se não quarentenado).
-        # DT-3 dogfood: timeout duro de 10 min protege contra LLM travado
-        # ou rede lenta. Se estourar, o except interno em _analyze_async
-        # catch-all marca stage='failed'. Também precisamos limpar status.
-        asyncio.create_task(
-            self._analyze_with_timeout(doc_id, project_id, file_bytes, file_type)
-        )
+        # MVP 13 Fase 13.3b: upload dispara via Celery. Bytes já foram
+        # persistidos via write_ingested antes desta linha; task lê
+        # via read_ingested. Timeout + error handling via retry policy
+        # da task. Watchdog DT-073 continua como rede de segurança.
+        from app.tasks.pipeline import pipeline_ingest_task
+        pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
 
         logger.info(
             "ingestion.document_uploaded",
@@ -1324,23 +1312,24 @@ class IngestionService:
                             # internos; depois dele, `db.commit()` direto
                             # silenciou sem persistir stage.
                             await IngestionService._update_stage_fresh(document_id, "regenerating_backlog")
-                            asyncio.create_task(
-                                _propagate_async(
-                                    project_id=project_id,
-                                    changes=update_result["changes"],
-                                    ocg_version=update_result.get("version_to"),
-                                )
+                            # MVP 13 Fase 13.3b: Celery tasks com retry + ACK late.
+                            from app.tasks.pipeline import (
+                                propagate_task,
+                                reevaluate_gatekeeper_task,
+                            )
+                            propagate_task.delay(
+                                str(project_id),
+                                list(update_result["changes"]),
+                                update_result.get("version_to"),
                             )
                             # Reavaliar Gatekeeper com o OCG novo (MVP 2 §10).
-                            # Também fire-and-forget: grava evento
+                            # Também fire-and-forget via Celery: grava evento
                             # GATEKEEPER_REEVALUATED no audit_log com
                             # blocking_pillars/derived_status resultantes.
-                            asyncio.create_task(
-                                _reevaluate_gatekeeper_async(
-                                    project_id=project_id,
-                                    ocg_version=update_result.get("version_to"),
-                                    trigger="document_ingestion",
-                                )
+                            reevaluate_gatekeeper_task.delay(
+                                str(project_id),
+                                update_result.get("version_to"),
+                                "document_ingestion",
                             )
 
                         logger.info("ingestion.ocg_reactive_complete",
