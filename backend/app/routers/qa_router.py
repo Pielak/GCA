@@ -359,6 +359,76 @@ async def generate_single_test_spec(
     }
 
 
+@router.post("/projects/{project_id}/test-specs/generate-global")
+async def generate_global_test_spec(
+    project_id: UUID,
+    spec_type: str = Query(..., description="security|compliance"),
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 10 Fase 10.3 — Gera (ou regera) TestSpec GLOBAL via Premium.
+
+    Specs globais (module_id=NULL) consolidam OCG inteiro. Só aceita
+    security e compliance — alta criticidade §6.3 exige Premium.
+
+    503 se Premium não configurado (Ollama é explicitamente ignorado).
+    """
+    from app.services.global_spec_generator_service import generate_global_spec
+
+    try:
+        spec = await generate_global_spec(db, project_id, spec_type)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        import traceback
+        logger.warning(
+            "global_spec.generate_unexpected_error",
+            project_id=str(project_id), spec_type=spec_type,
+            error_type=type(exc).__name__, error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao gerar spec global ({type(exc).__name__}): {exc!r}",
+        )
+
+    return {
+        "id": str(spec.id),
+        "spec_type": spec.spec_type,
+        "status": spec.status,
+        "content_chars": len(spec.content or ""),
+        "generator_provider": spec.generator_provider,
+        "generator_model": spec.generator_model,
+        "generated_at": spec.generated_at.isoformat() if spec.generated_at else None,
+    }
+
+
+@router.post("/projects/{project_id}/test-specs/regenerate-global")
+async def bulk_regenerate_global_specs(
+    project_id: UUID,
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 10 Fase 10.3 — Regenera security + compliance em bulk.
+
+    Tolera falha individual (acumula em `errors`). Útil pro botão
+    'Regenerar Security+Compliance' da Fase 10.8.
+    """
+    from app.services.global_spec_generator_service import regenerate_all_global_specs
+    try:
+        return await regenerate_all_global_specs(db, project_id)
+    except Exception as exc:
+        import traceback
+        logger.error(
+            "global_spec.bulk_regenerate_failed",
+            project_id=str(project_id), error=repr(exc),
+            traceback=traceback.format_exc(),
+        )
+        raise HTTPException(status_code=500, detail=f"Erro no bulk global: {exc!r}")
+
+
 @router.post("/projects/{project_id}/test-specs/regenerate")
 async def bulk_regenerate_test_specs(
     project_id: UUID,
