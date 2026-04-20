@@ -4,9 +4,10 @@ import {
   BookOpen, RefreshCw, Loader2, AlertTriangle, FileText, Network, Sparkles,
 } from 'lucide-react'
 import {
-  useLiveDocs, useBulkRegenerateModuleDocs, useBulkRegenerateConsolidatedDocs,
+  useLiveDocs, useBulkRegenerateModuleDocs, useGenerateConsolidatedDoc,
   type LiveDocListItem, type LiveDocType,
 } from '@/hooks/useLiveDocs'
+import { useStaleSummary } from '@/hooks/useTestSpecs'
 import { LiveDocModal } from '@/components/livedocs/LiveDocModal'
 
 /**
@@ -48,9 +49,23 @@ const TYPE_ORDER: LiveDocType[] = ['index', 'architecture', 'module_doc']
 export function LiveDocsPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const { data: docs, isLoading } = useLiveDocs(projectId)
+  const { data: summary } = useStaleSummary(projectId)
   const bulkModule = useBulkRegenerateModuleDocs(projectId)
-  const bulkConsolidated = useBulkRegenerateConsolidatedDocs(projectId)
+  const genConsolidated = useGenerateConsolidatedDoc(projectId)
   const [openDocId, setOpenDocId] = useState<string | null>(null)
+  const [pending, setPending] = useState<LiveDocType | null>(null)
+
+  const staleByType = summary?.live_docs?.by_type || {}
+  const staleCountOf = (t: LiveDocType) => staleByType[t]?.stale ?? 0
+
+  const runModuleBulk = () => {
+    setPending('module_doc')
+    bulkModule.mutate(undefined, { onSettled: () => setPending(null) })
+  }
+  const runConsolidated = (t: 'index' | 'architecture') => {
+    setPending(t)
+    genConsolidated.mutate(t, { onSettled: () => setPending(null) })
+  }
 
   const byType: Record<LiveDocType, LiveDocListItem[]> = {
     module_doc: [], index: [], architecture: [],
@@ -75,37 +90,59 @@ export function LiveDocsPage() {
             sua procedência (versão do OCG, ingestões e modelo usado).
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <button
             type="button"
-            onClick={() => bulkModule.mutate()}
-            disabled={bulkModule.isPending}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
+            onClick={runModuleBulk}
+            disabled={pending !== null}
+            className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
             title="Gera/regera uma doc por módulo via Ollama local"
           >
-            {bulkModule.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            Docs de Módulo (Ollama)
+            {pending === 'module_doc' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+            Docs de Módulo
+            {staleCountOf('module_doc') > 0 && (
+              <span className="text-[10px] px-1 rounded bg-amber-500/20 text-amber-300">
+                {staleCountOf('module_doc')}
+              </span>
+            )}
           </button>
-          <button
-            type="button"
-            onClick={() => bulkConsolidated.mutate()}
-            disabled={bulkConsolidated.isPending}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-violet-600/30 border border-violet-500/40 text-violet-200 hover:bg-violet-600/40 disabled:opacity-50"
-            title="Gera/regera índice e arquitetura via Premium"
-          >
-            {bulkConsolidated.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            Index + Architecture (Premium)
-          </button>
+          {(['index', 'architecture'] as const).map((t) => {
+            const label = t === 'index' ? 'Índice' : 'Arquitetura'
+            const n = staleCountOf(t)
+            const busy = pending === t
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => runConsolidated(t)}
+                disabled={pending !== null}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded bg-violet-600/30 border border-violet-500/40 text-violet-200 hover:bg-violet-600/40 disabled:opacity-50"
+                title={`Gera/regera ${label.toLowerCase()} via Premium`}
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {label}
+                {n > 0 && (
+                  <span className="text-[10px] px-1 rounded bg-amber-500/30 text-amber-200">
+                    {n}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
-      {/* Stale banner */}
+      {/* Stale banner — aggregate via stale-summary quando disponível */}
       {staleCount > 0 && (
         <div className="bg-amber-500/10 border border-amber-500/40 rounded p-3 flex items-start gap-2">
           <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0 mt-0.5" />
           <div className="text-[12px] text-amber-200 flex-1">
             <strong>{staleCount} documento(s) desatualizado(s)</strong> — OCG
-            evoluiu desde a última geração. Clique em "Regenerar" para alinhar.
+            evoluiu desde a última geração.
+            {summary?.current_ocg_version !== null && summary?.current_ocg_version !== undefined
+              ? ` Versão atual: v${summary.current_ocg_version}.`
+              : ''}
+            {' '}Use os botões acima para regerar por tipo.
           </div>
         </div>
       )}

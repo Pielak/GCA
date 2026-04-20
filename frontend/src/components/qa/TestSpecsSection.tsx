@@ -5,7 +5,7 @@ import {
 } from 'lucide-react'
 import {
   useTestSpecs, useStaleSummary,
-  useBulkRegenerateTestSpecs, useBulkRegenerateGlobalSpecs,
+  useBulkRegenerateTestSpecs, useGenerateGlobalSpec,
   type TestSpecListItem, type TestSpecType,
 } from '@/hooks/useTestSpecs'
 import { TestSpecModal } from './TestSpecModal'
@@ -74,10 +74,26 @@ export function TestSpecsSection({ projectId }: Props) {
   const { data: specs, isLoading } = useTestSpecs(projectId)
   const { data: summary } = useStaleSummary(projectId)
   const bulkLocal = useBulkRegenerateTestSpecs(projectId)
-  const bulkGlobal = useBulkRegenerateGlobalSpecs(projectId)
+  const genGlobal = useGenerateGlobalSpec(projectId)
 
   const [openSpecId, setOpenSpecId] = useState<string | null>(null)
   const [filter, setFilter] = useState<TestSpecType | 'all'>('all')
+  const [pending, setPending] = useState<TestSpecType | null>(null)
+
+  const staleByType = summary?.test_specs?.by_type || {}
+  const staleCount = (t: TestSpecType) => staleByType[t]?.stale ?? 0
+
+  const isLocalBusy = (t: TestSpecType) => bulkLocal.isPending && pending === t
+  const isGlobalBusy = (t: TestSpecType) => genGlobal.isPending && pending === t
+
+  const runLocal = (t: 'unit' | 'integration' | 'e2e') => {
+    setPending(t)
+    bulkLocal.mutate([t], { onSettled: () => setPending(null) })
+  }
+  const runGlobal = (t: 'security' | 'compliance') => {
+    setPending(t)
+    genGlobal.mutate(t, { onSettled: () => setPending(null) })
+  }
 
   const bySpecType: Record<TestSpecType, TestSpecListItem[]> = {
     unit: [], integration: [], security: [], compliance: [], e2e: [],
@@ -104,27 +120,55 @@ export function TestSpecsSection({ projectId }: Props) {
             Derivado do OCG + Roadmap + Ingestão. Clique em qualquer item pra ver o conteúdo completo e como foi criado.
           </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            type="button"
-            onClick={() => bulkLocal.mutate(['unit', 'integration'])}
-            disabled={bulkLocal.isPending}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
-            title="Gera/regera planos unitários e de integração via Ollama local"
-          >
-            {bulkLocal.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
-            Unit + Integration (Ollama)
-          </button>
-          <button
-            type="button"
-            onClick={() => bulkGlobal.mutate()}
-            disabled={bulkGlobal.isPending}
-            className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-violet-600/30 border border-violet-500/40 text-violet-200 hover:bg-violet-600/40 disabled:opacity-50"
-            title="Gera/regera planos globais de Segurança e Compliance via Premium"
-          >
-            {bulkGlobal.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-            Security + Compliance (Premium)
-          </button>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(['unit', 'integration', 'e2e'] as const).map((t) => {
+            const m = TYPE_META[t]
+            const n = staleCount(t)
+            const busy = isLocalBusy(t)
+            const anyPending = pending !== null
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => runLocal(t)}
+                disabled={anyPending}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded border border-slate-700 text-slate-300 hover:border-slate-500 hover:text-slate-100 disabled:opacity-50"
+                title={`Gera/regera ${m.label.toLowerCase()} via Ollama local`}
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
+                {m.label}
+                {n > 0 && (
+                  <span className="text-[10px] px-1 rounded bg-amber-500/20 text-amber-300">
+                    {n}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+          {(['security', 'compliance'] as const).map((t) => {
+            const m = TYPE_META[t]
+            const n = staleCount(t)
+            const busy = isGlobalBusy(t)
+            const anyPending = pending !== null
+            return (
+              <button
+                key={t}
+                type="button"
+                onClick={() => runGlobal(t)}
+                disabled={anyPending}
+                className="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded bg-violet-600/30 border border-violet-500/40 text-violet-200 hover:bg-violet-600/40 disabled:opacity-50"
+                title={`Gera/regera ${m.label.toLowerCase()} via Premium`}
+              >
+                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                {m.label}
+                {n > 0 && (
+                  <span className="text-[10px] px-1 rounded bg-amber-500/30 text-amber-200">
+                    {n}
+                  </span>
+                )}
+              </button>
+            )
+          })}
         </div>
       </div>
 
