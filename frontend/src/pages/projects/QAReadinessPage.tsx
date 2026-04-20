@@ -6,6 +6,7 @@ import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { StatusBadge } from '@/components/ui/StatusBadge';
 import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress';
 import { useProjectPermissions } from '@/hooks/useProjectPermissions';
+import { TestSpecsSection } from '@/components/qa/TestSpecsSection';
 
 interface CoverageCategory {
   type: string;
@@ -144,6 +145,9 @@ export function QAReadinessPage() {
           <p className="text-slate-500 text-sm mt-0.5">Planejamento e execução de testes em containers isolados por projeto</p>
         </div>
       </div>
+
+      {/* MVP 10 Fase 10.5 — Plano de Testes derivado de OCG/Roadmap */}
+      {id && <TestSpecsSection projectId={id} />}
 
       {/* Requisitos de testes do OCG (DT-052) */}
       {ocgTesting && Object.keys(ocgTesting).length > 0 && (
