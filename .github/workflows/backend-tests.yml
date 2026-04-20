@@ -69,9 +69,11 @@ jobs:
           python -c "import pypdf, reportlab, esprima; print('image-build OK')"
 
   e2e:
-    # MVP 11 Fase 11.7 — lane dedicada de GUI E2E. Executa apenas quando
-    # test_fluxo_completo.py ou seus suportes mudam (paths no on:). Instala
-    # playwright + chromium on-demand para não inchar a imagem backend.
+    # MVP 11 Fase 11.7 — lane dedicada de GUI E2E.
+    # MVP 12 Fase 12.6 — seed canônico (`scripts/seed_e2e.py`) garante
+    # estado reprodutível: admin `admin@gca.local` + project UUID fixo +
+    # membership GP. `continue-on-error` removido: a lane agora é gate
+    # real — regressão em e2e falha o job.
     runs-on: ubuntu-latest
     needs: [test]
     steps:
@@ -103,12 +105,21 @@ jobs:
           sleep 2
         done
 
-    - name: Run e2e lane
+    - name: Seed canary state (MVP 12 Fase 12.6)
+      env:
+        DATABASE_URL: postgresql+asyncpg://gca:gca_secret@localhost:5432/gca
+      run: |
+        cd backend
+        poetry run python scripts/seed_e2e.py
+
+    - name: Run e2e lane (gate real — falha bloqueia merge)
       env:
         E2E_BASE_URL: http://localhost:3000
         E2E_API_URL: http://localhost:8000
+        E2E_ADMIN_EMAIL: admin@gca.local
+        E2E_ADMIN_PASS: SenhaAdmin@2026
+        E2E_PROJECT_ID: "00000000-0000-0000-0000-000000000001"
       run: |
         cd backend
         poetry run pytest app/tests/e2e/ -m e2e -v
-      continue-on-error: true  # smoke: reporta sem bloquear merge até estabilização
 

@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.20  
+Versão: 3.21  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 / 12.4 / 12.5 FECHADAS 2026-04-20**. Fase 12.5 (remover/redirecionar TODOs SMTP de fluxo deprecado): `POST /api/v1/onboarding/{id}/step-3/team` passa a retornar **410 Gone** apontando caminho canônico `POST /api/v1/projects/{id}/invite`; TODOs históricos "Criar OGC inicial" e "Criar pillar_configuration" em `complete_step_5_stack_selection` substituídos por comentário canônico explicando que OCG nasce do questionário (contrato §5); corpo antigo preservado como referência histórica; 2 testes. Fases 12.6-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** Fases **12.1 / 12.2 / 12.3 / 12.4 / 12.5 / 12.6 FECHADAS 2026-04-20**. Fase 12.6 (canário e2e + remoção `continue-on-error`): novo `backend/scripts/seed_e2e.py` cria admin canônico `admin@gca.local` + project UUID fixo + membership GP de forma idempotente; CI `backend-tests.yml` lane `e2e` passa a rodar seed antes do teste; `continue-on-error: true` removido — lane agora é gate real. 3 testes (seed cria estado correto, seed é idempotente, workflow sem continue-on-error). Fases 12.7-12.10 seguem definidas.
 
 ---
 
@@ -15,7 +15,7 @@ Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em exe
 1. **Tema A — Segurança de fronteira:** ✅ Fase 12.1 rate limit em `POST /public/project-requests` (slowapi + env `PUBLIC_RATE_LIMIT`; 3 testes).
 2. **Tema B — Configurabilidade operacional:** ✅ Fase 12.2 timezone configurável em BackupScheduler (env `BACKUP_TIMEZONE`; fallback em valor inválido; 10 testes).
 3. **Tema C — Higiene de schema + cleanup:** ✅ Fase 12.3 consolidar `accepted_at`/`joined_at` (fix + helpers + docstring; 11 testes); 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
-4. **Tema D — CI maturity:** 12.6 canário real + remoção `continue-on-error` da lane e2e.
+4. **Tema D — CI maturity:** ✅ Fase 12.6 canário `seed_e2e.py` idempotente + CI roda seed + `continue-on-error` removido (3 testes).
 5. **Tema E — Type safety frontend:** 12.7 remoção de `any` em ~20 arquivos TS.
 6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis (pipeline arguider/ocg_updater/codegen); 12.9 consolidação de helper de prompt CodeGen.
 7. **Tema G — Observabilidade compliance:** 12.10 cobertura completa de `audit_log_global` (projeto, questionário, OCG, CodeGen).
