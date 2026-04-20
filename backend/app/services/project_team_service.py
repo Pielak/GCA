@@ -11,6 +11,7 @@ from app.models.base import User, Project, ProjectMember
 from app.core.security import hash_password
 from app.core.config import settings
 from app.services.email_service import EmailService
+from app.services.audit_service import AuditService, AuditEvents
 
 logger = structlog.get_logger(__name__)
 
@@ -98,6 +99,20 @@ class ProjectTeamService:
                 invite_expires_at=expires_at,
             )
             db.add(project_member)
+            await db.flush()
+
+            # MVP 11 Fase 11.4 — audit canônico: grant de papel (fase invited)
+            await AuditService(db).log_role_event(
+                event_type=AuditEvents.ROLE_GRANTED,
+                actor_id=gp_user_id,
+                target_user_id=user.id,
+                project_id=project_id,
+                old_role=None,
+                new_role=role,
+                phase="invited",
+                resource_id=project_member.id,
+            )
+
             await db.commit()
 
             # Get GP name for email
@@ -240,6 +255,19 @@ class ProjectTeamService:
             )
             user = user_result.scalar_one_or_none()
 
+            # MVP 11 Fase 11.4 — audit canônico: grant efetivo de papel (fase accepted)
+            # actor_id é o próprio convidado (ele mesmo aceitou)
+            await AuditService(db).log_role_event(
+                event_type=AuditEvents.ROLE_GRANTED,
+                actor_id=member.user_id,
+                target_user_id=member.user_id,
+                project_id=project_id,
+                old_role=None,
+                new_role=member.role,
+                phase="accepted",
+                resource_id=member.id,
+            )
+
             await db.commit()
 
             project_info = {
@@ -296,6 +324,20 @@ class ProjectTeamService:
             # Revogar
             invite.is_active = False
             invite.revoked_at = datetime.now(timezone.utc)
+            await db.flush()
+
+            # MVP 11 Fase 11.4 — audit canônico: revogação de papel
+            await AuditService(db).log_role_event(
+                event_type=AuditEvents.ROLE_REVOKED,
+                actor_id=gp_user_id,
+                target_user_id=invite.user_id,
+                project_id=project_id,
+                old_role=invite.role,
+                new_role=None,
+                phase="revoked",
+                resource_id=invite.id,
+            )
+
             await db.commit()
 
             logger.info("project_team.invite_revoked",

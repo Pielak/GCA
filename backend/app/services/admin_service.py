@@ -17,6 +17,7 @@ from app.models.onboarding import ProjectRequest, ProjectRequestStatus, Onboardi
 from app.models.base import User, Organization, Project, ProjectMember, AccessAttempt, SupportTicket, TicketResponse, IntegrationWebhook, SystemAlert
 from app.models.pillar import PillarTemplate
 from app.models.tenant import PillarConfiguration, OGCVersion
+from app.services.audit_service import AuditService, AuditEvents
 
 logger = structlog.get_logger(__name__)
 
@@ -689,8 +690,15 @@ class AdminService:
             "reset_at": user.updated_at.isoformat()
         }
 
-    async def lock_user(self, user_id: UUID) -> dict:
-        """Lock (deactivate) a user account"""
+    async def lock_user(self, user_id: UUID, actor_id: Optional[UUID] = None) -> dict:
+        """Lock (deactivate) a user account.
+
+        MVP 11 Fase 11.4: quando `actor_id` é fornecido, emite evento
+        canônico `role_revoked` com `phase='user_deactivated'` em
+        `audit_log_global`. `old_role` reflete o papel mais alto que o
+        user tinha (admin > gp > user) — quem analisa entende em que
+        nível a desativação impactou.
+        """
         user = await self.db.get(User, user_id)
         if not user:
             raise ValueError("User not found")
@@ -698,8 +706,44 @@ class AdminService:
         if not user.is_active:
             raise ValueError("User is already locked")
 
+        # Snapshot do papel mais alto do user antes da desativação (para audit)
+        was_admin = bool(user.is_admin)
+        res = await self.db.execute(
+            select(ProjectMember).where(
+                (ProjectMember.user_id == user_id)
+                & (ProjectMember.is_active == True)
+                & (ProjectMember.joined_at.is_not(None))
+            )
+        )
+        active_memberships = res.scalars().all()
+        had_gp_role = any(m.role == "gp" for m in active_memberships)
+        old_role_snapshot = (
+            "admin" if was_admin
+            else ("gp" if had_gp_role
+                  else ("member" if active_memberships else None))
+        )
+
         user.is_active = False
         user.updated_at = datetime.now(timezone.utc)
+        await self.db.flush()
+
+        if actor_id is not None:
+            await AuditService(self.db).log_role_event(
+                event_type=AuditEvents.ROLE_REVOKED,
+                actor_id=actor_id,
+                target_user_id=user.id,
+                project_id=None,
+                old_role=old_role_snapshot,
+                new_role=None,
+                phase="user_deactivated",
+                resource_type="user",
+                resource_id=user.id,
+                extra={
+                    "was_admin": was_admin,
+                    "had_gp_role": had_gp_role,
+                    "active_memberships_count": len(active_memberships),
+                },
+            )
 
         await self.db.commit()
         await self.db.refresh(user)

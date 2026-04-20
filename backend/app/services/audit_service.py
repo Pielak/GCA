@@ -55,6 +55,15 @@ class AuditEvents:
     PROJECT_APPROVAL_EMAIL_SENT = "PROJECT_APPROVAL_EMAIL_SENT"
     SYSTEM_SETUP_COMPLETED = "system.setup_completed"
 
+    # MVP 11 Fase 11.4 — Eventos canônicos de papel
+    # Payload em details: {actor_id, target_user_id, project_id (nullable),
+    # old_role, new_role, phase, timestamp}. Cobertura obrigatória: convite
+    # emitido, convite aceito, convite revogado, promoção/rebaixamento de
+    # Admin, transferência de soberania de GP, desativação de user/member.
+    ROLE_GRANTED = "role_granted"
+    ROLE_REVOKED = "role_revoked"
+    ROLE_TRANSFERRED = "role_transferred"
+
 logger = structlog.get_logger(__name__)
 
 
@@ -112,6 +121,62 @@ class AuditService:
         )
 
         return entry
+
+    async def log_role_event(
+        self,
+        event_type: str,
+        actor_id: Optional[UUID],
+        target_user_id: UUID,
+        project_id: Optional[UUID],
+        old_role: Optional[str],
+        new_role: Optional[str],
+        phase: str,
+        resource_type: str = "project_member",
+        resource_id: Optional[UUID] = None,
+        actor_email: Optional[str] = None,
+        correlation_id: Optional[UUID] = None,
+        extra: Optional[dict] = None,
+    ) -> GlobalAuditLog:
+        """MVP 11 Fase 11.4 — registra evento canônico de papel.
+
+        Uso obrigatório nos 6 pontos de mudança de papel (contrato §7 MVP 11
+        Fase 11.4): invite emitido, invite aceito, invite revogado, promoção/
+        rebaixamento de admin, desativação de user ativa com papel. Payload
+        canônico: actor_id + target_user_id + project_id (nullable na
+        instância) + old_role + new_role + phase.
+
+        `event_type` deve ser um de: AuditEvents.ROLE_GRANTED,
+        AuditEvents.ROLE_REVOKED, AuditEvents.ROLE_TRANSFERRED.
+        `phase` diferencia o momento da mudança ('invited', 'accepted',
+        'revoked', 'admin_promoted', 'admin_demoted', 'transferred',
+        'user_deactivated'). `project_id=None` sinaliza ação na instância
+        (Admin). `extra` permite anexar metadados opcionais sem quebrar o
+        schema canônico.
+        """
+        allowed = {AuditEvents.ROLE_GRANTED, AuditEvents.ROLE_REVOKED, AuditEvents.ROLE_TRANSFERRED}
+        if event_type not in allowed:
+            raise ValueError(f"event_type inválido para log_role_event: {event_type!r}")
+
+        details: dict = {
+            "target_user_id": str(target_user_id),
+            "project_id": str(project_id) if project_id else None,
+            "old_role": old_role,
+            "new_role": new_role,
+            "phase": phase,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            details["extra"] = extra
+
+        return await self.log_event(
+            event_type=event_type,
+            resource_type=resource_type,
+            actor_id=actor_id,
+            actor_email=actor_email,
+            resource_id=resource_id,
+            details=details,
+            correlation_id=correlation_id,
+        )
 
     async def _get_last_hash(self) -> Optional[str]:
         """Busca hash do último registro da cadeia"""

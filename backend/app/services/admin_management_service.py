@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.models.base import Project, User
 from app.services.email_service import EmailService
+from app.services.audit_service import AuditService, AuditEvents
 
 logger = structlog.get_logger(__name__)
 
@@ -101,6 +102,35 @@ async def set_admin_flag(
             )
 
     target.is_admin = bool(new_value)
+    await db.flush()
+
+    # MVP 11 Fase 11.4 — audit canônico: promoção/rebaixamento de Admin
+    # (papel de instância; project_id=None por definição)
+    if new_value:
+        await AuditService(db).log_role_event(
+            event_type=AuditEvents.ROLE_GRANTED,
+            actor_id=actor.id,
+            target_user_id=target.id,
+            project_id=None,
+            old_role=None,
+            new_role="admin",
+            phase="admin_promoted",
+            resource_type="user",
+            resource_id=target.id,
+        )
+    else:
+        await AuditService(db).log_role_event(
+            event_type=AuditEvents.ROLE_REVOKED,
+            actor_id=actor.id,
+            target_user_id=target.id,
+            project_id=None,
+            old_role="admin",
+            new_role=None,
+            phase="admin_demoted",
+            resource_type="user",
+            resource_id=target.id,
+        )
+
     await db.commit()
     await db.refresh(target)
     logger.info(
@@ -164,6 +194,22 @@ async def invite_admin(
         )
         db.add(user)
         created = True
+    await db.flush()
+
+    # MVP 11 Fase 11.4 — audit canônico: convite/promoção de Admin
+    # (papel de instância; project_id=None)
+    await AuditService(db).log_role_event(
+        event_type=AuditEvents.ROLE_GRANTED,
+        actor_id=actor.id,
+        target_user_id=user.id,
+        project_id=None,
+        old_role=None if created else ("user" if not existing or not existing.is_admin else None),
+        new_role="admin",
+        phase="invited" if created else "admin_promoted",
+        resource_type="user",
+        resource_id=user.id,
+    )
+
     await db.commit()
     await db.refresh(user)
 

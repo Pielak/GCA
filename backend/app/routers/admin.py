@@ -533,7 +533,7 @@ async def lock_user(
     """
     try:
         service = AdminService(db)
-        result = await service.lock_user(user_id)
+        result = await service.lock_user(user_id, actor_id=current_user_id)
 
         return {
             "status": "user_locked",
