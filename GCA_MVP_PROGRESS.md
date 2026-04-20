@@ -1,7 +1,7 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.5  
-Data-base: 2026-04-19  
+Versão: 3.6  
+Data-base: 2026-04-20  
 Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases). **MVP 10 fechado** (todas as 8 fases — 10.1 schema, 10.2 Ollama unit/integration/e2e, 10.3 Premium security/compliance, 10.4 stale detection, 10.5 UI Plano de Testes, 10.6 approve/reject, 10.7 LiveDocs reais, 10.8 Regenerar granular). **DT-073 (watchdog ingestão), DT-074 (PII via extractor) e DT-075 (fila persistente diferida) quitadas em 2026-04-20. DT-076 (DDL não gerado — crítica estrutural cross-pipeline) quitada em 2026-04-20 em 6 fases: OCG.DATA_MODEL, ddl_generator_service (7 frameworks), integração CodeGen, Backlog sensível, Doc Viva com modelo de dados.** Suite baseline pós-DT-076: 1266/1266 (+104).
 
 ---
@@ -9,20 +9,19 @@ Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 8 — Ingestão inteligente de documentos** — Fase 1 em execução (barra de progresso). Fases 2-6 definidas no contrato §7 MVP 8, aguardando autorização explícita de início conforme protocolo §7.0.
+**Nenhum.** MVPs 1 a 10 do contrato §7 estão fechados. Baseline de suíte pós-DT-076: **1266/1266 passing (+104)**. Nenhum novo MVP autorizado pelo stakeholder-soberano sob o protocolo §7.0 — portanto não há escopo canônico em execução.
 
-Escopo por fase:
-- **Fase 1** (fechada): feedback de progresso — `arguider_stage` + `arguider_progress_percent` no schema + polling frontend + barra visível.
-- **Fase 2** (fechada): extração rica de `.docx` transformando tabelas em parágrafos estruturados.
-- **Fase 3** (fechada em 2 commits): Commit A — pipeline de camadas com AcroForm + texto pesquisável. Commit B — OCR via LLM Vision (Anthropic/OpenAI) como camada 3 quando 1+2 não produzem texto.
-- **Fase 4** (definida): normalização por heurística detectando seções implícitas.
-- **Fase 5** (fechada): relatório de extração read-only exibido na UI via card expansível em cada doc da lista de Ingestão.
-- **Fase 6** (definida): testes de regressão com fixtures reais.
-
-### MVPs fechados recentes
+### MVPs fechados recentes (2026-04-19 / 2026-04-20)
 - **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
 - **MVP 6 Emenda 2026-04-19** — fechada mesmo dia (commits `3f2e373`/`9ec8d09`/`21362ed`). Sustentação + anexos + contexto obrigatório.
-- **MVP 7** — fechado 2026-04-19 (commits `71f0082`/`d02f2d2`/`<fase3+4>`). 4 sub-fases: backend core + destrutiva/rollback + frontend + completion tasks.
+- **MVP 7** — fechado 2026-04-19 (commits `71f0082`/`d02f2d2`/`d59ad8e`). 4 sub-fases: backend core + destrutiva/rollback + frontend + completion tasks.
+- **MVP 8 — Ingestão inteligente de documentos** — fechado 2026-04-20 (Fase 4 `6ea89f3`; demais fases em commits anteriores). 6 fases: (1) feedback de progresso `arguider_stage` + `arguider_progress_percent`; (2) extração rica de `.docx` com tabelas estruturadas; (3) pipeline de camadas `.pdf` com AcroForm + texto pesquisável + OCR via LLM Vision; (4) normalização heurística de seções implícitas; (5) relatório de extração read-only na UI; (6) suite de fixtures de regressão (`24de5d2`/`b26ae5f`).
+- **MVP 9 — Roadmap multicategoria com pré-ingestão guiada** — fechado 2026-04-20 (Fase 9.2.ext `899e180`). 8 fases: 9.1 categorias canônicas, 9.1.1 Foundation generator, 9.1.2 status pt-BR, 9.2 detalhamento on-demand Ollama, 9.2.ext WebFetch curado, 9.3 orquestração Premium (readiness + DAG), 9.4 plano de deploy com export Markdown, 9.5 ciclo resposta GP → ingestão → `adicionado` → DELIVERABLE automático.
+- **MVP 10 — Planos de Teste e Documentação Viva reativos ao OCG** — fechado 2026-04-20 (consolidação `a82df0c`). 8 fases: 10.1 schema `test_specs`/`live_docs`, 10.2 gerador Ollama unit/integration/e2e, 10.3 specs globais security/compliance via Premium, 10.4 stale detection on-the-fly, 10.5 UI Plano de Testes com modal + banner stale, 10.6 approve/reject + Tester Review tab Specs, 10.7 LiveDocs reais (Ollama módulo + Premium consolidado), 10.8 Regenerar granular por tipo.
+
+### DTs dogfood fechadas em 2026-04-20 (pós-MVP 10)
+- **DT-073** (watchdog ingestão), **DT-074** (PII via extractor), **DT-075** (fila persistente diferida) — commit `7f47a22`.
+- **DT-076** (DDL não gerado — crítica estrutural cross-pipeline) — 6 fases atômicas: F1 `013d292` OCG ganha bloco `DATA_MODEL`; F2 `d1dbc4f` `ddl_generator_service` (schema+seed+migrations em 7 frameworks: Alembic/Flyway/Knex/TypeORM/Laravel/EFCore/go-migrate); F3 `92aeb38` dispatch do CodeGen injeta schema/migrations; F4 `676ee33` Backlog deriva itens do `DATA_MODEL`; F5 `0dccd1d` Doc Viva ganha seção Modelo de dados; F6 `349647a` consolidação no PROGRESS.md. V1 cobre PostgreSQL + MySQL; Oracle/SQL Server/SQLite/Mongo diferidos para V2 com placeholder explicativo. Adicionou 104 testes (35+38+13+7+11).
 
 ### MVPs fechados
 - **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
@@ -138,14 +137,15 @@ Mesmo dos MVPs anteriores:
 ## 2. Escopo ativo
 
 ### MVP em execução
-**Nenhum.** MVPs 1-7 do contrato §7 estão fechados. Não há nova seção
-`### MVP 8` no contrato soberano — portanto não existe escopo canônico
+**Nenhum.** MVPs 1 a 10 do contrato §7 estão fechados. Não há MVP 11
+(ou superior) no contrato soberano — portanto não existe escopo canônico
 de trabalho novo até que o stakeholder-soberano autorize formalmente
 um novo MVP pelo protocolo §7.0 (commit atômico `GCA_CANONICAL_CONTRACT.md §7`
 + `GCA_MVP_PROGRESS.md §1`).
 
-### Baseline ao fechamento do MVP 7 (2026-04-19)
-Superfície canônica entregue e validada em dogfood/suite:
+### Baseline ao fechamento do MVP 10 + DT-076 (2026-04-20)
+Suíte baseline: **1266/1266 passing** contra `gca_test` isolado (+104
+testes em DT-076). Superfície canônica entregue e validada em dogfood/suite:
 - **MVP 1** — auth, RBAC 5 papéis, cadastro/aprovação de projeto,
   questionário externo/interno, OCG persistido básico, Gatekeeper
   básico, auditoria mínima, configuração de IA, roteamento híbrido.
@@ -169,15 +169,40 @@ Superfície canônica entregue e validada em dogfood/suite:
   destrutiva com snapshot automático (DT-063) e rollback por projeto,
   completion tasks pós-release. Release v0.8.0 retroativa aplicada na
   instância dogfood.
+- **MVP 8** — ingestão inteligente: `arguider_stage`/`progress_percent`
+  + feedback UI; extração rica de `.docx` (tabelas → parágrafos);
+  pipeline `.pdf` em camadas (AcroForm → texto pesquisável → OCR LLM
+  Vision); normalização heurística de seções; relatório read-only;
+  fixtures de regressão com documentos reais.
+- **MVP 9** — Roadmap multicategoria: 6 categorias canônicas, Fase 1
+  de Fundação derivada do OCG (não do Arguidor), status pt-BR
+  (sugerido/aguardando_resposta/adicionado/concluído), detalhamento
+  on-demand via Ollama (baixa criticidade §6.2), WebFetch curado,
+  orquestração Premium (DAG + `readiness_status`, alta criticidade §6.2),
+  plano de deploy com export Markdown, ciclo resposta GP → ingestão →
+  `adicionado` criando `DELIVERABLE` automático.
+- **MVP 10** — Planos de Teste e Documentação Viva reativos ao OCG:
+  schema `test_specs`/`live_docs`, geração Ollama de unit/integration/e2e,
+  specs Premium globais de security/compliance, stale detection versionada
+  por OCG, UI Plano de Testes + Tester Review tab Specs, LiveDocs por
+  módulo (Ollama) + consolidada (Premium), Regenerar granular por tipo.
+- **DT-073/074/075** — watchdog da fila de ingestão, PII via extractor,
+  reclassificação de fila diferida (`7f47a22`).
+- **DT-076** — bloco `DATA_MODEL` no OCG + `ddl_generator_service` (7
+  frameworks de migration) + integração ponta-a-ponta em CodeGen,
+  Backlog e Doc Viva (6 commits atômicos, F1-F6).
 
 ### Dívidas estruturais residuais — não-bloqueadoras
 - **DT-041 (Minor)** — rebuild `--no-cache` da imagem para persistir
   `pypdf`/`reportlab`/`esprima`. Paliativo via `pip install` em
   runtime continua cobrindo o ambiente atual; fix canônico é follow-up
   operacional de CI.
+- **DT-076 V2 (Minor, diferida)** — suporte a Oracle, SQL Server, SQLite
+  e MongoDB em `ddl_generator_service` (V1 cobre PostgreSQL + MySQL).
+  Placeholder já existe no código. Não bloqueia fluxo canônico atual.
 
 ### Fora de escopo sempre (até autorização explícita)
-- qualquer feature fora dos MVPs 1-7 do contrato soberano;
+- qualquer feature fora dos MVPs 1-10 do contrato soberano;
 - marketplace, A/B de release, multi-instância avançada, downgrade
   de container, compartilhamento de correção entre instâncias de
   clientes diferentes — todos explicitamente "fora de escopo" em §7.
@@ -431,18 +456,24 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (pós-MVP 7)
+### Situação atual do gate (pós-MVP 10 + DT-076)
 **NÃO APLICÁVEL — nenhum MVP em execução.**
 
-Os MVPs 1-7 foram fechados com gate §9 atendido em cada transição
-(rastreabilidade no histórico abaixo). A baseline de suíte revalidada
-em **2026-04-19 pós-saneamento** é **732 passed / 0 failed em 173s**,
-com `--ignore=app/tests/e2e/test_fluxo_completo.py` (exige playwright,
-fora do caminho canônico do backend) e `TEST_DATABASE_URL` explícito
-apontando para o service `gca-postgres` quando pytest roda dentro do
-container (armadilha de `localhost`; ver §7). Nenhum novo MVP está
-definido no contrato §7 — portanto o gate volta a ser avaliado somente
-quando o stakeholder-soberano autorizar um novo MVP pelo protocolo §7.0.
+Os MVPs 1-10 foram fechados com gate §9 atendido em cada transição
+(rastreabilidade no histórico abaixo). A baseline de suíte pós-DT-076
+é **1266 passed / 0 failed** (+104 testes somados por DT-076). Nenhum
+MVP 11 (ou superior) está definido no contrato §7 — portanto o gate
+volta a ser avaliado somente quando o stakeholder-soberano autorizar
+um novo MVP pelo protocolo §7.0. Operacional:
+- `--ignore=app/tests/e2e/test_fluxo_completo.py` (exige playwright,
+  fora do caminho canônico do backend);
+- `TEST_DATABASE_URL` explícito apontando para `gca-postgres` quando
+  pytest roda dentro do container (armadilha de `localhost`; ver §7).
+
+**Veredito binário:** sem blocker, sem critical, sem contradição
+estrutural entre código e contrato após o saneamento documental
+2026-04-20 (ver emenda §9). Gate **aberto** para o último MVP
+encerrado (MVP 10); inexistente para MVP 11 (não autorizado).
 
 ### Motivo do último gate avaliado (MVP 4, preservado para rastreabilidade)
 Base do MVP 4 instalada e testes verde:
@@ -540,12 +571,33 @@ registradas como pós-MVP 4 e já quitadas em 4.
   auto-apply), destrutiva+rollback (snapshot via DT-063), frontend
   (AdminReleases + AdminReleaseDetail + Releases), completion tasks.
   Release v0.8.0 retroativa aplicada na instância dogfood. Suite 704/704.
-- Pós-MVP 7 (2026-04-19) → **Sem MVP em execução.** Commits posteriores
-  (métricas por projeto, project-lifecycle active/paused/inactive,
-  cleanup-orphan, emenda §4.1 GP soberano, empacotamento/screenshots)
-  são saneamento operacional e ajustes de UI fora do corpo dos MVPs
-  canônicos. Gate só volta a ser avaliado quando novo MVP for
-  autorizado pelo stakeholder-soberano.
+- Pós-MVP 7 (2026-04-19) → Commits intermediários (métricas por projeto,
+  project-lifecycle active/paused/inactive, cleanup-orphan, emenda §4.1
+  GP soberano, empacotamento/screenshots) são saneamento operacional e
+  ajustes de UI fora do corpo dos MVPs canônicos.
+- MVP 8 → **ENCERRADO 2026-04-20** (6 fases; Fase 4 commit `6ea89f3`;
+  Fase 6 commits `24de5d2`/`b26ae5f`). Ingestão inteligente de
+  documentos: feedback de progresso + extração rica `.docx` +
+  pipeline `.pdf` em camadas + normalização heurística + relatório
+  read-only + fixtures de regressão reais.
+- MVP 9 → **ENCERRADO 2026-04-20** (8 fases; Fase 9.2.ext commit
+  `899e180`). Roadmap multicategoria: 6 categorias canônicas, Fase 1
+  de Fundação derivada do OCG, status pt-BR, detalhamento on-demand
+  Ollama (baixa criticidade §6.2), WebFetch curado, orquestração
+  Premium (DAG + readiness — alta criticidade §6.2), plano de deploy
+  Markdown, ciclo resposta GP → ingestão → `DELIVERABLE` automático.
+- MVP 10 → **ENCERRADO 2026-04-20** (8 fases; consolidação `a82df0c`;
+  Fase 10.8 `291ef41`). Planos de Teste + Documentação Viva reativos
+  ao OCG com geração híbrida (Ollama baixa criticidade / Premium alta
+  criticidade §6.2), stale detection versionada, UI conectada, Regenerar
+  granular. Roteamento híbrido é explícito, auditável e parametrizável
+  conforme §6.4.
+- Pós-MVP 10 (2026-04-20) → DT-073/074/075 (watchdog/PII/fila) fechadas
+  em `7f47a22`. DT-076 (DDL cross-pipeline) fechada em 6 fases atômicas
+  (F1-F6, commits `013d292` → `349647a`) com +104 testes. Suite
+  **1266/1266 passing**.
+- Pós-DT-076 (2026-04-20) → **Sem MVP em execução.** Gate só volta a
+  ser avaliado quando novo MVP for autorizado pelo stakeholder-soberano.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta
@@ -613,6 +665,7 @@ Antes de qualquer mudança:
 | 2026-04-18 | Saneamento do documento §6/§7/§10 para o MVP 4. Versões anteriores ainda descreviam gate, ordem de saneamento e marco de saída do MVP 2 apesar do cabeçalho anunciar MVP 4 ativo. Adicionado histórico das transições MVP 2 → 3 → 4. Registrada DT-045 (testes e2e que hangam) como novo Critical do MVP 4. | `GCA_MVP_PROGRESS.md §6`, `§7`, `§10`, `§3.2` (DT-045), cabeçalho (versão 1.6) | Eliminar contradição estrutural apontada pelo gate §9 critério 3. Garantir que futuras sessões partam do estado verdadeiro em vez de reinterpretar o MVP 2. Sem mudança de código. |
 | 2026-04-19 | Emenda §4.1 — GP é soberano do projeto. Revoga a regra anterior "GP não escreve código" e declara que o GP tem acesso a todas as funcionalidades do projeto, inclusive CodeGen, pipeline de testes e demais fluxos. Analogia cross-escopo: GP está para o projeto assim como Admin está para a instância. Separação do dia-a-dia (Dev codifica, Tester testa, QA revisa) é mantida, mas não remove acesso. | `GCA_CANONICAL_CONTRACT.md §4.1` (emenda no bloco GP), commit `9f2181e` (impactos de UI órfão visível) | Destravar o GP quando precisa operar o projeto por inteiro sem depender de presença de Dev/Tester/QA. Necessário para dogfood e cenários com equipe reduzida. Implica revisão de enforcement que antes usava "GP não escreve" como sinônimo de "GP não aciona code:write". |
 | 2026-04-19 | Saneamento pós-MVP 7. §2/§6/§7/§10 ainda descreviam MVP 4 como fase ativa apesar do cabeçalho declarar MVPs 1-7 fechados e suite 704/704. Conteúdo do MVP 4 foi preservado na seção "Histórico do gate" (§6) e no próprio §4 (dívida quitada); §2 passou a descrever "baseline ao fechamento do MVP 7"; §7 e §10 foram consolidados em notas de encerramento. | `GCA_MVP_PROGRESS.md §2`, `§6` (situação atual), `§7`, `§10`, cabeçalho | Mesmo princípio do saneamento 2026-04-18: eliminar contradição estrutural (gate §9 critério 3). Sem mudança de código. |
+| 2026-04-20 | Saneamento pós-MVP 10 + DT-076. §1/§2/§6/§10 ainda descreviam "MVP 8 Fase 1 em execução" ou "MVPs 1-7 fechados, nenhum MVP em execução" apesar do cabeçalho declarar MVP 8, MVP 9 e MVP 10 fechados e suite 1266/1266. §1 agora lista as 6+8+8 fases dos MVPs 8/9/10 com commits; §2 renomeia baseline para "ao fechamento do MVP 10 + DT-076" e inclui MVP 8/9/10 + DT-073/074/075/076; §6 situação atual vira "pós-MVP 10 + DT-076"; histórico do gate recebe entradas para MVP 8/9/10 + pós-DT-076; §10 atualiza próximo marco para MVP 11. Veredito binário consolidado: gate aberto para o último MVP encerrado; nenhum novo MVP autorizado. | `GCA_MVP_PROGRESS.md §1`, `§2`, `§6` (situação atual + histórico), `§10` | Mesmo princípio dos saneamentos 2026-04-18 e 2026-04-19: eliminar contradição estrutural (gate §9 critério 3 — contradição entre contrato canônico e progresso). Nenhuma mudança de código. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
 
@@ -620,10 +673,10 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-Com MVPs 1-7 fechados e nenhum MVP novo autorizado no contrato §7,
+Com MVPs 1-10 fechados e nenhum MVP 11 autorizado no contrato §7,
 não há marco de saída canônico pendente. O próximo marco é **externo
 ao documento**: solicitação formal do stakeholder-soberano abrindo
-`### MVP 8` no contrato, pelo protocolo §7.0 (commit atômico
+`### MVP 11` no contrato, pelo protocolo §7.0 (commit atômico
 alterando `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`).
 
 Enquanto isso não ocorrer:
@@ -631,5 +684,7 @@ Enquanto isso não ocorrer:
 - nenhuma feature nova entra em produção sem trilha formal (deve
   ser roteada como nova DT dentro de um MVP existente, ou como
   solicitação formal de novo MVP — nunca implementação silenciosa);
-- as DTs residuais minor (DT-041, playwright para GUI E2E) podem
-  ser endereçadas como follow-up operacional, sem gate associado.
+- as DTs residuais minor (DT-041 image drift, DT-076 V2 Oracle/SQL
+  Server/SQLite/Mongo no `ddl_generator_service`, playwright para GUI
+  E2E) podem ser endereçadas como follow-up operacional, sem gate
+  associado.
