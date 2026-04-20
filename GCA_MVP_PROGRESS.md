@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.9  
+Versão: 3.10  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em execução.** **Fase 11.1 FECHADA** (GP→GP convite compartimentalizado; whitelist `Literal[dev,tester,qa,gp]`; frontend com dropdown GP; 13 testes novos). **Fase 11.4 FECHADA 2026-04-20** (auditoria canônica de role events em `audit_log_global`: 3 eventos `role_granted`/`role_revoked`/`role_transferred` no catálogo; helper `log_role_event` com whitelist; 6 pontos de emissão — invite/accept/revoke + admin promote/demote/invite + lock_user; 8 testes novos). Suite pós-11.4: **1287/1287 passing** (+21 total 11.1+11.4). Fases 11.2/11.3/11.5/11.6/11.7 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em execução.** **Fase 11.1 FECHADA** (GP→GP convite compartimentalizado; whitelist `Literal[dev,tester,qa,gp]`; 13 testes). **Fase 11.4 FECHADA** (auditoria canônica de role events; 3 eventos + helper + 6 pontos de emissão; 8 testes). **Fase 11.2 FECHADA 2026-04-20** (GP transferir soberania: endpoint `POST /projects/{id}/transfer-gp/{user_id}` com inversão atômica de papéis + 2 eventos `role_transferred` com correlation_id; 9 testes cobrindo caminho feliz + 5 pré-condições negadas + RBAC 3 papéis). Suite pós-11.2: **1296/1296 passing** (+30 total 11.1+11.4+11.2). Fases 11.3/11.5/11.6/11.7 seguem definidas.
 
 ---
 
@@ -13,7 +13,7 @@ Status: **controle de avanço por fase** — MVPs 1-10 fechados. **MVP 11 em exe
 
 **Fases:**
 - **Fase 11.1 — GP convida outro GP do mesmo projeto** — **FECHADA 2026-04-20**. Backend: `InviteTeamMemberRequest.role` virou `Literal["dev","tester","qa","gp"]` em `backend/app/routers/projects.py`; whitelist canônica rejeita lixo (admin/tech_lead/vazio/"GP" maiúsculo → 422). Frontend: `ProjectTeamPage.tsx` adicionou `'gp'` ao type `InviteRole` e ao `ROLE_OPTIONS` com label "GP (co-gestor do projeto)". Compartimentalização preservada: `require_action('project:manage_team')` resolvido dentro do `project_id` do path + check no serviço de que o chamador é GP **daquele** projeto. Audit do DB de produção: só role `gp` em uso (1 membro) — zero risco de backwards-incompat. Testes: `test_mvp11_fase111_gp_invite.py` com 13 casos (feliz GP→GP, whitelist 5 inválidos × sanidade 4 canônicos, RBAC 3 papéis). Suite pós-11.1: **1279/1279 passing** (+13).
-- Fase 11.2 GP transferir soberania do projeto — **definida**.
+- **Fase 11.2 — GP transferir soberania do projeto** — **FECHADA 2026-04-20**. Endpoint `POST /projects/{id}/transfer-gp/{target_user_id}` (RBAC `project:manage_team`). Novo método `ProjectTeamService.transfer_gp_sovereignty` inverte papéis atomicamente: chamador vira `dev`, alvo vira `gp`. Pré-condições: chamador é GP ativo; alvo é membro ativo **integrado** (`joined_at != null`); alvo não é GP; alvo != chamador. Emite 2 eventos `role_transferred` (phase='transferred') com mesmo `correlation_id`, `extra.direction` ∈ {outgoing, incoming}. Testes: `test_mvp11_fase112_transfer_gp.py` (9 casos — caminho feliz + audit de correlation_id + 5 pré-condições negadas + 3 RBAC). Suite pós-11.2: **1296/1296 passing** (+9).
 - Fase 11.3 Guard reforçado de último Admin ativo — **definida**.
 - **Fase 11.4 — Auditoria canônica de role events em `audit_log_global`** — **FECHADA 2026-04-20**. 3 eventos canônicos registrados em `AuditEvents` (`ROLE_GRANTED`/`ROLE_REVOKED`/`ROLE_TRANSFERRED`). Novo helper `AuditService.log_role_event` com whitelist de event_type + payload canônico `{target_user_id, project_id (nullable na instância), old_role, new_role, phase, timestamp, extra?}`. 6 pontos de emissão injetados: (a) `project_team_service.invite_team_member` → role_granted phase=invited; (b) `accept_invite` → role_granted phase=accepted (actor é o próprio convidado); (c) `revoke_invite` → role_revoked phase=revoked; (d) `admin_management_service.set_admin_flag(True)` → role_granted phase=admin_promoted (project_id=None); (e) `set_admin_flag(False)` → role_revoked phase=admin_demoted; (f) `invite_admin` → role_granted phase=invited|admin_promoted; (g) `admin_service.lock_user(..., actor_id)` → role_revoked phase=user_deactivated com extra `{was_admin, had_gp_role, active_memberships_count}`. Router `admin.py` passa `current_user_id` para `lock_user` como `actor_id`. `ROLE_TRANSFERRED` reservado (Fase 11.2 emite). Testes: `test_mvp11_fase114_role_audit.py` com 8 casos (6 pontos de emissão + catálogo + whitelist do helper). Suite pós-11.4: **1287/1287 passing** (+8).
 - Fase 11.5 DT-041 image drift — **definida**.
@@ -651,6 +651,12 @@ registradas como pós-MVP 4 e já quitadas em 4.
   admin promote/demote/invite + lock_user). 8 testes novos em
   `test_mvp11_fase114_role_audit.py`. Suite 1287/1287 passing.
   `ROLE_TRANSFERRED` reservado para Fase 11.2. Gate §9 atendido.
+- MVP 11 Fase 11.2 → **FECHADA 2026-04-20**. Endpoint
+  `POST /projects/{id}/transfer-gp/{user_id}` inverte papéis
+  atomicamente (chamador → dev; alvo → gp). 2 eventos canônicos
+  `role_transferred` com mesmo `correlation_id` e direções
+  outgoing/incoming. 9 testes em `test_mvp11_fase112_transfer_gp.py`.
+  Suite 1296/1296 passing. Gate §9 atendido.
 
 ### Regra se surgir regressão
 Se qualquer Critical reabrir ou teste da fase falhar, o gate volta

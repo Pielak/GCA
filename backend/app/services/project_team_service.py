@@ -351,3 +351,110 @@ class ProjectTeamService:
             await db.rollback()
             logger.error("project_team.revoke_failed", error=str(e))
             return False, str(e)
+
+    @staticmethod
+    async def transfer_gp_sovereignty(
+        db: AsyncSession,
+        project_id: UUID,
+        current_gp_id: UUID,
+        target_user_id: UUID,
+    ) -> Tuple[bool, Optional[str]]:
+        """MVP 11 Fase 11.2 — transferência atômica de soberania do projeto.
+
+        Promove outro membro ativo a GP e rebaixa o chamador a Dev numa
+        única transação. Pré-condições (todas obrigatórias):
+        - chamador é GP ativo do projeto (papel atual == 'gp');
+        - alvo é membro ativo do projeto com role != 'gp' e already joined;
+        - alvo não é o próprio chamador.
+
+        Emite 2 eventos canônicos `role_transferred` com mesmo
+        `correlation_id` (contrato §7 MVP 11 Fase 11.4 reservou o event_type):
+        - actor=current_gp, target=current_gp, old='gp', new='dev'
+        - actor=current_gp, target=new_gp,     old='dev', new='gp'
+        """
+        from uuid import uuid4 as _uuid4
+
+        try:
+            # Chamador deve ser GP ativo do projeto
+            res = await db.execute(
+                select(ProjectMember).where(
+                    (ProjectMember.project_id == project_id)
+                    & (ProjectMember.user_id == current_gp_id)
+                    & (ProjectMember.role == "gp")
+                    & (ProjectMember.is_active == True)
+                )
+            )
+            caller_member = res.scalar_one_or_none()
+            if not caller_member:
+                return False, "Apenas o GP atual do projeto pode transferir a soberania"
+
+            # Não pode transferir para si mesmo
+            if target_user_id == current_gp_id:
+                return False, "Transferência para si mesmo não é permitida"
+
+            # Alvo deve ser membro ativo do projeto, com role != 'gp' e já tendo aceitado
+            res = await db.execute(
+                select(ProjectMember).where(
+                    (ProjectMember.project_id == project_id)
+                    & (ProjectMember.user_id == target_user_id)
+                    & (ProjectMember.is_active == True)
+                )
+            )
+            target_member = res.scalar_one_or_none()
+            if not target_member:
+                return False, "Alvo não é membro ativo deste projeto"
+            if target_member.role == "gp":
+                return False, "Alvo já é GP deste projeto"
+            if target_member.joined_at is None:
+                return False, "Alvo ainda não aceitou o convite — transferência exige membro já integrado"
+
+            old_target_role = target_member.role  # snapshot para audit
+
+            # Transferência atômica
+            caller_member.role = "dev"
+            target_member.role = "gp"
+            await db.flush()
+
+            # Auditoria com correlation_id comum para linkar os dois eventos
+            corr = _uuid4()
+            audit = AuditService(db)
+            await audit.log_role_event(
+                event_type=AuditEvents.ROLE_TRANSFERRED,
+                actor_id=current_gp_id,
+                target_user_id=current_gp_id,
+                project_id=project_id,
+                old_role="gp",
+                new_role="dev",
+                phase="transferred",
+                resource_id=caller_member.id,
+                correlation_id=corr,
+                extra={"direction": "outgoing"},
+            )
+            await audit.log_role_event(
+                event_type=AuditEvents.ROLE_TRANSFERRED,
+                actor_id=current_gp_id,
+                target_user_id=target_user_id,
+                project_id=project_id,
+                old_role=old_target_role,
+                new_role="gp",
+                phase="transferred",
+                resource_id=target_member.id,
+                correlation_id=corr,
+                extra={"direction": "incoming"},
+            )
+
+            await db.commit()
+
+            logger.info(
+                "project_team.gp_transferred",
+                project_id=str(project_id),
+                from_user=str(current_gp_id),
+                to_user=str(target_user_id),
+                correlation_id=str(corr),
+            )
+            return True, None
+
+        except Exception as e:
+            await db.rollback()
+            logger.error("project_team.transfer_gp_failed", error=str(e))
+            return False, str(e)

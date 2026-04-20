@@ -385,6 +385,48 @@ async def revoke_invite(
     return {"message": "Convite revogado com sucesso", "invite_id": str(invite_id)}
 
 
+class TransferGpResponse(BaseModel):
+    """MVP 11 Fase 11.2 — resposta da transferência de soberania."""
+    status: str
+    from_user_id: str
+    to_user_id: str
+    project_id: str
+
+
+@router.post("/{project_id}/transfer-gp/{target_user_id}", response_model=TransferGpResponse)
+async def transfer_gp_sovereignty(
+    project_id: UUID,
+    target_user_id: UUID,
+    permissions: dict = Depends(require_action("project:manage_team")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 11 Fase 11.2 — transferência atômica da soberania do projeto.
+
+    Promove outro membro a GP e rebaixa o chamador a Dev numa única transação.
+    Apenas o GP atual do projeto pode invocar (enforcement duplo: RBAC
+    `project:manage_team` + check de membership GP no serviço). Emite
+    2 eventos `role_transferred` com mesmo `correlation_id`.
+    """
+    caller_id = permissions["user_id"]
+    success, error = await ProjectTeamService.transfer_gp_sovereignty(
+        db=db,
+        project_id=project_id,
+        current_gp_id=caller_id,
+        target_user_id=target_user_id,
+    )
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=error,
+        )
+    return TransferGpResponse(
+        status="gp_transferred",
+        from_user_id=str(caller_id),
+        to_user_id=str(target_user_id),
+        project_id=str(project_id),
+    )
+
+
 @router.post("/{project_id}/activate")
 async def activate_project_context(
     project_id: UUID,
