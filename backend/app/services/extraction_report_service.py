@@ -38,6 +38,39 @@ MODULE_PATTERN = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# MVP 8 Fase 4 — detectores de seções implícitas.
+# Afirmações normativas sem prefixo RF- mas com estrutura de requisito.
+# Aceita frase começando por "o/a/os/as sujeito deve/pode/poderá/...".
+IMPLICIT_REQ_PATTERN = re.compile(
+    r"(?:^|(?<=[\.\n]))\s*"
+    r"(?:O|A|Os|As)\s+[A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s_-]{1,40}?\s+"
+    r"(?:deve[rá]{0,2}|pode[rá]{0,2}|precisa|tem que|não pode|é obrigat[óo]ri[oa])"
+    r"[^\.\n]{10,200}",
+    re.MULTILINE,
+)
+
+# Entregáveis/deliverables — frases com verbo de produção/entrega explícito.
+DELIVERABLE_PATTERNS = [
+    re.compile(
+        r"(?:ser[áã]o?|deve[mr]?\s+ser)\s+"
+        r"(?:entregue|produzid|gerad|elaborad|disponibilizad|document[ao]d|implementad|test[ao]d)"
+        r"[ao]s?\s+[^\.\n]{5,150}",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:^|\n)\s*(?:entreg[áa]vel|deliverable|artefato)\s*[:\-]\s*[^\.\n]{5,150}",
+        re.IGNORECASE | re.MULTILINE,
+    ),
+]
+
+# Fases/marcos temporais — ordenação cronológica explícita.
+PHASE_PATTERNS = [
+    re.compile(r"(?:^|\n)\s*(?:fase|sprint|etapa|mês|marco|milestone)\s+\d+"
+               r"[:\-\s]+[^\.\n]{3,150}", re.IGNORECASE | re.MULTILINE),
+    re.compile(r"(?:\d+)\s*(?:º|ª)\s+(?:fase|sprint|etapa)"
+               r"[^\.\n]{0,120}", re.IGNORECASE),
+]
+
 
 def build_extraction_report(
     file_bytes: bytes,
@@ -81,6 +114,12 @@ def build_extraction_report(
         "requirements_functional": [],
         "requirements_non_functional": [],
         "module_hints": [],
+        # MVP 8 Fase 4 — seções implícitas (heurísticas). Sempre listas,
+        # vazias quando doc não ativa a heurística. UI mostra chips só
+        # quando populado.
+        "implicit_requirements": [],
+        "deliverables_hints": [],
+        "phases_hints": [],
         "warnings": [],
         "text_sample": "",
     }
@@ -164,4 +203,37 @@ def build_extraction_report(
     module_matches = [m.strip().rstrip(".,;") for m in MODULE_PATTERN.findall(text)]
     report["module_hints"] = _unique_preserving_order(module_matches, max_preview_items)
 
+    # MVP 8 Fase 4 — heurísticas de seções implícitas.
+    # Requisitos sem prefixo RF-/RNF- mas com estrutura normativa.
+    implicit_matches = [
+        _normalize_match(m) for m in IMPLICIT_REQ_PATTERN.findall(text)
+    ]
+    report["implicit_requirements"] = _unique_preserving_order(
+        implicit_matches, max_preview_items,
+    )
+
+    # Entregáveis/deliverables via verbos de produção.
+    deliverable_matches: list[str] = []
+    for pat in DELIVERABLE_PATTERNS:
+        deliverable_matches.extend(_normalize_match(m) for m in pat.findall(text))
+    report["deliverables_hints"] = _unique_preserving_order(
+        deliverable_matches, max_preview_items,
+    )
+
+    # Fases/sprints/etapas com número explícito.
+    phase_matches: list[str] = []
+    for pat in PHASE_PATTERNS:
+        phase_matches.extend(_normalize_match(m) for m in pat.findall(text))
+    report["phases_hints"] = _unique_preserving_order(
+        phase_matches, max_preview_items,
+    )
+
     return report
+
+
+def _normalize_match(s: str) -> str:
+    """Compacta whitespace e trima pontuação solta das pontas."""
+    if not s:
+        return ""
+    compact = re.sub(r"\s+", " ", s).strip()
+    return compact.strip(".,;:-— \t")

@@ -164,6 +164,46 @@ export function ExtractionReportCard({ projectId, documentId, enabled = true }: 
                 </div>
               )}
 
+              {/* MVP 8 Fase 4 — seções implícitas (heurísticas) */}
+              {report.implicit_requirements?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                    Requisitos implícitos detectados (sem prefixo RF-)
+                  </div>
+                  <ul className="text-[11px] text-slate-300 space-y-0.5 list-disc list-inside">
+                    {report.implicit_requirements.map((r, i) => (
+                      <li key={i} className="truncate" title={r}>{r}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {report.deliverables_hints?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                    Entregáveis mencionados
+                  </div>
+                  <ul className="text-[11px] text-slate-300 space-y-0.5 list-disc list-inside">
+                    {report.deliverables_hints.map((d, i) => (
+                      <li key={i} className="truncate" title={d}>{d}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {report.phases_hints?.length > 0 && (
+                <div>
+                  <div className="text-[10px] uppercase tracking-wide text-slate-500 mb-1">
+                    Fases / cronograma detectados
+                  </div>
+                  <div className="flex flex-wrap gap-1">
+                    {report.phases_hints.map((f, i) => (
+                      <Chip key={i} text={f} color="violet" />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* Warnings */}
               {report.warnings.length > 0 && (
                 <div className="bg-amber-500/10 border border-amber-500/30 rounded p-2">

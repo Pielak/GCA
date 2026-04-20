@@ -106,6 +106,10 @@ export interface ExtractionReport {
   requirements_functional: string[]
   requirements_non_functional: string[]
   module_hints: string[]
+  // MVP 8 Fase 4 — heurísticas de seções implícitas (sempre listas, [] quando vazio)
+  implicit_requirements: string[]
+  deliverables_hints: string[]
+  phases_hints: string[]
   warnings: string[]
   text_sample: string
 }
