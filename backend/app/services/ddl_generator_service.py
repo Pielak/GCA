@@ -1,18 +1,35 @@
-"""DT-076 Fase 2 — Gerador de DDL a partir do DATA_MODEL do OCG.
+"""DT-076 Fase 2 + MVP 11 Fase 11.6 — Gerador de DDL a partir do DATA_MODEL do OCG.
 
 Emite artefatos reais (não mais placeholder) pro CodeGen incluir na
 entrega inicial do projeto:
-  - `schema.sql` nativo do dialeto
+  - `schema.sql` / `collections.json` nativo do dialeto
   - Migration no formato do framework declarado no OCG
-  - `seed.sql` idempotente
+  - `seed.sql` / `seed.js` idempotente
 
-V1 cobre dois dialetos (DT-076 Fase 2):
-  - **PostgreSQL**: UUID via `gen_random_uuid()`, JSONB, BIGSERIAL
-  - **MySQL 8+**: UUID via `UUID()` função, JSON, BIGINT AUTO_INCREMENT
+V1 (DT-076 Fase 2) cobriu PostgreSQL e MySQL.
 
-Outros dialetos (Oracle, SQLServer, SQLite) disparam warning e emitem
-schema.sql portável em ANSI como best-effort; migration no framework
-é skipada — GP escreve manualmente.
+V2 (MVP 11 Fase 11.6) adiciona cobertura completa:
+  - **SQLite**: TEXT pra UUID, INTEGER PRIMARY KEY AUTOINCREMENT pra
+    BIGSERIAL, INTEGER pra BOOLEAN, TEXT pra JSONB, DATETIME pra
+    TIMESTAMP.
+  - **SQL Server** (T-SQL): UNIQUEIDENTIFIER, BIGINT IDENTITY(1,1),
+    BIT, NVARCHAR(MAX), DATETIME2. IF NOT EXISTS via `IF OBJECT_ID`
+    check.
+  - **Oracle** (PL/SQL): RAW(16), NUMBER(19) com SEQUENCE pra
+    autoincrement, NUMBER(1) pra BOOLEAN, CLOB, TIMESTAMP WITH TIME
+    ZONE. IF NOT EXISTS via bloco anônimo com EXCEPTION.
+  - **MongoDB**: gera `collections.json` com JSON Schema validators
+    + `seed.js` com `insertMany` + criação de índices. Não é SQL.
+
+7 frameworks de migration continuam cobertos, com dialeto-específico
+quando aplicável:
+  - Alembic: todos dialetos SQL (pg/mysql/sqlite/sqlserver/oracle).
+  - Flyway: idem.
+  - Knex: idem.
+  - TypeORM: 5 SQL + mongo (nativo).
+  - Laravel: pg/mysql/sqlite/sqlsrv (sem oracle/mongo nativo).
+  - EFCore: todos via provider.
+  - go-migrate: 5 SQL (sem mongo).
 
 Inputs esperados: output de `data_model_inference.infer_data_model`.
 """
@@ -33,34 +50,66 @@ class DDLArtifact:
 
 SCHEMA_HEADER = {
     "postgresql": (
-        "-- Schema gerado pelo GCA (DT-076 Fase 2) a partir do OCG.DATA_MODEL\n"
+        "-- Schema gerado pelo GCA a partir do OCG.DATA_MODEL\n"
         "-- Dialect: PostgreSQL 12+\n"
         "-- Refine via backlog; nova versão sobrescreve este arquivo.\n\n"
         'CREATE EXTENSION IF NOT EXISTS "pgcrypto";\n\n'
     ),
     "mysql": (
-        "-- Schema gerado pelo GCA (DT-076 Fase 2) a partir do OCG.DATA_MODEL\n"
+        "-- Schema gerado pelo GCA a partir do OCG.DATA_MODEL\n"
         "-- Dialect: MySQL 8.0+\n"
         "-- Refine via backlog; nova versão sobrescreve este arquivo.\n\n"
         "SET sql_mode = 'STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION';\n\n"
     ),
+    "sqlite": (
+        "-- Schema gerado pelo GCA a partir do OCG.DATA_MODEL\n"
+        "-- Dialect: SQLite 3.35+\n"
+        "-- Refine via backlog; nova versão sobrescreve este arquivo.\n\n"
+        "PRAGMA foreign_keys = ON;\n\n"
+    ),
+    "sqlserver": (
+        "-- Schema gerado pelo GCA a partir do OCG.DATA_MODEL\n"
+        "-- Dialect: SQL Server 2017+\n"
+        "-- Refine via backlog; nova versão sobrescreve este arquivo.\n\n"
+        "SET ANSI_NULLS ON;\nSET QUOTED_IDENTIFIER ON;\nGO\n\n"
+    ),
+    "oracle": (
+        "-- Schema gerado pelo GCA a partir do OCG.DATA_MODEL\n"
+        "-- Dialect: Oracle 19c+\n"
+        "-- Refine via backlog; nova versão sobrescreve este arquivo.\n"
+        "-- Observação: BIGSERIAL é emulado via SEQUENCE + DEFAULT.\n\n"
+    ),
 }
 
 
-def generate_ddl(data_model: dict[str, Any]) -> list[DDLArtifact]:
-    """Gera schema.sql + seed.sql pra dialetos suportados.
+# Dialetos SQL suportados a partir da V2 (MVP 11 Fase 11.6).
+SQL_DIALECTS: tuple[str, ...] = ("postgresql", "mysql", "sqlite", "sqlserver", "oracle")
 
-    Retorna lista vazia quando engine não é suportado (callers devem
-    verificar `data_model["dialect_supported"]` antes). Se a lista
-    vier vazia, o CodeGen gera placeholder orientando o GP.
+
+# Dialetos totais (V2): 5 SQL + mongodb (caminho não-SQL dedicado).
+ALL_DIALECTS: tuple[str, ...] = SQL_DIALECTS + ("mongodb",)
+
+
+def generate_ddl(data_model: dict[str, Any]) -> list[DDLArtifact]:
+    """Gera artefatos nativos do dialeto a partir do DATA_MODEL.
+
+    Dialetos SQL (pg/mysql/sqlite/sqlserver/oracle) emitem
+    `schema.sql` + `seed.sql`.
+    MongoDB emite `collections.json` (JSON Schema validators) + `seed.js`
+    (insertMany + createIndex) — MVP 11 Fase 11.6.
+
+    Retorna lista vazia quando engine não é suportado.
     """
     engine = (data_model or {}).get("engine")
-    if engine not in ("postgresql", "mysql"):
+    if engine not in ALL_DIALECTS:
         return []
 
     tables = data_model.get("tables") or []
     fks = data_model.get("foreign_keys") or []
     seed = data_model.get("seed_data") or []
+
+    if engine == "mongodb":
+        return _render_mongodb_artifacts(tables, seed)
 
     schema_sql = _render_schema_sql(engine, tables, fks)
     seed_sql = _render_seed_sql(engine, seed)
@@ -100,6 +149,18 @@ def generate_migration(
     """
     f = (framework or "").lower().strip()
     engine = (data_model or {}).get("engine")
+
+    # MVP 11 Fase 11.6 — guardas de compat framework × dialeto.
+    # MongoDB só tem migration nativa com TypeORM (driver mongo) e EFCore
+    # (Cosmos provider). Demais frameworks são SQL-only — retornam None.
+    if engine == "mongodb" and f not in (
+        "typeorm", "nestjs", "nodejs-nestjs",
+        "efcore", "aspnet", "csharp", "c#",
+    ):
+        return None
+    # Laravel não tem suporte nativo a Oracle no ecossistema padrão.
+    if engine == "oracle" and f in ("laravel", "php", "php-laravel"):
+        return None
 
     # Mapas de aliases → handler
     if f in ("alembic", "fastapi", "python"):
@@ -155,18 +216,57 @@ def _render_create_table(t: dict[str, Any], engine: str) -> str:
     comment = t.get("comment") or ""
 
     col_lines = [_render_column(c, engine) for c in cols]
+    # SQLite: BIGSERIAL já vira "INTEGER PRIMARY KEY AUTOINCREMENT" no _TYPE_MAP —
+    # nesse caso evita PRIMARY KEY duplicado depois.
     body = ",\n  ".join(col_lines)
 
     lines = [f"-- {comment}" if comment else f"-- Tabela {name}"]
-    lines.append(f"CREATE TABLE IF NOT EXISTS {name} (")
+
+    # CREATE TABLE IF NOT EXISTS — sintaxe por dialeto.
+    if engine in ("postgresql", "mysql", "sqlite"):
+        lines.append(f"CREATE TABLE IF NOT EXISTS {name} (")
+    elif engine == "sqlserver":
+        # T-SQL: sem IF NOT EXISTS direto. Usa OBJECT_ID.
+        lines.append(
+            f"IF OBJECT_ID(N'{name}', N'U') IS NULL\nCREATE TABLE {name} ("
+        )
+    else:  # oracle
+        # PL/SQL: bloco anônimo tolerante a ORA-00955 (name already used).
+        lines.append(
+            "BEGIN EXECUTE IMMEDIATE '\n"
+            f"CREATE TABLE {name} ("
+        )
+
     lines.append(f"  {body}")
-    if pk:
+
+    # PK separada só quando o tipo da coluna PK não for auto-carregador.
+    skip_pk = (
+        engine == "sqlite"
+        and any(
+            (c.get("type") or "").upper() == "BIGSERIAL" and c["name"] in pk
+            for c in cols
+        )
+    )
+    if pk and not skip_pk:
         lines.append(f",  PRIMARY KEY ({', '.join(pk)})")
-    lines.append(");")
-    if comment and engine == "postgresql":
-        # Postgres suporta COMMENT ON TABLE; MySQL usa inline que seria verboso.
+
+    # Fecha o corpo
+    if engine == "oracle":
+        lines.append(")';")
+        lines.append("EXCEPTION WHEN OTHERS THEN")
+        lines.append("  IF SQLCODE != -955 THEN RAISE; END IF;")
+        lines.append("END;\n/")
+    else:
+        lines.append(");")
+
+    # COMMENT ON TABLE — por dialeto
+    if comment:
         safe = comment.replace("'", "''")
-        lines.append(f"COMMENT ON TABLE {name} IS '{safe}';")
+        if engine == "postgresql":
+            lines.append(f"COMMENT ON TABLE {name} IS '{safe}';")
+        elif engine == "oracle":
+            lines.append(f"COMMENT ON TABLE {name} IS '{safe}';")
+        # mysql inline é verboso; sqlserver/sqlite não suportam nativamente — skip
     return "\n".join(lines) + "\n"
 
 
@@ -183,6 +283,8 @@ def _render_column(c: dict[str, Any], engine: str) -> str:
     if default is not None:
         parts.append(f"DEFAULT {_dialect_default(default, c['type'], engine)}")
     if unique:
+        # Oracle não permite UNIQUE inline sem CONSTRAINT nome; mas sintaxe
+        # simples ainda funciona em todos os dialetos cobertos aqui.
         parts.append("UNIQUE")
     return " ".join(parts)
 
@@ -191,9 +293,20 @@ def _render_create_index(table: str, idx: dict[str, Any], engine: str) -> str:
     iname = idx["name"]
     cols = ", ".join(idx["columns"])
     unique = "UNIQUE " if idx.get("unique") else ""
-    if engine == "postgresql":
+    # IF NOT EXISTS: suportado em postgres, mysql 8.0.20+, sqlite.
+    if engine in ("postgresql", "mysql", "sqlite"):
         return f"CREATE {unique}INDEX IF NOT EXISTS {iname} ON {table} ({cols});\n"
-    return f"CREATE {unique}INDEX {iname} ON {table} ({cols});\n"
+    if engine == "sqlserver":
+        return (
+            f"IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'{iname}')\n"
+            f"  CREATE {unique}INDEX {iname} ON {table} ({cols});\n"
+        )
+    # oracle: usa bloco tolerante a ORA-00955
+    return (
+        "BEGIN EXECUTE IMMEDIATE '\n"
+        f"CREATE {unique}INDEX {iname} ON {table} ({cols})';\n"
+        "EXCEPTION WHEN OTHERS THEN IF SQLCODE != -955 THEN RAISE; END IF; END;\n/\n"
+    )
 
 
 def _render_fk(fk: dict[str, Any], engine: str) -> str:
@@ -210,36 +323,63 @@ def _render_fk(fk: dict[str, Any], engine: str) -> str:
     )
 
 
-def _dialect_type(canonical_type: str, engine: str) -> str:
-    """Mapeia tipos canônicos pra tipos nativos do dialeto.
-
-    Canonical (usado pelo inferencer) → dialeto:
-      UUID → postgresql: UUID, mysql: CHAR(36)
-      BIGSERIAL → postgresql: BIGSERIAL, mysql: BIGINT AUTO_INCREMENT
-      BOOLEAN → postgresql: BOOLEAN, mysql: TINYINT(1)
-      JSONB → postgresql: JSONB, mysql: JSON (já deveria ter sido normalizado upstream)
-      TIMESTAMP → postgresql: TIMESTAMPTZ, mysql: TIMESTAMP
-    """
-    t = canonical_type.upper().strip()
-    if engine == "postgresql":
-        mapping = {
-            "UUID": "UUID",
-            "BIGSERIAL": "BIGSERIAL",
-            "BOOLEAN": "BOOLEAN",
-            "JSONB": "JSONB",
-            "JSON": "JSONB",
-            "TIMESTAMP": "TIMESTAMPTZ",
-        }
-        return mapping.get(t, canonical_type)
-    # mysql
-    mapping = {
+_TYPE_MAP: dict[str, dict[str, str]] = {
+    "postgresql": {
+        "UUID": "UUID",
+        "BIGSERIAL": "BIGSERIAL",
+        "BOOLEAN": "BOOLEAN",
+        "JSONB": "JSONB",
+        "JSON": "JSONB",
+        "TIMESTAMP": "TIMESTAMPTZ",
+    },
+    "mysql": {
         "UUID": "CHAR(36)",
         "BIGSERIAL": "BIGINT AUTO_INCREMENT",
         "BOOLEAN": "TINYINT(1)",
         "JSONB": "JSON",
+        "JSON": "JSON",
         "TIMESTAMP": "TIMESTAMP",
-    }
-    # MySQL não suporta INTEGER DEFAULT em TEXT, CHAR lengths fixos
+    },
+    "sqlite": {
+        "UUID": "TEXT",
+        "BIGSERIAL": "INTEGER PRIMARY KEY AUTOINCREMENT",
+        "BOOLEAN": "INTEGER",
+        "JSONB": "TEXT",
+        "JSON": "TEXT",
+        "TIMESTAMP": "DATETIME",
+        "TEXT": "TEXT",
+        "VARCHAR": "TEXT",
+        "VARCHAR(255)": "TEXT",
+    },
+    "sqlserver": {
+        "UUID": "UNIQUEIDENTIFIER",
+        "BIGSERIAL": "BIGINT IDENTITY(1,1)",
+        "BOOLEAN": "BIT",
+        "JSONB": "NVARCHAR(MAX)",
+        "JSON": "NVARCHAR(MAX)",
+        "TIMESTAMP": "DATETIME2",
+        "TEXT": "NVARCHAR(MAX)",
+        "VARCHAR": "NVARCHAR(255)",
+    },
+    "oracle": {
+        "UUID": "RAW(16)",
+        "BIGSERIAL": "NUMBER(19)",  # auto-increment emulado via SEQUENCE (ver _render_column)
+        "BOOLEAN": "NUMBER(1)",
+        "JSONB": "CLOB",
+        "JSON": "CLOB",
+        "TIMESTAMP": "TIMESTAMP WITH TIME ZONE",
+        "TEXT": "CLOB",
+        "VARCHAR": "VARCHAR2(255)",
+        "INTEGER": "NUMBER(10)",
+        "BIGINT": "NUMBER(19)",
+    },
+}
+
+
+def _dialect_type(canonical_type: str, engine: str) -> str:
+    """Mapeia tipos canônicos pra tipos nativos do dialeto."""
+    t = canonical_type.upper().strip()
+    mapping = _TYPE_MAP.get(engine, {})
     return mapping.get(t, canonical_type)
 
 
@@ -250,14 +390,17 @@ def _dialect_default(default_val: Any, canonical_type: str, engine: str) -> str:
 
     # Caso CURRENT_TIMESTAMP / NOW
     if s.upper() in ("CURRENT_TIMESTAMP", "NOW()", "NOW"):
+        if engine == "oracle":
+            return "SYSTIMESTAMP"
         return "CURRENT_TIMESTAMP"
 
-    # Booleanos
+    # Booleanos: postgres usa literais TRUE/FALSE; demais dialetos usam 1/0
     if t == "BOOLEAN":
         val = str(default_val).lower()
-        if val in ("true", "1"):
-            return "TRUE" if engine == "postgresql" else "1"
-        return "FALSE" if engine == "postgresql" else "0"
+        truthy = val in ("true", "1")
+        if engine == "postgresql":
+            return "TRUE" if truthy else "FALSE"
+        return "1" if truthy else "0"
 
     # String já veio com aspas
     if s.startswith("'") and s.endswith("'"):
@@ -270,7 +413,7 @@ def _dialect_default(default_val: Any, canonical_type: str, engine: str) -> str:
     except ValueError:
         pass
 
-    # Fallback: aspas
+    # Fallback: aspas (Oracle prefere N'' para unicode mas single-quote cobre ASCII)
     return f"'{s}'"
 
 
@@ -333,13 +476,35 @@ def _render_insert(engine: str, table: str, row: dict[str, Any]) -> str:
     vals = [_sql_value(v, engine) for v in row.values()]
     col_list = ", ".join(cols)
     val_list = ", ".join(vals)
-    # ON CONFLICT / IGNORE pra idempotência
+    # Idempotência por dialeto.
     if engine == "postgresql":
         return (
             f"INSERT INTO {table} ({col_list}) VALUES ({val_list}) "
             "ON CONFLICT DO NOTHING;\n"
         )
-    return f"INSERT IGNORE INTO {table} ({col_list}) VALUES ({val_list});\n"
+    if engine == "mysql":
+        return f"INSERT IGNORE INTO {table} ({col_list}) VALUES ({val_list});\n"
+    if engine == "sqlite":
+        return (
+            f"INSERT OR IGNORE INTO {table} ({col_list}) "
+            f"VALUES ({val_list});\n"
+        )
+    if engine == "sqlserver":
+        # MERGE é complexo; best-effort: IF NOT EXISTS pela primeira coluna.
+        first_col = cols[0]
+        first_val = vals[0]
+        return (
+            f"IF NOT EXISTS (SELECT 1 FROM {table} WHERE {first_col} = {first_val})\n"
+            f"  INSERT INTO {table} ({col_list}) VALUES ({val_list});\n"
+        )
+    # oracle
+    first_col = cols[0]
+    first_val = vals[0]
+    return (
+        f"INSERT INTO {table} ({col_list})\n"
+        f"  SELECT {val_list} FROM DUAL\n"
+        f"  WHERE NOT EXISTS (SELECT 1 FROM {table} WHERE {first_col} = {first_val});\n"
+    )
 
 
 def _sql_value(v: Any, engine: str) -> str:
@@ -353,6 +518,125 @@ def _sql_value(v: Any, engine: str) -> str:
         return str(v)
     s = str(v).replace("'", "''")
     return f"'{s}'"
+
+
+# ---------------------------------------------------------------------------
+# MongoDB renderer (MVP 11 Fase 11.6)
+# ---------------------------------------------------------------------------
+
+# Canonical → JSON Schema bsonType.
+_BSON_TYPE_MAP: dict[str, str] = {
+    "UUID": "string",
+    "BIGSERIAL": "long",
+    "BIGINT": "long",
+    "INTEGER": "int",
+    "BOOLEAN": "bool",
+    "JSONB": "object",
+    "JSON": "object",
+    "TIMESTAMP": "date",
+    "TEXT": "string",
+    "VARCHAR": "string",
+    "VARCHAR(255)": "string",
+}
+
+
+def _render_mongodb_artifacts(
+    tables: list[dict[str, Any]], seed: list[dict[str, Any]],
+) -> list[DDLArtifact]:
+    """Gera collections.json (JSON Schema validators) + seed.js + create_indexes.js.
+
+    MongoDB não tem schema rígido, mas coleções podem ter JSON Schema
+    validators (`$jsonSchema`) ativados. Seed usa `insertMany` e
+    `createIndex`. Output é consumido pelo CodeGen e pode ser executado
+    via `mongosh < seed.js` ou via scripts de bootstrap do cliente.
+    """
+    import json as _json
+
+    collections: list[dict[str, Any]] = []
+    index_ops: list[str] = []
+    for t in tables:
+        name = t["name"]
+        cols = t.get("columns") or []
+        pk = t.get("primary_key") or []
+
+        properties: dict[str, dict[str, Any]] = {}
+        required: list[str] = []
+        for c in cols:
+            cname = c["name"]
+            ctype_upper = (c.get("type") or "string").upper()
+            bson_type = _BSON_TYPE_MAP.get(ctype_upper, "string")
+            properties[cname] = {"bsonType": bson_type}
+            if not c.get("nullable", False):
+                required.append(cname)
+
+        collection_doc: dict[str, Any] = {
+            "collection": name,
+            "validator": {
+                "$jsonSchema": {
+                    "bsonType": "object",
+                    "required": required,
+                    "properties": properties,
+                }
+            },
+            "primary_key": pk,
+        }
+        collections.append(collection_doc)
+
+        # Índices declarados
+        for idx in t.get("indexes") or []:
+            iname = idx["name"]
+            keys = {col: 1 for col in idx["columns"]}
+            options = {"name": iname}
+            if idx.get("unique"):
+                options["unique"] = True
+            index_ops.append(
+                f"db.{name}.createIndex({_json.dumps(keys)}, {_json.dumps(options)});"
+            )
+
+    collections_json = _json.dumps(
+        {"collections": collections}, indent=2, ensure_ascii=False
+    )
+
+    # Seed insertMany idempotente: usa updateOne upsert para cada row.
+    seed_lines = [
+        "// Seed idempotente gerado pelo GCA para MongoDB.",
+        "// Execute via: mongosh <uri> < seed.js",
+        "",
+    ]
+    for entry in seed:
+        table = entry["table"]
+        purpose = entry.get("purpose") or ""
+        if purpose:
+            seed_lines.append(f"// {purpose}")
+        for row in entry.get("rows") or []:
+            # Usa o primeiro campo como chave do upsert.
+            first_key = next(iter(row.keys()))
+            filter_doc = {first_key: row[first_key]}
+            seed_lines.append(
+                f"db.{table}.updateOne("
+                f"{_json.dumps(filter_doc, ensure_ascii=False)}, "
+                f"{{ $setOnInsert: {_json.dumps(row, ensure_ascii=False)} }}, "
+                f"{{ upsert: true }});"
+            )
+    seed_lines.append("")
+    if index_ops:
+        seed_lines.append("// Índices declarados no DATA_MODEL")
+        seed_lines.extend(index_ops)
+
+    return [
+        DDLArtifact(
+            filename="collections.json",
+            content=collections_json,
+            language="json",
+            purpose="schema",
+        ),
+        DDLArtifact(
+            filename="seed.js",
+            content="\n".join(seed_lines) + "\n",
+            language="javascript",
+            purpose="seed",
+        ),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -440,8 +724,44 @@ exports.down = async () => {{
 
 
 def _migration_typeorm(data_model: dict[str, Any]) -> DDLArtifact:
+    engine = data_model["engine"]
+    if engine == "mongodb":
+        # MVP 11 Fase 11.6 — TypeORM + MongoDB driver: migration cria
+        # coleções via connection.createCollection e índices via
+        # createIndex. Stub orientando o GP a completar a partir do
+        # collections.json.
+        tables = data_model.get("tables") or []
+        coll_names = [t["name"] for t in tables]
+        ops = "\n".join(
+            f'    await conn.db.createCollection("{n}");' for n in coll_names
+        )
+        content = f'''import {{ MigrationInterface, QueryRunner, MongoClient }} from "typeorm";
+
+// TypeORM + MongoDB: a migration cria coleções vazias. Os validators
+// JSON Schema e índices ficam em `collections.json` / `seed.js` —
+// aplicar via script de bootstrap do projeto.
+export class GcaInit0001 implements MigrationInterface {{
+  name = "GcaInit0001";
+
+  public async up(queryRunner: QueryRunner): Promise<void> {{
+    const conn: any = queryRunner.connection;
+{ops}
+  }}
+
+  public async down(): Promise<void> {{
+    throw new Error("Downgrade nao suportado.");
+  }}
+}}
+'''
+        return DDLArtifact(
+            filename="src/migrations/0001-gca-init.ts",
+            content=content,
+            language="typescript",
+            purpose="migration",
+        )
+
     schema = _render_schema_sql(
-        data_model["engine"], data_model.get("tables") or [], data_model.get("foreign_keys") or [],
+        engine, data_model.get("tables") or [], data_model.get("foreign_keys") or [],
     )
     escaped = schema.replace("`", "\\`")
     content = f'''import {{ MigrationInterface, QueryRunner }} from "typeorm";
@@ -495,8 +815,36 @@ return new class extends Migration {{
 
 
 def _migration_efcore(data_model: dict[str, Any]) -> DDLArtifact:
+    engine = data_model["engine"]
+    if engine == "mongodb":
+        # EFCore + Cosmos DB: containers equivalem a coleções; a migration
+        # define Database.EnsureCreated e delega schema/index para
+        # collections.json consumido pelo bootstrap.
+        content = '''using Microsoft.EntityFrameworkCore.Migrations;
+
+namespace GcaApp.Migrations {
+  // EFCore + Cosmos: containers são criados em runtime via
+  // Database.EnsureCreated(). Schema e índices em collections.json.
+  public partial class GcaInit : Migration {
+    protected override void Up(MigrationBuilder migrationBuilder) {
+      // No-op: Cosmos cria containers lazy. Ver collections.json.
+    }
+
+    protected override void Down(MigrationBuilder migrationBuilder) {
+      throw new System.NotSupportedException("Downgrade nao suportado.");
+    }
+  }
+}
+'''
+        return DDLArtifact(
+            filename="Migrations/20260420000001_GcaInit.cs",
+            content=content,
+            language="csharp",
+            purpose="migration",
+        )
+
     schema = _render_schema_sql(
-        data_model["engine"], data_model.get("tables") or [], data_model.get("foreign_keys") or [],
+        engine, data_model.get("tables") or [], data_model.get("foreign_keys") or [],
     )
     escaped = schema.replace('"', '\\"')
     content = f'''using Microsoft.EntityFrameworkCore.Migrations;

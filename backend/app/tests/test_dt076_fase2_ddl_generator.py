@@ -180,24 +180,37 @@ def test_seed_mysql_usa_insert_ignore():
 # Engine não suportado
 # ────────────────────────────────────────────────────────────────────────
 
-def test_oracle_retorna_lista_vazia():
+def test_oracle_agora_gera_artefatos_em_v2():
+    """MVP 11 Fase 11.6: Oracle saiu da lista vazia (V1) — agora emite DDL real."""
     dm = infer_data_model(
         {"initiative_type": "generic"},
         {"database": {"engine": "Oracle 19c"}},
     )
-    assert generate_ddl(dm) == []
+    artifacts = generate_ddl(dm)
+    assert len(artifacts) == 2
+    assert any(a.filename == "schema.sql" for a in artifacts)
+    assert any(a.filename == "seed.sql" for a in artifacts)
 
 
-def test_sqlite_retorna_lista_vazia():
+def test_sqlite_agora_gera_artefatos_em_v2():
+    """MVP 11 Fase 11.6: SQLite saiu da lista vazia (V1) — agora emite DDL real."""
     dm = infer_data_model(
         {"initiative_type": "generic"},
         {"database": {"engine": "SQLite"}},
     )
-    assert generate_ddl(dm) == []
+    artifacts = generate_ddl(dm)
+    assert len(artifacts) == 2
+    assert any(a.filename == "schema.sql" for a in artifacts)
 
 
 def test_sem_engine_retorna_lista_vazia():
     dm = infer_data_model({}, {})
+    assert generate_ddl(dm) == []
+
+
+def test_engine_desconhecido_retorna_lista_vazia():
+    """Engine fora dos 6 suportados (5 SQL + mongo) continua vazio."""
+    dm = {"engine": "foobar", "tables": [], "foreign_keys": [], "seed_data": []}
     assert generate_ddl(dm) == []
 
 
