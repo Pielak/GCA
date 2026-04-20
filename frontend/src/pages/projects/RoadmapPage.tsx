@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
-import { Clock, CheckCircle, Circle, GitCommit, Loader2, RefreshCw, AlertTriangle } from 'lucide-react'
+import { Clock, CheckCircle, Circle, GitCommit, Loader2, RefreshCw, AlertTriangle, ListOrdered } from 'lucide-react'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
 import { ModuleDetailsModal } from '@/components/roadmap/ModuleDetailsModal'
+import { DeployPlanModal } from '@/components/roadmap/DeployPlanModal'
 
 // MVP 9 Fase 9.1 — categorias canônicas de módulos no Roadmap.
 // Mantido em sync com `backend/app/constants/module_categories.py`.
@@ -117,6 +118,8 @@ export function RoadmapPage() {
   const [categoryFilter, setCategoryFilter] = useState<ModuleCategory | null>(null)
   // MVP 9 Fase 9.2 — modal de detalhamento on-demand. Guarda o módulo aberto.
   const [detailsModule, setDetailsModule] = useState<{ id: string; name: string } | null>(null)
+  // MVP 9 Fase 9.4 — modal do plano de deploy.
+  const [showDeployPlan, setShowDeployPlan] = useState(false)
 
   const loadData = async () => {
     setLoading(true)
@@ -188,6 +191,17 @@ export function RoadmapPage() {
           <p className="text-slate-500 text-sm mt-0.5">Evolução dos módulos por fase e prioridade</p>
         </div>
         <div className="flex items-center gap-4">
+          {/* MVP 9 Fase 9.4 — Botão "Plano de Deploy" */}
+          {hasModules && (
+            <button
+              onClick={() => setShowDeployPlan(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600/20 hover:bg-violet-600/30 border border-violet-600/40 text-violet-300 text-xs font-medium transition-colors"
+              title="Ver plano sugerido de deploy ordenado por camada e dependências"
+            >
+              <ListOrdered className="w-3.5 h-3.5" />
+              Plano de Deploy
+            </button>
+          )}
           <button onClick={loadData} className="p-1.5 rounded-lg text-slate-500 hover:text-slate-300 hover:bg-slate-800 transition-colors" title="Atualizar">
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -344,6 +358,14 @@ export function RoadmapPage() {
           moduleId={detailsModule.id}
           moduleName={detailsModule.name}
           onClose={() => setDetailsModule(null)}
+        />
+      )}
+
+      {/* MVP 9 Fase 9.4 — Modal do plano de deploy */}
+      {showDeployPlan && id && (
+        <DeployPlanModal
+          projectId={id}
+          onClose={() => setShowDeployPlan(false)}
         />
       )}
     </div>

@@ -76,6 +76,51 @@ async def get_module_details(
     return details
 
 
+@router.get("/projects/{project_id}/roadmap/deploy-plan")
+async def get_deploy_plan(
+    project_id: UUID,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.4 — Plano de deploy sugerido (JSON).
+
+    Ordena `module_candidates` por camada canônica
+    (infrastructure → ... → deploy_pipeline) com sort topológico
+    de dependencies_inferred (Fase 9.3) dentro de cada camada.
+    Itens em ciclo aparecem com `cycle=true` na resposta.
+    """
+    from app.services.deploy_plan_service import build_deploy_plan
+    return await build_deploy_plan(db, project_id)
+
+
+@router.get("/projects/{project_id}/roadmap/deploy-plan.md")
+async def get_deploy_plan_markdown(
+    project_id: UUID,
+    _perm: dict = Depends(require_action("project:view")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 9 Fase 9.4 — Plano de deploy exportado como Markdown
+    (attachment pra GP baixar/imprimir/compartilhar com a equipe)."""
+    from fastapi.responses import Response
+    from app.services.deploy_plan_service import build_deploy_plan, render_markdown
+    from app.models.base import Project
+
+    plan = await build_deploy_plan(db, project_id)
+
+    project = await db.get(Project, project_id)
+    project_name = project.name if project else None
+    md = render_markdown(plan, project_name=project_name)
+
+    return Response(
+        content=md.encode("utf-8"),
+        media_type="text/markdown; charset=utf-8",
+        headers={
+            "Content-Disposition": f'attachment; filename="gca-deploy-plan-{str(project_id)[:8]}.md"',
+            "Cache-Control": "no-store",
+        },
+    )
+
+
 @router.post("/projects/{project_id}/modules/{module_id}/evaluate-readiness")
 async def evaluate_module_readiness_endpoint(
     project_id: UUID,
