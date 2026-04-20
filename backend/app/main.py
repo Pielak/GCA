@@ -84,6 +84,22 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("release.startup_sync_failed", error=str(e))
 
+    # DT-3 dogfood: watchdog limpa docs presos em 'processing' por
+    # reinício de backend (asyncio.create_task morre com o processo).
+    # Também resolve sintoma operacional da DT-5 (sem fila persistente).
+    if "PYTEST_CURRENT_TEST" not in _os.environ:
+        try:
+            from app.services.ingestion_watchdog import recover_zombie_documents
+            summary = await recover_zombie_documents()
+            if summary["recovered"]:
+                logger.warning(
+                    "ingestion.startup_watchdog_recovered",
+                    recovered=summary["recovered"],
+                    threshold_minutes=summary["threshold_minutes"],
+                )
+        except Exception as e:
+            logger.error("ingestion.startup_watchdog_failed", error=str(e))
+
     yield
 
     # Shutdown

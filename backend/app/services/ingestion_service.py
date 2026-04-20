@@ -394,9 +394,12 @@ class IngestionService:
                 "status_code": 200,
             }
 
-        # Disparar análise assíncrona (somente se não quarentenado)
+        # Disparar análise assíncrona (somente se não quarentenado).
+        # DT-3 dogfood: timeout duro de 10 min protege contra LLM travado
+        # ou rede lenta. Se estourar, o except interno em _analyze_async
+        # catch-all marca stage='failed'. Também precisamos limpar status.
         asyncio.create_task(
-            self._analyze_async(doc_id, project_id, file_bytes, file_type)
+            self._analyze_with_timeout(doc_id, project_id, file_bytes, file_type)
         )
 
         logger.info(
@@ -461,22 +464,61 @@ class IngestionService:
         return total % 10 == 0
 
     @staticmethod
+    def _extract_text_for_pii_scan(file_bytes: bytes, file_type: str) -> str:
+        """DT-4 dogfood — Extrai texto humano-legível antes da triagem de PII.
+
+        O scan antigo fazia `file_bytes.decode("utf-8", errors="ignore")`
+        direto nos bytes — em PDFs/DOCX ricos em runs numéricos (xref
+        tables, IDs internos, streams), isso ainda gerava janela de falso
+        positivo mesmo após o reforço de DT-028 (mod-11/Luhn/contexto
+        telefone). A correção estrutural é usar o extrator certo do
+        formato antes de aplicar regex.
+
+        - PDF: `extract_pdf_layered(bytes).text` (camadas AcroForm + texto).
+        - DOCX: `extract_rich_text(bytes)` (parágrafos + tabelas).
+        - Outros (texto/markdown/json/csv etc): decode UTF-8 direto.
+        - image/spreadsheet: retorna "" (não escaneia).
+
+        Trunca em 100 KB pra não pagar pelo tempo de regex em docs gigantes.
+        """
+        if file_type in ("image", "spreadsheet"):
+            return ""
+
+        try:
+            if file_type == "pdf":
+                from app.services.pdf_layered_extractor import extract_pdf_layered
+                text = extract_pdf_layered(file_bytes).text or ""
+            elif file_type == "docx":
+                from app.services.rich_docx_extractor import extract_rich_text
+                text = extract_rich_text(file_bytes) or ""
+                # extract_rich_text começa com `[Erro ...]` em falha — não escaneia
+                if text.startswith("["):
+                    text = ""
+            else:
+                text = file_bytes.decode("utf-8", errors="ignore")
+        except Exception:
+            # Qualquer falha do extractor → cai no caminho seguro (string vazia,
+            # zero PII detectado). PII detection nunca deve quebrar a ingestão.
+            return ""
+
+        return text[:100_000]
+
+    @staticmethod
     def _detect_pii(file_bytes: bytes, file_type: str) -> tuple[bool, list[str]]:
         """Triagem básica de PII em conteúdo textual.
 
         Para CPF/CNPJ/cartão: exige que o valor passe pelo dígito verificador real
         (mod-11 / Luhn) — regex puro dá falso-positivo em PDFs/binários que têm
         runs de 14 dígitos em xref tables, IDs de objetos etc.
+
+        DT-4 dogfood: extração de texto agora é via extractor real do formato
+        (`_extract_text_for_pii_scan`), não mais decode("utf-8") cru sobre
+        bytes. Elimina falso-positivo em PDFs/DOCX ricos em runs numéricos.
         """
         import re
 
-        # Só analisa tipos textuais
-        if file_type in ("image", "spreadsheet"):
-            return False, []
-
-        try:
-            text = file_bytes.decode("utf-8", errors="ignore")[:100_000]  # primeiros 100KB
-        except Exception:
+        text = IngestionService._extract_text_for_pii_scan(file_bytes, file_type)
+        if not text:
             return False, []
 
         only_digits = re.compile(r"\D")
@@ -920,6 +962,57 @@ class IngestionService:
             fallback=fallback_provider,
             recipients=len(recipients),
         )
+
+    # DT-3 dogfood: tempo máximo de uma análise antes de matar a task.
+    # Análises reais com Anthropic levam segundos a minutos; com Ollama
+    # local sobem pra alguns minutos. 10 min é margem confortável.
+    _ANALYZE_TIMEOUT_SECONDS = 600
+
+    async def _analyze_with_timeout(
+        self,
+        document_id: UUID,
+        project_id: UUID,
+        file_bytes: bytes,
+        file_type: str,
+    ):
+        """DT-3 dogfood — Wrapper que aplica timeout duro a `_analyze_async`.
+
+        Em caso de TimeoutError, marca o doc como `arguider_status='error'`
+        com mensagem clara. Sem isso, doc fica preso em 'processing' até
+        watchdog do startup limpar (que só roda se o backend reiniciar).
+        """
+        import asyncio as _asyncio
+        try:
+            await _asyncio.wait_for(
+                self._analyze_async(document_id, project_id, file_bytes, file_type),
+                timeout=self._ANALYZE_TIMEOUT_SECONDS,
+            )
+        except _asyncio.TimeoutError:
+            logger.error(
+                "ingestion.analyze_timeout",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                timeout_s=self._ANALYZE_TIMEOUT_SECONDS,
+            )
+            try:
+                from app.db.database import AsyncSessionLocal as _ASL
+                from app.models.base import IngestedDocument as _Doc
+                async with _ASL() as _db:
+                    _doc = await _db.get(_Doc, document_id)
+                    if _doc and _doc.arguider_status == "processing":
+                        _doc.arguider_status = "error"
+                        _doc.arguider_error_message = (
+                            f"Análise excedeu o tempo máximo de "
+                            f"{self._ANALYZE_TIMEOUT_SECONDS // 60} minutos. "
+                            "Tente novamente ou reduza o tamanho do documento."
+                        )
+                        _doc.arguider_stage = "failed"
+                        await _db.commit()
+            except Exception as _e:
+                logger.warning(
+                    "ingestion.analyze_timeout_cleanup_failed",
+                    document_id=str(document_id), error=str(_e),
+                )
 
     async def _analyze_async(
         self,
