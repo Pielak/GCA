@@ -75,6 +75,11 @@ aiohttp = "^3.9.0"
 # MVP 12 Fase 12.1 — rate limit anti-abuse em endpoints públicos
 slowapi = "^0.1.9"
 
+# MVP 13 Fase 13.1 — fila persistente de tasks (Celery + broker Redis).
+# Redis já está no docker-compose; workers rodam em serviço separado
+# `gca-celery-worker`.
+celery = {extras = ["redis"], version = "^5.3.0"}
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
 pytest-asyncio = "^0.21.1"

@@ -89,6 +89,43 @@ services:
       - gca-backups:/var/gca-backups
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
+  # MVP 13 Fase 13.1 — Celery Worker (fila persistente de tasks do pipeline).
+  # Broker + result backend: Redis (DBs 1 e 2 respectivamente).
+  # Worker roda em processo separado para resiliência: se backend cair,
+  # tasks continuam na fila; se worker cair, tasks rearmadas via ACK late.
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gca-celery-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gca:gca_secret@postgres:5432/gca
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: gca
+      POSTGRES_USER: gca
+      POSTGRES_PASSWORD: gca_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - gca-uploads-storage:/tmp/gca-storage
+      - gca-backups:/var/gca-backups
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    healthcheck:
+      test: ["CMD", "celery", "-A", "app.celery_app", "inspect", "ping", "-d", "celery@gca-celery-worker"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   # Frontend (React + Vite)
   frontend:
     image: node:20-alpine
