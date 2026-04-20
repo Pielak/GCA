@@ -160,6 +160,78 @@ async def open_first_release_detail(page: Page) -> None:
         await wait_settle(page, 1200)
 
 
+# ─── Pré-actions MVP 8/9/10 ──────────────────────────────────────────────
+
+async def expand_first_ingestion_report(page: Page) -> None:
+    """MVP 8.5 — Extraction Report card (toggle) na Ingestão."""
+    await wait_settle(page, 1800)
+    toggle = page.locator('button:has-text("Relatório de extração")').first
+    if await toggle.count() > 0:
+        try:
+            await toggle.click()
+            await wait_settle(page, 1000)
+        except Exception:
+            pass
+
+
+async def open_first_module_details(page: Page) -> None:
+    """MVP 9.2 — Modal de detalhamento de módulo do Roadmap.
+
+    Cada chip de módulo é um <button> com ícone GitCommit + nome +
+    badge de categoria. Clicar abre o ModuleDetailsModal.
+    """
+    await wait_settle(page, 2000)
+    # Clip até o primeiro chip de módulo com categoria (elimina botões da UI)
+    chip = page.locator('main button:has(svg.lucide-git-commit-horizontal)').first
+    if await chip.count() > 0:
+        try:
+            await chip.click()
+            await wait_settle(page, 1500)
+        except Exception:
+            pass
+
+
+async def open_deploy_plan_modal(page: Page) -> None:
+    """MVP 9.4 — Modal Plano de Deploy no Roadmap."""
+    await wait_settle(page, 1500)
+    btn = page.get_by_role("button", name="Plano de Deploy").first
+    if await btn.count() > 0:
+        try:
+            await btn.click()
+            await wait_settle(page, 1500)
+        except Exception:
+            pass
+
+
+async def open_first_test_spec_modal(page: Page) -> None:
+    """MVP 10.5 — Modal TestSpec com provenance (aba QA/Plano de Testes)."""
+    await wait_settle(page, 1800)
+    # Primeiro item clicável da seção de specs
+    card = page.locator('button:has(span:text-is("Unitários")), button:has(span:text-is("Integração")), button:has(span:text-is("Segurança")), button:has(span:text-is("Compliance")), button:has(span:text-is("E2E"))').first
+    if await card.count() > 0:
+        try:
+            await card.click()
+            await wait_settle(page, 1200)
+        except Exception:
+            pass
+
+
+async def open_first_live_doc_modal(page: Page) -> None:
+    """MVP 10.7 — Modal LiveDoc com provenance.
+
+    Os items de doc estão em <section> dentro do main (agrupados por tipo).
+    Clicar em qualquer um abre o modal.
+    """
+    await wait_settle(page, 2000)
+    card = page.locator('main section button').first
+    if await card.count() > 0:
+        try:
+            await card.click()
+            await wait_settle(page, 1500)
+        except Exception:
+            pass
+
+
 # ─── Expansão da sidebar do projeto ───────────────────────────────────────
 
 async def expand_project_sidebar(page: Page) -> None:
@@ -233,6 +305,17 @@ def shots_gp_phase() -> list[Shot]:
         Shot(49, "projeto", "gp_abrir_ticket_modal","Modal Abrir Ticket",
              url=f"/projects/{pid}/incidents", pre_action=open_new_incident_modal),
         Shot(50, "projeto", "gp_metrics",          "Métricas do Projeto",                 url=f"/projects/{pid}/metrics"),
+        # ─── MVP 8/9/10 — Modais e novas telas ────────────────────
+        Shot(60, "projeto", "gp_ingestion_report",  "Ingestão com relatório de extração (MVP 8.5)",
+             url=f"/projects/{pid}/ingestion", pre_action=expand_first_ingestion_report),
+        Shot(61, "projeto", "gp_module_details",    "Modal Detalhamento de Módulo (MVP 9.2)",
+             url=f"/projects/{pid}/roadmap", pre_action=open_first_module_details),
+        Shot(62, "projeto", "gp_deploy_plan",       "Modal Plano de Deploy (MVP 9.4)",
+             url=f"/projects/{pid}/roadmap", pre_action=open_deploy_plan_modal),
+        Shot(63, "projeto", "gp_test_spec_modal",   "Modal Plano de Testes com provenance (MVP 10.5)",
+             url=f"/projects/{pid}/qa", pre_action=open_first_test_spec_modal),
+        Shot(64, "projeto", "gp_live_doc_modal",    "Modal Doc Viva com provenance (MVP 10.7)",
+             url=f"/projects/{pid}/docs", pre_action=open_first_live_doc_modal),
         # GP também vê /releases (mas segmentado por papel)
         Shot(55, "global",  "gp_changelog_user",   "Novidades e entregas (visto por GP)", url="/releases"),
     ]

@@ -1,5 +1,5 @@
 {
-  "started_at": "2026-04-19T12:43:41.876468",
+  "started_at": "2026-04-20T00:03:00.777726",
   "base_url": "http://localhost:5173",
   "viewport": {
     "width": 1600,
@@ -406,6 +406,56 @@
           "error": null
         },
         {
+          "n": 60,
+          "category": "projeto",
+          "slug": "gp_ingestion_report",
+          "description": "Ingestão com relatório de extração (MVP 8.5)",
+          "url": "/projects/65cab180-e00d-4eec-aaf2-fb4b5d0f4057/ingestion",
+          "file": "60_projeto_gp_ingestion_report.png",
+          "ok": true,
+          "error": null
+        },
+        {
+          "n": 61,
+          "category": "projeto",
+          "slug": "gp_module_details",
+          "description": "Modal Detalhamento de Módulo (MVP 9.2)",
+          "url": "/projects/65cab180-e00d-4eec-aaf2-fb4b5d0f4057/roadmap",
+          "file": "61_projeto_gp_module_details.png",
+          "ok": true,
+          "error": null
+        },
+        {
+          "n": 62,
+          "category": "projeto",
+          "slug": "gp_deploy_plan",
+          "description": "Modal Plano de Deploy (MVP 9.4)",
+          "url": "/projects/65cab180-e00d-4eec-aaf2-fb4b5d0f4057/roadmap",
+          "file": "62_projeto_gp_deploy_plan.png",
+          "ok": true,
+          "error": null
+        },
+        {
+          "n": 63,
+          "category": "projeto",
+          "slug": "gp_test_spec_modal",
+          "description": "Modal Plano de Testes com provenance (MVP 10.5)",
+          "url": "/projects/65cab180-e00d-4eec-aaf2-fb4b5d0f4057/qa",
+          "file": "63_projeto_gp_test_spec_modal.png",
+          "ok": true,
+          "error": null
+        },
+        {
+          "n": 64,
+          "category": "projeto",
+          "slug": "gp_live_doc_modal",
+          "description": "Modal Doc Viva com provenance (MVP 10.7)",
+          "url": "/projects/65cab180-e00d-4eec-aaf2-fb4b5d0f4057/docs",
+          "file": "64_projeto_gp_live_doc_modal.png",
+          "ok": true,
+          "error": null
+        },
+        {
           "n": 55,
           "category": "global",
           "slug": "gp_changelog_user",
@@ -418,8 +468,8 @@
       ]
     }
   ],
-  "finished_at": "2026-04-19T12:46:08.481506",
-  "total": 40,
-  "ok": 40,
+  "finished_at": "2026-04-20T00:05:56.964679",
+  "total": 45,
+  "ok": 45,
   "failed": 0
 }

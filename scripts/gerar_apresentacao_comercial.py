@@ -222,13 +222,13 @@ def build(doc: Document):
 
     dt = doc.add_paragraph()
     dt.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    dr = dt.add_run(f"Versão 1.0 — {datetime.now().strftime('%d/%m/%Y')}")
+    dr = dt.add_run(f"Versão 1.1 — {datetime.now().strftime('%d/%m/%Y')}")
     dr.font.size = Pt(11)
     dr.font.color.rgb = SLATE_MEDIUM
 
     stat = doc.add_paragraph()
     stat.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    stat_r = stat.add_run("MVPs 1-7 fechados · 732 testes de regressão · Zero dívida técnica")
+    stat_r = stat.add_run("MVPs 1-10 fechados · 1145 testes de regressão · Zero dívida bloqueante")
     stat_r.font.size = Pt(10)
     stat_r.font.color.rgb = EMERALD
     stat_r.italic = True
@@ -250,15 +250,18 @@ def build(doc: Document):
     bullet(doc, "Entrada — solicitação externa + aprovação administrativa + cadastro do GP.")
     bullet(doc, "Descoberta — questionário de 49 perguntas e geração do OCG via pipeline de 8 agentes de IA.")
     bullet(doc, "Validação — Gatekeeper avalia 7 pilares (Business, Architecture, Stack, Testing, Compliance, Risk, Deliverables).")
-    bullet(doc, "Aprofundamento — ingestão de documentos, Arguidor, backlog, roadmap.")
+    bullet(doc, "Aprofundamento — ingestão multi-camadas (texto + OCR + LLM Vision), Arguidor, backlog, Roadmap multicategoria.")
     bullet(doc, "Execução — CodeGen assistida com scaffolders em 7 linguagens (Python, Java, Kotlin, Go, C#, PHP, Node.js).")
-    bullet(doc, "Qualidade — QA Readiness, revisão de testes, Release Bundle.")
+    bullet(doc, "Qualidade — Plano de Testes gerado por LLM (unit/integration/e2e/security/compliance), revisão Tester ↔ QA, Release Bundle.")
+    bullet(doc, "Documentação — Documentação Viva real (module_doc por módulo, index e architecture consolidados), reativa ao OCG com stale detection.")
     bullet(doc, "Operação — backup diário por projeto, tickets de incidente, releases versionadas preservando dados, métricas de IA.")
 
     h2(doc, "1.2. Diferenciais competitivos")
     bullet(doc, "Uma instância por cliente — sem SaaS multi-tenant. Dados nunca saem do ambiente do cliente.")
     bullet(doc, "Compartimentalização dura por projeto em banco, IA, storage, auditoria e backup.")
     bullet(doc, "IA configurável por cliente e por projeto — Anthropic Claude, OpenAI GPT, Google Gemini, DeepSeek, Ollama local.")
+    bullet(doc, "Roteamento híbrido por criticidade — tarefas simples no Ollama local (custo zero), decisões críticas no Premium. Auditável por chamada.")
+    bullet(doc, "Provenance em todo artefato gerado — TestSpec, LiveDoc e Module Details registram OCG, LLM, ingestões e prompt hash. Auditoria completa.")
     bullet(doc, "Governança auditável — todas as decisões críticas geram entrada em audit_log_global com hash chain.")
     bullet(doc, "Proteção de código — sete camadas anti-engenharia-reversa documentadas.")
     bullet(doc, "Instalação assistida em Windows e Ubuntu com 10 etapas guiadas.")
@@ -529,10 +532,15 @@ def build(doc: Document):
          "novos.",
          "Figura 21 — Repositórios externos com integração Git."),
         ("6.7. Ingestão", "35_projeto_gp_ingestion.png",
-         "Upload de documentos (PDF, DOCX, TXT, MD) para análise. Detector de PII aplica "
-         "quarentena quando detecta dados pessoais. GP pode liberar manualmente falsos-"
-         "positivos. Documentos ingeridos alimentam o Arguidor.",
-         "Figura 22 — Ingestão de documentos com quarentena PII."),
+         "Upload de documentos (PDF, DOCX, TXT, MD) para análise. Pipeline MVP 8: "
+         "barra de progresso em tempo real via polling do stage atual "
+         "(fetching → classifying → analyzing → finalizing), extração rica de .docx "
+         "transformando tabelas em parágrafos estruturados, pipeline PDF em 3 camadas "
+         "(texto embutido → OCR nativo → LLM Vision como último recurso), normalização "
+         "heurística detectando seções implícitas (requisitos sem prefixo RF, "
+         "entregáveis mencionados, fases/sprints). Detector de PII aplica quarentena; "
+         "GP pode liberar falso-positivo. Documentos alimentam o Arguidor.",
+         "Figura 22 — Ingestão com pipeline multi-camadas (MVP 8)."),
         ("6.8. Gatekeeper", "36_projeto_gp_gatekeeper.png",
          "Avaliação por sete pilares. Cada pilar tem thresholds parametrizáveis pelo Admin. "
          "Bloqueia avanço de fase quando pilar crítico não atinge o mínimo. Findings geram "
@@ -549,26 +557,44 @@ def build(doc: Document):
          "PHP/Laravel 11, Node.js/NestJS. Python via LLM. Após emenda RBAC 2026-04-19, GP "
          "pode operar CodeGen.",
          "Figura 25 — Geração de Código com scaffolders para 7 linguagens."),
-        ("6.11. QA Readiness", "39_projeto_gp_qa_readiness.png",
-         "Estado de prontidão de QA com cobertura por pilar. Derivado automaticamente do OCG, "
-         "testes executados e evidências.",
-         "Figura 26 — QA Readiness com cobertura de testes por pilar."),
+        ("6.11. QA Readiness (Plano de Testes)", "39_projeto_gp_qa_readiness.png",
+         "MVP 10: a aba \"Testes\" ganha seção \"Plano de Testes\" derivada do OCG. "
+         "TestSpecs são geradas por LLM seguindo roteamento híbrido §6.2/6.3 — "
+         "unit/integration/e2e via Ollama local (baixa criticidade; por módulo); "
+         "security e compliance via Premium (Anthropic > OpenAI; Ollama explicitamente "
+         "ignorado pois alta criticidade). Cinco botões granulares permitem regerar por "
+         "tipo com contador de specs desatualizados. Banner amarelo destaca pendências "
+         "quando o OCG evoluiu desde a última geração (stale detection). Cada spec abre "
+         "modal com conteúdo plain-text e provenance completa.",
+         "Figura 26 — QA Readiness com Plano de Testes gerado por LLM (MVP 10)."),
         ("6.12. Revisão de Testes", "40_projeto_gp_tester_review.png",
-         "Workflow de aprovação: Tester registra teste executado com evidência; QA revisa e "
-         "aprova ou rejeita. Toda decisão auditada.",
-         "Figura 27 — Revisão de Testes (fluxo Tester → QA)."),
+         "Workflow de aprovação em dois níveis: Tester registra teste executado com "
+         "evidência; QA revisa e aprova ou rejeita. MVP 10.6 acrescenta a aba \"Specs "
+         "(planos)\" como primeira tab — Tester/QA veem os TestSpecs aprovados pra "
+         "usar como insumo. Aprovação/rejeição de spec exige papel GP ou QA (contrato "
+         "§4.1); rejeição requer motivo ≥10 caracteres; regeneração rebaixa o status "
+         "de volta para rascunho, forçando re-revisão.",
+         "Figura 27 — Revisão de Testes (Tester ↔ QA) com tab Specs."),
         ("6.13. Backlog", "41_projeto_gp_backlog.png",
          "Items derivados do OCG + findings do Arguidor, priorizados. Cada item tem tipo, "
          "descrição, pilar relacionado, status.",
          "Figura 28 — Backlog priorizado do projeto."),
-        ("6.14. Roadmap", "42_projeto_gp_roadmap.png",
-         "Visão temporal das entregas. Consolidação do backlog em timeline.",
-         "Figura 29 — Roadmap do projeto."),
-        ("6.15. Documentação Viva", "43_projeto_gp_docs.png",
-         "Documentação gerada automaticamente a partir do OCG e atualizada a cada mudança. "
-         "Inclui: Arquitetura, Stack, Testing Strategy, Compliance, Risk Assessment, "
-         "Deliverables.",
-         "Figura 30 — Documentação Viva sincronizada com OCG."),
+        ("6.14. Roadmap multicategoria", "42_projeto_gp_roadmap.png",
+         "MVP 9: módulos do projeto organizados em 3 fases (Fundação → Funcionalidades "
+         "Principais → Complementos) com seis categorias canônicas visuais — "
+         "Infraestrutura, Observabilidade, Middleware, Serviço de Backend, "
+         "Funcionalidade e Pipeline de Deploy. Filtros por categoria. Cada chip de "
+         "módulo é clicável e abre modal de detalhamento (MVP 9.2). Botão \"Plano de "
+         "Deploy\" abre modal com sequência sugerida de construção (MVP 9.4).",
+         "Figura 29 — Roadmap multicategoria em 3 fases (MVP 9)."),
+        ("6.15. Documentação Viva real", "43_projeto_gp_docs.png",
+         "MVP 10.7: docs reais geradas por LLM, substituindo placeholders. Cada módulo "
+         "do Roadmap recebe um \"module_doc\" via Ollama local (baixa criticidade §6.2). "
+         "Dois documentos globais consolidam o OCG via Premium §6.3: \"index\" "
+         "(índice executivo) e \"architecture\" (decisões arquiteturais). Cada item "
+         "registra procedência (versão do OCG, ingestões, LLM, prompt hash). "
+         "Três botões granulares regeneram por tipo com contador de stale.",
+         "Figura 30 — Documentação Viva gerada por LLM (MVP 10.7)."),
         ("6.16. Definition of Done (Readiness)", "44_projeto_gp_readiness.png",
          "Checklist de critérios de entrega final. Quando todos os critérios atendidos, "
          "libera geração do Release Bundle (pacote consolidado de artefatos).",
@@ -606,6 +632,46 @@ def build(doc: Document):
          "Acessível pelo ícone ✨ no topbar. O mesmo endpoint /releases segmenta o changelog "
          "pelo papel do usuário. GP vê items relevantes ao projeto dele.",
          "Figura 38 — Changelog visto pelo GP com segmentação por papel."),
+        # ─── Novas funcionalidades MVP 8/9/10 ───────────────────────
+        ("6.24. Relatório de extração (MVP 8.5)", "60_projeto_gp_ingestion_report.png",
+         "Card expansível por documento na Ingestão mostrando tudo que a pipeline "
+         "de extração identificou: contagem de páginas/parágrafos/tabelas, requisitos "
+         "funcionais (RF-N explícitos), requisitos não-funcionais (RNF-N), candidatos "
+         "a módulos, sumário executivo, entregáveis mencionados e fases/sprints "
+         "detectadas. Read-only — é instrumento de auditoria do que o GCA entendeu.",
+         "Figura 39 — Relatório de extração expansível por documento."),
+        ("6.25. Detalhamento de Módulo (MVP 9.2)", "61_projeto_gp_module_details.png",
+         "Clicar em qualquer chip de módulo no Roadmap abre o modal de detalhamento. "
+         "Campos: \"o que é\", \"pré-requisitos operacionais\", fonte ({OCG, "
+         "ingestão}), dependências inferidas entre módulos (Fase 9.3) e referência "
+         "externa opcional (URL de documentação oficial — validada contra SSRF e "
+         "fetch ao final do prompt LLM pra enriquecer a descrição). Geração sob "
+         "demanda via Ollama; re-geração disponível.",
+         "Figura 40 — Modal de detalhamento de módulo (MVP 9.2)."),
+        ("6.26. Plano de Deploy (MVP 9.4)", "62_projeto_gp_deploy_plan.png",
+         "Modal disparado pelo botão \"Plano de Deploy\" no header do Roadmap. "
+         "Gera determinísticamente (sem LLM) sequência de construção honesta: "
+         "(1) camadas canônicas em ordem infra → observability → middleware → "
+         "backend → feature → deploy pipeline; (2) sort topológico dentro da "
+         "camada baseado em dependências inferidas; (3) desempate por prioridade, "
+         "readiness e nome. Módulos em ciclo ganham aviso ⚠. Download como "
+         ".md é um clique.",
+         "Figura 41 — Modal Plano de Deploy com sequência sugerida."),
+        ("6.27. Modal do Plano de Testes (MVP 10.5)", "63_projeto_gp_test_spec_modal.png",
+         "Acessível clicando em qualquer spec na aba Testes. Apresenta o conteúdo "
+         "em texto simples (preservando parágrafos do markdown, sem formatação — "
+         "escolha deliberada pra manter transparência). Seção colapsável \"Como "
+         "este plano foi criado\" lista: versão do OCG na geração vs atual, LLM "
+         "usado, questionário, ingestões consideradas, módulos vizinhos, prompt "
+         "hash. Footer com ações de aprovação/rejeição visível apenas a GP/QA.",
+         "Figura 42 — Modal de TestSpec com provenance (MVP 10.5)."),
+        ("6.28. Modal da Documentação Viva (MVP 10.7)", "64_projeto_gp_live_doc_modal.png",
+         "Análogo ao modal de TestSpec mas sem workflow de aprovação (docs são "
+         "geradas sob demanda, não passam por revisão formal). Exibe conteúdo "
+         "plain-text com seção colapsável de provenance (OCG na geração, LLM "
+         "provider/model, ingestões consideradas, hash do prompt). Banner amarelo "
+         "destaca quando o OCG evoluiu desde a geração — convite pra regerar.",
+         "Figura 43 — Modal de LiveDoc com provenance (MVP 10.7)."),
     ]
 
     for title, filename, desc, caption in project_screens:
@@ -626,30 +692,30 @@ def build(doc: Document):
         ("7.1. Login Administrador",
          "Fluxo padrão de autenticação administrativa. JWT com expiração configurável é o "
          "único token emitido nesta versão — não há refresh token.",
-         "seq_login_admin.png", "Figura 39 — Login administrativo."),
+         "seq_login_admin.png", "Figura 44 — Login administrativo."),
         ("7.2. Login via projeto (ProjectLoginPage)",
          "Entrada contextualizada em /p/{short_slug}: o frontend busca resumo do projeto e "
          "apresenta form de login com o nome do projeto no topo; após autenticar, valida "
          "membership e redireciona direto ao dashboard do projeto.",
-         "seq_login_projeto.png", "Figura 40 — Login via slug de projeto."),
+         "seq_login_projeto.png", "Figura 45 — Login via slug de projeto."),
         ("7.3. Criação e aprovação de projeto",
          "Da solicitação pública até a aprovação pelo Admin e promoção automática do "
          "solicitante a GP do projeto recém-criado.",
-         "seq_criar_projeto.png", "Figura 41 — Criação e aprovação de projeto."),
+         "seq_criar_projeto.png", "Figura 46 — Criação e aprovação de projeto."),
         ("7.4. Geração do OCG (pipeline de 8 agentes)",
          "Pipeline em cascata com 7 pilares em paralelo: analyzer → P1..P7 (paralelo) → "
          "consolidator. Escolha de provedor por criticidade (alta → premium). Registro em "
          "ai_usage_log.",
-         "seq_ocg_generation.png", "Figura 42 — Geração do OCG em 8 agentes."),
+         "seq_ocg_generation.png", "Figura 47 — Geração do OCG em 8 agentes."),
         ("7.5. Rastreabilidade Ticket → Release",
          "Conforme MVP 6 + MVP 7. A release seguinte à resolução do ticket amarra-se via "
          "ref_id=TICKET-{id}. Snapshot automático antes de aplicar quando release é "
          "destrutiva.",
-         "seq_ticket_release.png", "Figura 43 — Rastreabilidade Ticket → Release."),
+         "seq_ticket_release.png", "Figura 48 — Rastreabilidade Ticket → Release."),
         ("7.6. Backup diário e restore",
          "Scheduler às 12:00 (tz America/Sao_Paulo), catch-up no startup se última execução "
          "> 24h, restore com validação SHA-256 preservando audit_log_global.",
-         "seq_backup_restore.png", "Figura 44 — Ciclo de backup e restore (DT-063)."),
+         "seq_backup_restore.png", "Figura 49 — Ciclo de backup e restore (DT-063)."),
     ]
 
     for title, desc, filename, caption in sequences:
@@ -667,15 +733,15 @@ def build(doc: Document):
          "Projeto passa por quatro estágios principais: solicitado (externo), pendente "
          "(aguardando Admin), aprovado (linha em projects). A partir de aprovado, o Admin "
          "pode transitar entre active, paused e inactive sem nunca apagar dados.",
-         "flow_projeto_lifecycle.png", "Figura 45 — Estados do projeto."),
+         "flow_projeto_lifecycle.png", "Figura 50 — Estados do projeto."),
         ("8.2. Ciclo de vida do ticket",
          "Aberto → em andamento → resolvido → fechado. Tickets resolvidos podem ser reabertos. "
          "Tickets fechados entram no histórico permanente.",
-         "flow_ticket_lifecycle.png", "Figura 46 — Estados do ticket de incidente."),
+         "flow_ticket_lifecycle.png", "Figura 51 — Estados do ticket de incidente."),
         ("8.3. Ciclo de vida da release",
          "Declarada (YAML) → pending (sync no startup) → applied (auto ou manual). Releases "
          "destrutivas exigem confirmação e snapshot antes de aplicar. Rollback é por-projeto.",
-         "flow_release_lifecycle.png", "Figura 47 — Estados da release."),
+         "flow_release_lifecycle.png", "Figura 52 — Estados da release."),
     ]
 
     for title, desc, filename, caption in flows:
@@ -923,10 +989,16 @@ def build(doc: Document):
         ("Docker", "Runtime de containers usado pelo GCA. Versão mínima 24."),
         ("Docker Compose", "Orquestrador multi-container definido em docker-compose.yml."),
         ("Dogfood", "Prática de usar a própria instância do GCA para conduzir o desenvolvimento do GCA. O projeto Automação Jurídica Assistida é o dogfood ativo."),
-        ("DT", "Dívida técnica. Identificada por número (DT-001 a DT-063)."),
+        ("Deploy Plan", "Sequência sugerida de construção do projeto (MVP 9.4). Ordena módulos por camada canônica + sort topológico por dependências + desempate por prioridade e readiness. Exportável como Markdown. Módulos em ciclo são sinalizados."),
+        ("Doc Viva (module_doc)", "Documentação por módulo gerada via Ollama (MVP 10.7). Cada módulo do Roadmap recebe uma doc com Visão geral, Responsabilidades, Interfaces, Pré-requisitos operacionais, Notas de manutenção e Referências. Regerada sob demanda."),
+        ("Doc Viva (index)", "Índice executivo do projeto gerado via Premium (MVP 10.7). Consolida OCG inteiro em visão de alto nível para stakeholder + líder técnico."),
+        ("Doc Viva (architecture)", "Documento de arquitetura gerado via Premium (MVP 10.7). Registra camadas, fluxo de execução, decisões arquiteturais, padrões obrigatórios e áreas a decidir."),
+        ("DT", "Dívida técnica. Identificada por número (DT-001 a DT-072)."),
         ("Emenda 2026-04-19", "Alteração formal no contrato canônico §4.1 (GP soberano do projeto) e §7 MVP 6 (Sustentação, anexos, seção/fluxo)."),
         ("Equipe Sustentação", "Conjunto de usuários com is_support=true (ou is_admin=true via herança). Recebe tickets com target_scope=admin."),
         ("EULA", "End User License Agreement — contrato de licença aceito no Passo 2 da instalação."),
+        ("Extraction Report", "Relatório read-only por documento ingerido (MVP 8.5). Lista contagem de páginas/parágrafos/tabelas, requisitos funcionais e não-funcionais detectados, candidatos a módulo, sumário executivo, entregáveis mencionados e fases/sprints inferidas. Card expansível na tela de Ingestão."),
+        ("External Reference", "URL de documentação oficial declarada por GP em um módulo (MVP 9.2.ext). Validada contra SSRF (rejeita loopback, RFC1918, link-local). Conteúdo extraído via WebFetch alimenta o prompt do Ollama no detalhamento."),
         ("Fernet", "Algoritmo de criptografia simétrica autenticada. Usado no GCA para PATs e chaves de API de provedores."),
         ("Gatekeeper", "Módulo de avaliação baseado em sete pilares (Business, Architecture, Stack, Testing, Compliance, Risk, Deliverables)."),
         ("GCA", "Gestão de Codificação Assistida / Gerenciador Central de Arquiteturas."),
@@ -942,11 +1014,14 @@ def build(doc: Document):
         ("is_support", "Flag em users que habilita recebimento de tickets escalados a Admin. Independente de is_admin."),
         ("JWT", "JSON Web Token. Único tipo de token de autenticação nesta versão. Assinado com HS256."),
         ("Lifecycle", "Ciclo de vida. Aplicado a projetos (active/paused/inactive), tickets (open/in_progress/resolved/closed) e releases (pending/applied/rolled_back)."),
+        ("LiveDoc", "Registro em live_docs com conteúdo gerado por LLM + provenance (MVP 10). Três tipos: module_doc (por módulo, Ollama), index e architecture (globais, Premium)."),
         ("LLM", "Large Language Model. Provedor de IA usado pelo GCA."),
         ("manifest.json", "Arquivo dentro de cada backup e cada release YAML que lista conteúdo, contagens e hashes."),
         ("Mermaid", "Linguagem de marcação para diagramas (sequência, fluxo, estado)."),
         ("Migration", "Script SQL aplicado ao banco durante upgrade. Nunca destrutivo por default (MVP 7)."),
-        ("MVP", "Minimum Viable Product. No GCA, unidade de escopo canônico (MVP 1 a 7)."),
+        ("Module Details", "Detalhamento textual de um módulo do Roadmap gerado por Ollama (MVP 9.2). Acessível pelo modal ao clicar em qualquer chip. Inclui descrição, pré-requisitos, fonte e dependências inferidas."),
+        ("Module Category", "Categoria canônica de módulo (MVP 9.1). Seis valores: infrastructure, observability, middleware, backend_service, feature, deploy_pipeline. Define o agrupamento no Roadmap e a ordem no Plano de Deploy."),
+        ("MVP", "Minimum Viable Product. No GCA, unidade de escopo canônico (MVP 1 a 10)."),
         ("Multi-stage", "Técnica Docker de separar build e runtime. Usada nas imagens de produção."),
         ("OCG", "Objeto Canônico de Governança. Fonte única de verdade do projeto. Gerado pelo pipeline de 8 agentes."),
         ("Ollama", "Provedor de IA local (self-hosted). Suportado via endpoint OpenAI-compatible."),
@@ -956,6 +1031,8 @@ def build(doc: Document):
         ("PII", "Personally Identifiable Information. O GCA detecta e quarentena documentos com PII na ingestão."),
         ("Playwright", "Framework de automação de navegador usado para captura das 40 telas da aplicação."),
         ("PostgreSQL", "Banco de dados relacional usado pelo GCA (versão 15)."),
+        ("Premium (provedor)", "Conjunto Anthropic/OpenAI dentro do roteamento híbrido §6.3. Usado pra alta criticidade (consolidação OCG, security/compliance specs, docs consolidadas, codegen crítico). Anthropic é preferido por padrão; OpenAI é fallback; Ollama é explicitamente ignorado nessas tarefas."),
+        ("Provenance", "Conjunto de metadados que acompanha cada artefato gerado por LLM (TestSpec, LiveDoc, Module Details). Registra versão do OCG na geração, questionário, ingestões consideradas, módulos vizinhos, LLM provider/model, hash do prompt e timestamp. Visível em modal colapsável."),
         ("project_id", "Chave de compartimentalização. Obrigatória em todo predicado que acessa dado de projeto."),
         ("project_requests", "Tabela de solicitações externas de projeto. Estados: PENDING, APPROVED, REJECTED."),
         ("ProjectLoginPage", "Tela de login contextualizada para usuários não-admin em /p/{short_slug}."),
@@ -964,9 +1041,11 @@ def build(doc: Document):
         ("Questionnaire", "Questionário de 49 perguntas (PDF AcroForm) que inicia o pipeline do projeto."),
         ("RBAC", "Role-Based Access Control. Modelo de autorização do GCA."),
         ("Registry", "Repositório de imagens Docker. O GCA usa registry privado autenticado."),
+        ("Regenerar granular", "Botões na UI (MVP 10.8) que permitem regerar planos/docs por tipo isolado (Unitários, Integração, E2E, Segurança, Compliance, Docs de Módulo, Índice, Arquitetura). Cada botão exibe contador de stale. Lock por tipo evita execuções concorrentes."),
         ("Release", "Unidade de entrega de software para a instância. Declarada em backend/releases/*.yaml."),
         ("Release Bundle", "Pacote consolidado de artefatos entregues ao fim do MVP 4."),
         ("Rollback", "Restauração de dados de projeto via snapshot prévio. Por-projeto."),
+        ("Roteamento híbrido", "Princípio do contrato §6.2/6.3: tarefas de baixa criticidade (extração, sumarização, doc por módulo, plano de teste por módulo) caem em LLM local/Ollama; alta criticidade (consolidação OCG, security/compliance, codegen crítico, doc consolidada) exige Premium. Auditável."),
         ("Scaffolder", "Gerador determinístico de estrutura inicial de projeto por linguagem."),
         ("Scheduler", "APScheduler — dispara backups diários às 12:00 (America/Sao_Paulo)."),
         ("SHA-256", "Algoritmo de hash usado para verificar integridade de backups e manifestos de release."),
@@ -975,8 +1054,11 @@ def build(doc: Document):
         ("SMTP", "Protocolo de envio de e-mail. O GCA usa SMTP compartimentalizado por projeto."),
         ("Snapshot", "Backup prévio automático antes de aplicação de release destrutiva."),
         ("Solicitante", "Usuário externo que submete /solicitar-projeto. Quando o projeto é aprovado, torna-se GP automaticamente."),
+        ("SSRF", "Server-Side Request Forgery. O GCA bloqueia URLs apontando para loopback (127.0.0.1, ::1), redes privadas RFC1918 e link-local 169.254.x.x antes de fazer qualquer fetch externo (External Reference, MVP 9.2.ext)."),
+        ("Stale detection", "Marcação automática (sem mutação no DB) de TestSpecs e LiveDocs cuja versão do OCG na geração é menor que a versão atual (MVP 10.4). Computada on-the-fly no GET. Não dispara regeneração — só sinaliza."),
         ("Sustentação", "Ver Equipe Sustentação."),
         ("target_scope", "Campo em incident_tickets. Valores: gp (ticket vai para GPs) ou admin (vai para Admins + Sustentação)."),
+        ("TestSpec", "Plano de teste gerado por LLM e persistido em test_specs (MVP 10). Cinco tipos: unit/integration/e2e (por módulo, via Ollama §6.2) e security/compliance (globais, via Premium §6.3). Status: draft → approved | rejected. Stale quando o OCG evoluiu desde a geração."),
         ("Tester", "Papel canônico do projeto. Cria, edita e executa testes; registra evidências."),
         ("Thresholds", "Valores limites do Gatekeeper por pilar. Parametrizáveis em /admin (Settings)."),
         ("Ticket", "Registro de incidente aberto por usuário do projeto."),
@@ -985,6 +1067,7 @@ def build(doc: Document):
         ("Uvicorn", "Servidor ASGI que executa o FastAPI do GCA."),
         ("Vite", "Ferramenta de build para frontend React. Em produção usa vite preview."),
         ("Volume", "Área de armazenamento persistente do Docker. Três volumes: gca-postgres-data, gca-uploads-storage, gca-backups."),
+        ("WebFetch curado", "Mecanismo de buscar conteúdo de URL declarada por GP em External Reference (MVP 9.2.ext). GCA não navega autonomamente — só faz fetch quando GP marca explicitamente. Limites: timeout 30s, max body 1 MB, redirects máx 5, scheme http/https."),
         ("Windows", "Sistema operacional suportado via instalador Inno Setup (.exe)."),
         ("WSL 2", "Windows Subsystem for Linux versão 2. Obrigatório para Docker Desktop em Windows."),
         ("YAML", "Formato de declaração de releases em backend/releases/*.yaml."),
