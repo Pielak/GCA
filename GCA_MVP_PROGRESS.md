@@ -2,7 +2,7 @@
 
 Versão: 3.5  
 Data-base: 2026-04-19  
-Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases: 9.1 + 9.1.1 + 9.1.2 + 9.2 + 9.2.ext + 9.3 + 9.4 + 9.5.1 + 9.5.2). Suite baseline pós-MVP8-F4: 1037/1037.
+Status: **controle de avanço por fase** — MVPs 1-7 fechados + DT-064 até DT-072 quitadas. **MVP 8 fechado** (todas as 6 fases). **MVP 9 fechado** (todas as 8 fases). **MVP 10 aberto no contrato §7 em 2026-04-20** (Planos de Teste + LiveDocs reativos ao OCG, 8 fases definidas). Suite baseline pós-MVP8-F4: 1037/1037.
 
 ---
 
