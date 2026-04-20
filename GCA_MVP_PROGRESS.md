@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.27  
+Versão: 3.28  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** **Fases 13.1 + 13.2 FECHADAS 2026-04-20**. Fase 13.2 (lifespan + worker lifecycle): helpers `check_broker_connection` e `check_workers_alive` em `celery_app.py`; smoke do broker no startup do lifespan (não-fatal se fora); `/health` expandido com bloco `celery` contendo broker.reachable + workers.count/nodes; 7 testes novos. Smoke manual: `/health` retorna `workers=1, nodes=[celery@...]`. Fases 13.3-13.7 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** Fases **13.1 + 13.2 + 13.3a FECHADAS 2026-04-20**. Fase 13.3a (primeiro ponto migrado): task `pipeline_ingest_task` em `app/tasks/pipeline.py` envelopa `_analyze_async` via `asyncio.run`; lê bytes via `read_ingested(project_id, filename)` (não passa bytes pelo broker); retry bounded max=2, delay=30; `ingestion_router.reanalyze` passou de `asyncio.create_task` para `.delay()`; watchdog DT-073 continua cobrindo os 7 pontos restantes. Suite pós-13.3a: **1431/1431 passing** (+27 cumulativo MVP 13: 15 + 7 + 5). Fases 13.3b/c + 13.4-13.7 seguem definidas.
 
 ---
 
@@ -16,7 +16,7 @@ Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em exe
 **Tema A — Fila persistente Celery/Redis (4 fases):**
 - ✅ **Fase 13.1** Setup Celery + infra — **FECHADA 2026-04-20**. `celery[redis]` em pyproject/requirements; `celery_app.py` com broker DB 1 / result DB 2 / task `ping` / timezone via `BACKUP_TIMEZONE` / JSON-only / retry bounded; serviço `gca-celery-worker` no docker-compose (concurrency=2, healthcheck `inspect ping`). Smoke validado: `ping.delay().get() == "pong"`; `celery inspect ping` retorna 1 node online. 15 testes novos.
 - ✅ **Fase 13.2** Lifespan + worker lifecycle — **FECHADA 2026-04-20**. `check_broker_connection` e `check_workers_alive` em `celery_app.py`; smoke não-fatal do broker no startup; `/health` expandido com bloco `celery.broker.reachable` + `celery.workers.workers/nodes`; 7 testes. Worker segue em processo separado (`gca-celery-worker`).
-- **Fase 13.3** Refactor pipeline Arguider + OCG Updater + auto-CodeGen (migrar os 8 `asyncio.create_task` mapeados). **Ponto de maior risco** — tem autorização de sub-divisão (13.3a/b/c) se diagnóstico revelar mais entrelaçamento que o esperado.
+- **Fase 13.3** Refactor pipeline Arguider + OCG Updater + auto-CodeGen (migrar os 8 `asyncio.create_task` mapeados). **Ponto de maior risco** — sub-dividido em 13.3a/b/c. ✅ **13.3a** FECHADA 2026-04-20: task `pipeline_ingest_task` + 1 ponto migrado (router reanalyze). 13.3b (6 pontos em `ingestion_service`) e 13.3c (1 ponto em `ocg_updater_service` + pontos em `external_repos_router`) seguem.
 - **Fase 13.4** Testes (`CELERY_TASK_ALWAYS_EAGER`) + monitoring + retry policy (max_retries=3, DLQ `celery_dlq`, logs estruturados).
 
 **Tema B — Cobertura completa de `audit_log_global` (3 fases):**

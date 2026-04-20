@@ -78,9 +78,10 @@ celery_app = Celery(
     broker=_resolve_broker_url(),
     backend=_resolve_result_backend_url(),
     include=[
-        # MVP 13 Fase 13.1 — módulo de tasks vazio por enquanto.
-        # Fases 13.2-13.4 adicionam sub-módulos.
+        # MVP 13 Fase 13.1 — pacote raiz.
         "app.tasks",
+        # MVP 13 Fase 13.3a — task de ingestão (primeiro ponto migrado).
+        "app.tasks.pipeline",
     ],
 )
 

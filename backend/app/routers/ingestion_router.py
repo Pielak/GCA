@@ -245,11 +245,15 @@ async def reanalyze_document(
     doc.ocg_updated = False
     await db.commit()
 
-    # Dispara análise em background (não bloqueia a resposta)
-    import asyncio
-    from app.services.ingestion_service import IngestionService
-    svc = IngestionService(db)
-    asyncio.create_task(svc._analyze_async(document_id, project_id, file_bytes, doc.file_type))
+    # MVP 13 Fase 13.3a — dispara via Celery (persiste no broker se
+    # worker cair; retry bounded via task config). Watchdog DT-073
+    # continua cobrindo até 13.3b/c migrarem os demais 7 pontos.
+    from app.tasks.pipeline import pipeline_ingest_task
+    pipeline_ingest_task.delay(
+        str(document_id),
+        str(project_id),
+        doc.file_type or "",
+    )
 
     logger.info(
         "ingestion.reanalyze_dispatched",
