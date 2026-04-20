@@ -119,6 +119,7 @@ def dispatch_scaffold(
     project_name: str,
     project_slug: str,
     package: Optional[str] = None,
+    data_model: Optional[dict] = None,
 ) -> Optional[Tuple[str, List[ScaffoldFile]]]:
     """Despacha para o scaffolder correto baseado em `STACK_RECOMMENDATION`.
 
@@ -126,6 +127,11 @@ def dispatch_scaffold(
     combinação (language, framework) não tem template. Caller decide o
     que fazer no caso `None` — atualmente: cair no fluxo LLM-only do
     `code_generation_service`.
+
+    DT-076 Fase 3: quando `data_model` é fornecido (vem do OCG.DATA_MODEL),
+    anexamos artefatos DDL (schema.sql, seed.sql, migration do framework)
+    à lista de arquivos gerados pelo scaffolder. Sem DDL, o app gerado
+    não sobe (Spring ddl-auto=validate, TypeORM synchronize=false).
     """
     language = _extract_language(stack)
     frameworks = _extract_framework(stack)
@@ -138,34 +144,48 @@ def dispatch_scaffold(
         "project_slug": project_slug,
     }
 
+    def _augment(name: str, files: List[ScaffoldFile]) -> Tuple[str, List[ScaffoldFile]]:
+        """DT-076 Fase 3: anexa schema.sql + seed.sql + migration do framework."""
+        if not data_model or not data_model.get("dialect_supported"):
+            if data_model and not data_model.get("dialect_supported"):
+                # Engine não suportado — deixa placeholder explicando
+                warning_msg = _engine_placeholder(data_model)
+                files = list(files) + [ScaffoldFile(
+                    path="db/README_DDL.md", content=warning_msg,
+                )]
+            return name, files
+        # Engine suportado — gera artefatos reais
+        ddl_files = _ddl_files_for_scaffolder(name, data_model)
+        return name, list(files) + ddl_files
+
     if language == "java":
         # Decidir Spring Boot vs Quarkus por hint do GP no questionário
         is_quarkus = any("quarkus" in fw for fw in frameworks)
         is_spring = any("spring" in fw for fw in frameworks)
         if is_quarkus and not is_spring:
             logger.info("scaffold.dispatch", scaffolder="java_quarkus", **log_ctx)
-            return "java_quarkus", scaffold_java_quarkus(spec)
+            return _augment("java_quarkus", scaffold_java_quarkus(spec))
         # Default Java: Spring Boot (mais comum em clientes BR)
         logger.info("scaffold.dispatch", scaffolder="java_spring", **log_ctx)
-        return "java_spring", scaffold_java_spring(spec)
+        return _augment("java_spring", scaffold_java_spring(spec))
 
     if language == "kotlin":
         # Kotlin tem só Spring Boot por enquanto (Ktor é candidato futuro)
         logger.info("scaffold.dispatch", scaffolder="kotlin_spring", **log_ctx)
-        return "kotlin_spring", scaffold_kotlin_spring(spec)
+        return _augment("kotlin_spring", scaffold_kotlin_spring(spec))
 
     if language == "go":
         logger.info("scaffold.dispatch", scaffolder="go_app", **log_ctx)
-        return "go_app", scaffold_go(spec)
+        return _augment("go_app", scaffold_go(spec))
 
     if language in ("csharp", "c#", "cs", ".net", "dotnet"):
         logger.info("scaffold.dispatch", scaffolder="csharp_aspnet", **log_ctx)
-        return "csharp_aspnet", scaffold_csharp_aspnet(spec)
+        return _augment("csharp_aspnet", scaffold_csharp_aspnet(spec))
 
     if language == "php":
         # PHP tem só Laravel (Symfony fica como candidato futuro)
         logger.info("scaffold.dispatch", scaffolder="php_laravel", **log_ctx)
-        return "php_laravel", scaffold_php_laravel(spec)
+        return _augment("php_laravel", scaffold_php_laravel(spec))
 
     # Node.js / TypeScript — Q27 lista "Node.js" como linguagem. Aliases
     # cobrem TypeScript puro também (frontends às vezes ficam aqui).
@@ -175,12 +195,109 @@ def dispatch_scaffold(
         # Se framework explícito é Express E não é NestJS, vai pro minimalista
         if is_express and not is_nestjs:
             logger.info("scaffold.dispatch", scaffolder="nodejs_express", **log_ctx)
-            return "nodejs_express", scaffold_nodejs_express(spec)
+            return _augment("nodejs_express", scaffold_nodejs_express(spec))
         # Default Node.js: NestJS (enterprise, mais opinionado, mais valor
         # do template determinístico vs LLM solto)
         logger.info("scaffold.dispatch", scaffolder="nodejs_nestjs", **log_ctx)
-        return "nodejs_nestjs", scaffold_nodejs_nestjs(spec)
+        return _augment("nodejs_nestjs", scaffold_nodejs_nestjs(spec))
 
     # Linguagens sem template (Python ainda é LLM-only, Ruby, Rust, etc.)
     logger.info("scaffold.dispatch_no_template", **log_ctx)
     return None
+
+
+# ---------------------------------------------------------------------------
+# DT-076 Fase 3 — helpers de injeção de DDL
+# ---------------------------------------------------------------------------
+
+# Mapeia nome do scaffolder -> framework aceito por generate_migration
+_SCAFFOLDER_TO_FRAMEWORK = {
+    "java_spring": "flyway",
+    "java_quarkus": "flyway",
+    "kotlin_spring": "flyway",
+    "csharp_aspnet": "efcore",
+    "php_laravel": "laravel",
+    "go_app": "go-migrate",
+    "nodejs_nestjs": "typeorm",
+    "nodejs_express": "knex",
+}
+
+
+def _ddl_files_for_scaffolder(
+    scaffolder_name: str, data_model: dict,
+) -> List[ScaffoldFile]:
+    """Gera lista de ScaffoldFile com schema.sql + seed.sql + migration.
+
+    Caso scaffolder desconhecido, retorna só schema.sql + seed.sql em `db/`
+    (migration fica como responsabilidade do GP — README explicativo).
+    """
+    from app.services.ddl_generator_service import generate_ddl, generate_migration
+
+    out: List[ScaffoldFile] = []
+
+    # schema.sql + seed.sql sempre (em db/ pra scaffolders que não usam Flyway
+    # etc; Flyway replica o schema dentro de src/main/resources/db/migration).
+    for art in generate_ddl(data_model):
+        out.append(ScaffoldFile(path=f"db/{art.filename}", content=art.content))
+
+    # Migration específica do framework
+    framework = _SCAFFOLDER_TO_FRAMEWORK.get(scaffolder_name)
+    if framework:
+        mig = generate_migration(data_model, framework)
+        if mig is not None:
+            out.append(ScaffoldFile(path=mig.filename, content=mig.content))
+
+    # README orientando o ciclo de migration
+    out.append(ScaffoldFile(
+        path="db/README.md",
+        content=_ddl_readme(scaffolder_name, data_model),
+    ))
+
+    return out
+
+
+def _engine_placeholder(data_model: dict) -> str:
+    """Placeholder pro caso de engine não suportado em V1 de DDL."""
+    engine = data_model.get("engine_raw") or data_model.get("engine") or "?"
+    return (
+        f"# Modelo de dados — refinar manualmente\n\n"
+        f"O GCA detectou `{engine}` como engine do projeto mas ainda não gera\n"
+        f"DDL automático para este dialeto (V1 cobre PostgreSQL e MySQL).\n\n"
+        f"## O que fazer\n\n"
+        f"1. Crie o schema manualmente seguindo o modelo de dados em "
+        f"`OCG.DATA_MODEL` (aba OCG do projeto no GCA).\n"
+        f"2. Commit o SQL em `db/schema.sql` deste repositório.\n"
+        f"3. Abra ticket pedindo suporte ao dialeto se for recorrente no "
+        f"seu time.\n\n"
+        f"## Por que não automatizamos\n\n"
+        f"Dialetos SQL variam demais (tipos, quoting, AUTO_INCREMENT vs "
+        f"SEQUENCE, etc). Preferimos não gerar DDL errado que o GP descobre "
+        f"em produção. V2 cobre Oracle, SQL Server e SQLite.\n"
+    )
+
+
+def _ddl_readme(scaffolder_name: str, data_model: dict) -> str:
+    framework = _SCAFFOLDER_TO_FRAMEWORK.get(scaffolder_name, "(nenhum)")
+    engine = data_model.get("engine", "?")
+    n_tables = len(data_model.get("tables") or [])
+    return (
+        f"# Banco de dados\n\n"
+        f"**Engine**: {engine}\n"
+        f"**Framework de migration**: {framework}\n"
+        f"**Tabelas iniciais**: {n_tables}\n\n"
+        f"Este diretório foi gerado automaticamente pelo GCA "
+        f"(DT-076 Fase 3) a partir do `OCG.DATA_MODEL`.\n\n"
+        f"## Arquivos\n\n"
+        f"- `schema.sql` — DDL completo para criação do schema do zero.\n"
+        f"- `seed.sql` — dados mínimos (admin inicial + config).\n"
+        f"- Migration em `{framework}` está na raiz do framework "
+        f"(Alembic/Flyway/Knex/etc).\n\n"
+        f"## Antes do primeiro boot\n\n"
+        f"O seed contém a string placeholder `__REPLACE_ON_BOOT__` no hash "
+        f"da senha do admin. O primeiro boot do backend deve substituí-la "
+        f"por um hash bcrypt real — ou o admin não loga.\n\n"
+        f"## Mudou o modelo?\n\n"
+        f"Regere via aba CodeGen do projeto no GCA. Nova versão do "
+        f"`schema.sql` é emitida; use migration incremental do framework "
+        f"para aplicar as mudanças em prod.\n"
+    )
