@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.16  
+Versão: 3.17  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** **Fase 12.1 FECHADA 2026-04-20** (rate limit anti-abuse em `POST /public/project-requests` via `slowapi`: env `PUBLIC_RATE_LIMIT` default `5/minute`, key por IP, 3 testes — limite aplica, limite alto passa livre, idempotência preservada). Suite pós-12.1: **1363/1363 passing, 3 skipped** (+3). Fases 12.2-12.10 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em execução.** **Fase 12.1 FECHADA** (rate limit `POST /public/project-requests` via slowapi; +3 testes). **Fase 12.2 FECHADA 2026-04-20** (timezone configurável em BackupScheduler via env `BACKUP_TIMEZONE`; default `America/Sao_Paulo` mantido; fallback silencioso em valor inválido; 10 testes cobrindo default/valid/empty/invalid/multi-zone/runtime). Fases 12.3-12.10 seguem definidas.
 
 ---
 
@@ -13,7 +13,7 @@ Status: **controle de avanço por fase** — MVPs 1-11 fechados. **MVP 12 em exe
 
 **Objetivo:** fechar em ordem A→B→C→D→E→F→G —
 1. **Tema A — Segurança de fronteira:** ✅ Fase 12.1 rate limit em `POST /public/project-requests` (slowapi + env `PUBLIC_RATE_LIMIT`; 3 testes).
-2. **Tema B — Configurabilidade operacional:** Fase 12.2 timezone configurável em BackupScheduler.
+2. **Tema B — Configurabilidade operacional:** ✅ Fase 12.2 timezone configurável em BackupScheduler (env `BACKUP_TIMEZONE`; fallback em valor inválido; 10 testes).
 3. **Tema C — Higiene de schema + cleanup:** 12.3 consolidar `accepted_at`/`joined_at`; 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
 4. **Tema D — CI maturity:** 12.6 canário real + remoção `continue-on-error` da lane e2e.
 5. **Tema E — Type safety frontend:** 12.7 remoção de `any` em ~20 arquivos TS.

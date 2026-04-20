@@ -163,6 +163,33 @@ async def startup_catchup_job() -> None:
         await asyncio.sleep(15)
 
 
+def _resolve_backup_timezone() -> str:
+    """MVP 12 Fase 12.2 — timezone configurável via env `BACKUP_TIMEZONE`.
+
+    Default `America/Sao_Paulo` (compat retrógrada). Se a env tiver valor
+    inválido, faz fallback para o default e loga warning — evita crash
+    no startup por typo de config.
+    """
+    import os
+
+    tz = (os.environ.get("BACKUP_TIMEZONE") or "").strip()
+    if not tz:
+        return "America/Sao_Paulo"
+    # Validação leve: pytz reconhece?
+    try:
+        import pytz
+        pytz.timezone(tz)
+        return tz
+    except Exception as e:
+        logger.warning(
+            "scheduler.invalid_timezone_env_fallback",
+            requested=tz,
+            fallback="America/Sao_Paulo",
+            error=str(e),
+        )
+        return "America/Sao_Paulo"
+
+
 def start_scheduler() -> None:
     """Inicia o APScheduler — chamado no lifespan do FastAPI startup."""
     global _scheduler
@@ -170,8 +197,11 @@ def start_scheduler() -> None:
         logger.warning("scheduler.already_started")
         return
 
-    # Timezone hardcoded BRT — clientes BR. Configurável via env futura.
-    sched = AsyncIOScheduler(timezone="America/Sao_Paulo")
+    # MVP 12 Fase 12.2 — timezone via env `BACKUP_TIMEZONE` (default
+    # `America/Sao_Paulo`, compat retrógrada). Cliente fora de BR
+    # configura a env conforme sua localidade.
+    tz = _resolve_backup_timezone()
+    sched = AsyncIOScheduler(timezone=tz)
     sched.add_job(
         daily_backup_job,
         CronTrigger(hour=12, minute=0),
@@ -182,7 +212,7 @@ def start_scheduler() -> None:
     )
     sched.start()
     _scheduler = sched
-    logger.info("scheduler.started", job_id="daily_backup", cron="0 12 * * *", tz="America/Sao_Paulo")
+    logger.info("scheduler.started", job_id="daily_backup", cron="0 12 * * *", tz=tz)
 
     # Catch-up no startup, em background
     asyncio.create_task(startup_catchup_job())
