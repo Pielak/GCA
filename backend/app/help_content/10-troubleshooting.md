@@ -1,53 +1,57 @@
 # Solução de problemas
 
-FAQs frequentes + diagnósticos canônicos.
+FAQs com diagnósticos práticos.
 
-## Backend / infra
+## Backend e infraestrutura
 
 ### Backend não sobe
 
-**Sintoma**: `docker compose up -d` termina mas `gca-backend` fica reiniciando.
+Sintoma: `docker compose up -d` termina mas `gca-backend` fica reiniciando.
 
-**Diagnóstico**:
+Diagnóstico:
 
 ```bash
 docker logs gca-backend --tail 50
 ```
 
-**Causas comuns**:
+Causas comuns e soluções:
 
-- `DATABASE_URL` ausente ou inválido → `.env` não montado / não exportado.
-- Alembic migration pendente → `docker exec gca-backend alembic upgrade head`.
-- `JWT_SECRET` ou `VAULT_MASTER_KEY` não definido → gerar e adicionar ao `.env`.
-- Porta 8000 em uso por outro processo → `lsof -i :8000` ou ajustar port mapping.
+| Causa | Solução |
+|---|---|
+| `DATABASE_URL` ausente | Verificar `.env` e reiniciar com `docker compose up -d` |
+| `JWT_SECRET` ou `VAULT_MASTER_KEY` ausentes | Gerar e adicionar ao `.env` |
+| Migração pendente | `docker exec gca-backend alembic upgrade head` |
+| Porta 8000 em uso | `lsof -i :8000` e liberar ou mudar o port mapping |
+| Imagem Docker desatualizada | `docker compose pull && docker compose up -d` |
 
-### Celery worker reporta `unhealthy`
+### Celery worker marca `unhealthy` mas responde a ping
 
-Antes do MVP 17: healthcheck usava `celery@gca-celery-worker` literal, mas o hostname real do container é o ID curto. Mitigação em `docker-compose.yml`: healthcheck usa `CMD-SHELL` com `celery@$$HOSTNAME`.
-
-Se persistir após MVP 17:
+Verifique se o worker processa tarefas de verdade:
 
 ```bash
-docker exec gca-celery-worker celery -A app.celery_app inspect ping -d celery@$HOSTNAME
+docker exec gca-backend python -c "
+from app.celery_app import celery_app
+print(celery_app.send_task('app.celery_app.ping').get(timeout=10))
+"
 ```
 
-Se responder `pong` mas healthcheck falhar, confirme que o `docker-compose.yml` foi sincronizado (regra dura CLAUDE.md §12):
+Se retornar `pong`, o worker está funcional. Se o healthcheck do Docker marca `unhealthy` mesmo assim, o container foi criado antes da versão atual do `docker-compose.yml` — rode:
 
 ```bash
 docker compose up -d
 ```
 
-Sem argumentos. Sincroniza a stack com o compose.
+Sem argumentos. Isso sincroniza a stack com as configurações atuais.
 
-### Flower não responde em `:5555`
+### Flower não responde em `localhost:5555`
 
-DT-077 herdada de MVP 14.10: serviço declarado mas não subiu na primeira tentativa.
+O serviço Flower pode estar declarado no `docker-compose.yml` mas não subido. Força o up:
 
 ```bash
 docker compose up -d celery-flower
 ```
 
-Valida:
+Valide:
 
 ```bash
 curl -fsS http://localhost:5555/ | head -5
@@ -55,142 +59,177 @@ curl -fsS http://localhost:5555/ | head -5
 
 ### Backup não executa no horário configurado
 
-Conferir timezone (MVP 12.2 — env `BACKUP_TIMEZONE`). Fallback para UTC se valor inválido.
+Verifique o timezone:
 
 ```bash
-docker exec gca-backend python -c "
-from app.core.config import settings
-print('BACKUP_TIMEZONE:', settings.BACKUP_TIMEZONE)
-"
+docker exec gca-backend env | grep BACKUP_TIMEZONE
 ```
+
+Se vazio ou inválido, o agendador cai em UTC. Ajuste `BACKUP_TIMEZONE` no `.env` (ex.: `America/Sao_Paulo`) e reinicie.
 
 ## Ingestão
 
-### Documento preso em `processing` para sempre
+### Documento preso em `processing`
 
-Antes do MVP 13 Fase 13.3 + DT-073: ingestão disparava `asyncio.create_task` sem watchdog — se o backend reiniciava (`uvicorn --reload`), task morria e doc ficava preso.
+Causa provável: o pipeline de análise foi interrompido (reload, crash) e a task sumiu.
 
-Mitigação:
+Mitigações automáticas já presentes:
 
-- **MVP 13**: pipeline migrado pra Celery com ACK late + retry bounded + DLQ.
-- **DT-073 watchdog**: `recover_zombie_documents(threshold=30min)` roda no startup, recupera docs em `processing` > 30min e marca como `error` com mensagem clara.
+- **Watchdog no startup** — recupera documentos em `processing` há mais de 30 minutos, marca como `error` com mensagem clara.
+- **ACK late na fila** — se o worker cai no meio da tarefa, a fila reenfileira.
+- **Timeout com `asyncio.wait_for`** — análises passam 10 minutos no máximo; em timeout, o documento vai para `error` com mensagem explícita em vez de ficar pendurado.
 
-Se persistir com Celery, confira:
+Se algum documento persistir preso:
 
 ```bash
-# Worker ativo?
-docker exec gca-backend python -c "from app.celery_app import celery_app; print(celery_app.control.inspect(timeout=1).ping())"
+# Worker está ativo?
+docker exec gca-backend python -c "
+from app.celery_app import celery_app
+print(celery_app.control.inspect(timeout=1).ping())
+"
 
-# Task está na fila?
+# Alguma tarefa pendente no broker?
 docker exec gca-redis redis-cli -n 1 KEYS "celery*"
 
-# DLQ?
+# Alguma tarefa na DLQ?
 curl -H "Authorization: Bearer <admin-token>" http://localhost:8000/api/v1/admin/celery/dlq
 ```
 
-Delete do doc com `status=processing`: endpoint `/reanalyze` (MVP 14.6) reseta o status antes de re-enfileirar — usa isso em vez de delete direto se quiser reprocessar.
+Na UI, em `/projects/:id/ingestion`, clique em **"Reanalisar"** no documento — o sistema reseta o status e re-enfileira a tarefa.
 
-### Documento quarentenado por PII que não tem
+### Documento quarentenado por PII que você sabe que não tem
 
-**Antes do MVP 8 DT-028** (pré-2026-04-17): regex promíscuo `\b\(?\d{2}\)?\s?\d{4,5}-?\d{4}\b` pegava qualquer sequência numérica (coordenadas, IDs, timestamps, scores) e disparava quarentena.
+O GCA detecta PII (CPF, CNPJ, cartão, telefone BR) com validações apropriadas:
 
-Mitigação em DT-028: telefone BR agora valida contexto. CPF/CNPJ/cartão validam mod-11/Luhn desde DT-015.
+- CPF, CNPJ, cartão — validados por mod-11 ou Luhn (não disparam em números aleatórios).
+- Telefone BR — regex + contexto (não dispara em sequências numéricas como IDs ou timestamps).
 
-Se ainda quarentenar falso-positivo, o GP pode liberar manualmente em `/projects/:id/ingestion` → detalhe do doc → "Liberar quarentena".
+Se ainda assim um falso-positivo quarentenar, em `/projects/:id/ingestion` → detalhe do documento → **"Liberar quarentena"**. O documento volta ao pipeline.
 
-### PDF com AcroForm não extrai campos
+### PDF com formulário AcroForm não extrai campos
 
-**Antes do MVP 8 DT-018**: `flatten` do PDF removia a AcroForm silenciosamente; extração entregava análise incompleta.
-
-Mitigação: pré-flight agora rejeita com 422 + mensagem orientando a abrir em **Adobe Reader / Foxit / Okular** e salvar com **Ctrl+S** (não "Salvar como…" nem "Imprimir → PDF"). O salvar preserva AcroForm.
+PDFs que passaram por "flatten" (Imprimir → PDF, algumas ferramentas de exportação) perdem a estrutura de formulário. O GCA rejeita esses PDFs com erro 422 e mensagem orientando a abrir no **Adobe Reader**, **Foxit** ou **Okular** e salvar com **Ctrl+S** (não "Salvar como..." nem "Imprimir → PDF") — isso preserva o AcroForm.
 
 ## OCG
 
 ### OCG preso em `pending_analysis` após questionário aprovado
 
-Pipeline de geração (8 agentes) rodou mas algo falhou antes do save. Causas e fixes já mitigados:
+O pipeline dos 8 agentes disparou mas algo no meio falhou. Vá em `/projects/:id/ingestion` → botão **"Reanalisar"**. Se persistir, como GP você pode regenerar o OCG do zero:
 
-- **DT-023** — parse JSON do LLM robusto (code fences + balanced braces).
-- **DT-024** — `exec_model` → `exec_models` (multi-select).
-- **DT-025** — strings hardcoded alinhadas com options do schema.
-- **DT-032/033** — Arguidor/OCG Updater usavam provider hardcoded.
-- **DT-036** — criticidade do provider validada (não aceita modelo médio pra alta criticidade).
-- **DT-039** — retry via `/reanalyze` disponível no UI.
-
-Se persistir: `/projects/:id/ingestion` → botão "Reanalisar" dispara regeneração. Ou Admin pode regenerar OCG completo em `/projects/:id/ocg` → "Regenerar OCG" (com confirmação).
+`/projects/:id/ocg` → **"Regenerar OCG"** (confirmação dupla — é destrutivo, perde o delta history).
 
 ### OCG em `BLOCKED` sem motivo óbvio
 
-Regra canônica §5: `P2 < 70` (compliance) OU `P7 < 70` (segurança) → BLOCKED. Veja `/projects/:id/ocg` → PILLAR_SCORES.
+O Gatekeeper bloqueia quando:
 
-Fix: ingerir documento que responda os gaps de compliance/segurança, OU responder Arguidor com evidência.
+- `P2 < 70` — compliance insuficiente.
+- `P7 < 70` — segurança insuficiente.
+
+Veja `/projects/:id/ocg` → `PILLAR_SCORES` para identificar qual pilar puxou para baixo.
+
+Como desbloquear: ingerir documento que responda os gaps de compliance ou segurança, OU responder as perguntas do Arguidor com evidência.
 
 ### Rollback falhou com "Snapshot não disponível"
 
-Delta log antigo sem `ocg_snapshot` preenchido. Rollback só funciona para versões em que o delta log persistiu snapshot completo (MVP 14.7 introduziu).
+Só é possível fazer rollback para versões que tenham snapshot persistido no delta log. Versões muito antigas (pré-feature) podem não ter.
 
-Alternativa: regenerar OCG do questionário (perde delta history, mas recria do zero).
+Alternativa: regenerar o OCG do questionário atual em `/projects/:id/ocg` → **"Regenerar OCG"**.
 
-## Providers IA
+## Provedores de IA
 
-### 401 / 403 do provider
+### Erro 401 ou 403 do provedor
 
-Token inválido ou expirado. `/projects/:id/settings` → aba IA do projeto → botão "Validar" em cada provedor. Se 401, atualizar a chave.
+A chave está inválida ou expirou. Vá em:
 
-Regra dura §6.3: se o projeto tem DeepSeek configurado e você faz consolidação de OCG (alta criticidade), o sistema **não aceita** silenciosamente — DT-036 exige validação. Configure um provider premium (Anthropic, OpenAI) no projeto, OU o Admin da instância configura no `/admin` e o pipeline cai no global para alta criticidade.
+- **Admin**: `/admin` → "Provedores de IA" → botão **"Testar"** no provedor → atualize a chave.
+- **GP**: `/projects/:id/settings` → aba IA → **"Validar"** → atualize a chave do projeto.
 
-### 429 rate limit
+### Erro 429 (rate limit) ou falha de conexão
 
-Fallback automático entre providers está ativo desde MVP 4 DT-064:
+O GCA tem fallback automático entre provedores configurados no projeto. Quando o provedor padrão falha (429, 5xx, timeout, 401, 403, DNS, SSL), o sistema tenta o próximo da cadeia — e você recebe uma notificação avisando qual fallback está ativo.
 
-- Cadeia ordenada: default primeiro, depois validados por data, inválidos por último.
-- Fallback em rate limit, quota, 5xx, timeout, conn refused, DNS, SSL, EOF, 401/403.
-- Notificação `UserNotification` (severity=warning) para GPs + Admins quando idx > 0.
+Se só há um provedor configurado no projeto, adicione um segundo em `/projects/:id/settings` → aba IA. O Ollama (local) é uma boa opção como rede de segurança para tarefas de baixa criticidade.
+
+### "Provider do projeto não é criticidade alta suficiente"
+
+Algumas operações (consolidação do OCG, decisões arquiteturais, compliance) exigem provedor classificado como **alta criticidade** (Anthropic, OpenAI, etc — não Ollama sozinho).
+
+Configure um provider premium no projeto OU, se o Admin tiver um global de alta criticidade, operações globais (Admin) podem rodar pelo canal administrativo.
 
 ## CodeGen
 
-### Scaffolder retorna None / linguagem não suportada
+### Scaffolder retornou `None` (linguagem não suportada)
 
-`dispatch_scaffold` retorna `None` quando a linguagem não tem template determinístico (Python, Rust, Ruby, Swift, Zig, etc). Caller cai no fluxo LLM-only — o scaffold vem do LLM, sem garantia de estrutura.
+O CodeGen caiu no fluxo LLM-only porque a linguagem do projeto (ex.: Python, Rust, Swift) não tem template determinístico no GCA.
 
-Se for linguagem esperada mas com `language` escrito diferente (ex: "Python3", "node"), o dispatch não normaliza 100% — aliases atuais são: `c++/cpp/cplusplus` (MVP 16), `csharp/c#/cs/.net/dotnet`, `node.js/nodejs/node/typescript/javascript`. Demais devem usar a grafia do enum canônico.
+- **Python** — ainda em LLM-only (FastAPI, Django, Flask vêm do LLM).
+- **Outras** (Rust, Ruby, Swift, etc) — não suportadas; o código vem do LLM sem garantia de estrutura.
 
-Futura extensão de linguagens depende de abrir MVP específico (C++ foi MVP 16; Rust, Swift, Python-scaffold ficariam parked até autorização).
+Se sua linguagem é uma das suportadas mas foi escrita de forma diferente (ex.: "Python3", "node"), confira `STACK.backend.language` em `/projects/:id/ocg`. Os aliases canônicos são:
 
-### `cmake` falha no scaffold C++
+- C++, cpp, cplusplus.
+- C#, cs, .net, dotnet.
+- Node.js, nodejs, node, typescript, javascript.
+- Java, kotlin, go, php.
 
-CMake 3.14+ é obrigatório (FetchContent estabilizado). Container `gcc:13-bookworm` já traz via `apt-get install cmake ninja-build` no Dockerfile gerado. Se rodar local sem container, instalar `cmake >= 3.14`.
+### Erro no `cmake` ao testar o scaffold C++
 
-Erro comum: `-G Ninja` sem ninja instalado → `apt install ninja-build` ou remover `-G Ninja` (cai em Makefile).
+CMake 3.14 ou superior é obrigatório (FetchContent estável a partir dessa versão). Se você está rodando fora do Docker do scaffold:
 
-## Help / documentação
+```bash
+cmake --version
+# Se < 3.14, atualize
+```
 
-### Aba Ajuda mostra "Conteúdo em construção"
+Se `-G Ninja` falhar porque ninja não está instalado:
 
-Versão pós-MVP 18 Onda 1 (Fases 18.1+18.2) tinha esse placeholder. Na Onda 2 (Fases 18.3+18.4+18.5) o conteúdo real foi carregado em `backend/app/help_content/*.md`. Se ainda aparecer placeholder:
+```bash
+apt install ninja-build
+# ou remova -G Ninja do comando — cai em Makefile
+```
 
-- Confirmar que MVP 18 Onda 2 foi deployado: `ls backend/app/help_content/*.md | wc -l` deve retornar **10**.
-- Conferir que o router `/api/v1/help/section/{id}` retorna 200:
-  ```bash
-  curl -H "Authorization: Bearer <token>" http://localhost:8000/api/v1/help/section/01-visao-geral
-  ```
+### Falha de build C++ dentro do Docker
 
-### Busca do help retorna lista vazia
+O Dockerfile gerado usa `gcc:13-bookworm` como stage de build. Em caso de erro, veja os logs:
 
-**Antes da Fase 18.4**: endpoint `/search` retornava `{backend: "stub", results: []}`.
+```bash
+docker build -t <target> . 2>&1 | tee build.log
+```
 
-**Após 18.4**: FTS5 indexou os 10 capítulos; busca por termo retorna snippets. Se ainda vazio, o termo pode não existir no corpus — tente busca por termo canônico (OCG, RBAC, CodeGen, Gatekeeper).
+Erros comuns:
+
+- **Out of memory** — o build do GoogleTest via FetchContent consome memória. Docker Desktop com 2GB pode falhar; use 4GB+.
+- **Download do GoogleTest falhou** — rede bloqueada. Configure proxy no Docker ou use vcpkg offline (V2, ainda não suportado).
+
+## Busca no help
+
+### Busca retorna lista vazia
+
+Verifique se o termo está escrito como aparece no conteúdo. O sistema é case-insensitive e ignora acentos (ex.: `documentacao` encontra `documentação`), mas não corrige erros de digitação.
+
+Termos que têm muitos hits (teste primeiro com eles): OCG, RBAC, CodeGen, Gatekeeper, pipeline, DDL, ingestão.
+
+### Renderer mostra markdown como texto puro
+
+O frontend precisa ter sido buildado e reiniciado depois de upgrade:
+
+```bash
+docker exec gca-frontend npm run build
+docker compose restart gca-frontend
+```
+
+Depois, **hard refresh** no navegador (Ctrl+Shift+R ou Cmd+Shift+R) para bypassar cache.
 
 ## Contato / suporte
 
 Para problemas não cobertos:
 
-1. **Incidente técnico** → `/projects/:id/incidents` → novo ticket com severidade + descrição + anexos.
-2. **Equipe Sustentação** da instância → `/admin/support` (se for Admin).
-3. **Audit log** → `/admin/audit` filtrando por tipo de evento (ex: `DOCUMENT_QUARANTINED` pra achar quarentenas recentes).
+1. **Incidente técnico no projeto** — `/projects/:id/incidents` → **"Novo ticket"** com severidade + descrição + anexos.
+2. **Equipe de Sustentação da instância** — `/admin/support` (se você for Admin).
+3. **Auditoria** — `/admin/audit` filtrando pelo tipo de evento relacionado (ex.: `DOCUMENT_QUARANTINED` para encontrar quarentenas recentes).
 
 ## Ver também
 
 - [Observabilidade](?section=09-observabilidade) — endpoints de diagnóstico.
-- [Instalação & setup](?section=02-instalacao) — pós-install validation.
-- [Área Administrativa](?section=06-admin) — ferramentas de admin para diagnóstico.
+- [Instalação & primeiro setup](?section=02-instalacao) — validação pós-install.
+- [Área Administrativa](?section=06-admin) — ferramentas de diagnóstico.

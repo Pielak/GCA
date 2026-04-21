@@ -1,126 +1,131 @@
 # RBAC e papéis
 
-O GCA opera com **5 papéis canônicos** (contrato §4, imutável): Admin, GP, Dev, Tester, QA. Papéis antigos (tech_lead, dev_senior, dev_pleno, compliance, stakeholder, viewer) foram removidos em MVP 1 (DT-001); documentos históricos que citem esses papéis não são contrato de implementação.
+O GCA tem **5 papéis** e cada ação sensível do sistema exige uma permissão específica.
 
-## Os 5 papéis canônicos
+## Os 5 papéis
 
-### Admin (instância)
+### Admin — escopo: instância
 
-- Configura a instância: provedores de IA, SMTP, backup, thresholds dos pilares, pesos.
-- **Não atua operacionalmente em projetos**. A analogia: Admin está para a instância assim como GP está para o projeto.
-- Convida e bloqueia usuários, aprova/rejeita requisições externas de projeto, inspeciona auditoria global, vê métricas agregadas.
-- Flag cross-instância `is_support` (Sustentação) é herdada automaticamente por Admin. UI de Sustentação **não** promove Support a Admin.
-- Guard dura: não é possível desativar/excluir o **último Admin ativo** (MVP 11 Fase 11.3).
+- Configura a instância: provedores de IA, SMTP, backup, thresholds e pesos dos pilares.
+- **Não atua operacionalmente dentro dos projetos** — o GP é soberano lá.
+- Convida e bloqueia usuários.
+- Aprova ou rejeita requisições externas de projeto.
+- Inspeciona auditoria global e métricas agregadas.
+- Gerencia equipe de Sustentação (flag `is_support`).
 
-### GP (projeto) — **soberano do projeto**
+Protege-se automaticamente: você **não consegue** desativar ou excluir o último Admin ativo da instância.
 
-Emenda §4.1 de 2026-04-19: o GP tem **todos os acessos** dentro do projeto, incluindo CodeGen, pipeline de testes e demais fluxos. A separação operacional com Dev/Tester/QA é de dia-a-dia, não de permissão.
+### GP — escopo: um projeto
+
+O GP é o **dono funcional** do projeto. Tem acesso a todas as funcionalidades: OCG, ingestão, Gatekeeper, Arguidor, CodeGen, testes, documentação, releases. A distribuição operacional com Dev/Tester/QA é só uma divisão de trabalho do dia-a-dia — não uma restrição de permissão.
 
 - Conduz o projeto do questionário até o release bundle.
-- Aprova/rejeita OCG, ingestões, análises do Arguidor, scaffolds de código.
-- Convida membros (Dev, Tester, QA, outro GP) com papel específico.
-- Pode **transferir soberania** para outro membro ativo (MVP 11 Fase 11.2 — endpoint `POST /projects/{id}/transfer-gp/{target}`).
-- Pode **convidar outro GP** do mesmo projeto (MVP 11 Fase 11.1 — co-gestão).
-- Configura provedor IA do projeto separado das chaves globais do Admin.
+- Aprova OCG, ingestões, análises, scaffolds de código.
+- Convida membros (Dev, Tester, QA, outro GP).
+- Pode **transferir a soberania** para outro membro ativo do projeto.
+- Pode **convidar outro GP** (co-gestão).
+- Configura as chaves de IA do projeto (separadas das globais).
 
-### Dev
+### Dev — escopo: um projeto
 
-- Implementa, gera código via CodeGen, executa correções.
-- **Não aprova módulos nem OCG** — aprovação é GP ou Admin via override.
-- Interage com repositório Git do projeto (PAT do projeto configurado em Configurações).
+- Implementa e gera código via CodeGen.
+- Executa correções.
+- Interage com o repositório Git do projeto (PAT configurado em Configurações).
+- **Não aprova** módulos nem OCG — aprovação é GP.
 
-### Tester
+### Tester — escopo: um projeto
 
 - Edita, executa e registra testes.
-- Aprova/rejeita specs de teste unitário/integração/E2E.
-- **Não revisa por QA** — revisão formal é papel do QA.
+- Aprova ou rejeita specs de teste (unit, integration, E2E).
+- **Não aprova a execução formalmente** — isso é do QA.
 
-### QA
+### QA — escopo: um projeto
 
-- Revisa e aprova execução de testes.
-- **Não edita conteúdo de teste** — edição é do Tester.
-- Atua no gate `qa:approve` que libera Release Bundle (MVP 4).
+- Revisa e aprova a execução dos testes.
+- Atua no gate `qa:approve` que libera o Release Bundle.
+- **Não edita o conteúdo dos testes** — edição é do Tester.
 
-## Matriz resumida de permissões
+## Matriz de permissões
 
 | Ação | Admin | GP | Dev | Tester | QA |
 |---|---|---|---|---|---|
 | Criar/aprovar/arquivar projeto | ✅ | ⚠️ dentro do próprio | ❌ | ❌ | ❌ |
 | Configurar IA da instância | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Configurar IA do projeto | ⚠️ override | ✅ | ❌ | ❌ | ❌ |
-| Convidar membros | ✅ (qualquer) | ✅ (no projeto) | ❌ | ❌ | ❌ |
+| Convidar membros para projeto | ✅ | ✅ (do próprio) | ❌ | ❌ | ❌ |
 | Aprovar OCG | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Ingerir documentos | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Rodar CodeGen | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Editar spec de teste | ✅ | ✅ | ⚠️ | ✅ | ❌ |
 | Executar teste | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Aprovar execução (`qa:approve`) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Aprovar execução (qa:approve) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Ver auditoria global | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Ver auditoria do projeto | ✅ | ✅ | ✅ | ✅ | ✅ |
 
-Enforcement técnico: `require_action('<permission>')` como FastAPI dependency em cada endpoint sensível. RBAC pulverizado por ação, não por papel.
+## Fluxos de convite e transferência
 
-## Fluxos canônicos do RBAC
+### Convidar Admin
 
-### Convite de Admin
+1. Admin existente → `/admin/users` → **"Convidar Administrador"**.
+2. Preenche nome + email.
+3. Sistema envia email com link de aceite (expira em 5 dias).
+4. O convidado abre o link, define senha, aceita.
+5. Passa a ter `is_admin=true` e fica ativo.
 
-1. Admin existente → `/admin/users` → "Convidar Administrador".
-2. Backend cria `users` inativo + token de aceite.
-3. Email com link `/accept-invitation?token=...`.
-4. Convidado define senha + aceita → `is_admin=true` + `is_active=true`.
-5. Emite `ROLE_GRANTED` com `phase=admin_promoted` em `audit_log_global`.
+### Convidar membro para o projeto
 
-### Convite de membro para projeto
+1. GP → `/projects/:id/settings` → aba **Equipe** → **"Convidar Membro"**.
+2. Escolhe o papel (Dev / Tester / QA / GP) e o email.
+3. Sistema envia email com link de aceite + slug do projeto.
+4. O convidado abre o link, define senha (se for primeiro acesso à instância), aceita.
+5. Passa a ser membro ativo do projeto no papel escolhido.
 
-1. GP do projeto → `/projects/:id/team` → "Convidar Membro".
-2. Escolhe papel (Dev/Tester/QA/GP) + email.
-3. Backend cria `project_members` inativo + invitation token.
-4. Email com link `/accept-invitation?token=...` + slug do projeto.
-5. Convidado aceita → `accepted_at` + `joined_at` preenchidos.
-6. Emite `ROLE_GRANTED` com `phase=invited`, depois `phase=accepted`.
+### Transferir a soberania de GP → GP
 
-### Transferência de soberania GP → GP
+Quando o GP atual precisa sair do papel e passar para outro membro:
 
-1. GP atual → `/projects/:id/team` → aba "Transferir soberania".
-2. Seleciona membro ativo + aceito do projeto.
-3. Confirmação dupla (modal).
-4. Backend em transação: chamador vira `dev`, alvo vira `gp`. Ambos `ROLE_TRANSFERRED` com mesmo `correlation_id` (`extra.direction ∈ {outgoing, incoming}`).
-5. Pré-condições binárias (qualquer falha → 403):
-   - Chamador é GP ativo do projeto.
-   - Alvo é membro ativo e aceito.
-   - Alvo não é GP já.
-   - Alvo ≠ chamador.
+1. GP atual → `/projects/:id/settings` → aba **Equipe** → **"Transferir soberania"**.
+2. Seleciona um membro ativo e aceito do projeto.
+3. Confirma duas vezes (modal).
+4. Operação atômica: o chamador vira `dev`; o alvo vira `gp`.
 
-### Revogação/bloqueio de Admin
+Pré-condições que o sistema exige:
 
-- `lock_user(user_id)` com `actor_id` — bloqueia o user.
-- Guard canônico `guard_last_admin_on_action` (MVP 11.3) bloqueia se target é admin ativo e restariam 0 ativos após a ação. Impossível "se trancar para fora".
-- Mesmo guard aplicado em `delete_user` e `set_admin_flag(False)`.
+- O alvo precisa ser membro ativo e já ter aceitado o convite.
+- O alvo não pode já ser GP.
+- O alvo não pode ser o próprio chamador.
 
-## Compartimentalização §2.2
+Ambos os lados da transferência geram evento na auditoria, agrupados pelo mesmo `correlation_id`.
 
-Toda query envolvendo dado de projeto **deve** incluir `project_id` no predicado. Nenhum canal lateral (vault, storage, cache, logs, notificações, git, n8n, SMTP) cruza entre projetos sem autorização explícita.
+### Revogar / bloquear usuário
 
-Exemplos de regras duras decorrentes:
+- Admin → `/admin/users` → **"Bloquear"** ou **"Excluir"** no card do usuário.
+- Se o alvo é o último Admin ativo, o sistema bloqueia a ação com 403. Você **não consegue** se trancar para fora da instância.
 
-- Repositório Git compartilhado entre projetos é **bloqueado** no backend (MVP 2 DT-026): a tentativa de conectar URL normalizada já vinculada rejeita com mensagem explícita.
-- Chave global de avaliação (Admin) ≠ chave do projeto (GP). Roteador canônico `AIKeyResolver` separa as camadas.
-- Notificações por email seguem o escopo: admin só recebe avisos do próprio projeto ou da instância; não recebe eventos de projetos que não governa.
+## Compartimentalização entre projetos
 
-## Auditoria de eventos de papel (MVP 11.4)
+Regra dura: dado de um projeto **não cruza** para outro.
 
-Todo evento de papel emite uma das 3 categorias em `audit_log_global`:
+- Documentos ingeridos em projeto A nunca aparecem no OCG de B.
+- Chaves de IA do projeto A não são usadas em chamadas do projeto B.
+- Tokens Git (PAT) são criptografados por projeto.
+- Notificações por email respeitam o escopo — Admin não é notificado sobre eventos de projetos onde ele não tem relação.
+- Um mesmo repositório Git **não pode** ser vinculado a dois projetos. Ao tentar, o sistema rejeita com mensagem explícita citando o projeto que já usa aquele repositório.
 
-- `ROLE_GRANTED` — convite emitido, convite aceito, promoção admin, transferência recebida.
-- `ROLE_REVOKED` — convite revogado, rebaixamento admin, desativação de user, transferência emitida.
-- `ROLE_TRANSFERRED` — reservado ao fluxo de transferência GP → GP.
+## Auditoria de mudanças de papel
 
-Payload canônico: `{ actor_id, target_user_id, project_id (nullable na instância), old_role, new_role, phase, timestamp, extra? }`.
+Todo evento que altera papel gera entrada em `audit_log_global`:
 
-Consulta: `/admin/audit` filtro por tipo de evento.
+- `role_granted` — convite emitido, convite aceito, Admin promovido, transferência recebida.
+- `role_revoked` — convite revogado, Admin rebaixado, usuário desativado, transferência emitida.
+- `role_transferred` — evento específico do fluxo de transferência GP → GP.
+
+Cada entrada registra: quem fez (`actor_id`), alvo (`target_user_id`), projeto (`project_id` — nulo para ações na instância), papel anterior e novo, fase (`invited`, `accepted`, `revoked`, `admin_promoted`, `admin_demoted`, `transferred`, `user_deactivated`) e timestamp.
+
+Admin vê tudo isso em `/admin/audit` filtrando por evento.
 
 ## Ver também
 
-- [Instalação & setup](?section=02-instalacao) — como criar o primeiro Admin.
+- [Instalação & primeiro setup](?section=02-instalacao) — como criar o primeiro Admin.
 - [Área Administrativa](?section=06-admin) — tour completo do que Admin faz.
 - [Área de Gestão de Projeto](?section=07-gp) — tour completo do que GP faz.

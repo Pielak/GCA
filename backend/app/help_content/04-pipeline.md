@@ -1,155 +1,196 @@
 # Pipeline canônico do GCA
 
-O pipeline é a sequência de etapas pela qual um projeto passa do questionário inicial até a entrega (release bundle + documentação viva). É **orientado a eventos**: cada etapa lê o OCG, opera, atualiza o OCG, emite evento em `audit_log_global`, dispara a próxima etapa (ou aguarda ação humana).
+Sequência de etapas pela qual um projeto passa do questionário inicial até a entrega. É **orientado a eventos**: cada etapa lê o OCG, opera, atualiza o OCG, emite evento na auditoria e dispara a próxima (ou aguarda ação humana).
 
 ```
-[Externo]                        [Admin]              [GP]                  [GP/Dev/Tester/QA]
-┌───────────────┐  aprovação   ┌──────────┐  OCG  ┌─────────────┐  ingestão/dev   ┌──────────────┐
-│ Questionário  │─────────────▶│ Projeto  │──────▶│ OCG/         │────────────────▶│ CodeGen/QA/  │
-│ externo (49Q) │              │ criado   │       │ Gatekeeper/  │                 │ Docs/Release │
-└───────────────┘              └──────────┘       │ Arguidor     │                 └──────────────┘
-                                                   └─────────────┘
+[Externo]                           [Admin]               [GP]                   [GP/Dev/Tester/QA]
+┌───────────────┐   aprovação    ┌──────────┐   OCG    ┌──────────────┐   ingestão/dev  ┌───────────────┐
+│ Questionário  │ ─────────────▶ │ Projeto  │ ────────▶│ OCG /         │ ────────────────▶│ CodeGen / QA /│
+│ externo (49Q) │                │ criado   │          │ Gatekeeper /  │                  │ Docs / Release│
+└───────────────┘                └──────────┘          │ Arguidor      │                  └───────────────┘
+                                                        └──────────────┘
 ```
 
 ## 1. Questionário externo
 
-- Link público com expiração de 5 dias (RF-001 / MVP 1).
-- Wizard de 2 passos (pós-refactor sessão 22) + 49 perguntas técnicas em 7 blocos (A.1-A.7: Identidade, Escopo, Frontend, Backend, Dados, IA/Segurança, Testes).
-- Cada pergunta tem tooltip + opção "N/A" quando aplicável.
-- PDF editável alternativo para preenchimento offline + upload.
-- Validação server-side antes de submeter.
-- Email ao Admin quando submetido.
+- Link público com prazo de 5 dias.
+- Wizard em 2 passos com 49 perguntas técnicas em 7 blocos:
+  - A.1 Identidade, A.2 Escopo, A.3 Frontend, A.4 Backend, A.5 Dados, A.6 IA/Segurança, A.7 Testes.
+- Cada pergunta tem tooltip explicativo e opção "N/A" quando aplicável.
+- Alternativa: PDF editável para preenchimento offline + upload.
+- Validação antes de submeter (campos obrigatórios + formato).
+- Ao submeter, o Admin é notificado por email.
 
 ## 2. Aprovação pelo Admin
 
-- `/admin/projects` → lista pendentes.
-- Admin revisa → **Aprovar** ou **Rejeitar com motivo** (obrigatório).
-- Aprovar: backend em transação provisiona `organization` + `project` + convida o GP (email com link de aceite). Emite `PROJECT_APPROVED`.
-- Rejeitar: marca a requisição como rejeitada com motivo. Emite `PROJECT_REJECTED`.
+- Admin acessa `/admin/projects` → lista de pendentes.
+- Revisa as respostas submetidas.
+- Escolhe **Aprovar** ou **Rejeitar**.
+- Rejeitar exige motivo obrigatório (fica no histórico).
+- Aprovar provisiona: organização + projeto + convite ao GP (email com link).
 
-## 3. Geração do OCG (8 agentes)
+## 3. Geração do OCG — 8 agentes de IA
 
-Disparada automaticamente após aprovação (via Celery task `generate_ocg_task` — MVP 14 Fase 14.1). O pipeline de 8 agentes:
+Disparada automaticamente após a aprovação, em segundo plano. O pipeline tem 8 agentes:
 
 ```
-                    Agente 0
-                    Analyzer (classifica 49 respostas por pilar)
-                    ↓
-    ┌───────┬───────┬─────────┬────────┬────────┬────────┬────────┐
-    ↓       ↓       ↓         ↓        ↓        ↓        ↓        ↓
-   P1      P2      P3        P4       P5       P6       P7
-   Caso    Compl.  Escopo    NFRs     Arq.     Dados    Seg.
-   Neg.    Reg.                                                    (paralelo)
-    ↓       ↓       ↓         ↓        ↓        ↓        ↓
-    └───────┴───────┴─────────┴────────┴────────┴────────┴────────┘
-                    ↓
-                    Agente 8
-                    Consolidator (OCG final + COMPOSITE_SCORE + status)
+                     Agente 0
+                     Analyzer
+                     (classifica as 49 respostas por pilar)
+                     ↓
+    ┌──────┬───────┬──────────┬────────┬────────┬────────┬────────┐
+    ↓      ↓       ↓          ↓        ↓        ↓        ↓        ↓
+   P1     P2      P3         P4       P5       P6       P7
+   Caso   Compl.  Escopo     NFRs     Arq.     Dados    Seg.
+   Neg.   Reg.                                                    (paralelo)
+    ↓      ↓       ↓          ↓        ↓        ↓        ↓
+    └──────┴───────┴──────────┴────────┴────────┴────────┴────────┘
+                     ↓
+                     Agente 8
+                     Consolidator
+                     (OCG final + composite score + status)
 ```
 
-Cada agente de pilar devolve: score 0-100, adherence_level, is_blocking, findings (severity + descrição + recomendação). O Consolidator aglutina em `OCGResponse` com 12 seções (ver [cap. 5 — OCG](?section=05-ocg)).
+Cada agente de pilar devolve: score de 0 a 100, nível de aderência, se é bloqueante e achados (severidade + descrição + recomendação).
 
-Fallback determinístico: se o LLM não retornar um campo esperado (ex: `STACK_RECOMMENDATION`), o Consolidator usa `_stack_from_metadata(questionnaire_metadata)` para preencher com heurísticas. Nenhuma seção do OCG fica vazia por falha de LLM.
+Fallback determinístico: se o LLM falhar em algum campo, o Consolidator preenche com heurísticas baseadas no questionário. Nenhuma seção do OCG fica vazia por falha de IA.
 
 ## 4. Gatekeeper
 
-Avalia o OCG resultante contra regras canônicas do contrato §5:
+Avalia o OCG recém-gerado:
 
-- **Thresholds canônicos** (configuráveis pelo Admin em `/admin`):
-  - `P7 < 70` → **BLOCKED** (segurança insuficiente).
-  - `P2 < 70` → **BLOCKED** (compliance insuficiente).
-  - `composite ≥ 90` → **READY**.
-  - `composite ≥ 75` → **NEEDS_REVIEW**.
-  - `composite < 75` → **AT_RISK**.
-- **Items rastreados**: gaps, show_stoppers, poor_definitions, improvement_suggestions, module_candidates.
-- GP acessa `/projects/:id/gatekeeper` para ver summary + bloqueadores ativos.
+- **Regras de bloqueio**:
+  - `P2 < 70` (compliance insuficiente) → **BLOCKED**.
+  - `P7 < 70` (segurança insuficiente) → **BLOCKED**.
+- **Regras de aprovação**:
+  - Score composto `≥ 90` → **READY**.
+  - Score composto `≥ 75` → **NEEDS_REVIEW**.
+  - Score composto `< 75` → **AT_RISK**.
+- Thresholds e pesos dos pilares são configuráveis pelo Admin no dashboard.
+- Rastreia items: gaps, show_stoppers, poor_definitions, improvement_suggestions, módulos candidatos.
+- Reavalia automaticamente quando o OCG muda por ingestão, resposta do Arguidor ou consolidação manual.
 
-Quando OCG muda (via ingestão, Arguidor ou consolidate manual), o Gatekeeper reavalia automaticamente.
+GP acessa tudo em `/projects/:id/gatekeeper`.
 
 ## 5. Ingestão de documentos complementares
 
-GP pode ingerir documentos adicionais (PDF, DOCX, XLSX, PNG, JPG, MD; máx 50 MB):
+GP pode ingerir documentos adicionais para enriquecer o contexto:
 
-- Drop zone em `/projects/:id/ingestion`.
-- Pipeline assíncrono via Celery (MVP 13/14): `queued → extracting_text → analyzing → updating_ocg → regenerating_backlog → completed`.
-- Extração rica por tipo (MVP 8): DOCX com tabelas estruturadas, PDF com AcroForm + texto pesquisável + OCR via LLM Vision, normalização de seções implícitas.
-- **Quarentena PII obrigatória**: CPF/CNPJ/cartão (validados por mod-11/Luhn) + telefone BR (validado após DT-028, antes era regex promíscuo). Documento com PII fica retido até GP liberar.
+- **Formatos aceitos**: PDF, DOCX, XLSX, PNG, JPG, MD.
+- **Tamanho máximo**: 50 MB por arquivo.
+- **Drop zone** em `/projects/:id/ingestion`.
+- Pipeline assíncrono com barra de progresso: `queued → extracting_text → analyzing → updating_ocg → regenerating_backlog → completed`.
 
-Cada ingestão impacta o OCG:
+### Extração rica por tipo
 
-| Qualidade | Efeito no OCG |
+- **DOCX**: tabelas estruturadas + parágrafos + cabeçalhos/rodapés.
+- **PDF**: campos de formulário AcroForm + texto pesquisável + OCR via LLM Vision para PDFs scan-only.
+- **XLSX**: tabelas preservando estrutura + fórmulas → texto.
+- **Imagens (PNG/JPG)**: OCR via LLM Vision.
+
+### Quarentena automática de PII
+
+Se o documento contém CPF, CNPJ, cartão de crédito ou telefone BR, é **automaticamente retido** antes de tocar o OCG. GP decide:
+
+- **Liberar** — reconhece que o contexto precisa dessa informação.
+- **Descartar** — documento não entra no sistema.
+
+Validações de PII:
+- CPF / CNPJ / cartão: validados por mod-11 ou Luhn (não disparam em números aleatórios).
+- Telefone BR: regex + contexto (não dispara em sequências numéricas como IDs, timestamps, coordenadas).
+
+### Efeito da ingestão no OCG
+
+| Qualidade do documento | Efeito |
 |---|---|
-| Documento válido + complementar | **EXPAND** (enriquece seção, sobe confidence) |
-| Documento parcial | **UPDATE** (atualiza com lacunas marcadas) |
-| Documento conflitante | **CONTRACT** (reduz confidence, marca conflito) |
-| Documento com PII | **BLOCK** (quarentena; OCG não tocado) |
-| Documento que invalida stack | **CONTRACT** (P5/P6 caem + CRITICAL_FINDING) |
+| Válido e complementar | **EXPAND** — enriquece seção, aumenta confidence |
+| Parcial | **UPDATE** — atualiza marcando lacunas |
+| Conflitante com estado atual | **CONTRACT** — reduz confidence, marca conflito |
+| Contém PII | **BLOCK** — quarentena; OCG não é tocado |
+| Invalida stack declarada | **CONTRACT** — P5/P6 caem + achado crítico |
+| Segurança ausente (P7 < 70) | **BLOCK** — status BLOCKED, pipeline para |
+| Compliance ausente (P2 < 70) | **BLOCK** — idem |
 
 ## 6. Arguidor
 
-Após ingestão (ou quando Gatekeeper detecta gaps), o Arguidor emite perguntas dirigidas ao GP:
+Após ingestão ou quando o Gatekeeper detecta lacunas, o Arguidor emite **perguntas dirigidas** ao GP:
 
-- Cada gap vira um item em `gatekeeper_items` com `status='pending'`.
-- GP em `/projects/:id/arguider` responde (texto + evidência opcional) ou ignora com motivo.
-- Resposta registrada como `ARGUIDER_RESPONSE_REGISTERED` no audit.
-- Resposta alimenta o OCG de volta (expand/update).
+- Cada pergunta vira um item pendente no Gatekeeper.
+- GP em `/projects/:id/arguider` responde com texto (evidência opcional).
+- Pode **ignorar com motivo** se a pergunta não se aplica.
+- A resposta alimenta o OCG de volta: expand, update ou contract dependendo do que foi dito.
 
-## 7. Backlog e Roadmap derivados
+## 7. Backlog e Roadmap automáticos
 
 Qualquer mudança relevante no OCG dispara:
 
-- `BACKLOG_REGENERATED` — backlog recalculado conforme `STACK_RECOMMENDATION`, `DELIVERABLES`, `DATA_MODEL`.
-- Módulos canônicos em 8 categorias (MVP 9): Foundation, Auth, Data, Business, Infra, UI, Integration, Compliance.
-- Detalhamento on-demand via Ollama (local); curadoria Premium quando necessário.
-- Plano de deploy com export Markdown (MVP 9 Fase 9.4).
+- Recálculo do **backlog** — lista de itens de trabalho derivada do `STACK_RECOMMENDATION`, `DELIVERABLES` e `DATA_MODEL`.
+- **Roadmap** com módulos em 8 categorias: Foundation, Auth, Data, Business, Infra, UI, Integration, Compliance.
+- Detalhamento sob demanda de cada módulo (geração via modelo local).
+- Curadoria para módulos críticos (geração via modelo premium).
+- Plano de deploy exportável em Markdown.
 
 ## 8. CodeGen
 
-- **9 linguagens scaffoldadas** canonicamente: Java Spring, Java Quarkus, Kotlin Spring, Go, C#, PHP, Node.js (NestJS + Express), **C++ (CMake + GoogleTest — MVP 16)**.
-- Python fica em LLM-only (sem scaffolder determinístico).
-- Scaffold a partir de `OCG.STACK_RECOMMENDATION.backend.language` + `framework`.
-- DDL automaticamente injetado a partir de `OCG.DATA_MODEL` (5 dialetos SQL + Mongo; 7 frameworks de migration — MVP 10 DT-076).
-- Preview antes de commit; apply cria commit no Git do projeto com mensagem canônica.
-- Docstrings obrigatórias em todo código gerado.
-- Validação pós-geração: pyflakes (Python), esprima (JS), ast.parse (Python), cmake+gcc (C++ via CI step `cpp-scaffold-compile`).
+Nove linguagens com scaffold determinístico a partir do OCG:
+
+- Java com Spring Boot ou Quarkus
+- Kotlin com Spring Boot
+- Go (chi + pgx)
+- C# com ASP.NET Core
+- PHP com Laravel
+- Node.js com NestJS ou Express
+- **C++ com CMake + GoogleTest**
+
+Python fica em modo LLM-only (sem scaffold determinístico; o LLM compõe).
+
+- **DDL** (schema + seed + migration) é injetado automaticamente a partir do modelo de dados do OCG — cobre PostgreSQL, MySQL, SQLite, SQL Server, Oracle e MongoDB.
+- **Preview** do scaffold antes do commit — diff completo por arquivo.
+- **Apply** cria commit no repositório Git do projeto com mensagem padrão.
+- **Regeneração por arquivo** quando um módulo específico muda.
+- **Docstrings obrigatórias** em todo código gerado.
+- **Validação pós-geração**: pyflakes (Python), esprima (JS/TS), ast.parse (Python), cmake+gcc (C++).
 
 Detalhes em [cap. 8 — Codegen](?section=08-codegen).
 
 ## 9. QA Readiness + Tester Review
 
-- `/projects/:id/qa` consolida cobertura de testes (unit, integration, e2e, regression, load, security).
-- Specs geradas via Ollama local para unit/integration/e2e; security/compliance via Premium (MVP 10 Fase 10.3).
-- Tester aprova/rejeita/edita spec; QA revisa execução (gate `qa:approve`).
-- Stale detection: banner aparece quando OCG mudou depois da última geração (MVP 10 Fase 10.4).
+- **Specs** de teste gerados automaticamente por módulo (unit, integration, E2E).
+- Specs críticos (security, compliance) usam modelo premium.
+- Tester aprova, rejeita ou edita o spec.
+- Execução com timeout configurável; logs ficam gravados em JSONL por run.
+- QA revisa a execução no gate `qa:approve` que libera o Release Bundle.
+- Banner "Stale" aparece quando o OCG mudou depois da última geração do spec.
 
 ## 10. Documentação Viva + Release Bundle
 
-- Doc Viva regenera em cada commit de pipeline (incremento automático).
-- Consolidação geral via Premium; geração por módulo via Ollama.
-- Seção "Modelo de dados" com DDL inline (MVP 10 Fase 10.5 / DT-076 Fase 5).
-- Viewer read-only de documentos ingeridos.
-- Release Bundle (MVP 4 + evoluções): markdown + OCG version + commits incluídos + artefatos (schema.sql, seed.sql, migrations) + evidência de testes.
+- **Doc Viva** regenera a cada commit relevante do pipeline.
+- Consolidação geral por modelo premium; por módulo via modelo local.
+- Seção "Modelo de dados" embute o DDL gerado.
+- **Release Bundle** é um pacote markdown com:
+  - Versão do OCG no momento do release.
+  - Commits incluídos.
+  - Artefatos: schema.sql, seed.sql, migrations.
+  - Evidência de testes executados.
 
-## Auto-trigger e propagação de eventos
+## Propagação de eventos
 
-Cada passo relevante emite evento em `audit_log_global`:
+Cada etapa do pipeline emite evento na auditoria encadeada. Admin filtra em `/admin/audit`; GP vê o pipeline do próprio projeto em `/projects/:id/audit`.
 
-- `QUESTIONNAIRE_SUBMITTED` / `QUESTIONNAIRE_APPROVED` / `QUESTIONNAIRE_REJECTED`
-- `PROJECT_APPROVED` / `PROJECT_REJECTED` / `PROJECT_STATUS_CHANGED`
-- `DOCUMENT_INGESTED` / `DOCUMENT_QUARANTINED`
-- `GATEKEEPER_EVALUATED`
-- `ARGUIDER_QUESTION_OPENED` / `ARGUIDER_RESPONSE_REGISTERED`
-- `OCG_UPDATED` / `OCG_ROLLED_BACK` / `OCG_CONSOLIDATED`
-- `BACKLOG_REGENERATED`
-- `CODEGEN_REQUESTED` / `CODEGEN_COMPLETED` / `CODEGEN_SCAFFOLD_GENERATED` / `CODEGEN_SCAFFOLD_APPLIED` / `CODEGEN_FILE_REGENERATED`
-- `CODE_VALIDATION_COMPLETED`
-- `QA_EXECUTION_REQUESTED` / `QA_EXECUTION_COMPLETED`
-- `LIVEDOCS_UPDATED`
+Eventos principais:
 
-Cada evento tem `previous_hash` + `current_hash` (SHA-256) encadeado → trilha verificável.
+- Projeto: aprovado, rejeitado, status alterado.
+- Questionário: submetido, aprovado, rejeitado.
+- Ingestão: documento ingerido, documento quarentenado.
+- Pipeline: Gatekeeper avaliou, Arguidor pergunta aberta, Arguidor resposta registrada.
+- OCG: atualizado, revertido (rollback), consolidado.
+- Backlog: regenerado.
+- CodeGen: scaffold gerado, scaffold aplicado, arquivo regenerado, validação concluída.
+- QA: execução requisitada, execução concluída.
+- Doc Viva: atualizada.
 
 ## Ver também
 
-- [OCG — Objeto de Contexto Global](?section=05-ocg)
-- [Codegen e linguagens suportadas](?section=08-codegen)
-- [Observabilidade](?section=09-observabilidade)
+- [OCG — Objeto de Contexto Global](?section=05-ocg) — fonte central do pipeline.
+- [Codegen](?section=08-codegen) — detalhes das 9 linguagens e DDL.
+- [Observabilidade](?section=09-observabilidade) — auditoria, saúde e métricas.

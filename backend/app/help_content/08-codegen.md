@@ -1,143 +1,136 @@
 # Codegen e linguagens suportadas
 
-O GCA gera **scaffolds determinísticos** por linguagem/framework a partir de `OCG.STACK_RECOMMENDATION`. "Determinístico" quer dizer: mesma entrada → mesmos arquivos, sem dependência de LLM. O LLM continua sendo usado para código de negócio (módulos individuais), mas a estrutura inicial é garantida.
+O GCA gera **scaffolds iniciais** (estrutura do projeto) a partir do `STACK_RECOMMENDATION` do OCG. Cada linguagem/framework tem um template determinístico — mesma entrada do OCG sempre gera os mesmos arquivos. Isso garante que o scaffold funcione independente do modelo de IA configurado.
 
-## 9 linguagens canonicamente suportadas
+O LLM continua responsável pelo código de negócio (módulos individuais); a estrutura inicial (arquivos de build, configs, entrypoint) vem de template determinístico.
 
-| Linguagem / Framework | Scaffolder | Migration | Observações |
-|---|---|---|---|
-| Java / Spring Boot | `scaffold_java_spring` | Flyway | Java 21, Maven. ddl-auto=validate. |
-| Java / Quarkus | `scaffold_java_quarkus` | Flyway | Java 21, Maven. GraalVM-ready. |
-| Kotlin / Spring Boot | `scaffold_kotlin_spring` | Flyway | Kotlin + Spring (Ktor fica como candidato futuro). |
-| Go | `scaffold_go` | go-migrate | Go 1.22, chi/v5 router, pgx/v5 pra Postgres, go-redis/v9. |
-| C# / ASP.NET Core | `scaffold_csharp_aspnet` | EF Core | .NET 8, WebAPI. |
-| PHP / Laravel | `scaffold_php_laravel` | Laravel migrations | PHP 8.3, Eloquent. |
-| Node.js / NestJS | `scaffold_nodejs_nestjs` | TypeORM | TypeScript, enterprise, mais opinionado. Default do ecossistema Node. |
-| Node.js / Express | `scaffold_nodejs_express` | Knex | TypeScript, minimalista. |
-| **C++ / CMake + GoogleTest** (MVP 16) | `scaffold_cpp_cmake` | — | C++17 baseline (whitelist 14/17/20/23); executable V1; GoogleTest via FetchContent; Dockerfile multi-stage (gcc:13 → debian:bookworm-slim). |
+## 9 linguagens suportadas
 
-**Python fica em LLM-only** (sem scaffolder determinístico) — o ecossistema Python tem FastAPI/Django/Flask + Alembic já maduros, e scaffold por template tem menos valor vs deixar o LLM compor. O DDL (Alembic) é injetado mesmo quando a linguagem é Python.
+| Linguagem / Framework | Framework de migration | Observações |
+|---|---|---|
+| Java + Spring Boot | Flyway | Java 21, Maven, `ddl-auto=validate` |
+| Java + Quarkus | Flyway | Java 21, Maven, pronto para GraalVM |
+| Kotlin + Spring Boot | Flyway | Kotlin + Spring |
+| Go | go-migrate | Go 1.22, chi/v5 router, pgx/v5 para Postgres, go-redis/v9 |
+| C# + ASP.NET Core | EF Core | .NET 8, WebAPI |
+| PHP + Laravel | Laravel migrations | PHP 8.3, Eloquent |
+| Node.js + NestJS | TypeORM | TypeScript, enterprise, mais opinionado |
+| Node.js + Express | Knex | TypeScript, minimalista |
+| **C++ + CMake + GoogleTest** | — | C++17 baseline (permitido 14/17/20/23); executable; Dockerfile multi-stage (gcc:13 → debian:bookworm-slim) |
 
-## Dispatch (backend/app/services/scaffolders/dispatch.py)
+**Python fica em LLM-only** — o GCA não gera scaffold determinístico para Python. O ecossistema tem FastAPI, Django e Flask maduros, e template determinístico tem menos valor aí. O DDL (Alembic) é injetado mesmo em projetos Python.
 
-```
-OCG.STACK.backend.language  →  normalize  →  branch
-  "Java"                        → "java"       → scaffold_java_spring | scaffold_java_quarkus
-  "Kotlin"                      → "kotlin"     → scaffold_kotlin_spring
-  "Go"                          → "go"         → scaffold_go
-  "C#" | ".net" | "dotnet"      → "csharp"     → scaffold_csharp_aspnet
-  "PHP"                         → "php"        → scaffold_php_laravel
-  "Node.js" | "TypeScript"      → "node.js"    → scaffold_nodejs_nestjs | scaffold_nodejs_express
-  "C++" | "cpp" | "cplusplus"   → "c++"        → scaffold_cpp_cmake             (MVP 16)
-  outros (Python, Rust, Ruby)   → None (LLM-only)
-```
+## Como o GCA escolhe o scaffolder
 
-## DDL generator (MVP 10 DT-076)
+O dispatcher olha `OCG.STACK.backend.language` e normaliza:
 
-A partir de `OCG.DATA_MODEL` (inferido automaticamente em MVP 10 Fase 10.1 se o agente não popula), o generator emite:
+- `"Java"` → `java`
+- `"Kotlin"` → `kotlin`
+- `"Go"` → `go`
+- `"C#" | ".net" | "dotnet"` → `csharp`
+- `"PHP"` → `php`
+- `"Node.js" | "TypeScript" | "JavaScript"` → `node.js`
+- `"C++" | "cpp" | "cplusplus"` → `c++`
+- Outros (Python, Rust, Ruby, Swift, etc) → sem scaffolder (cai no LLM-only)
 
-- **schema.sql** com CREATE TABLE + FKs + índices em dialeto nativo.
-- **seed.sql** com INSERTs idempotentes (ON CONFLICT / INSERT IGNORE / etc).
-- **Migration específica do framework** declarado na stack.
+Para Java e Node.js, o framework declarado (`STACK.backend.framework`) escolhe qual variante:
 
-### 5 dialetos SQL suportados
+- Java + "quarkus" → Quarkus; senão → Spring Boot.
+- Node.js + "express" sem "nest" → Express; senão → NestJS.
 
-- PostgreSQL (default, JSONB, TIMESTAMPTZ, UUID nativo)
-- MySQL (JSON, TINYINT(1) para BOOLEAN, AUTO_INCREMENT)
-- SQLite (tipos reduzidos, INTEGER PK)
-- SQL Server (T-SQL com `IF OBJECT_ID`)
-- Oracle (bloco `EXCEPTION` anônimo para idempotência)
+## DDL generator — 5 dialetos SQL + MongoDB
+
+O GCA gera DDL automaticamente a partir do `DATA_MODEL` do OCG. Se o OCG não tiver um `DATA_MODEL` explícito, o Consolidator infere um a partir do perfil do projeto e da stack.
+
+Cada scaffolder recebe o `DATA_MODEL` junto e injeta os artefatos em `db/`:
+
+### Dialetos SQL
+
+- **PostgreSQL** — JSONB, TIMESTAMPTZ, UUID nativo, `ON CONFLICT DO NOTHING` no seed.
+- **MySQL** — JSON, `TINYINT(1)` para BOOLEAN, `AUTO_INCREMENT`, `INSERT IGNORE` no seed.
+- **SQLite** — tipos reduzidos, `INTEGER PRIMARY KEY`, `INSERT OR IGNORE` no seed.
+- **SQL Server** — T-SQL com `IF OBJECT_ID` para idempotência.
+- **Oracle** — bloco anônimo com `EXCEPTION` tolerando `ORA-00955` (tabela já existe).
 
 ### NoSQL
 
-- **MongoDB**: `collections.json` com JSON Schema validators + `seed.js` com `updateOne({...}, {$setOnInsert}, {upsert: true})` + `createIndex` por índice declarado.
+- **MongoDB** — emite `collections.json` com validators (JSON Schema) + `seed.js` com `updateOne({...}, {$setOnInsert}, {upsert: true})` + `createIndex` por índice declarado.
 
-### 7 frameworks de migration
+### Frameworks de migration gerados
 
-| Framework | Dialetos cobertos | Scaffolder alvo |
+| Framework | Cobertura | Scaffolder que consome |
 |---|---|---|
-| Alembic | SQL todos | Python (quando futuro scaffolder Python existir) |
-| Flyway | SQL todos | java_spring · java_quarkus · kotlin_spring |
-| Knex | SQL todos | nodejs_express |
-| TypeORM | SQL todos (+ Mongo via Cosmos) | nodejs_nestjs |
-| EF Core | SQL todos (+ Mongo via Cosmos stub) | csharp_aspnet |
-| Laravel | SQL menos Oracle | php_laravel |
-| go-migrate | SQL todos | go_app |
+| Alembic | Todos SQL | Python (quando houver scaffolder Python) |
+| Flyway | Todos SQL | Java Spring, Java Quarkus, Kotlin Spring |
+| Knex | Todos SQL | Node.js Express |
+| TypeORM | Todos SQL + Mongo (Cosmos stub) | Node.js NestJS |
+| EF Core | Todos SQL + Mongo (Cosmos stub) | C# ASP.NET |
+| Laravel | SQL menos Oracle | PHP Laravel |
+| go-migrate | Todos SQL | Go |
 
-Matriz completa: cada scaffolder SQL ganha schema.sql + seed.sql + migration nativa do framework. Mongo sai em TypeORM/EFCore como stub + recebe artefatos nativos (collections.json + seed.js) em `db/` independente do scaffolder escolhido.
+Cada scaffolder SQL recebe: `db/schema.sql` + `db/seed.sql` + a migration nativa do framework. Mongo emite os artefatos nativos em `db/` independente do scaffolder escolhido.
 
-## C++ Codegen (MVP 16 — cobertura V1)
+## Scaffolder C++ em detalhe
 
-Primeiro scaffolder **systems-level** do GCA. Arquivos emitidos:
+### Arquivos emitidos
 
 ```
-CMakeLists.txt            # C++17, warnings estritos, CMake 3.14+
-tests/CMakeLists.txt      # GoogleTest v1.14.0 via FetchContent
-src/main.cpp              # Entrypoint executable V1
-include/<target>/         # Diretório público de headers (vazio, .gitkeep)
-tests/test_main.cpp       # Smoke TEST + fixture TEST_F
-.clang-format             # Google Style + 4 espaços + 100 colunas
-.clang-tidy               # bugprone, cert, cppcoreguidelines, modernize, performance
-.gitignore                # Artefatos CMake + IDE + OS
-.dockerignore             # Pula build/, _deps/, .git/
-Dockerfile                # Multi-stage: gcc:13-bookworm → debian:bookworm-slim (non-root user)
-README.md                 # Comandos build, test, docker, padrões
+CMakeLists.txt             # C++17, warnings estritos, CMake 3.14+
+tests/CMakeLists.txt       # GoogleTest via FetchContent (sem vcpkg/conan em V1)
+src/main.cpp               # Entrypoint executable
+include/<target>/          # Diretório para headers públicos (vem vazio, com .gitkeep)
+tests/test_main.cpp        # Smoke TEST + fixture TEST_F
+.clang-format              # Google Style + 4 espaços + 100 colunas
+.clang-tidy                # Checks: bugprone, cert, cppcoreguidelines, modernize, performance
+.gitignore                 # Artefatos CMake + IDE + OS
+.dockerignore              # Pula build/, _deps/, .git/
+Dockerfile                 # Multi-stage: gcc:13-bookworm → debian:bookworm-slim (usuário não-root)
+README.md                  # Build, test, docker, padrões
 ```
 
-### Slug translation
+### Slug → target
 
-`demo-app` vira target `demo_app` (CMake não aceita hífen em `project()`). Include dir usa target name: `include/demo_app/`, não `include/demo-app/`.
+Slugs com hífen (ex.: `demo-app`) viram target `demo_app` dentro do CMake — o CMake não aceita hífen em `project()`. O diretório de include usa o nome do target: `include/demo_app/`.
 
-### cpp_standard whitelist
+### Padrão C++
 
-`OCG.STACK.backend.cpp_standard` aceita apenas `{ "14", "17", "20", "23" }`. Qualquer outro valor (número, string inválida, ausência) cai no default **"17"**.
+`OCG.STACK.backend.cpp_standard` aceita `"14"`, `"17"`, `"20"` ou `"23"`. Valor inválido ou ausente cai no default **`"17"`**.
 
-### CI step
+### Como testar localmente
 
-`backend-tests.yml` ganha job `cpp-scaffold-compile` que:
+Gerado o scaffold e aplicado no Git do projeto:
 
-1. Materializa o scaffold em `/tmp/cpp_smoke` via Python.
-2. Roda `docker run gcc:13-bookworm bash -c 'apt-get install cmake ninja-build && cmake -G Ninja -B build -DBUILD_TESTING=OFF && cmake --build build -j && ./build/bin/<target>'`.
-3. Valida binariamente que o scaffold compila.
+```bash
+cd <repo-do-projeto>
+cmake -B build
+cmake --build build -j
+./build/bin/<target>                    # executa
+ctest --test-dir build --output-on-failure    # testes
+docker build -t <target> .              # Docker multi-stage
+docker run --rm <target>
+```
 
-### Test spec generator GoogleTest-aware (MVP 16 Fase 16.3)
+### Test spec para C++
 
-Quando `OCG.STACK.backend.language` é C++, o `test_spec_generator_service` anexa `CPP_GOOGLETEST_GUIDANCE` ao prompt LLM com idioms canônicos:
+Quando o OCG identifica que o projeto é C++, o gerador de specs de teste usa idioms canônicos do GoogleTest:
 
-- `TEST(SuiteName, TestName)` / `TEST_F(FixtureClass, TestName)` com fixture `class XxxFixture : public ::testing::Test` + `SetUp()` / `TearDown()`.
-- Assertivas canônicas: `EXPECT_EQ`, `EXPECT_NE`, `EXPECT_TRUE`, `EXPECT_FALSE`, `EXPECT_THROW`, `EXPECT_THAT` com matchers GMock.
-- `ASSERT_*` apenas quando falha invalida o resto do teste.
-- `GTEST_SKIP() << "motivo"` para cenários não suportados.
+- `TEST(SuiteName, TestName) { ... }` para testes simples.
+- `TEST_F(FixtureClass, TestName) { ... }` com `class XxxFixture : public ::testing::Test` + `SetUp()` e `TearDown()` para testes que compartilham estado.
+- Assertivas: `EXPECT_EQ`, `EXPECT_NE`, `EXPECT_TRUE`, `EXPECT_FALSE`, `EXPECT_THROW`, `EXPECT_THAT` com matchers GMock.
+- `GTEST_SKIP() << "motivo"` para pular cenários não suportados.
 - Integração CMake: `add_executable(<target>_tests ...)` + `target_link_libraries(... GTest::gtest_main)` + `gtest_discover_tests(...)`.
 
-Provenance JSON inclui `test_framework: "googletest"` quando aplicável.
-
-### Fora de escopo V1 (backlog parked)
-
-- **CI matrix multi-compiler** (gcc × clang × msvc) — MVP 17 Cluster B potencial.
-- **Sanitizers automáticos** (ASan, UBSan, TSan, MSan) — idem.
-- **Doxygen** integrado ao LiveDocs — idem.
-- **CPack** (.deb / .rpm / .msi) — Cluster C.
-- **Export macros ABI** (PIMPL, visibility) — Cluster C.
-- **Embedded** (ARM Cortex-M, ESP32) e **GPU** (CUDA, HIP, SYCL) — Cluster D (parked).
-- **vcpkg / conan** como package managers — V2.
-- **Library / header-only / shared artifacts** — V2 (V1 cobre só executable).
-- **Questionário C++ expandido** (Q-cpp-*: artifact_type, target_platforms, package_manager) — V2.
-
-Gap completo mapeado em `gca_cpp_codegen_gap.md` (memória da sessão 24).
-
-## Regras duras de CodeGen
+## Regras que governam o CodeGen
 
 - **Docstrings obrigatórias** em todo código gerado.
-- **Teste funcional + massa de dados** por arquivo gerado (contrato §CODEGEN_RULES).
-- **Preview antes do commit** (CodeGen nunca escreve direto no Git sem aprovação explícita).
-- **Commit com mensagem canônica** formato Conventional Commits.
-- **RBAC**: `code:write` requerido (Dev e GP; Admin via override).
-- **Análise de adequação do provedor** antes de alta criticidade — modelo local não consolida nem decide arquitetura sozinho.
-- **Eventos emitidos**: `CODEGEN_SCAFFOLD_GENERATED`, `CODEGEN_SCAFFOLD_APPLIED`, `CODEGEN_FILE_REGENERATED`.
+- **Teste funcional + massa de dados** por arquivo gerado.
+- **Preview antes do commit** — CodeGen nunca escreve direto no Git sem aprovação explícita do usuário.
+- **Commit com mensagem padrão** (Conventional Commits).
+- **Permissão `code:write`** — Dev ou GP (Admin pode via override).
+- **Validação pós-geração** conforme a linguagem: pyflakes (Python), esprima (JS/TS), ast.parse (Python), cmake+gcc (C++).
 
 ## Ver também
 
-- [OCG — STACK_RECOMMENDATION + DATA_MODEL](?section=05-ocg)
+- [OCG — STACK_RECOMMENDATION e DATA_MODEL](?section=05-ocg)
 - [Pipeline canônico](?section=04-pipeline)
-- [Troubleshooting](?section=10-troubleshooting) — quando scaffolder retorna None (linguagem não coberta).
+- [Solução de problemas](?section=10-troubleshooting) — scaffolder None (linguagem não coberta), erros de build C++, etc.
