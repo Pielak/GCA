@@ -22,7 +22,10 @@ from __future__ import annotations
 
 import os
 
+import structlog
 from celery import Celery
+
+logger = structlog.get_logger(__name__)
 
 
 def _resolve_broker_url() -> str:
@@ -112,6 +115,77 @@ celery_app.conf.update(
 
 
 # ─── Task canônica de smoke / healthcheck ─────────────────────────────
+
+
+# ─── Fase 13.4: signal handlers para monitoring + DLQ visibility ─────
+
+
+from celery.signals import task_failure, task_retry, task_success  # noqa: E402
+
+
+# Lista in-memory + log estruturado (Redis result backend já retém
+# falha permanente para inspection externa). Para produção séria,
+# plugar Flower/Prometheus por cima sem alterar código — os signals
+# são o ponto canônico de observabilidade.
+_DLQ_LOG_ENTRIES: list[dict] = []
+
+
+@task_failure.connect
+def _on_task_failure(sender=None, task_id=None, exception=None,
+                     args=None, kwargs=None, einfo=None, **_):
+    """Handler disparado quando task esgota retries e falha permanente.
+
+    Grava log estruturado com task_id, task_name, exception e args.
+    Mantém cópia em `_DLQ_LOG_ENTRIES` (cap 200) para inspeção via
+    endpoint interno se necessário — evita tabela + migração só para
+    observabilidade.
+    """
+    task_name = getattr(sender, "name", "unknown")
+    entry = {
+        "task_id": task_id,
+        "task_name": task_name,
+        "exception_type": type(exception).__name__ if exception else None,
+        "exception_msg": str(exception) if exception else None,
+        "args": [str(a)[:200] for a in (args or [])],
+    }
+    _DLQ_LOG_ENTRIES.append(entry)
+    # Cap pra não vazar memória num worker long-running.
+    if len(_DLQ_LOG_ENTRIES) > 200:
+        del _DLQ_LOG_ENTRIES[:-200]
+
+    logger.error(
+        "celery.task_failure_permanent",
+        **entry,
+    )
+
+
+@task_retry.connect
+def _on_task_retry(sender=None, request=None, reason=None, **_):
+    """Log de retry: task ainda não esgotou política."""
+    task_name = getattr(sender, "name", "unknown")
+    logger.warning(
+        "celery.task_retry",
+        task_name=task_name,
+        task_id=getattr(request, "id", None),
+        retries=getattr(request, "retries", None),
+        reason=str(reason) if reason else None,
+    )
+
+
+@task_success.connect
+def _on_task_success(sender=None, result=None, **_):
+    """Log minimalista de sucesso — debug-level pra não poluir."""
+    task_name = getattr(sender, "name", "unknown")
+    logger.debug("celery.task_success", task_name=task_name)
+
+
+def get_dlq_entries(limit: int = 50) -> list[dict]:
+    """Retorna últimas N falhas permanentes para inspeção administrativa.
+
+    Uso canônico: endpoint admin que lista tasks que estouraram retries.
+    Limit default 50; max efetivo é o cap interno (200).
+    """
+    return list(_DLQ_LOG_ENTRIES[-limit:])
 
 
 @celery_app.task(name="app.celery_app.ping")

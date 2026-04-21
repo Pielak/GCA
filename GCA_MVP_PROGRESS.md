@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.30  
+Versão: 3.31  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** Fase **13.3 FECHADA INTEIRA** (13.3a + 13.3b + 13.3c). 13.3c (últimos 3 pontos): `auto_generate_task` substitui `ocg_updater_service:369`; `external_repo_fallback_task` substitui 2 pontos em `external_repos_router`. **Escopo canônico MVP 13 Fase 13.3 é 100% Celery**: pipeline Arguider + OCG Updater + auto-CodeGen + external_repos migrado; `ingestion_service.py`, `ocg_updater_service.py`, `external_repos_router.py` e `ingestion_router.py` todos com **zero** `asyncio.create_task`. Questionnaire + Gatekeeper fora do escopo per §7 MVP 13 (watchdog DT-073 cobre). Suite pós-13.3c: **1454/1454 passing** (+50 cumulativo MVP 13). Fases 13.4-13.7 seguem.
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** **Tema A (fila persistente Celery/Redis) COMPLETO**: 13.1 + 13.2 + 13.3 (a/b/c) + 13.4. Fase 13.4 (monitoring + retry + DLQ): signal handlers `task_failure`/`task_retry`/`task_success` em `celery_app.py` emitem logs estruturados; lista DLQ in-memory (cap 200) acessível via `get_dlq_entries()`; endpoints admin `GET /admin/celery/dlq` e `GET /admin/celery/workers` expõem para inspeção; retry policy bounded em todas as 6 tasks (max 2, delay 30-60); 14 testes novos (signal handler, cap, limit, retry policy parametrizado × 6 tasks, retry ≠ infinito, 3 endpoints admin incluindo 403 non-admin). Suite pós-13.4: **1468/1468 passing** (+64 cumulativo MVP 13). Tema B (13.5-13.7 audit coverage) segue.
 
 ---
 
@@ -17,7 +17,7 @@ Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em exe
 - ✅ **Fase 13.1** Setup Celery + infra — **FECHADA 2026-04-20**. `celery[redis]` em pyproject/requirements; `celery_app.py` com broker DB 1 / result DB 2 / task `ping` / timezone via `BACKUP_TIMEZONE` / JSON-only / retry bounded; serviço `gca-celery-worker` no docker-compose (concurrency=2, healthcheck `inspect ping`). Smoke validado: `ping.delay().get() == "pong"`; `celery inspect ping` retorna 1 node online. 15 testes novos.
 - ✅ **Fase 13.2** Lifespan + worker lifecycle — **FECHADA 2026-04-20**. `check_broker_connection` e `check_workers_alive` em `celery_app.py`; smoke não-fatal do broker no startup; `/health` expandido com bloco `celery.broker.reachable` + `celery.workers.workers/nodes`; 7 testes. Worker segue em processo separado (`gca-celery-worker`).
 - ✅ **Fase 13.3** Refactor pipeline Arguider + OCG Updater + auto-CodeGen — **FECHADA 2026-04-20** em 3 sub-fases. **13.3a**: pipeline_ingest_task + router reanalyze (1 ponto). **13.3b**: 3 tasks novas + reuso em upload_document (6 pontos). **13.3c**: auto_generate_task + external_repo_fallback_task (3 pontos). **Total: 10 pontos migrados**. Escopo canônico 100% Celery (ingestion_service, ocg_updater_service, external_repos_router, ingestion_router — todos zero `create_task`). Questionnaire/Gatekeeper fora do escopo per §7.
-- **Fase 13.4** Testes (`CELERY_TASK_ALWAYS_EAGER`) + monitoring + retry policy (max_retries=3, DLQ `celery_dlq`, logs estruturados).
+- ✅ **Fase 13.4** Monitoring + retry + DLQ — **FECHADA 2026-04-20**. Signal handlers (`task_failure`/`task_retry`/`task_success`) + DLQ in-memory (cap 200) + endpoints admin `/admin/celery/dlq` e `/admin/celery/workers`; retry bounded em 6 tasks; 14 testes. Decisão: **não** ligar `CELERY_TASK_ALWAYS_EAGER` em conftest (vaza pro singleton e quebra testes async); padrão canônico é `.apply()` em teste isolado — documentado nas Fases 13.3b/c.
 
 **Tema B — Cobertura completa de `audit_log_global` (3 fases):**
 - **Fase 13.5** Inventário + helpers canônicos por domínio (`log_project_event`, `log_questionnaire_event`, `log_codegen_event`). Resultado publicado no §3 como lista binária "tem audit / falta audit".

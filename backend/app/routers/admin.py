@@ -1587,3 +1587,39 @@ async def cleanup_orphan_project_request(
 
     logger.info("admin.orphan_request_cleaned", request_id=str(request_id), name=project_name)
     return {"success": True, "cleaned": project_name}
+
+
+# ─── MVP 13 Fase 13.4: Celery DLQ inspection (admin only) ─────────────
+
+
+@router.get("/celery/dlq")
+async def get_celery_dlq(
+    limit: int = 50,
+    current_user_id: UUID = Depends(require_admin),
+):
+    """Retorna últimas falhas permanentes de tasks Celery.
+
+    Lista dicts com task_id, task_name, exception_type, exception_msg
+    e args (truncados em 200 chars). Populada pelo signal handler
+    `_on_task_failure` em `celery_app.py`. Fonte canônica pro admin
+    inspecionar tasks que estouraram retry policy.
+    """
+    from app.celery_app import get_dlq_entries
+    entries = get_dlq_entries(limit=limit)
+    return {"count": len(entries), "entries": entries}
+
+
+@router.get("/celery/workers")
+async def get_celery_workers(current_user_id: UUID = Depends(require_admin)):
+    """Inspeciona workers Celery ativos via `inspect ping`.
+
+    Retorna lista de nodes online + count. Complementa /health com
+    detalhes que só Admin precisa.
+    """
+    from app.celery_app import check_workers_alive, check_broker_connection
+    broker = check_broker_connection(timeout=1.0)
+    workers = (
+        check_workers_alive(timeout=1.5) if broker["reachable"]
+        else {"workers": 0, "nodes": [], "error": "broker_unreachable"}
+    )
+    return {"broker": broker, "workers": workers}
