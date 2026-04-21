@@ -504,36 +504,51 @@ def test_resolve_adapter_registrado_retorna_instancia():
 
 
 # ===========================================================================
-# Service — métodos 20.1b/c/d ainda não implementados
+# Service — orquestração exige provider registrado
 # ===========================================================================
+# Nota: após 20.1b, create_issue_from_module e apply_webhook_event estão
+# implementados e testados em test_mvp20_fase201b_service_orch.py.
+# Aqui garantimos que sem adapter registrado o erro é claro.
 
 @pytest.mark.asyncio
-async def test_create_issue_from_module_levanta_not_implemented_em_20_1a(db_session):
-    """20.1a é foundation; implementação completa vem em 20.1b/d."""
+async def test_create_issue_from_module_sem_adapter_registrado_levanta_config_error(db_session):
     user = await _make_user(db_session)
     project = await _make_project(db_session, user)
     mod = await _make_module(db_session, project, user)
 
     from app.services.issue_tracker_service import create_issue_from_module
+    from app.services.ports.issue_tracker_port import ProviderConfig
 
-    with pytest.raises(NotImplementedError) as exc:
+    _clear_registry_for_tests()
+    config = ProviderConfig(
+        credentials={"email": "a@b", "api_token": "t"},
+        base_url="https://x.atlassian.net",
+        default_project_key="PROJ",
+    )
+    with pytest.raises(IssueTrackerConfigError):
         await create_issue_from_module(
             db_session,
             project_id=project.id,
             module_candidate_id=mod.id,
             provider="jira",
+            config=config,
             actor_id=user.id,
         )
-    # Mensagem deve citar as sub-fases pendentes.
-    assert "20.1" in str(exc.value)
 
 
 @pytest.mark.asyncio
-async def test_apply_webhook_event_levanta_not_implemented_em_20_1a(db_session):
+async def test_apply_webhook_event_sem_adapter_registrado_levanta_config_error(db_session):
     from app.services.issue_tracker_service import apply_webhook_event
+    from app.services.ports.issue_tracker_port import ProviderConfig
 
-    with pytest.raises(NotImplementedError):
+    _clear_registry_for_tests()
+    config = ProviderConfig(
+        credentials={"email": "a@b", "api_token": "t", "webhook_secret": "s"},
+        base_url="https://x.atlassian.net",
+        default_project_key="PROJ",
+    )
+    with pytest.raises(IssueTrackerConfigError):
         await apply_webhook_event(
-            db_session, provider="jira",
+            db_session, provider="jira", config=config,
             headers={}, raw_body=b"", payload={},
         )

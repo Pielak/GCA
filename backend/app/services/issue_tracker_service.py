@@ -171,31 +171,191 @@ async def create_issue_from_module(
     project_id: UUID,
     module_candidate_id: UUID,
     provider: str,
-    actor_id: Optional[UUID],
+    config,  # ProviderConfig — evita import circular em annotation
+    actor_id: Optional[UUID] = None,
 ) -> ExternalIssue:
     """Cria issue no tracker externo a partir de módulo aprovado do GCA.
 
-    Implementação completa entra em 20.1b/20.1d. Em 20.1a levanta
-    NotImplementedError explícito pra não mascarar incompletude.
+    Fluxo canônico:
+      1. Carrega ModuleCandidate (valida project_id, compartimentalização).
+      2. Resolve adapter via registry.
+      3. Chama adapter.create_issue() com título/descrição canônicos.
+      4. Faz upsert do ExternalIssue vinculado ao módulo.
+      5. Emite EXTERNAL_ISSUE_CREATED no audit.
+
+    Caller (router ou hook de aprovação de módulo) é responsável por
+    fornecer o `ProviderConfig`. Service não toca em vault/settings —
+    isso vive na Fase 20.1d (UI + config).
     """
-    raise NotImplementedError(
-        "create_issue_from_module exige JiraAdapter/TrelloAdapter (20.1b/c) "
-        "+ ProviderConfig do projeto (20.1d)."
+    from app.models.base import ModuleCandidate
+    from app.services.audit_service import AuditEvents, AuditService
+
+    adapter = resolve_adapter(provider)
+
+    # Carrega módulo validando compartimentalização.
+    mod = (await db.execute(
+        select(ModuleCandidate)
+        .where(ModuleCandidate.id == module_candidate_id)
+        .where(ModuleCandidate.project_id == project_id)
+    )).scalar_one_or_none()
+    if mod is None:
+        raise ValueError(
+            f"Módulo {module_candidate_id} não pertence ao projeto {project_id} "
+            f"ou não existe"
+        )
+
+    # Título canônico: "<prefixo RF/RNF/BR>-<id curto> — nome".
+    prefix = {
+        "functional": "RF", "non_functional": "RNF",
+        "business_rule": "BR",
+    }.get(mod.requirement_category, "REQ")
+    short = str(mod.id)[:8]
+    title = f"{prefix}-{short} — {mod.name}"
+
+    # Descrição em markdown com rastreabilidade ao GCA.
+    description = (
+        f"**Origem**: GCA · módulo `{mod.id}`\n\n"
+        f"**Tipo**: `{mod.module_type}` · **Prioridade**: `{mod.priority}` · "
+        f"**Status GCA**: `{mod.status}`\n\n"
+        f"{mod.description or '_(sem descrição)_'}\n\n"
+        f"---\n"
+        f"_Issue criada automaticamente pelo GCA ao aprovar o módulo. "
+        f"Atualizações de status são sincronizadas via webhook._"
     )
+
+    # Priority canônica a partir do módulo (se mapeável).
+    priority_map = {"high": "high", "medium": "medium", "low": "low"}
+    priority = priority_map.get(mod.priority)
+
+    payload = await adapter.create_issue(
+        config,
+        title=title,
+        description_markdown=description,
+        priority=priority,  # type: ignore[arg-type]
+        labels=[f"gca", f"type-{mod.module_type}"],
+    )
+
+    issue = await upsert_from_payload(
+        db, project_id=project_id, provider=provider,
+        module_candidate_id=module_candidate_id,
+        payload=payload, created_by=actor_id,
+    )
+
+    # Audit.
+    audit = AuditService(db)
+    await audit.log_event(
+        event_type=AuditEvents.EXTERNAL_ISSUE_CREATED,
+        resource_type="external_issue",
+        actor_id=actor_id,
+        resource_id=issue.id,
+        details={
+            "project_id": str(project_id),
+            "module_candidate_id": str(module_candidate_id),
+            "provider": provider,
+            "external_id": payload.external_id,
+            "url": payload.url,
+        },
+    )
+
+    logger.info(
+        "issue_tracker.created_from_module",
+        project_id=str(project_id),
+        module_id=str(module_candidate_id),
+        provider=provider,
+        external_id=payload.external_id,
+    )
+    return issue
 
 
 async def apply_webhook_event(
     db: AsyncSession,
     *,
     provider: str,
+    config,  # ProviderConfig
     headers: dict[str, str],
     raw_body: bytes,
     payload: dict,
 ) -> Optional[ExternalIssue]:
     """Processa webhook recebido do provider.
 
-    Implementação completa entra em 20.1b/c. Em 20.1a levanta
-    NotImplementedError."""
-    raise NotImplementedError(
-        "apply_webhook_event exige adapter do provider (20.1b/c)."
+    Fluxo:
+      1. Adapter valida assinatura (verify_webhook) — se falhar, retorna None.
+      2. Adapter normaliza em IssueEvent (parse_webhook).
+      3. Service resolve project_id do evento e aplica upsert idempotente.
+      4. Emite EXTERNAL_ISSUE_STATUS_SYNCED no audit.
+
+    Retorna a row de ExternalIssue atualizada, ou None quando:
+      - Assinatura inválida (caller responde 401).
+      - Evento não-relevante (parse_webhook retornou None).
+      - Issue deletada externamente (marcamos cancelled e retornamos).
+    """
+    from app.services.audit_service import AuditEvents, AuditService
+
+    adapter = resolve_adapter(provider)
+
+    if not adapter.verify_webhook(config, headers, raw_body):
+        logger.warning("issue_tracker.webhook.invalid_signature",
+                        provider=provider)
+        return None
+
+    event = adapter.parse_webhook(config, payload)
+    if event is None:
+        return None
+
+    project_id = UUID(event.project_id)
+
+    if event.event_type == "issue_deleted":
+        # Marca como cancelled preservando auditabilidade (não deletamos).
+        existing = await get_external_issue_by_external_id(
+            db, project_id, provider, event.external_id,
+        )
+        if existing is not None:
+            existing.status_canonical = "cancelled"
+            existing.status_raw = "deleted-externally"
+            existing.synced_at = datetime.now(timezone.utc)
+            existing.closed_at = existing.closed_at or datetime.now(timezone.utc)
+            await db.flush()
+        return existing
+
+    # Busca estado real via adapter pra ter payload completo
+    # (webhook costuma ter dados parciais).
+    try:
+        current = await adapter.get_issue(config, event.external_id)
+    except Exception as exc:
+        logger.warning("issue_tracker.webhook.get_issue_failed",
+                        provider=provider,
+                        external_id=event.external_id,
+                        error=str(exc))
+        # Fallback: usa dados do próprio webhook.
+        from app.services.ports.issue_tracker_port import IssuePayload
+        current = IssuePayload(
+            external_id=event.external_id,
+            url=None,
+            title=event.title or "(título não disponível)",
+            status_canonical=event.status_canonical or "todo",
+            status_raw=event.status_raw or "",
+        )
+
+    issue = await upsert_from_payload(
+        db, project_id=project_id, provider=provider,
+        module_candidate_id=None,  # mantém vínculo preexistente se houver
+        payload=current,
     )
+
+    # Audit.
+    audit = AuditService(db)
+    await audit.log_event(
+        event_type=AuditEvents.EXTERNAL_ISSUE_STATUS_SYNCED,
+        resource_type="external_issue",
+        actor_id=None,  # ação veio do provider, não de um usuário humano
+        resource_id=issue.id,
+        details={
+            "project_id": str(project_id),
+            "provider": provider,
+            "external_id": event.external_id,
+            "status_canonical": current.status_canonical,
+            "status_raw": current.status_raw,
+            "event_type": event.event_type,
+        },
+    )
+    return issue

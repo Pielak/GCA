@@ -84,6 +84,12 @@ class AuditEvents:
     CODEGEN_SCAFFOLD_APPLIED = "codegen_scaffold_applied"
     CODEGEN_FILE_REGENERATED = "codegen_file_regenerated"
 
+    # MVP 20 Fase 20.1b — Eventos canônicos do Issue Tracker Bridge
+    # Payload em details: {project_id, module_candidate_id?, provider,
+    # external_id, url?, status_canonical?, status_raw?, event_type?}.
+    EXTERNAL_ISSUE_CREATED = "external_issue_created"
+    EXTERNAL_ISSUE_STATUS_SYNCED = "external_issue_status_synced"
+
     # MVP 14 Fase 14.7 — Evento canônico de rollback de OCG
     # Payload em details: {actor_id, project_id, version_from, version_to,
     # restored_from, timestamp}. Emitido por OCGService.rollback_to_version.
