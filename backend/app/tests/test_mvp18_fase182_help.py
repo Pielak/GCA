@@ -143,26 +143,23 @@ def test_load_section_fallback_title_sem_h1(tmp_path, monkeypatch):
 
 
 # ===========================================================================
-# search_content (stub)
+# search_content — backend fts5 (MVP 18 Fase 18.4)
+#
+# Testes de busca detalhados vivem em test_mvp18_fase184_fts5.py.
+# Aqui só sanity checks do contrato de resposta compartilhado com 18.2.
 # ===========================================================================
 
-def test_search_stub_retorna_backend_stub():
-    result = search_content("qualquer coisa")
-    assert result["backend"] == "stub"
-    assert result["results"] == []
-    assert result["query"] == "qualquer coisa"
-
-
-def test_search_stub_normaliza_query_vazia():
+def test_search_query_vazia_retorna_results_vazio():
     result = search_content("")
     assert result["query"] == ""
     assert result["results"] == []
 
 
-def test_search_stub_aplica_limit_clamp():
-    assert search_content("x", limit=0)["limit"] == 1
-    assert search_content("x", limit=500)["limit"] == 100
-    assert search_content("x", limit=20)["limit"] == 20
+def test_search_aplica_limit_clamp():
+    # Com query vazia não faz match, mas o clamp do limit deve funcionar.
+    assert search_content("", limit=0)["limit"] == 1
+    assert search_content("", limit=500)["limit"] == 100
+    assert search_content("", limit=20)["limit"] == 20
 
 
 # ===========================================================================
@@ -258,7 +255,8 @@ async def test_endpoint_section_rejeita_path_traversal_com_400():
 
 
 @pytest.mark.asyncio
-async def test_endpoint_search_stub_retorna_backend_stub():
+async def test_endpoint_search_retorna_backend_fts5():
+    """Smoke: endpoint responde 200 + backend canônico. Detalhes em 18.4."""
     _user, token = await _make_user()
     async with _client() as client:
         resp = await client.get(
@@ -267,6 +265,6 @@ async def test_endpoint_search_stub_retorna_backend_stub():
         )
     assert resp.status_code == 200
     body = resp.json()
-    assert body["backend"] == "stub"
-    assert body["results"] == []
+    assert body["backend"] == "fts5"
     assert body["query"] == "ocg"
+    assert isinstance(body["results"], list)
