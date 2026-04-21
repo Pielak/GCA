@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.33  
+Versão: 3.34  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** Tema A completo (13.1-13.4). **Fase 13.5 + 13.6 FECHADAS 2026-04-20**. Fase 13.6 (instrumentação projeto + questionário): `admin_service.reject_project_request` emite PROJECT_REJECTED; `admin_management_service.set_project_status` emite PROJECT_STATUS_CHANGED; `questionnaire_service.submit_questionnaire` emite QUESTIONNAIRE_SUBMITTED + APPROVED/REJECTED conforme score (ambos com correlation_id compartilhado). 5 testes (3 estáticos + 2 E2E contra gca_test). Suite pós-13.6: **1489/1489 passing** (+85 cumulativo MVP 13). Fase 13.7 (CodeGen + chain E2E) segue.
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 FECHADO 2026-04-20 com as 7 fases entregues**. Fase 13.7 (instrumentação CodeGen + chain E2E): `generate_scaffold` emite CODEGEN_SCAFFOLD_GENERATED; `apply_scaffold` emite CODEGEN_SCAFFOLD_APPLIED; `regenerate_single_file` emite CODEGEN_FILE_REGENERATED com commit_sha. Teste E2E de chain integrity: série canônica de 7 eventos (project + questionnaire + role + 3 codegen) → `verify_chain()` íntegra. 4 testes. Suite pós-13.7: **1493/1493 passing** (+89 cumulativo MVP 13). Tema A (fila Celery) + Tema B (audit coverage) completos.
 
 ---
 
@@ -22,7 +22,7 @@ Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em exe
 **Tema B — Cobertura completa de `audit_log_global` (3 fases):**
 - ✅ **Fase 13.5** Inventário + helpers canônicos — **FECHADA 2026-04-20**. 8 constantes novas em `AuditEvents` + 3 helpers em `AuditService` (project/questionnaire/codegen). Inventário binário em `§3.0`: 4 SIM / 7 NÃO (reject_project_request, set_project_status, submit_questionnaire, 3 CodeGen endpoints, + lacunas N/A registradas). 16 testes; nenhum ponto instrumentado (escopo 13.6/13.7).
 - ✅ **Fase 13.6** Instrumentação projeto + questionário — **FECHADA 2026-04-20**. 3 pontos: `reject_project_request` (PROJECT_REJECTED), `set_project_status` (PROJECT_STATUS_CHANGED), `submit_questionnaire` (SUBMITTED + APPROVED|REJECTED com correlation_id compartilhado). 5 testes (3 estáticos, 2 E2E).
-- **Fase 13.7** Instrumentação OCG (update_from_arguider, rollback, consolidate) + CodeGen (scaffold, apply, regenerate-file) + teste E2E de chain integrity (`verify_chain()` íntegra após série de ações).
+- ✅ **Fase 13.7** Instrumentação CodeGen + chain integrity E2E — **FECHADA 2026-04-20**. 3 endpoints CodeGen instrumentados (generate_scaffold, apply_scaffold, regenerate_file) com eventos canônicos. Teste E2E grava série de 7 eventos canônicos de 4 domínios e valida `verify_chain()` íntegra. OCG `update_from_arguider` já era SIM desde 11.4; rollback/consolidate seguem N/A per inventário §3.0. 4 testes.
 
 **Regras duras (do contrato §7 MVP 13):**
 - Fase 13.3 pode ser sub-dividida (13.3a Arguider / 13.3b OCG / 13.3c CodeGen) se o diagnóstico revelar entrelaçamento maior que o mapeado em 12.8.

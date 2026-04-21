@@ -626,6 +626,17 @@ async def generate_scaffold(
             nmi=sum(1 for f in files if f["status"] == "nmi"),
         )
 
+        # MVP 13 Fase 13.7 — audit canônico de scaffold gerado.
+        from app.services.audit_service import AuditEvents, AuditService
+        await AuditService(db).log_codegen_event(
+            event_type=AuditEvents.CODEGEN_SCAFFOLD_GENERATED,
+            actor_id=user_id,
+            project_id=project_id,
+            action="generate_scaffold_dry_run" if request.dry_run else "generate_scaffold_commit",
+            files_count=len(files),
+        )
+        await db.commit()
+
         from fastapi.responses import JSONResponse
 
         # MVP 3: modo preview é o default. Retorna files sem tocar no Git.
@@ -821,6 +832,18 @@ async def apply_scaffold(
         failed=failed,
         skipped_nmi=skipped_nmi,
     )
+
+    # MVP 13 Fase 13.7 — audit canônico de scaffold aplicado.
+    from app.services.audit_service import AuditEvents, AuditService
+    await AuditService(db).log_codegen_event(
+        event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
+        actor_id=user_id,
+        project_id=project_id,
+        action="apply_scaffold",
+        files_count=committed,
+        extra={"failed": failed, "skipped_nmi": skipped_nmi},
+    )
+    await db.commit()
 
     return ScaffoldApplyResponse(
         committed=committed,
@@ -1249,6 +1272,19 @@ async def regenerate_single_file(
             status=status_value,
             committed=bool(commit_result.get("success")),
         )
+
+        # MVP 13 Fase 13.7 — audit canônico de arquivo regenerado.
+        from app.services.audit_service import AuditEvents, AuditService
+        await AuditService(db).log_codegen_event(
+            event_type=AuditEvents.CODEGEN_FILE_REGENERATED,
+            actor_id=user_id,
+            project_id=project_id,
+            action="regenerate_file",
+            file_path=request.path,
+            commit_sha=commit_result.get("sha") or commit_result.get("commit_sha"),
+            extra={"status": status_value, "committed": bool(commit_result.get("success"))},
+        )
+        await db.commit()
 
         return RegenerateFileResponse(
             path=request.path,
