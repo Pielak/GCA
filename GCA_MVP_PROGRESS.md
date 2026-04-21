@@ -1,14 +1,33 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.53  
+Versão: 3.54  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-14 fechados. **MVP 15 FECHADO 2026-04-21** com 4/4 fases entregues. 15.4 (any remainder) alcançou meta ≤ 20 (76→20, 74% redução) via tipagem narrow em hooks/pages sem cascata. Tsc: 34 → 1 error (apenas DesignShowcasePage NodeJS namespace — fora de escopo MVP 15, backlog isolado).
+Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 ABERTO 2026-04-21** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Escopo: **C++ fundacional (Cluster A do gap) + DesignShowcase tsc fix + dogfood validation**. 5 fases trancadas em ≈1.5 semanas. Estado inicial: **definido — não iniciado**; implementação da Fase 16.1 exige autorização adicional explícita (§7.0 regra 3).
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
+**MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** — **ABERTO 2026-04-21, definido — não iniciado**. Aberto pelo protocolo §7.0 após diagnóstico OCG + reaproveitamento de `gca_cpp_codegen_gap.md`. Rejeita formalmente a proposta `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (1650h em 30 semanas) por incompatibilidade com §7.0 e §10.
+
+**Fases:**
+- ⏳ **Fase 16.1** Scaffolder C++ CMake (≈2-3d) — `cpp_cmake.py` + dispatch branch + teste de compilação em CI.
+- ⏳ **Fase 16.2** Estender `LinguagemBackend` enum + `OCG.STACK.backend.cpp_standard` (≈1d).
+- ⏳ **Fase 16.3** Test spec generator C++-aware (GoogleTest idioms) (≈1d).
+- ⏳ **Fase 16.4** DesignShowcasePage tsc fix — `NodeJS.Timeout` → `ReturnType<typeof setInterval>` (≈0.5d). Baseline tsc finalmente = 0.
+- ⏳ **Fase 16.5** Dogfood validation — 5 checks binários (Flower :5555, Celery task roundtrip, OCG rollback endpoint, OCG consolidate endpoint, e2e CI lane) (≈0.5d).
+
+**Regras duras:** cada fase exige gate §9 antes da próxima; stop-rule >2d por fase; nenhuma feature nova; §10 anti-refactor-vizinho; 16.5 é validação binária (falhas viram DT, não bloqueiam fechamento); 16.2 é pré-requisito de 16.3.
+
+**Baseline de entrada:** 1506 passing, 5 skipped; tsc = 1; any = 20; MVP 15 fechado (`0751c0a`).
+**Meta de saída:** C++ scaffoldado + tsc = 0 + dogfood validado nos 5 itens (ou DTs registrados).
+
+**Próximo marco operacional:** autorização explícita da Fase 16.1.
+
+---
+
+### MVP anterior fechado
 **MVP 15 — Limpeza do backlog parked pós-MVP 14** — **FECHADO 2026-04-21** com 4/4 fases entregues.
 
 **Fases:**
@@ -22,7 +41,7 @@ Status: **controle de avanço por fase** — MVPs 1-14 fechados. **MVP 15 FECHAD
 
 ---
 
-### MVP anterior fechado
+### MVP 14 (referência histórica)
 **MVP 14 — Saneamento de follow-up pós-MVP 13 + OCG maturity + type safety + observabilidade Celery** — **FECHADO 2026-04-20 com 10/11 fases entregues + 1 N/A + 1 parcial com stop-rule**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0; fechado no mesmo dia após suite verde **1506/1506 passing (+13 vs baseline 1493)**.
 
 **Fases:**
@@ -612,10 +631,12 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (pós-MVP 15)
-**ABERTO — MVP 15 fechado com 4/4 fases entregues.**
+### Situação atual do gate (MVP 16 — abertura)
+**ABERTO PARA AVALIAÇÃO — MVP 16 definido, não iniciado.**
 
-Baseline pós-MVP 15: **1506 passing, 5 skipped**; tsc = 1 error isolado (DesignShowcasePage NodeJS namespace — backlog isolado, não afeta build de produção). 20 `any` restantes no frontend (meta ≤ 20 atingida). Todo item parked do MVP 14 absorvido ou formalmente desqualificado.
+MVP 16 nasce com gate §9 aberto (critério binário 1-9 todos SIM): zero blocker/critical/contradição herdado do MVP 15; suíte verde (1506 passing); tsc = 1 error residual isolado (alvo da Fase 16.4). Gate vira "fechado" durante execução de fase e volta a "aberto" ao final.
+
+Baseline pós-MVP 15 (de entrada do 16): **1506 passing, 5 skipped**; tsc = 1; any = 20 (meta atingida em 15.4); shadcn limpo (só 4 componentes próprios).
 
 ---
 
@@ -917,6 +938,8 @@ Antes de qualquer mudança:
 | 2026-04-20 | Abertura de **MVP 14 — Saneamento de follow-up pós-MVP 13 + OCG maturity + type safety + observabilidade Celery** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 14` (nova subseção com 11 fases em 7 temas A-G) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.36, §1 MVP ativo = MVP 14 definido/não-iniciado, §2 escopo, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = autorização fase 14.1). Escopo: Tema A Celery residual (14.1 questionnaire + 14.2 gatekeeper TODO); Tema B CI/operacional (14.3 rebuild --no-cache + 14.4 canário e2e); Tema C TSC baseline (14.5 shadcn não usados + 14.6 TesterReviewPage); Tema D OCG maturity (14.7 rollback + 14.8 consolidate); Tema E type safety (14.9 91 `any`); Tema F observabilidade (14.10 Flower+Prometheus); Tema G refactor shadcn usado (14.11). **Fora explícito**: Identity Federation SSO OIDC/SAML (sem cliente real), Data Federation (exige emenda §3), Federated Learning (GCA não treina). Estado "definido — não iniciado"; implementação por fase exige autorização adicional (§7.0 regra 3). Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 14), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§10` | Capturar em ciclo canônico as dívidas residuais pós-MVP 13: pontos de `asyncio.create_task` fora do escopo 13.3 (watchdog DT-073 cobria), rebuild definitivo de imagem, canário e2e real, limpeza tsc baseline, OCG maturity (rollback/consolidate N/A no inventário 13.5), remoção dos 91 `any` (follow-up 12.7), Flower/Prometheus (fora de escopo 13.4 explícito), refactor shadcn. SSO e Data Federation ficam fora até pedido explícito (sem cliente real para testar; contrato §3 exige emenda). Protocolo §7.0 evita implementação silenciosa. Sem mudança de código. |
 | 2026-04-20 | Abertura + autorização de execução de **MVP 15 — Limpeza do backlog parked pós-MVP 14** em mensagem única do stakeholder-soberano (protocolo §7.0 + autorização em bloco dos 4 itens parked). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 15` (nova subseção com 4 fases) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.49, §1 MVP ativo = MVP 15 em execução, §6 gate aberto para avaliação, §10 próximo marco = execução em ordem 15.1→15.4). Escopo: 15.1 shadcn pass 2 (33 órfãos); 15.2 AdminMetrics HintCard (1 error tsc); 15.3 e2e tests 02-14 rewrite; 15.4 any remainder (76→≤20) com stop-rule > 2d. **Fora explícito**: SSO/Federation/FL permanecem fora; Futura Visão parked. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 15), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§2`/`§6`/`§9`/`§10` | Absorver em ciclo canônico os 4 itens residuais que estavam parked no §10 pós-MVP 14 (saneamento estrito, sem feature nova). Stakeholder autorizou abertura + execução simultaneamente — §7.0 regra 3 atendida na mesma mensagem. |
 | 2026-04-21 | Fechamento de **MVP 15** com 4/4 fases entregues. Fases commitadas atomicamente: 15.1 `24f34df` (33 shadcn órfãos removidos; tsc 34→2); 15.2 `ed0d075` (HintCard prop `hint?: string` no Section local; tsc 2→1); 15.3 `f54e2b7` (e2e 12 tests alinhados a rotas/seletores canônicos; removidos 08 legacy + 09 merge); 15.4 (any 76→20, −74% via tipagem narrow em ~20 arquivos; meta ≤20 atingida). Suite inalterada (1506 passing — 15.x é refactor/cleanup sem testes novos). Tsc baseline de saída: 1 error isolado (DesignShowcase NodeJS namespace — backlog isolado, fix trivial). | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§6` (situação atual) + `§9` esta linha + `§10` (próximo marco limpo) | Encerrar MVP 15 no ciclo canônico. Aplicou §10 (constraint de escopo): fase 15.4 usou tipagem cirúrgica em vez de cascata cross-file; stop-rule respeitada ao achieving target sem reverter ganhos. Produto fica em estado baseline técnico melhor que antes de MVP 14: tsc praticamente zero, e2e lane em rotas canônicas, any em patamar mínimo razoável. Sem novo MVP autorizado. |
+| 2026-04-21 | **Rejeição formal** de `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (proposta externa de 1.650h em 30 semanas sobre "OCG v2 com 15 seções"). Motivos binários: (a) incompatível com §7.0 (viola MVP iterativo — `feedback_mvp_over_end_to_end.md`); (b) desconectado do código real (OCG atual já tem 12 seções com fallback determinístico; doc propõe "15" sem identificar as 3 novas); (c) cita entidades inexistentes ("BRD Agent", "News Intake"); (d) estimativas fantasiosas (70h para definir conteúdo); (e) reinventa features já existentes (LiveDocs, Definition of Done, RBAC, hash chain). | Sem mudança de código; registro para trilha de decisão. `gca_session_23_2026_04_20_21.md` memória. | Preservar trilha canônica: propostas não vêm de fora do código; diagnóstico vem primeiro, MVP depois. Aplicou `feedback_honesty_over_completeness` + §10. |
+| 2026-04-21 | Abertura de **MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano após diagnóstico curto de OCG + reaproveitamento de `gca_cpp_codegen_gap.md`). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 16` (nova subseção com 5 fases trancadas em ≈1.5 semanas) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.54, §1 MVP ativo = MVP 16 definido/não-iniciado, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = autorização Fase 16.1). Escopo: 16.1 scaffolder C++ CMake (≈2-3d); 16.2 enum `LinguagemBackend` + `cpp_standard` (≈1d); 16.3 test spec GoogleTest-aware (≈1d); 16.4 DesignShowcase tsc fix → 0 (≈0.5d); 16.5 dogfood validation (≈0.5d). **Fora explícito**: OCG v2 (rejeitado), Clusters B/C/D C++, auto-trigger consolidate, APPROVAL_STATUS banner UI, IaC scaffolder, policy-as-code, NoSQL avançado, questionário C++ expandido, SSO/Federation/FL, Futura Visão. Estado "definido — não iniciado"; implementação Fase 16.1 exige autorização adicional (§7.0 regra 3). Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 16), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§6`/`§9`/`§10` | Absorver em ciclo canônico o gap C++ documentado (`gca_cpp_codegen_gap.md` — 15/17 fases canônicas sem cobertura) + DT trivial do DesignShowcase + validação formal de dogfood. Escopo mínimo (1.5 semanas) respeita `feedback_mvp_over_end_to_end.md`. Protocolo §7.0 evita implementação silenciosa; fase individual precisa autorização explícita. Sem mudança de código neste commit. |
 | 2026-04-20 | Fechamento de **MVP 14** com 10/11 fases entregues + 1 N/A (14.11) + 1 parcial com stop-rule (14.9). Fases commitadas atomicamente: 14.1–14.5 prévias; 14.6 `886652c` (TestArtifactCard type alignment); 14.7 `fdeeddd` (OCG rollback_to_version formal + audit `OCG_ROLLED_BACK`); 14.8 `876a256` (OCG consolidate_ocg explícito + audit `OCG_CONSOLIDATED` + endpoint); 14.9 `1bed30d` (91→76 any; stop-rule > 2d); 14.10 `a0abfc3` (Flower :5555 + 3 gauges Celery Prometheus). 14.11 N/A: diagnóstico comprovou zero shadcn primitivo importado (os únicos imports `@/components/ui/*` são para 4 componentes próprios). Suite pós-MVP 14: **1506 passing, 5 skipped**. Backlog residual parked: "any pass 2" (76 restantes), "shadcn pass 2" (33 órfãos), "AdminMetrics HintCard", "14.4 e2e tests 02-14 rewrite". | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§6` (situação atual) + `§10` (próximo marco limpo — nenhum MVP autorizado) + `§9` esta linha | Encerrar MVP 14 no ciclo canônico. Temas A/B/C/D/F completos; Tema E (type safety) com redução segura + restante parked; Tema G (shadcn usado) N/A porque premissa não existe no código atual. Aplicar §10 (constraint de escopo): fases com stop-rule pararam no limite em vez de cascatar refactor cross-file; backlog residual documentado no §10. Sem próximo MVP autorizado. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
@@ -925,11 +948,30 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-MVP 15 **FECHADO 2026-04-21** com 4/4 fases entregues. Próximo marco é **autorização explícita para novo MVP** (§7.0 regra 3). Nenhum MVP autorizado.
+MVP 16 **ABERTO 2026-04-21 pelo protocolo §7.0 — estado definido, não iniciado**. Próximo marco é **autorização explícita da Fase 16.1** (§7.0 regra 3). Escopo travado em 5 fases ≈1.5 semanas.
 
-Backlog residual pós-MVP 15:
-- **DesignShowcasePage NodeJS namespace**: 1 error tsc isolado (TS2503 Cannot find namespace 'NodeJS' na linha 37). Fora de escopo MVP 15; fix trivial (`NodeJS.Timeout` → `ReturnType<typeof setInterval>`) em MVP futuro ou standalone.
-- **20 any restantes**: meta atingida; reduzir além disso exigiria tipagem profunda de OCG/PILLAR_SCORES e api.ts `T=any` default (cascata cross-file).
+Ordem canônica obrigatória:
+1. **Fase 16.1** Scaffolder C++ CMake (≈2-3d)
+2. **Fase 16.2** Estender `LinguagemBackend` + `OCG.STACK.backend.cpp_standard` (≈1d) — pré-requisito de 16.3
+3. **Fase 16.3** Test spec generator C++-aware (GoogleTest) (≈1d)
+4. **Fase 16.4** DesignShowcase NodeJS namespace fix — tsc → 0 (≈0.5d)
+5. **Fase 16.5** Dogfood validation de 5 itens binários (≈0.5d)
+
+Regras duras durante execução:
+- Cada fase exige revalidação §9 antes da próxima.
+- **Stop-rule dura >2d** por fase.
+- 16.5 é validação binária (falhas viram DT, não bloqueiam fechamento).
+- §10 (anti-alucinação): zero refactor vizinho, zero melhoria não-solicitada.
+
+Backlog parked (NÃO entra no MVP 16):
+- OCG v2 / 15 seções (proposta `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` formalmente rejeitada em 2026-04-21 — incompatível com §7.0 e §10).
+- C++ Clusters B/C/D (CI matrix, sanitizers, Doxygen, CPack, ABI macros, embedded, GPU).
+- Auto-trigger de `consolidate_ocg` pós-eventos canônicos.
+- APPROVAL_STATUS banner UI por aba.
+- IaC scaffolder (Terraform/Helm/k8s).
+- Policy-as-code (Rego/OPA).
+- NoSQL avançado no DATA_MODEL (Cassandra, DynamoDB).
+- 20 `any` restantes (meta ≤20 atingida).
 
 Backlog permanente (fora de MVP):
 - Identity Federation / Data Federation / Federated Learning — fora até pedido explícito.

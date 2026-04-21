@@ -860,6 +860,84 @@ Portanto, a fase ativa não deve ser tratada como “expandir produto”, mas co
 
 ---
 
+### MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation
+
+**Motivação:** pós-fechamento do MVP 15, o diagnóstico binário de OCG (memória `gca_session_23_2026_04_20_21.md` + `gca_cpp_codegen_gap.md`) mostrou que o OCG atual está estruturalmente completo (12 seções com fallback determinístico — agent_service.py:680-737). Os gaps reais são de **propagação + linguagem-awareness**, não de modelagem. Três entregas combinam num MVP de ≈1.5 semanas: (a) suporte fundacional a C++ no codegen (Cluster A do gap — scaffolder CMake + enum backend + test spec), fechando a única linguagem de alto impacto ausente; (b) fix tsc residual do DesignShowcase que está parked desde MVP 14; (c) validação formal de dogfood dos endpoints/servers entregues em MVPs 13-15 mas nunca verificados com produto rodando. Timeline 1-2 semanas com stop-rule dura >2d por fase.
+
+**Não entra no MVP 16 (explícito):**
+- **OCG v2 / 15 seções** — rejeitado formalmente em 2026-04-21 após análise do `TASK_MELHORIAS_OCG_REALISTA_v1.1.md`: OCG atual tem 12 seções e está estruturalmente completo; gaps reais são de propagação.
+- **Cluster B C++** (CI matrix gcc×clang×msvc, sanitizers, Doxygen) — MVP 17 potencial.
+- **Cluster C C++** (packaging CPack, export macros ABI) — MVP 17 ou 18.
+- **Cluster D C++** (embedded ARM/ESP32, GPU CUDA/SYCL) — parked indefinidamente até pedido.
+- **Auto-trigger de `consolidate_ocg`** pós-eventos canônicos — deferido; hoje é manual via 14.8.
+- **APPROVAL_STATUS banner UI** por aba quando BLOCKED — deferido.
+- **IaC scaffolder** (Terraform/Helm/k8s manifests) — não planejado.
+- **Policy-as-code** (Rego/OPA para COMPLIANCE_CHECKLIST) — não planejado.
+- **NoSQL avançado** (Cassandra, DynamoDB no DATA_MODEL) — não planejado.
+- **Questionário expandido** para C++ (artifact type, target platforms, package manager) — V1 usa defaults; Q-cpp-* fica para MVP 17.
+- **Identity Federation / Data Federation / Federated Learning** — seguem fora.
+
+#### Em escopo
+
+**Fase 16.1 — Scaffolder C++ CMake (≈2-3d)**
+- Novo `backend/app/services/scaffolders/cpp_cmake.py` + `cpp_cmake` em `dispatch.py`.
+- Emite: `CMakeLists.txt` mínimo (C++17, target executable), `src/main.cpp`, `include/<project>/` vazio pronto, `tests/test_main.cpp` (GoogleTest), `.clang-format`, `.clang-tidy`, `.gitignore`, `Dockerfile` multi-stage (builder + runner), `README.md`.
+- Artefato V1: executável apenas (library/header-only ficam para V2).
+- Teste: scaffolder roda + projeto gerado compila `cmake -B build && cmake --build build` dentro de container docker em CI.
+
+**Fase 16.2 — Estender `LinguagemBackend` enum + OCG STACK (≈1d)**
+- `schemas/questionnaire.py`: adiciona `CPP = "C++"` ao enum `LinguagemBackend`.
+- `OCG.STACK_RECOMMENDATION.backend` aceita campo novo `cpp_standard` com default `"17"`.
+- `dispatch.py`: branch `if language in ("c++", "cpp", "cplusplus")` → `scaffold_cpp_cmake(spec)`.
+- Sem nova pergunta no questionário (V1 usa defaults; Q-cpp-* vira MVP 17).
+- Analyzer (agente 0) aceita "C++" no texto livre Q27 "Outra" e normaliza para o enum.
+
+**Fase 16.3 — Test spec generator C++-aware (≈1d)**
+- `test_spec_generator_service.py`: quando `backend.language == "c++"`, emite specs em formato `TEST(Suite, Case)` (GoogleTest).
+- Cobertura: unit, integration, e2e com idioms canônicos (EXPECT_EQ, EXPECT_THAT, GTEST_SKIP, fixtures com TEST_F).
+- `provenance_json` marca `test_framework: "googletest"`.
+
+**Fase 16.4 — DesignShowcasePage tsc fix (≈0.5d)**
+- `frontend/src/pages/DesignShowcasePage.tsx:37` — `NodeJS.Timeout` → `ReturnType<typeof setInterval>`.
+- Baseline tsc chega a **0 errors** (pela primeira vez desde MVP 14).
+
+**Fase 16.5 — Dogfood validation (≈0.5d)**
+- Validação binária sim/não por item contra instância dogfood:
+  - Flower `:5555` responde (`curl -fsS http://localhost:5555/` HTTP 200).
+  - Celery worker processa task (enfileirar `ping.delay()`, medir tempo até conclusão < 5s).
+  - `POST /projects/:id/ocg/rollback/:v` contra DB real retorna 200 + versão incrementada.
+  - `POST /projects/:id/ocg/consolidate` contra DB real retorna 200 + `changed` boolean.
+  - CI e2e lane executa com sucesso em trigger de PR dummy (ou nota explícita que não foi possível validar).
+- Falhas viram DTs novas (não bloqueiam fechamento do MVP 16).
+- Registra resultado em `GCA_MVP_PROGRESS.md §3` como DTs ou ✅.
+
+#### Regras duras
+
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- **Stop-rule dura >2d** por fase (exceto 16.4 e 16.5 que são limites já <1d).
+- Nenhuma feature nova além do escopo das 5 fases.
+- §10 aplicável: zero refactor vizinho, zero melhoria não-solicitada.
+- **16.5 é validação binária**, não implementação — falhas vão para backlog.
+- Nenhuma fase escreve teste contra DB de produção (§11.3 — usar `gca_test` via `TEST_DATABASE_URL`).
+- RBAC imutável (§4) — C++ não introduz papel novo.
+- **16.2 é pré-requisito de 16.3** (test spec precisa saber que C++ é linguagem canônica).
+
+#### RBAC preservado (§4.1)
+
+- Nenhuma mudança em papéis canônicos.
+- Scaffolder C++ disparado pelo CodeGen existente; RBAC `code:write` já gate (MVP 3).
+
+#### Baseline de entrada (2026-04-21)
+
+- Suite backend: **1506 passing, 5 skipped**.
+- Frontend tsc: **1 error residual** (DesignShowcase — alvo da 16.4).
+- `any` frontend: 20 (meta ≤20 atingida em 15.4).
+- MVP 15 fechado (`0751c0a`).
+- Sem blockers/criticals abertos.
+- Shadcn `src/components/ui/`: só 4 componentes próprios (15.1 limpo).
+
+---
+
 ## 9. Regras duras de implementação
 
 - Não antecipar feature de MVP futuro.
