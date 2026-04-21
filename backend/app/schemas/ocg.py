@@ -232,6 +232,13 @@ class OCGResponse(BaseModel):
     # Inferência determinística via data_model_inference.infer_data_model.
     # Alimenta ddl_generator_service (Fase 2) e scaffolders (Fase 3).
     DATA_MODEL: Any = {}
+    # MVP 19 Fase 19.1 — regras de negócio canônicas do domínio.
+    # Lista de dicts com {id, title, description, source, created_at}
+    # populada pelo GP manualmente ou pelo agente Consolidator quando
+    # inferível do questionário/ingestão. Default [] preserva compat
+    # com OCGs pré-19 — nenhum consumidor é obrigado a ter BUSINESS_RULES
+    # populado. Alimenta a seção 3.3 do ERS (Fase 19.2).
+    BUSINESS_RULES: Any = []
 
     class Config:
         from_attributes = True

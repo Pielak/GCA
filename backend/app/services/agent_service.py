@@ -770,6 +770,20 @@ Return complete JSON analysis with score, classification, findings, and recommen
                     "inference_rationale": [],
                 }
 
+            # MVP 19 Fase 19.1 — BUSINESS_RULES. Preserva o que o agente
+            # popular (ocg_json) e cai em [] quando ausente. Sem heurística
+            # determinística em V1 — regras de negócio são domínio-específicas
+            # e arriscado inferir automaticamente; GP popula manualmente via
+            # UI (Fase 19.2+).
+            business_rules_from_agent = (
+                ocg_json.get("BUSINESS_RULES")
+                or ocg_json.get("business_rules")
+            )
+            if isinstance(business_rules_from_agent, list):
+                ocg_response.BUSINESS_RULES = business_rules_from_agent
+            else:
+                ocg_response.BUSINESS_RULES = []
+
             # Salvar no banco
             await self.save_ocg(ocg_response)
 

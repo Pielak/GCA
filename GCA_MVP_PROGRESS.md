@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.66  
+Versão: 3.67  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-18 fechados. **MVP 19 ABERTO 2026-04-21 + EMENDADO** pelo protocolo §7.0 — ERS Vivo (IEEE 830). Emenda importante: ERS passa a ser arquivo versionado no repositório Git do projeto (`docs/ERS.md`) via `git_service` existente — elimina tabela `live_doc_revisions` e Fase 19.5 (histórico é `git log`). Escopo passa de 5 fases (~7d) para **4 fases (~5-6d)**: schema expansion → generator IEEE 830 + commit Git → glossário vivo → matriz de rastreabilidade. Decisão binária nova (#6): regeneração é manual (GP clica); sistema detecta stale via eventos do pipeline mas não regenera sozinho. Estado: **definido — não iniciado**; execução exige autorização adicional por fase (§7.0 regra 3).
+Status: **controle de avanço por fase** — MVPs 1-18 fechados. **MVP 19 em execução 2026-04-21**. **Fase 19.1 FECHADA**: migration 033 aplicada em `gca` + `gca_test` adicionando `requirement_category VARCHAR(20) NULL` em `module_candidates` + índice parcial; modelo `ModuleCandidate` atualizado; `OCGResponse` ganha campo `BUSINESS_RULES: list[dict] = []` com fallback determinístico em `agent_service.consolidate_ocg` (aceita lista do agente, ignora tipos inválidos, cai em `[]` quando ausente). 13 testes novos, zero regressão em 14 testes de OCG/rollback/consolidate. Fases 19.2-19.4 seguem na ordem canônica.
 
 ---
 

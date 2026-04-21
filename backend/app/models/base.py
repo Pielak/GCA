@@ -1112,6 +1112,11 @@ class ModuleCandidate(Base):
     external_reference_content = Column(Text, nullable=True)
     external_reference_fetched_at = Column(DateTime(timezone=True), nullable=True)
     external_reference_fetch_error = Column(Text, nullable=True)
+    # MVP 19 Fase 19.1 — classificação IEEE 830 do requisito (migration 033).
+    # Valores canônicos aplicação-level: functional | non_functional |
+    # business_rule | NULL (ainda não classificado pelo GP). Whitelist
+    # validada em app; banco aceita qualquer string ≤ 20 chars.
+    requirement_category = Column(String(20), nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -1121,6 +1126,7 @@ class ModuleCandidate(Base):
     __table_args__ = (
         Index("idx_module_candidates_project", project_id),
         Index("idx_module_candidates_status", project_id, status),
+        Index("idx_module_candidates_requirement_category", project_id, requirement_category),
     )
 
 
