@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.67  
+Versão: 3.68  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-18 fechados. **MVP 19 em execução 2026-04-21**. **Fase 19.1 FECHADA**: migration 033 aplicada em `gca` + `gca_test` adicionando `requirement_category VARCHAR(20) NULL` em `module_candidates` + índice parcial; modelo `ModuleCandidate` atualizado; `OCGResponse` ganha campo `BUSINESS_RULES: list[dict] = []` com fallback determinístico em `agent_service.consolidate_ocg` (aceita lista do agente, ignora tipos inválidos, cai em `[]` quando ausente). 13 testes novos, zero regressão em 14 testes de OCG/rollback/consolidate. Fases 19.2-19.4 seguem na ordem canônica.
+Status: **controle de avanço por fase** — MVPs 1-18 fechados. **MVP 19 em execução 2026-04-21**. **Fases 19.1 + 19.2 FECHADAS**: 19.2 entrega `ers_doc_generator_service.py` (`build_ers_markdown` puro + `generate_and_commit_ers` que commita `docs/ERS.md` via `git_service` existente) + freshness calculado ao vivo via audit log (zero tabela dedicada — respeita decisão #5 do contrato) + 3 endpoints HTTP + componente `ERSCard.tsx` integrado na LiveDocsPage. 9 eventos stale canônicos monitorados. 14 testes unit novos; 27/27 regressão 19.1+19.2 verde. Smoke live: `GET /docs/ers/freshness` contra dogfood retornou estado real. Fases 19.3-19.4 seguem.
 
 ---
 

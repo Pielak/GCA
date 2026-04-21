@@ -9,6 +9,7 @@ import {
 } from '@/hooks/useLiveDocs'
 import { useStaleSummary } from '@/hooks/useTestSpecs'
 import { LiveDocModal } from '@/components/livedocs/LiveDocModal'
+import { ERSCard } from '@/components/livedocs/ERSCard'
 
 /**
  * MVP 10 Fase 10.7 — Documentação Viva real (LiveDocs).
@@ -131,6 +132,11 @@ export function LiveDocsPage() {
           })}
         </div>
       </div>
+
+      {/* MVP 19 Fase 19.2 — card do ERS (arquivo docs/ERS.md no Git).
+          Vive separado dos LiveDocs tradicionais porque tem UX diferente:
+          um único documento por projeto, commit no repo, histórico via git. */}
+      {projectId && <ERSCard projectId={projectId} />}
 
       {/* Stale banner — aggregate via stale-summary quando disponível */}
       {staleCount > 0 && (
