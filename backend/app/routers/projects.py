@@ -995,6 +995,32 @@ async def rollback_ocg(
     return {"success": True, **result}
 
 
+@router.post("/{project_id}/ocg/consolidate")
+async def consolidate_ocg(
+    project_id: UUID,
+    permissions: dict = Depends(require_action("project:manage_team")),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 14 Fase 14.8 — consolidação explícita do OCG.
+
+    Recalcula `COMPOSITE_SCORE`/`status`/`is_blocking` a partir de
+    `PILLAR_SCORES` atuais. Idempotente: se nada mudar, retorna
+    `changed=False`. Emite `OCG_CONSOLIDATED` em `audit_log_global`.
+    """
+    from app.services.ocg_service import OCGService
+
+    current_user_id = permissions["user_id"]
+    try:
+        result = await OCGService(db).consolidate_ocg(
+            project_id=project_id,
+            actor_id=current_user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    return {"success": True, **result}
+
+
 @router.get("/{project_id}/ocg/health")
 async def get_ocg_health(
     project_id: UUID,

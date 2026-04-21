@@ -283,6 +283,151 @@ class OCGService:
             "restored_from": version_to,
         }
 
+    async def consolidate_ocg(
+        self,
+        project_id: UUID,
+        actor_id: Optional[UUID] = None,
+    ) -> dict:
+        """MVP 14 Fase 14.8 — consolidação explícita do OCG.
+
+        Lê o OCG atual do projeto, recalcula `overall_score` e `status`
+        a partir do bloco `PILLAR_SCORES`, aplicando as regras canônicas
+        do contrato §5 (BLOCKED se P7<70 ou P2<70; READY≥90; NEEDS_REVIEW≥75;
+        AT_RISK caso contrário).
+
+        Se houver mudança, grava nova versão + delta `trigger_source=
+        'consolidation'` + emite `OCG_CONSOLIDATED`. Se não houver mudança,
+        é no-op e retorna `changed=False`.
+        """
+        from app.services.audit_service import AuditService, AuditEvents
+
+        ocg_result = await self.db.execute(
+            select(OCG)
+            .where(OCG.project_id == project_id)
+            .order_by(OCG.created_at.desc())
+            .limit(1)
+        )
+        ocg = ocg_result.scalar_one_or_none()
+        if not ocg:
+            raise ValueError("OCG do projeto não encontrado")
+
+        data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+        pillar_scores = data.get("PILLAR_SCORES") or {}
+        scores: list[float] = []
+        p2_score: Optional[float] = None
+        p7_score: Optional[float] = None
+        for key, value in pillar_scores.items():
+            score = None
+            if isinstance(value, dict):
+                score = value.get("score")
+            elif isinstance(value, (int, float)):
+                score = value
+            if score is None:
+                continue
+            scores.append(float(score))
+            if key.upper() == "P2":
+                p2_score = float(score)
+            elif key.upper() == "P7":
+                p7_score = float(score)
+
+        overall = round(sum(scores) / len(scores), 1) if scores else 0.0
+        is_blocking = (p2_score is not None and p2_score < 70) or (
+            p7_score is not None and p7_score < 70
+        )
+        if is_blocking:
+            status = "BLOCKED"
+        elif overall >= 90:
+            status = "READY"
+        elif overall >= 75:
+            status = "NEEDS_REVIEW"
+        else:
+            status = "AT_RISK"
+
+        composite_before = data.get("COMPOSITE_SCORE") or {}
+        status_before = ocg.status
+        score_before = ocg.overall_score
+        composite_after = {
+            "overall": overall,
+            "is_blocking": is_blocking,
+            "status": status,
+        }
+        unchanged = (
+            (score_before or 0.0) == overall
+            and status_before == status
+            and composite_before.get("overall") == overall
+            and composite_before.get("status") == status
+        )
+        if unchanged:
+            return {"changed": False, "version": ocg.version}
+
+        version_from = ocg.version
+        new_version = version_from + 1
+
+        data["COMPOSITE_SCORE"] = composite_after
+        ocg.ocg_data = json.dumps(data, ensure_ascii=False)
+        ocg.overall_score = overall
+        ocg.status = status
+        ocg.is_blocking = is_blocking
+        ocg.version = new_version
+        ocg.updated_at = datetime.now(timezone.utc)
+        self.db.add(ocg)
+
+        delta = OCGDeltaLog(
+            project_id=project_id,
+            document_id=None,
+            ocg_version_from=version_from,
+            ocg_version_to=new_version,
+            fields_changed=json.dumps(
+                {
+                    "COMPOSITE_SCORE": {
+                        "old": composite_before,
+                        "new": composite_after,
+                    }
+                },
+                ensure_ascii=False,
+            ),
+            change_summary=f"Consolidação v{version_from}→v{new_version}",
+            changed_by=actor_id,
+            trigger_source="consolidation",
+            ocg_snapshot=json.dumps(data, ensure_ascii=False),
+        )
+        self.db.add(delta)
+        await self.db.flush()
+
+        await AuditService(self.db).log_ocg_event(
+            event_type=AuditEvents.OCG_CONSOLIDATED,
+            actor_id=actor_id,
+            project_id=project_id,
+            version_from=version_from,
+            version_to=new_version,
+            extra={
+                "composite_before": composite_before,
+                "composite_after": composite_after,
+                "status_before": status_before,
+                "status_after": status,
+            },
+        )
+
+        await self.db.commit()
+
+        logger.info(
+            "ocg.consolidated",
+            project_id=str(project_id),
+            version_from=version_from,
+            version_to=new_version,
+            overall_score=overall,
+            status=status,
+        )
+
+        return {
+            "changed": True,
+            "previous_version": version_from,
+            "new_version": new_version,
+            "overall_score": overall,
+            "status": status,
+            "is_blocking": is_blocking,
+        }
+
     async def get_next_version(self, project_id: UUID) -> int:
         """Retorna a próxima versão do OCG para o projeto"""
         result = await self.db.execute(

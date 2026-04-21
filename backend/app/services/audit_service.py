@@ -89,6 +89,12 @@ class AuditEvents:
     # restored_from, timestamp}. Emitido por OCGService.rollback_to_version.
     OCG_ROLLED_BACK = "ocg_rolled_back"
 
+    # MVP 14 Fase 14.8 — Evento canônico de consolidação explícita de OCG
+    # Payload em details: {actor_id, project_id, version_from, version_to,
+    # composite_before, composite_after, status_before, status_after,
+    # timestamp}. Emitido por OCGService.consolidate_ocg.
+    OCG_CONSOLIDATED = "ocg_consolidated"
+
 logger = structlog.get_logger(__name__)
 
 
@@ -362,7 +368,7 @@ class AuditService:
         Hoje cobre OCG_ROLLED_BACK. Payload: actor_id + project_id +
         version_from + version_to + restored_from + timestamp.
         """
-        allowed = {AuditEvents.OCG_ROLLED_BACK}
+        allowed = {AuditEvents.OCG_ROLLED_BACK, AuditEvents.OCG_CONSOLIDATED}
         if event_type not in allowed:
             raise ValueError(f"event_type inválido para log_ocg_event: {event_type!r}")
 
