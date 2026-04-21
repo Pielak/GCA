@@ -475,6 +475,24 @@ O container `gca-frontend` roda `vite preview` sobre build estático — **não 
 
 Não cumprir esses 3 passos é a causa mais comum de "você disse que fez, mas eu continuo vendo o mesmo". Se o commit só toca backend, nenhum desses passos é necessário.
 
+#### Regra dura de sincronização do docker-compose.yml (DT-077)
+
+Mudança em `docker-compose.yml` (serviço novo, porta, env var, volume, healthcheck, depends_on, command) **não** é refletida automaticamente por `uvicorn --reload` nem por `docker restart <servico>` isolado. A rotina canônica é:
+
+```bash
+docker compose up -d
+```
+
+**Sem argumentos.** `up -d` sozinho sincroniza todos os serviços declarados: cria os novos, recria os que tiveram config alterada, deixa os iguais como estão. Restart de serviço específico (`docker restart X`) usa o config antigo que já está no container — a mudança do compose fica invisível até um `up -d` explícito.
+
+Armadilha histórica: MVP 14 Fase 14.10 adicionou `gca-celery-flower` ao compose, foi commitado, mas nunca subiu no dogfood porque `docker compose up -d` não foi executado. DT-077 aberta por isso na Fase 16.5. **Toda vez que Claude editar `docker-compose.yml`, antes de declarar a entrega visível ao user:**
+
+1. `docker compose up -d` — sincroniza toda a stack com o compose novo.
+2. Validar binariamente o serviço afetado (ex: `docker ps`, `curl` na porta, `docker exec <svc> <ping>`).
+3. Se mudança afetou healthcheck, aguardar `start_period` antes de declarar `healthy`.
+
+Não cumprir estes passos faz o compose divergir silenciosamente do estado rodando.
+
 ### Banco
 - Não remover tabelas/colunas existentes sem fase de deprecação
 - Toda mudança estrutural exige migração
