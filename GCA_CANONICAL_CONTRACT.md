@@ -938,6 +938,50 @@ Portanto, a fase ativa não deve ser tratada como “expandir produto”, mas co
 
 ---
 
+### MVP 17 — Saneamento operacional Celery (DT-077 + DT-078)
+
+**Motivação:** pós-fechamento do MVP 16 (5/5 fases entregues), restam **2 DTs minor abertas em §3.3** descobertas na Fase 16.5 (dogfood validation): DT-077 (Flower não auto-start após update do docker-compose.yml) e DT-078 (worker healthcheck usa hostname literal causando flag `unhealthy` mesmo com worker respondendo ping em 58ms). Ambas sem impacto funcional, mas fecham o gate §9 em todos os 10 critérios. MVP pequeno (~1h total) para zerar o backlog de DTs.
+
+**Não entra no MVP 17 (explícito):**
+- Nenhum item parked em outro MVP ou §10.
+- Refactor de docker-compose.yml além dos 2 fixes.
+- Migração de healthcheck engine (ex: para script externo).
+- Melhoria em Flower (auth, plugins, dashboards custom).
+
+#### Em escopo
+
+**Fase 17.1 — Fix healthcheck hostname (DT-078) (≈30min)**
+- `docker-compose.yml` serviço `celery-worker`: substituir `celery -A app.celery_app inspect ping -d celery@gca-celery-worker` por `celery -A app.celery_app inspect ping -d celery@$$HOSTNAME`.
+- `$$HOSTNAME` (com `$$` escapando interpolação do compose) resolve no runtime pro hostname real do container (ID curto do docker).
+- Validação binária: após `docker compose up -d --force-recreate celery-worker`, container reporta `Up (healthy)` em até 40s (start_period).
+- Teste: nenhum — é configuração de infra, validada empiricamente.
+
+**Fase 17.2 — Documentar rotina operacional pós-compose (DT-077) (≈30min)**
+- DT-077 não tem bug técnico: `gca-celery-flower` está correto no docker-compose.yml. O problema foi que `docker compose up -d` não foi re-executado após o commit de 14.10. Fix é **documentação operacional**, não código.
+- Adicionar em `CLAUDE.md §12` (Convenções técnicas → Backend) uma regra dura:
+  - "Toda vez que `docker-compose.yml` muda (serviço novo, porta, env, volume, healthcheck), executar `docker compose up -d` sem argumentos antes de declarar a mudança visível ao user. O up sem flags sincroniza todos os serviços declarados — sem isso, serviços novos ficam declarados mas não rodando."
+- Sem mudança de código no GCA core (só CLAUDE.md).
+
+#### Regras duras
+
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- **Stop-rule dura >2d** por fase (ambas são <1h).
+- Nenhuma feature nova além dos 2 fixes.
+- §10 aplicável: zero refactor vizinho.
+- Validação binária: 17.1 ok se healthcheck vira `healthy`; 17.2 ok se `CLAUDE.md §12` cobre a rotina.
+- RBAC imutável (§4).
+
+#### Baseline de entrada (2026-04-21)
+
+- Suite backend: **1506 passing, 5 skipped**.
+- Frontend tsc: **0 errors** (primeira vez desde MVP 14, entregue em 16.4).
+- `any` frontend: 20 (meta).
+- DTs abertas: 2 (DT-077 + DT-078 — alvos deste MVP).
+- MVP 16 fechado (`3b21758`).
+- Sem blockers/criticals.
+
+---
+
 ## 9. Regras duras de implementação
 
 - Não antecipar feature de MVP futuro.
