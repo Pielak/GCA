@@ -2,7 +2,7 @@
 
 Cria o ambiente mínimo reprodutível que `test_fluxo_completo.py`
 espera:
-- Admin `admin@gca.local` com senha `SenhaAdmin@2026`, ativo e
+- Admin `admin@gca-test.com` com senha `SenhaAdmin@2026`, ativo e
   com `first_access_completed=True` (evita bloqueio de 1º login).
 - Uma Organization.
 - 1 Project com id fixo `00000000-0000-0000-0000-000000000001`
@@ -36,7 +36,7 @@ from app.core.security import hash_password  # noqa: E402
 from app.models.base import Organization, Project, ProjectMember, User  # noqa: E402
 
 
-ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL", "admin@gca.local")
+ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL", "admin@gca-test.com")
 ADMIN_PASSWORD = os.environ.get("E2E_ADMIN_PASS", "SenhaAdmin@2026")
 PROJECT_ID = UUID(os.environ.get("E2E_PROJECT_UUID", "00000000-0000-0000-0000-000000000001"))
 PROJECT_SLUG = os.environ.get("E2E_PROJECT_SLUG", "e2e-canary")

@@ -19,7 +19,7 @@ import pytest
 # UUID canônico do projeto canário (deve bater com E2E_PROJECT_UUID
 # default do script seed_e2e).
 CANARY_PROJECT_UUID = UUID("00000000-0000-0000-0000-000000000001")
-CANARY_ADMIN_EMAIL = "admin@gca.local"
+CANARY_ADMIN_EMAIL = "admin@gca-test.com"
 
 
 def _run_seed(monkeypatch):

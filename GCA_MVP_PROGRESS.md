@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.39  
+Versão: 3.40  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1 + 14.2 + 14.3 FECHADAS 2026-04-20**. 14.3 (rebuild --no-cache definitivo): imagem fresh via `docker compose build --no-cache backend` valida 5 libs críticas (celery 5.6.3 / slowapi / pypdf 4.3.1 / reportlab 4.4.10 / esprima); CI estendido — jobs `test` e `docker-image` verificam todas as 5 num único import check. 3 testes (1 runtime + 2 yml inspection com skip em container). Fases 14.4-14.11 seguem.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.4 FECHADAS 2026-04-20** (14.4 parcial — infra validada, rewrite suite é DT). 14.4 (canário e2e real): `vite.config.ts` ganha `preview.allowedHosts` para `gca-frontend` (dogfood revelou Vite bloqueando host); seletores login ajustados (`type="email"` sem `name=`); redirect `/` (não `/dashboard`); admin canônico `admin@gca.local` → `admin@gca-test.com` (pydantic EmailStr rejeita `.local`); playwright + chromium runtime. `test_e2e_01_setup_status` passa; `test_e2e_02_login_redireciona_dashboard` requer diagnóstico do `handleLogin` frontend (condicional por project dropdown) — fora do escopo canônico do 14.4 "canário". TODO registrado no arquivo apontando rewrite tests 03-14 como escopo próprio. Fases 14.5-14.11 seguem.
 
 ---
 

@@ -75,7 +75,7 @@ jobs:
   e2e:
     # MVP 11 Fase 11.7 — lane dedicada de GUI E2E.
     # MVP 12 Fase 12.6 — seed canônico (`scripts/seed_e2e.py`) garante
-    # estado reprodutível: admin `admin@gca.local` + project UUID fixo +
+    # estado reprodutível: admin `admin@gca-test.com` + project UUID fixo +
     # membership GP. `continue-on-error` removido: a lane agora é gate
     # real — regressão em e2e falha o job.
     runs-on: ubuntu-latest
@@ -120,7 +120,7 @@ jobs:
       env:
         E2E_BASE_URL: http://localhost:3000
         E2E_API_URL: http://localhost:8000
-        E2E_ADMIN_EMAIL: admin@gca.local
+        E2E_ADMIN_EMAIL: admin@gca-test.com
         E2E_ADMIN_PASS: SenhaAdmin@2026
         E2E_PROJECT_ID: "00000000-0000-0000-0000-000000000001"
       run: |

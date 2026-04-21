@@ -30,7 +30,7 @@ pytestmark = pytest.mark.e2e
 
 BASE_URL = os.environ.get("E2E_BASE_URL", "http://gca-frontend:4173")
 API_URL = os.environ.get("E2E_API_URL", "http://gca-backend:8000")
-ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL", "admin@gca.local")
+ADMIN_EMAIL = os.environ.get("E2E_ADMIN_EMAIL", "admin@gca-test.com")
 ADMIN_PASS = os.environ.get("E2E_ADMIN_PASS", "SenhaAdmin@2026")
 PROJECT_ID = os.environ.get("E2E_PROJECT_ID", "1")
 
@@ -53,12 +53,18 @@ async def page(browser: Browser):
 
 
 async def login(page: Page) -> None:
-    """Helper: autentica como admin."""
+    """Helper: autentica como admin.
+
+    MVP 14 Fase 14.4: seletores ajustados pro estado atual do
+    `LoginPage.tsx` — input usa `type=` sem `name=`; redirect pós-login
+    vai para `/` (não `/dashboard`).
+    """
     await page.goto(f"{BASE_URL}/login")
-    await page.fill('[name="email"]', ADMIN_EMAIL)
-    await page.fill('[name="password"]', ADMIN_PASS)
+    await page.fill('input[type="email"]', ADMIN_EMAIL)
+    await page.fill('input[type="password"]', ADMIN_PASS)
     await page.click('button[type="submit"]')
-    await page.wait_for_url(f"{BASE_URL}/dashboard", timeout=10_000)
+    # Redirect pós-login vai para `/` (landing), não `/dashboard`.
+    await page.wait_for_url(f"{BASE_URL}/", timeout=10_000)
 
 
 # ──── Testes ──────────────────────────────────────────────────────────────────
@@ -73,9 +79,27 @@ async def test_e2e_01_setup_status_nao_exige_setup(page: Page):
 
 @pytest.mark.asyncio
 async def test_e2e_02_login_redireciona_dashboard(page: Page):
-    """Login com credenciais válidas → redireciona para /dashboard."""
+    """Login com credenciais válidas → redireciona para raiz `/`.
+
+    MVP 14 Fase 14.4: frontend atual redireciona pós-login para `/`
+    (landing), não `/dashboard`. Nome do teste mantido por trilha
+    histórica.
+    """
     await login(page)
-    assert "/dashboard" in page.url
+    assert page.url.rstrip("/") == BASE_URL.rstrip("/")
+
+
+# TODO MVP 14.4 (ou fase separada de rewrite e2e): tests 03-14 estão
+# defasados contra rotas atuais do frontend. Precisam rewrite contra:
+# - /dashboard pode não existir como rota isolada
+# - /projects/{id}/... espera UUID, não string "1" do fixture
+# - /admin path e conteúdo podem ter mudado
+# - Seletores de texto ("Ingestão de Documentos", "Gatekeeper", etc)
+#   dependem de literais que podem ter mudado nas refactorings do
+#   frontend (MVPs 8/9/10/11/12).
+# Decisão: escopo do canário Fase 14.4 já validou infra (rebuild,
+# vite allowedHosts, seletor email/password, email admin pydantic-
+# válido, redirect /). Tests 03-14 são lane separada.
 
 
 @pytest.mark.asyncio

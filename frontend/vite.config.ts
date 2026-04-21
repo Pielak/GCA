@@ -25,6 +25,20 @@ export default defineConfig({
       },
     },
   },
+  // MVP 14 Fase 14.4 — vite preview (container docker) precisa permitir
+  // o host interno `gca-frontend` pra que o teste e2e chame via rede
+  // docker. Mantém mesmos hosts públicos do server.
+  preview: {
+    host: "0.0.0.0",
+    port: 5173,
+    allowedHosts: [
+      "localhost",
+      "127.0.0.1",
+      "gca-frontend",
+      "gpd.code-auditor.com.br",
+      "gca.code-auditor.com.br",
+    ],
+  },
   build: {
     target: "es2020",
     minify: "terser",
