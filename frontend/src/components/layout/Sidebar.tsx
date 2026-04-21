@@ -4,7 +4,7 @@ import {
   LayoutDashboard, FolderOpen, Users, Shield, ChevronDown, ChevronRight,
   LogOut, Settings, Code2, FileText, GitBranch, Zap, TestTube2,
   History, BookOpen, Activity, ScrollText, Menu, X, Clock, ClipboardList,
-  CheckCircle2, BarChart3, Database, Bug, LifeBuoy, Package
+  CheckCircle2, BarChart3, Database, Bug, LifeBuoy, Package, HelpCircle
 } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
@@ -153,6 +153,8 @@ export function Sidebar() {
             <NavItem to="/admin/incidents" icon={<Bug className="w-4 h-4" />} label="Incidentes" />
             <NavItem to="/admin/support" icon={<LifeBuoy className="w-4 h-4" />} label="Equipe Sustentação" />
             <NavItem to="/admin/releases" icon={<Package className="w-4 h-4" />} label="Releases" />
+            {/* MVP 18 Fase 18.1 — entrada Ajuda Admin */}
+            <NavItem to="/admin/help" icon={<HelpCircle className="w-4 h-4" />} label="Ajuda" />
           </div>
         )}
 

@@ -1,0 +1,15 @@
+{
+  "version": "18.2",
+  "chapters": [
+    { "id": "01-visao-geral", "title": "Visão geral & Glossário", "order": 1 },
+    { "id": "02-instalacao", "title": "Instalação & primeiro setup", "order": 2 },
+    { "id": "03-rbac", "title": "RBAC e papéis", "order": 3 },
+    { "id": "04-pipeline", "title": "Pipeline canônico do GCA", "order": 4 },
+    { "id": "05-ocg", "title": "OCG — Objeto de Contexto Global", "order": 5 },
+    { "id": "06-admin", "title": "Área Administrativa", "order": 6 },
+    { "id": "07-gp", "title": "Área de Gestão de Projeto", "order": 7 },
+    { "id": "08-codegen", "title": "Codegen e linguagens suportadas", "order": 8 },
+    { "id": "09-observabilidade", "title": "Observabilidade", "order": 9 },
+    { "id": "10-troubleshooting", "title": "Solução de problemas", "order": 10 }
+  ]
+}

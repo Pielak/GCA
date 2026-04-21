@@ -3,7 +3,7 @@ import { Outlet, NavLink, useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ChevronLeft, Activity, Settings, FileText, Shield, GitBranch, Zap,
   Code2, TestTube2, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2,
-  SlidersHorizontal,
+  SlidersHorizontal, HelpCircle,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
@@ -40,6 +40,8 @@ const MODULES = [
   { path: 'roadmap', label: 'Roadmap', icon: Clock },
   { path: 'docs', label: 'Documentação Viva', icon: BookOpen },
   { path: 'audit', label: 'Auditoria', icon: Shield },
+  // MVP 18 Fase 18.1 — entrada Ajuda no nav do projeto.
+  { path: 'help', label: 'Ajuda', icon: HelpCircle },
 ]
 
 const PIPELINE_PATHS = new Set([

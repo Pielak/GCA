@@ -22,6 +22,7 @@ from app.routers.backup_router import (
     admin_router as backup_admin_router,
     status_router as backup_status_router,
 )
+from app.routers.help_router import router as help_router
 from app.routers.incident_ticket_router import (
     router as incident_project_router,
     ticket_router as incident_ticket_router,
@@ -208,6 +209,7 @@ app.include_router(metrics_project_router, prefix=f"{settings.API_PREFIX}", tags
 app.include_router(backup_project_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
 app.include_router(backup_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-backups"])
 app.include_router(backup_status_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
+app.include_router(help_router, prefix=f"{settings.API_PREFIX}", tags=["help"])
 app.include_router(incident_project_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_ticket_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-incidents"])

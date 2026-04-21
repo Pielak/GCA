@@ -44,6 +44,7 @@ import { ProjectLoginPage } from './pages/ProjectLoginPage';
 import { IncidentListPage } from './pages/projects/IncidentListPage';
 import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
 import { ProjectMetricsPage } from './pages/projects/ProjectMetricsPage';
+import { HelpPage } from './pages/HelpPage';
 
 export const router = createBrowserRouter([
   {
@@ -128,6 +129,11 @@ export const router = createBrowserRouter([
         element: <RequireAdmin><AdminReleaseDetailPage /></RequireAdmin>,
       },
       { path: 'releases', Component: ReleasesPage },
+      // MVP 18 Fase 18.1 — Ajuda Admin
+      {
+        path: 'admin/help',
+        element: <RequireAdmin><HelpPage /></RequireAdmin>,
+      },
       {
         path: 'design-showcase',
         element: <RequireAdmin><DesignShowcasePage /></RequireAdmin>,
@@ -165,6 +171,9 @@ export const router = createBrowserRouter([
           { path: 'incidents', Component: IncidentListPage },
           { path: 'incidents/:ticketId', Component: IncidentDetailPage },
           { path: 'metrics', Component: ProjectMetricsPage },
+          // MVP 18 Fase 18.1 — Ajuda GP (conteúdo idêntico ao /admin/help; guard
+          // via ProjectDetailLayout: membro aceito OR admin).
+          { path: 'help', Component: HelpPage },
         ],
       },
     ],

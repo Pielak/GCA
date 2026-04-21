@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.62  
+Versão: 3.63  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-17 fechados. **MVP 18 ABERTO 2026-04-21** pelo protocolo §7.0 — Sistema de Ajuda integrado (infraestrutura + conteúdo). **Onda 1 autorizada**: Fases 18.1 + 18.2 (infraestrutura). Fases 18.3-18.5 (conteúdo real + busca FTS5 + integração final) ficam fora desta onda; exigem autorização adicional após review da infraestrutura. Estado inicial: definido, em execução Onda 1.
+Status: **controle de avanço por fase** — MVPs 1-17 fechados. **MVP 18 em execução — Onda 1 FECHADA** 2026-04-21. **Fases 18.1-18.2 entregues**: (18.1) `HelpPage` skeleton layout 3-col + rotas `/admin/help` + `/projects/:id/help` + sidebar entries em Admin + ProjectDetailLayout + guards RBAC; frontend rebuild ok, tsc=0. (18.2) `help_service` + `help_router` + 3 endpoints `/api/v1/help/{toc,section/{id},search}` + storage canônico `backend/app/help_content/*.md + toc.json` com 10 capítulos stub + 1 MD de exemplo + 21 testes unit (4 load_toc + 5 load_section + 3 search + 6 endpoints HTTP + 3 edge cases). Backend live validado via smoke curl. Fases 18.3-18.5 (Onda 2) aguardam autorização adicional.
 
 ---
 
@@ -11,9 +11,9 @@ Status: **controle de avanço por fase** — MVPs 1-17 fechados. **MVP 18 ABERTO
 ### MVP ativo
 **MVP 18 — Sistema de Ajuda integrado (infraestrutura + conteúdo)** — **em execução 2026-04-21 — Onda 1 (18.1+18.2) autorizada**. Aberto pelo protocolo §7.0 após user pedir aba "Ajuda" tanto no sidebar Admin quanto no sidebar de projeto, com documentação completa + busca + screenshots. Plan fatiado em 5 fases; autorização stakeholder cobre apenas as 2 primeiras (infraestrutura); conteúdo real e busca FTS5 ficam para onda 2 após review.
 
-**Fases — Onda 1 (autorizada):**
-- ⏳ **Fase 18.1** Rotas + HelpPage skeleton + sidebar item (Admin + GP) com layout 3 colunas + guards RBAC.
-- ⏳ **Fase 18.2** Backend `/api/v1/help/{toc,section,search}` + storage canônico em `backend/app/help_content/` + serviço + 8+ testes. Search é stub em 18.2.
+**Fases — Onda 1 (FECHADA 2026-04-21):**
+- ✅ **Fase 18.1** Rotas + HelpPage skeleton + sidebar Admin + ProjectDetailLayout. `HelpPage.tsx` layout 3-col (TOC + conteúdo + busca-filtro local). 2 rotas novas + 2 entries sidebar. Tsc=0. Frontend rebuildado + restart ok.
+- ✅ **Fase 18.2** Backend: `help_service.py` com `load_toc`/`load_section`/`search_content` (proteção path-traversal via regex `^[a-zA-Z0-9_\-]+$` + resolve dentro da raiz canônica). `help_router.py` com 3 endpoints + guard `_require_auth` local (middleware canônico retorna None sem token; help força 401). Storage: `backend/app/help_content/toc.json` (10 capítulos) + `01-visao-geral.md` placeholder. 21 testes unit (100% passing). Smoke live: `GET /api/v1/help/toc` com token JWT válido retornou os 10 capítulos.
 
 **Fases — Onda 2 (não autorizada; aguarda review da Onda 1):**
 - Fase 18.3 Conteúdo real dos 10 capítulos canônicos (~2d).
