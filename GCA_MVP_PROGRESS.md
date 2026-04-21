@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.36  
+Versão: 3.37  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 aberto 2026-04-20 pelo protocolo §7.0** (autorização do stakeholder-soberano) com 11 fases em 7 temas: A saneamento Celery residual (14.1-14.2); B CI/operacional (14.3-14.4); C TSC baseline cleanup (14.5-14.6); D OCG maturity (14.7-14.8); E type safety frontend (14.9); F observabilidade Celery (14.10); G refactor shadcn usado (14.11). **Estado inicial: definido — não iniciado.** Baseline de entrada: **1493 passed, 4 skipped** pós-MVP 13. Identity Federation, Data Federation e Federated Learning explicitamente fora (sem cliente real / emenda §3 pendente / produto não treina LLM).
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** **Fase 14.1 FECHADA 2026-04-20** (Celery em questionnaire_service): 4 tasks novas em `app/tasks/questionnaire.py` (notify_admins_submitted_task, send_analysis_email_task, trigger_n8n_analysis_task, generate_ocg_task); `questionnaire_service.py` com zero asyncio.create_task; 15 testes; worker registra 11 tasks totais. Suite pós-14.1: **1508/1508 passing** (+15). Fases 14.2-14.11 seguem definidas.
 
 ---
 

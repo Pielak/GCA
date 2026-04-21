@@ -132,13 +132,13 @@ class QuestionnaireService:
             # admins se projeto não tiver responsible_admin_id definido.
             # Externo (sem project_id) sempre cai no fallback — ainda não há
             # relação admin-projeto antes da aprovação.
-            asyncio.create_task(
-                QuestionnaireService._notify_admins_questionnaire_submitted(
-                    gp_email=gp_email,
-                    project_name=project_name,
-                    questionnaire_id=questionnaire_id,
-                    project_id=project_id,
-                )
+            # MVP 14 Fase 14.1 — via Celery.
+            from app.tasks.questionnaire import notify_admins_submitted_task
+            notify_admins_submitted_task.delay(
+                gp_email,
+                project_name,
+                questionnaire_id,
+                str(project_id) if project_id else None,
             )
 
             # Opção A: Análise built-in (imediato)
@@ -227,36 +227,37 @@ class QuestionnaireService:
                 else:
                     notification_type = "revision_needed"
 
-                # Trigger email asynchronously (non-blocking)
-                asyncio.create_task(
-                    QuestionnaireService._send_analysis_email(
-                        gp_email=gp_email,
-                        project_id=str(project_id),
-                        questionnaire_id=str(questionnaire.id),
-                        notification_type=notification_type,
-                        analysis_result=result,
-                    )
+                # MVP 14 Fase 14.1 — 3 disparos via Celery.
+                from app.tasks.questionnaire import (
+                    send_analysis_email_task,
+                    trigger_n8n_analysis_task,
+                    generate_ocg_task,
                 )
 
-                # OPTION C: Trigger n8n for enhanced analysis (asynchronous)
-                asyncio.create_task(
-                    QuestionnaireService._trigger_n8n_analysis(
-                        questionnaire_id=str(questionnaire.id),
-                        project_id=str(project_id),
-                        gp_email=gp_email,
-                        responses=responses,
-                    )
+                # Trigger email async (non-blocking)
+                send_analysis_email_task.delay(
+                    gp_email,
+                    str(project_id),
+                    str(questionnaire.id),
+                    notification_type,
+                    result,
+                )
+
+                # OPTION C: Trigger n8n for enhanced analysis
+                trigger_n8n_analysis_task.delay(
+                    str(questionnaire.id),
+                    str(project_id),
+                    gp_email,
+                    responses,
                 )
 
                 # Se aprovado na verificação tecnológica, disparar geração do OCG
                 # via pipeline de 8 agentes IA (assíncrono, não bloqueia a resposta)
                 if result["approved"]:
-                    asyncio.create_task(
-                        QuestionnaireService._generate_ocg(
-                            questionnaire_id=questionnaire.id,
-                            project_id=project_id,
-                            gp_email=gp_email,
-                        )
+                    generate_ocg_task.delay(
+                        str(questionnaire.id),
+                        str(project_id),
+                        gp_email,
                     )
 
                 logger.info(

@@ -85,6 +85,8 @@ celery_app = Celery(
         "app.tasks",
         # MVP 13 Fase 13.3a — task de ingestão (primeiro ponto migrado).
         "app.tasks.pipeline",
+        # MVP 14 Fase 14.1 — tasks do pipeline de questionário.
+        "app.tasks.questionnaire",
     ],
 )
 
