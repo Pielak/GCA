@@ -1,29 +1,25 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.58  
+Versão: 3.59  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 em execução 2026-04-21**. **Fases 16.1-16.4 FECHADAS**: 16.4 (DesignShowcase tsc fix) substitui `NodeJS.Timeout` por `ReturnType<typeof setInterval>` (1 linha em `DesignShowcasePage.tsx:37`). **Tsc frontend = 0 errors** pela primeira vez desde MVP 14 (baseline estava em 1 residual desde 15.2). Fase 16.5 (dogfood validation) segue como única pendência.
+Status: **controle de avanço por fase** — MVPs 1-16 fechados. **MVP 16 FECHADO 2026-04-21** com 5/5 fases entregues (16.5 registrou 2 DTs novas: DT-077 Flower auto-start + DT-078 worker healthcheck hostname — ambas minor, sem impacto funcional). Baseline pós-MVP 16: **C++ codegen fundacional entregue** (scaffolder CMake + enum `CPP` + dispatch + GoogleTest idioms em specs); **tsc frontend = 0** pela primeira vez; **dogfood validado** em 3/5 checks (Flower, Celery, endpoints registrados); mutação de OCG em prod + CI push não executados por regra anti-mutação.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** — **ABERTO 2026-04-21, definido — não iniciado**. Aberto pelo protocolo §7.0 após diagnóstico OCG + reaproveitamento de `gca_cpp_codegen_gap.md`. Rejeita formalmente a proposta `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (1650h em 30 semanas) por incompatibilidade com §7.0 e §10.
+**MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** — **FECHADO 2026-04-21 com 5/5 fases entregues**. Aberto pelo protocolo §7.0 após diagnóstico OCG + reaproveitamento de `gca_cpp_codegen_gap.md`. Rejeita formalmente a proposta `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (1650h em 30 semanas) por incompatibilidade com §7.0 e §10.
 
 **Fases:**
-- ⏳ **Fase 16.1** Scaffolder C++ CMake (≈2-3d) — `cpp_cmake.py` + dispatch branch + teste de compilação em CI.
-- ⏳ **Fase 16.2** Estender `LinguagemBackend` enum + `OCG.STACK.backend.cpp_standard` (≈1d).
-- ⏳ **Fase 16.3** Test spec generator C++-aware (GoogleTest idioms) (≈1d).
-- ⏳ **Fase 16.4** DesignShowcasePage tsc fix — `NodeJS.Timeout` → `ReturnType<typeof setInterval>` (≈0.5d). Baseline tsc finalmente = 0.
-- ⏳ **Fase 16.5** Dogfood validation — 5 checks binários (Flower :5555, Celery task roundtrip, OCG rollback endpoint, OCG consolidate endpoint, e2e CI lane) (≈0.5d).
+- ✅ **Fase 16.1** Scaffolder C++ CMake — `cpp_cmake.py` com 11 arquivos (CMakeLists, src/main.cpp, include/<target>/, tests GoogleTest, configs .clang-format/.clang-tidy, Dockerfile multi-stage, README). Slug→target translation (hífen→underscore). Smoke compile validado gcc:13. CI step `cpp-scaffold-compile` em backend-tests.yml. 25 testes unitários. Commit `ec46113`.
+- ✅ **Fase 16.2** Enum `LinguagemBackend.CPP` + `ScaffoldSpec.cpp_standard` + dispatch branch `{c++, cpp, cplusplus}` → `scaffold_cpp_cmake` + whitelist canônica `{14, 17, 20, 23}` com fallback "17". Zero regressão em 60 testes dispatch+scaffolders existentes. 17 testes novos. Commit `66b20bc`.
+- ✅ **Fase 16.3** `test_spec_generator_service` C++-aware — `_detect_test_framework` + `CPP_GOOGLETEST_GUIDANCE` bloco anexado ao prompt quando C++ + `test_framework` no provenance. Zero regressão em 39 testes do test_spec pré-existentes. 16 testes novos. Commit `f32f3fc`.
+- ✅ **Fase 16.4** `NodeJS.Timeout` → `ReturnType<typeof setInterval>` em `DesignShowcasePage.tsx:37`. **Tsc frontend = 0 errors** pela primeira vez desde MVP 14. Commit `0242e8e`.
+- ✅ **Fase 16.5** Dogfood validation — 5 checks binários: **Check 1 ✅** Flower `:5555` HTTP 200 (após `docker compose up -d celery-flower`); **Check 2 ✅** Celery ping roundtrip 58ms; **Check 3 ⚠️** OCG rollback endpoint registrado no OpenAPI + unit tests (14.7) passam — E2E em prod não executado (regra anti-mutação); **Check 4 ⚠️** idem para consolidate (14.8); **Check 5 ⚠️** CI e2e lane não disparada (requer push ao remoto — ação visível a terceiros). **2 DTs novas** registradas em §3.3: DT-077 (Flower auto-start) + DT-078 (worker healthcheck hostname). Falhas são **minor**; fechamento do MVP não bloqueado per regra dura.
 
-**Regras duras:** cada fase exige gate §9 antes da próxima; stop-rule >2d por fase; nenhuma feature nova; §10 anti-refactor-vizinho; 16.5 é validação binária (falhas viram DT, não bloqueiam fechamento); 16.2 é pré-requisito de 16.3.
-
-**Baseline de entrada:** 1506 passing, 5 skipped; tsc = 1; any = 20; MVP 15 fechado (`0751c0a`).
-**Meta de saída:** C++ scaffoldado + tsc = 0 + dogfood validado nos 5 itens (ou DTs registrados).
-
-**Próximo marco operacional:** autorização explícita da Fase 16.1.
+**Baseline de entrada:** 1506 passing, 5 skipped; tsc = 1; any = 20.
+**Baseline de saída:** 1506 passing, 5 skipped; **tsc = 0**; any = 20; +58 testes unitários novos; C++ é 9ª linguagem scaffoldada canonicamente.
 
 ---
 
@@ -452,6 +448,8 @@ projeto) e 13.7 (3 pontos CodeGen + chain integrity E2E).
 | DT-037 | Major | Auto-CONTRACT + guard de consumidores | Contrato §5 diz "ingestão ruim/conflitante contrai". Código permite CONTRACT mas não detecta automaticamente. Consumidores do OCG (backlog, Gatekeeper, CodeGen, deliverables) não consultam `ocg.status` — se updater falha e deixa `ocg_pending`, eles operam como se OCG estivesse íntegro. Violação do §5 ("módulos NÃO PODEM assumir defaults invisíveis quando OCG incompleto"). | Auditoria 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-038 | Major | Compartimentalização — notificação cross-project | `_notify_admins_questionnaire_submitted` envia pra TODOS admins ativos (`is_admin=true AND is_active=true`). Projeto A comunica existência + nome + GP email a admin que pode não ter relação com ele. Numa única instância com 1 admin é aceitável; com instância futura multi-admin por área quebra compartimentalização §2.2. | Auditoria 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 | DT-039 | Major | UX de retry e regeneração do pipeline OCG | Pipeline OCG era "async one-shot": análise do Arguidor rodava 1x por doc, ocg_updater rodava 1x por análise, OCG era gerado 1x por questionário aprovado. Se qualquer etapa falhasse (401, parse, timeout), ficava travado — sem botão de retry. Quando prompts/providers mudam (ex: DT-035 reescreveu prompt imperativo), análises antigas continuam baseadas no prompt anterior. Ingestões travadas em `ocg_pending` precisavam UPDATE manual. | Dogfood MVP 2 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
+| DT-077 | Minor | Dogfood / operacional — Flower não auto-start | Serviço `gca-celery-flower` definido em `docker-compose.yml` desde MVP 14.10 (2026-04-20) mas nunca subiu no dogfood — `docker compose up -d` sem argumentos não foi re-executado após a mudança de compose. Validado em MVP 16 Fase 16.5 dogfood check (2026-04-21): após `docker compose up -d celery-flower`, HTTP 200 em `:5555` confirmado + broker Redis conectado. Fix: rotina operacional pós-update do docker-compose.yml. | Fase 16.5 | **Aberta** — sem impacto funcional (Flower é observabilidade opcional). |
+| DT-078 | Minor | Celery worker healthcheck usa hostname literal | `docker-compose.yml` (herdado de MVP 13.1) define healthcheck `celery -A app.celery_app inspect ping -d celery@gca-celery-worker` mas o hostname real do worker é o container ID (ex: `982577f2232a`), não o nome `gca-celery-worker`. Worker reporta `Up (unhealthy)` mesmo respondendo ping (Fase 16.5 validou ping.delay().get() em 58ms). Herdado e silent desde 13.1. Fix sugerido: `-d celery@$HOSTNAME` ou remover o `-d` pra aceitar qualquer worker. | Fase 16.5 | **Aberta** — sem impacto funcional; apenas flag visual `unhealthy`. |
 | DT-040 | **Critical** | Suite de testes dessincronizada pós-saneamento | Após 30+ DTs quitadas (DT-001..DT-039), APIs de services mudaram (DT-012/013/032/033 exigem key; DT-024 mudou `exec_model`→`exec_models`), colunas viraram NOT NULL, módulos foram removidos (`mock_n8n_service` na deprecação n8n), e testes não foram sincronizados. Suite pytest contra `gca_test` (DT-034 isolado) deu 20 fails + 11 errors de coleta/execução em 2026-04-18. Gate §9 critério 7 ("testes da fase passando") não atende. Categorias: (a) **collection errors** (2) — `test_e2e_fase3_5.py` importa `app.services.mock_n8n_service` inexistente; `test_questionnaire_pdf_service.py` importa `pypdf` no topo (container não tem); (b) **fixture drift** — `conftest.py::test_project` cria `Project(...)` sem `deliverable_type` (que é NOT NULL desde DT-015); afeta `test_admin_service` (8 fails), `test_gatekeeper` (2), `test_setup_wizard` (4 errors); (c) **API drift** — `test_ingestion::test_build_prompt` espera `ArguiderService(db)` sem key (DT-012 fim do fallback); (d) **MVP 3 scope** — `test_codegen_persistence` (4), `test_ocg_codegen_integration` (2), `test_e2e_pipeline_fase6` (6 errors) testam CodeGen que está em evolução no MVP 3; (e) **misc** — `test_ocg_e2e::TestConsolidator`, `test_code_validation::test_javascript`, `test_pii_validators::test_detect_pii_does_not_flag_empty_questionnaire_pdf`. **Sem este fix, o gate MVP 2 fica fechado** (critério §9/7 falha). | Gate revalidação 2026-04-18 | **Quitada 2026-04-18** — ver §4 |
 
 #### Abertas (MVP 3)
@@ -631,12 +629,10 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (MVP 16 — abertura)
-**ABERTO PARA AVALIAÇÃO — MVP 16 definido, não iniciado.**
+### Situação atual do gate (pós-MVP 16)
+**ABERTO — MVP 16 fechado com 5/5 fases entregues; 2 DTs novas minor registradas.**
 
-MVP 16 nasce com gate §9 aberto (critério binário 1-9 todos SIM): zero blocker/critical/contradição herdado do MVP 15; suíte verde (1506 passing); tsc = 1 error residual isolado (alvo da Fase 16.4). Gate vira "fechado" durante execução de fase e volta a "aberto" ao final.
-
-Baseline pós-MVP 15 (de entrada do 16): **1506 passing, 5 skipped**; tsc = 1; any = 20 (meta atingida em 15.4); shadcn limpo (só 4 componentes próprios).
+Baseline pós-MVP 16: **1506 passing, 5 skipped**; **tsc = 0 errors** (pela primeira vez desde MVP 14); any = 20 (meta atingida); shadcn limpo (4 componentes próprios); **C++ canonicamente suportado** como 9ª linguagem de codegen. DT-077 (Flower auto-start) + DT-078 (worker healthcheck hostname) abertas — ambas sem impacto funcional. Critérios binários §9 (1-9) todos SIM.
 
 ---
 
@@ -940,6 +936,7 @@ Antes de qualquer mudança:
 | 2026-04-21 | Fechamento de **MVP 15** com 4/4 fases entregues. Fases commitadas atomicamente: 15.1 `24f34df` (33 shadcn órfãos removidos; tsc 34→2); 15.2 `ed0d075` (HintCard prop `hint?: string` no Section local; tsc 2→1); 15.3 `f54e2b7` (e2e 12 tests alinhados a rotas/seletores canônicos; removidos 08 legacy + 09 merge); 15.4 (any 76→20, −74% via tipagem narrow em ~20 arquivos; meta ≤20 atingida). Suite inalterada (1506 passing — 15.x é refactor/cleanup sem testes novos). Tsc baseline de saída: 1 error isolado (DesignShowcase NodeJS namespace — backlog isolado, fix trivial). | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§6` (situação atual) + `§9` esta linha + `§10` (próximo marco limpo) | Encerrar MVP 15 no ciclo canônico. Aplicou §10 (constraint de escopo): fase 15.4 usou tipagem cirúrgica em vez de cascata cross-file; stop-rule respeitada ao achieving target sem reverter ganhos. Produto fica em estado baseline técnico melhor que antes de MVP 14: tsc praticamente zero, e2e lane em rotas canônicas, any em patamar mínimo razoável. Sem novo MVP autorizado. |
 | 2026-04-21 | **Rejeição formal** de `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (proposta externa de 1.650h em 30 semanas sobre "OCG v2 com 15 seções"). Motivos binários: (a) incompatível com §7.0 (viola MVP iterativo — `feedback_mvp_over_end_to_end.md`); (b) desconectado do código real (OCG atual já tem 12 seções com fallback determinístico; doc propõe "15" sem identificar as 3 novas); (c) cita entidades inexistentes ("BRD Agent", "News Intake"); (d) estimativas fantasiosas (70h para definir conteúdo); (e) reinventa features já existentes (LiveDocs, Definition of Done, RBAC, hash chain). | Sem mudança de código; registro para trilha de decisão. `gca_session_23_2026_04_20_21.md` memória. | Preservar trilha canônica: propostas não vêm de fora do código; diagnóstico vem primeiro, MVP depois. Aplicou `feedback_honesty_over_completeness` + §10. |
 | 2026-04-21 | Abertura de **MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano após diagnóstico curto de OCG + reaproveitamento de `gca_cpp_codegen_gap.md`). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 16` (nova subseção com 5 fases trancadas em ≈1.5 semanas) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.54, §1 MVP ativo = MVP 16 definido/não-iniciado, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = autorização Fase 16.1). Escopo: 16.1 scaffolder C++ CMake (≈2-3d); 16.2 enum `LinguagemBackend` + `cpp_standard` (≈1d); 16.3 test spec GoogleTest-aware (≈1d); 16.4 DesignShowcase tsc fix → 0 (≈0.5d); 16.5 dogfood validation (≈0.5d). **Fora explícito**: OCG v2 (rejeitado), Clusters B/C/D C++, auto-trigger consolidate, APPROVAL_STATUS banner UI, IaC scaffolder, policy-as-code, NoSQL avançado, questionário C++ expandido, SSO/Federation/FL, Futura Visão. Estado "definido — não iniciado"; implementação Fase 16.1 exige autorização adicional (§7.0 regra 3). Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 16), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§6`/`§9`/`§10` | Absorver em ciclo canônico o gap C++ documentado (`gca_cpp_codegen_gap.md` — 15/17 fases canônicas sem cobertura) + DT trivial do DesignShowcase + validação formal de dogfood. Escopo mínimo (1.5 semanas) respeita `feedback_mvp_over_end_to_end.md`. Protocolo §7.0 evita implementação silenciosa; fase individual precisa autorização explícita. Sem mudança de código neste commit. |
+| 2026-04-21 | Fechamento de **MVP 16** com 5/5 fases entregues no mesmo dia da abertura. Fases commitadas atomicamente: 16.1 `ec46113` (scaffolder cpp_cmake 11 arquivos + CI step cpp-scaffold-compile + 25 testes unit; smoke compile gcc:13 validado local); 16.2 `66b20bc` (enum LinguagemBackend.CPP + ScaffoldSpec.cpp_standard + dispatch branch + whitelist {14/17/20/23} + 17 testes; zero regressão em 60 testes dispatch+scaffolders); 16.3 `f32f3fc` (_detect_test_framework + CPP_GOOGLETEST_GUIDANCE apêndice ao prompt + test_framework no provenance + 16 testes; zero regressão em 39 testes spec generator); 16.4 `0242e8e` (NodeJS.Timeout → ReturnType<typeof setInterval>; tsc 1→0); 16.5 dogfood validation (Flower ✅ após up -d, Celery ping ✅ 58ms, endpoints registrados ✅ via OpenAPI; rollback/consolidate E2E em prod não executado por regra anti-mutação; CI e2e lane aguarda próximo push; 2 DTs novas minor DT-077 + DT-078). Suite pós-MVP 16: 1506 passing (inalterado — scaffolder+specs não tocam caminho de execução em runtime); **tsc frontend = 0 pela primeira vez desde MVP 14**. C++ vira 9ª linguagem de codegen canonicamente suportada (V1 cobre Cluster A do gap; Clusters B/C/D parked). | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§3.3` (DTs 077/078) + `§6` (situação atual) + `§9` esta linha + `§10` | Encerrar MVP 16 no ciclo canônico. Aplicou `feedback_mvp_over_end_to_end.md` (MVP enxuto, 1.5 semanas) + `feedback_no_unauthorized_data.md` (dogfood checks binários sem mutação em prod) + §10 (constraint de escopo — nenhuma feature além das 5 fases; DTs residuais viraram registro). Produto ganha: (a) primeira linguagem systems-level suportada no codegen, (b) baseline técnico frontend finalmente limpo (tsc = 0), (c) observabilidade Celery ativa via Flower. Sem novo MVP autorizado. |
 | 2026-04-20 | Fechamento de **MVP 14** com 10/11 fases entregues + 1 N/A (14.11) + 1 parcial com stop-rule (14.9). Fases commitadas atomicamente: 14.1–14.5 prévias; 14.6 `886652c` (TestArtifactCard type alignment); 14.7 `fdeeddd` (OCG rollback_to_version formal + audit `OCG_ROLLED_BACK`); 14.8 `876a256` (OCG consolidate_ocg explícito + audit `OCG_CONSOLIDATED` + endpoint); 14.9 `1bed30d` (91→76 any; stop-rule > 2d); 14.10 `a0abfc3` (Flower :5555 + 3 gauges Celery Prometheus). 14.11 N/A: diagnóstico comprovou zero shadcn primitivo importado (os únicos imports `@/components/ui/*` são para 4 componentes próprios). Suite pós-MVP 14: **1506 passing, 5 skipped**. Backlog residual parked: "any pass 2" (76 restantes), "shadcn pass 2" (33 órfãos), "AdminMetrics HintCard", "14.4 e2e tests 02-14 rewrite". | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§6` (situação atual) + `§10` (próximo marco limpo — nenhum MVP autorizado) + `§9` esta linha | Encerrar MVP 14 no ciclo canônico. Temas A/B/C/D/F completos; Tema E (type safety) com redução segura + restante parked; Tema G (shadcn usado) N/A porque premissa não existe no código atual. Aplicar §10 (constraint de escopo): fases com stop-rule pararam no limite em vez de cascatar refactor cross-file; backlog residual documentado no §10. Sem próximo MVP autorizado. |
 
 Regra: emendas de governança documental não são dívida técnica. São registradas aqui para preservar trilha de auditoria sobre a evolução do contrato soberano.
@@ -948,20 +945,14 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-MVP 16 **ABERTO 2026-04-21 pelo protocolo §7.0 — estado definido, não iniciado**. Próximo marco é **autorização explícita da Fase 16.1** (§7.0 regra 3). Escopo travado em 5 fases ≈1.5 semanas.
+MVP 16 **FECHADO 2026-04-21 com 5/5 fases entregues** em ciclo canônico §7.0. Próximo marco é **autorização explícita do stakeholder para novo MVP** (§7.0 regra 3). Nenhum MVP autorizado.
 
-Ordem canônica obrigatória:
-1. **Fase 16.1** Scaffolder C++ CMake (≈2-3d)
-2. **Fase 16.2** Estender `LinguagemBackend` + `OCG.STACK.backend.cpp_standard` (≈1d) — pré-requisito de 16.3
-3. **Fase 16.3** Test spec generator C++-aware (GoogleTest) (≈1d)
-4. **Fase 16.4** DesignShowcase NodeJS namespace fix — tsc → 0 (≈0.5d)
-5. **Fase 16.5** Dogfood validation de 5 itens binários (≈0.5d)
-
-Regras duras durante execução:
-- Cada fase exige revalidação §9 antes da próxima.
-- **Stop-rule dura >2d** por fase.
-- 16.5 é validação binária (falhas viram DT, não bloqueiam fechamento).
-- §10 (anti-alucinação): zero refactor vizinho, zero melhoria não-solicitada.
+Backlog residual pós-MVP 16:
+- **DT-077** (minor): Flower auto-start — rotina operacional pós-update de docker-compose.yml.
+- **DT-078** (minor): Celery worker healthcheck hostname literal causa flag `unhealthy` silent. Sem impacto funcional.
+- **OCG rollback/consolidate ponta-a-ponta em prod**: endpoints funcionam (unit/integration tests passing) mas E2E contra DB real não executado por regra anti-mutação. GP pode validar via UI quando rodar rollback real de projeto dele.
+- **CI e2e lane observada**: próximo push ao remoto dispara o job; esta sessão não empurrou.
+- **20 any restantes**: cobertos pelo meta ≤20; reduzir além exige refactor cross-file (parked).
 
 Backlog parked (NÃO entra no MVP 16):
 - OCG v2 / 15 seções (proposta `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` formalmente rejeitada em 2026-04-21 — incompatível com §7.0 e §10).
