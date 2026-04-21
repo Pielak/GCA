@@ -205,9 +205,10 @@ async def test_markdown_ocg_vazio_emite_placeholders(db_session):
     assert "## 4. Matriz de Rastreabilidade" in md
     assert "## Histórico de Revisão" in md
 
-    # Placeholder explícito da Fase 19.3 (glossário).
-    assert "Fase 19.3" in md
-    # Placeholder da Fase 19.4 (matriz).
+    # Seção 1.3 — placeholder do glossário agora aponta para a aba
+    # (após Fase 19.3, o texto não cita mais "Fase 19.3" — é funcional).
+    assert "Nenhum termo aprovado ainda" in md
+    # Placeholder da Fase 19.4 (matriz de rastreabilidade).
     assert "Fase 19.4" in md
 
 

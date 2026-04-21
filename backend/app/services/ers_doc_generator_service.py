@@ -278,15 +278,37 @@ async def build_ers_markdown(db: AsyncSession, project_id: UUID) -> str:
         lines.append("_(A ser preenchido — entregáveis derivados do questionário e do roadmap.)_")
     lines.append("")
 
-    # 1.3 Definições, Siglas e Abreviaturas (glossário vivo — Fase 19.3)
+    # 1.3 Definições, Siglas e Abreviaturas (glossário vivo)
     lines.append("### 1.3 Definições, Siglas e Abreviaturas")
     lines.append("")
-    lines.append(
-        "_Glossário específico do projeto será populado na Fase 19.3 do MVP 19 "
-        "(extração automática + aprovação pelo GP). Para acrônimos canônicos do "
-        "GCA (OCG, RBAC, GP, P1–P7, etc), consulte o capítulo 1 do help global._"
-    )
-    lines.append("")
+    # Import local pra evitar ciclo.
+    from app.services.glossary_service import list_approved_for_ers
+
+    approved_terms = await list_approved_for_ers(db, project_id)
+    if approved_terms:
+        lines.append(
+            "Termos específicos deste projeto (aprovados pelo GP). Para acrônimos "
+            "canônicos do GCA (OCG, RBAC, GP, P1–P7, etc), consulte o capítulo 1 "
+            "do help global."
+        )
+        lines.append("")
+        lines.append("| Termo | Definição |")
+        lines.append("|---|---|")
+        for t in approved_terms:
+            raw_def = t.definition.strip() if t.definition else "_(sem definição — GP edita na aba Glossário)_"
+            # Escapa pipes que quebram tabela markdown; colapsa quebras de linha.
+            definition_escaped = raw_def.replace("|", "\\|").replace("\n", " ")
+            term_escaped = t.term.replace("|", "\\|")
+            lines.append(f"| **{term_escaped}** | {_truncate(definition_escaped, 300)} |")
+        lines.append("")
+    else:
+        lines.append(
+            "_Nenhum termo aprovado ainda. Rode a extração automática em "
+            "`/projects/:id/docs` → aba Glossário e aprove os candidatos relevantes. "
+            "Para acrônimos canônicos do GCA (OCG, RBAC, GP, P1–P7, etc), consulte "
+            "o capítulo 1 do help global._"
+        )
+        lines.append("")
 
     # 1.4 Referências
     lines.append("### 1.4 Referências")

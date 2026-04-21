@@ -10,6 +10,7 @@ import {
 import { useStaleSummary } from '@/hooks/useTestSpecs'
 import { LiveDocModal } from '@/components/livedocs/LiveDocModal'
 import { ERSCard } from '@/components/livedocs/ERSCard'
+import { GlossaryPanel } from '@/components/livedocs/GlossaryPanel'
 
 /**
  * MVP 10 Fase 10.7 — Documentação Viva real (LiveDocs).
@@ -137,6 +138,10 @@ export function LiveDocsPage() {
           Vive separado dos LiveDocs tradicionais porque tem UX diferente:
           um único documento por projeto, commit no repo, histórico via git. */}
       {projectId && <ERSCard projectId={projectId} />}
+
+      {/* MVP 19 Fase 19.3 — glossário vivo por projeto.
+          Alimenta a seção 1.3 do ERS quando os termos são aprovados. */}
+      {projectId && <GlossaryPanel projectId={projectId} />}
 
       {/* Stale banner — aggregate via stale-summary quando disponível */}
       {staleCount > 0 && (

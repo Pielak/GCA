@@ -1371,6 +1371,45 @@ class GatekeeperItem(Base):
     )
 
 
+class ProjectGlossaryTerm(Base):
+    """MVP 19 Fase 19.3 — Termo do glossário vivo por projeto.
+
+    Alimenta a seção 1.3 do ERS (IEEE 830). Candidatos são extraídos
+    automaticamente via heurísticas do corpus do projeto (módulos,
+    análises do Arguidor, OCG profile); apenas termos com status
+    'approved' entram no ERS.gerado.
+    """
+    __tablename__ = "project_glossary_terms"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    term = Column(String(200), nullable=False)
+    definition = Column(Text, nullable=False, default="")
+    # Valores canônicos (aplicação-level):
+    #   ingested_doc | arguider_response | module_description |
+    #   ocg_profile | manual
+    source = Column(String(30), nullable=False, default="ingested_doc")
+    # Valores canônicos (aplicação-level):
+    #   candidate | approved | rejected
+    status = Column(String(20), nullable=False, default="candidate")
+    # Contexto curto de onde o termo foi extraído — exibido na UI
+    # para o GP revisar com contexto.
+    source_reference = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    rejected_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejected_at = Column(DateTime(timezone=True), nullable=True)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        # UNIQUE com LOWER(term) é criada via migration 034 (SQLAlchemy não
+        # suporta funções em UniqueConstraint sem Index Index func+DDL direto).
+        Index("idx_glossary_project_status", project_id, status),
+    )
+
+
 class GeneratedModule(Base):
     """Módulo gerado pelo CodeGen a partir de um candidato aprovado"""
     __tablename__ = "generated_modules"
