@@ -89,39 +89,41 @@ async def test_e2e_02_login_redireciona_dashboard(page: Page):
     assert page.url.rstrip("/") == BASE_URL.rstrip("/")
 
 
-# TODO MVP 14.4 (ou fase separada de rewrite e2e): tests 03-14 estão
-# defasados contra rotas atuais do frontend. Precisam rewrite contra:
-# - /dashboard pode não existir como rota isolada
-# - /projects/{id}/... espera UUID, não string "1" do fixture
-# - /admin path e conteúdo podem ter mudado
-# - Seletores de texto ("Ingestão de Documentos", "Gatekeeper", etc)
-#   dependem de literais que podem ter mudado nas refactorings do
-#   frontend (MVPs 8/9/10/11/12).
-# Decisão: escopo do canário Fase 14.4 já validou infra (rebuild,
-# vite allowedHosts, seletor email/password, email admin pydantic-
-# válido, redirect /). Tests 03-14 são lane separada.
+# MVP 15 Fase 15.3 — rewrite dos tests 03-14 contra rotas/UUIDs canônicos
+# do frontend pós-MVPs 8-14. Mudanças principais:
+# - `/dashboard` não existe → `/` redireciona per IndexRedirect
+# - `/projects/{id}/legacy` e `/projects/{id}/merge` foram removidos
+#   (não constam em `routes.tsx`); tests 08/09 foram deletados
+# - Selector "Ingestão de Documentos" → "Ingestão" (h2 atual)
+# - Selector "Documentação" → "Documentação Viva" (label do nav lateral)
+# - Admin dashboard tem botão "Configurações" + bloco "Pesos dos Pilares"
+#   já carregado na mesma view (sem clique em aba)
 
 
 @pytest.mark.asyncio
-async def test_e2e_03_dashboard_carrega_sem_erro_500(page: Page):
-    """Dashboard deve carregar com HTTP 200."""
+async def test_e2e_03_landing_apos_login_retorna_200(page: Page):
+    """Pós-login redirect: `/` carrega landing (admin ou projects) sem 5xx.
+
+    `/dashboard` legacy não existe em `routes.tsx`; IndexRedirect manda
+    admin→`/admin`, demais→`/projects`.
+    """
     await login(page)
-    resp = await page.goto(f"{BASE_URL}/dashboard")
+    resp = await page.goto(f"{BASE_URL}/")
     assert resp and resp.status < 500
 
 
 @pytest.mark.asyncio
 async def test_e2e_04_ingestion_page_carrega(page: Page):
-    """IngestionPage deve carregar e exibir a drop zone."""
+    """IngestionPage deve carregar e renderizar o h2 "Ingestão"."""
     await login(page)
     await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/ingestion")
-    await page.wait_for_selector('text=Ingestão de Documentos', timeout=8_000)
+    await page.wait_for_selector('text=Ingestão', timeout=8_000)
     assert "ingestion" in page.url
 
 
 @pytest.mark.asyncio
 async def test_e2e_05_gatekeeper_page_carrega(page: Page):
-    """GatekeeperPage deve carregar e exibir a lista de módulos."""
+    """GatekeeperPage deve carregar."""
     await login(page)
     await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/gatekeeper")
     await page.wait_for_selector('text=Gatekeeper', timeout=8_000)
@@ -130,43 +132,32 @@ async def test_e2e_05_gatekeeper_page_carrega(page: Page):
 
 @pytest.mark.asyncio
 async def test_e2e_06_livedocs_page_carrega(page: Page):
-    """LiveDocsPage deve carregar e exibir a sidebar de navegação."""
+    """LiveDocsPage (`/docs`) deve carregar; label canônico é
+    "Documentação Viva" (cfr. `ProjectDetailLayout.tsx`)."""
     await login(page)
     await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/docs")
-    await page.wait_for_selector('text=Documentação', timeout=8_000)
+    await page.wait_for_selector('text=Documentação Viva', timeout=8_000)
     assert "docs" in page.url
 
 
 @pytest.mark.asyncio
 async def test_e2e_07_roadmap_page_carrega(page: Page):
-    """RoadmapPage deve carregar e exibir o progresso geral."""
+    """RoadmapPage deve carregar."""
     await login(page)
     await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/roadmap")
     await page.wait_for_selector('text=Roadmap', timeout=8_000)
     assert "roadmap" in page.url
 
 
-@pytest.mark.asyncio
-async def test_e2e_08_legacy_page_carrega(page: Page):
-    """LegacyPage deve carregar e exibir o seletor de fonte."""
-    await login(page)
-    await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/legacy")
-    await page.wait_for_selector('text=Legado', timeout=8_000)
-    assert "legacy" in page.url
-
-
-@pytest.mark.asyncio
-async def test_e2e_09_merge_page_carrega(page: Page):
-    """MergeEnginePage deve carregar e exibir o seletor de módulos."""
-    await login(page)
-    await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/merge")
-    await page.wait_for_selector('text=Merge', timeout=8_000)
-    assert "merge" in page.url
+# Tests 08 (legacy) e 09 (merge) removidos em MVP 15 Fase 15.3: rotas
+# `/projects/{id}/legacy` e `/projects/{id}/merge` não constam em
+# `routes.tsx` do frontend atual. Qualquer regressão nessas funcionalidades
+# exige primeiro reintroduzir a rota; aí o teste volta.
 
 
 @pytest.mark.asyncio
 async def test_e2e_10_code_generator_sidebar_visivel(page: Page):
-    """CodeGenerator IDE-like deve ter sidebar Git visível."""
+    """CodeGenerator IDE-like deve ter sidebar Git ("Repositório") visível."""
     await login(page)
     await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/codegen")
     await page.wait_for_selector('text=Repositório', timeout=8_000)
@@ -191,7 +182,7 @@ async def test_e2e_11_sidebar_colapsavel(page: Page):
 
 @pytest.mark.asyncio
 async def test_e2e_12_helptooltip_visivel_em_ingestion(page: Page):
-    """HelpTooltip deve aparecer ao hover do ícone '?' na IngestionPage."""
+    """HelpTooltip deve aparecer ao hover do ícone "?" na IngestionPage."""
     await login(page)
     await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/ingestion")
     await page.wait_for_selector('[aria-label="Ajuda sobre este campo"]', timeout=8_000)
@@ -207,30 +198,34 @@ async def test_e2e_12_helptooltip_visivel_em_ingestion(page: Page):
 
 
 @pytest.mark.asyncio
-async def test_e2e_13_admin_settings_aba_acessivel(page: Page):
-    """Admin deve conseguir acessar a aba de Configurações GCA."""
+async def test_e2e_13_admin_dashboard_pesos_visiveis(page: Page):
+    """Admin dashboard deve exibir o bloco "Pesos dos Pilares" na view
+    principal.
+
+    MVP 15 Fase 15.3: versão anterior esperava clique numa aba
+    "Configurações" separada; o AdminDashboardPage atual já renderiza o
+    bloco direto na view.
+    """
     await login(page)
     await page.goto(f"{BASE_URL}/admin")
-    await page.wait_for_selector('text=Configurações', timeout=8_000)
-    await page.click('text=Configurações')
-    await page.wait_for_selector('text=Pesos dos Pilares', timeout=5_000)
+    await page.wait_for_selector('text=Pesos dos Pilares', timeout=8_000)
     assert await page.locator('text=Pesos dos Pilares').is_visible()
 
 
 @pytest.mark.asyncio
 async def test_e2e_14_smoke_todas_as_rotas(page: Page):
-    """
-    Smoke test: todas as páginas devem responder com HTTP < 500.
+    """Smoke test: todas as páginas canônicas respondem < 500.
+
+    MVP 15 Fase 15.3: removidas `/dashboard`, `/projects/{id}/legacy`,
+    `/projects/{id}/merge` — rotas ausentes em `routes.tsx`.
     """
     await login(page)
     rotas = [
-        "/dashboard",
+        "/",
         f"/projects/{PROJECT_ID}/ingestion",
         f"/projects/{PROJECT_ID}/gatekeeper",
         f"/projects/{PROJECT_ID}/docs",
         f"/projects/{PROJECT_ID}/roadmap",
-        f"/projects/{PROJECT_ID}/legacy",
-        f"/projects/{PROJECT_ID}/merge",
         f"/projects/{PROJECT_ID}/codegen",
         "/admin",
         "/admin/users",

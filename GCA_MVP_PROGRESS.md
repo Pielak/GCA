@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.51  
+Versão: 3.52  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-14 fechados. **MVP 15 em execução 2026-04-20**. **Fases 15.1-15.2 FECHADAS**: 15.1 (shadcn pass 2) removeu 33 órfãos; 15.2 (AdminMetrics HintCard) adicionou prop `hint?: string` ao componente `Section` local de AdminMetricsPage.tsx. Tsc: 34 → 1 error (apenas DesignShowcasePage NodeJS namespace — fora de escopo MVP 15). Fases 15.3-15.4 seguem.
+Status: **controle de avanço por fase** — MVPs 1-14 fechados. **MVP 15 em execução 2026-04-20**. **Fases 15.1-15.3 FECHADAS**: 15.3 (e2e tests 02-14 rewrite) atualizou `test_fluxo_completo.py` contra rotas/seletores canônicos pós-MVPs 8-14 — 12 tests coletados (removidos 08 legacy + 09 merge cujas rotas não existem em `routes.tsx`); test 03 passa a validar landing `/` em vez de `/dashboard` legacy; test 13 valida bloco "Pesos dos Pilares" direto no AdminDashboard (sem aba Configurações separada); test 14 smoke remove `/dashboard`, `/legacy`, `/merge`. Lane e2e roda apenas com playwright instalado (importorskip). Fase 15.4 segue.
 
 ---
 
