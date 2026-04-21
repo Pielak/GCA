@@ -13,7 +13,7 @@ interface UseAuthApiReturn {
   requestPasswordReset: (email: string) => Promise<{ success: boolean; error?: ApiError }>;
   verifyResetToken: (token: string) => Promise<{ valid: boolean; message: string; error?: ApiError }>;
   confirmPasswordReset: (token: string, newPassword: string) => Promise<{ success: boolean; error?: ApiError }>;
-  changeFirstPassword: (tempPassword: string, newPassword: string) => Promise<{ success: boolean; user?: any; error?: ApiError }>;
+  changeFirstPassword: (tempPassword: string, newPassword: string) => Promise<{ success: boolean; user?: unknown; error?: ApiError }>;
 }
 
 export const useAuthApi = (): UseAuthApiReturn => {
@@ -23,7 +23,7 @@ export const useAuthApi = (): UseAuthApiReturn => {
         await axios.post(`${API_URL}/auth/reset-password`, { email });
         return { success: true };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           success: false,
           error: {
@@ -45,7 +45,7 @@ export const useAuthApi = (): UseAuthApiReturn => {
           message: response.data.message,
         };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           valid: false,
           message: axiosError.response?.data?.detail || 'Token inválido ou expirado',
@@ -68,7 +68,7 @@ export const useAuthApi = (): UseAuthApiReturn => {
         });
         return { success: true };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           success: false,
           error: {
@@ -99,7 +99,7 @@ export const useAuthApi = (): UseAuthApiReturn => {
         );
         return { success: true, user: response.data.user };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           success: false,
           error: {

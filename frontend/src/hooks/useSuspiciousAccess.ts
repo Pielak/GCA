@@ -20,7 +20,9 @@ export const useSuspiciousAccess = (blockedOnly: boolean = true) => {
     queryKey: ['suspicious-access', blockedOnly],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<any>('/admin/suspicious-access')
+        const response = await apiClient.get<AccessAttempt[] | { suspicious_accesses: Array<Record<string, unknown>> }>(
+          '/admin/suspicious-access'
+        )
 
         // Handle both array and nested object response format
         let data: AccessAttempt[] = []
@@ -29,14 +31,14 @@ export const useSuspiciousAccess = (blockedOnly: boolean = true) => {
           data = response.data
         } else if (response.data?.suspicious_accesses && Array.isArray(response.data.suspicious_accesses)) {
           // Backend returns nested format: { suspicious_accesses: [...] }
-          data = response.data.suspicious_accesses.map((item: any) => ({
-            id: item.access_attempt_id || item.id,
-            user_id: item.user_id,
-            user_email: item.user_email,
-            attempt_number: item.attempt_number,
-            blocked: item.blocked,
-            blocked_at: item.blocked_at,
-            created_at: item.created_at,
+          data = response.data.suspicious_accesses.map((item: Record<string, unknown>) => ({
+            id: (item.access_attempt_id || item.id) as string,
+            user_id: item.user_id as string,
+            user_email: item.user_email as string | undefined,
+            attempt_number: item.attempt_number as number,
+            blocked: item.blocked as boolean,
+            blocked_at: item.blocked_at as string | undefined,
+            created_at: item.created_at as string,
           }))
         }
 

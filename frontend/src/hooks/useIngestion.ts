@@ -42,13 +42,13 @@ export interface IngestedDocument {
 export interface DocumentDetail extends IngestedDocument {
   arguider_error_message: string | null
   analysis?: {
-    classification: Record<string, any>
-    gaps: any[]
-    show_stoppers: any[]
-    poor_definitions: any[]
-    improvement_suggestions: any[]
-    module_candidates: any[]
-    ocg_fields_to_update: any[]
+    classification: Record<string, unknown>
+    gaps: unknown[]
+    show_stoppers: unknown[]
+    poor_definitions: unknown[]
+    improvement_suggestions: unknown[]
+    module_candidates: unknown[]
+    ocg_fields_to_update: unknown[]
     tokens_used: number
     latency_ms: number
   }

@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.44  
+Versão: 3.45  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.8 FECHADAS 2026-04-20**. 14.8 (OCG consolidate_ocg explícito): `OCGService.consolidate_ocg(project_id, actor_id)` recalcula `COMPOSITE_SCORE`/`status`/`is_blocking` a partir de `PILLAR_SCORES`, aplica regras canônicas §5 (P2<70 ou P7<70 → BLOCKED; ≥90 READY; ≥75 NEEDS_REVIEW; AT_RISK caso contrário), é idempotente (no-op se nada mudar), grava delta `trigger_source='consolidation'` e emite `OCG_CONSOLIDATED`. Novo endpoint `POST /projects/{id}/ocg/consolidate`. 4 testes novos. Fases 14.9-14.11 seguem.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.8 FECHADAS**; **14.9 PARCIALMENTE FECHADA com stop-rule acionada**; 14.10-14.11 seguem. 14.9 (remover 91 `any`): diagnóstico cirúrgico em api.ts/useAuthApi/useSuspiciousAccess/useIngestion removeu 15 `any` (91→76). Tentativas de migrar tipos compartilhados (`apiClient<T=any>` → `T=unknown`; `Record<string, any>` em `useArguider.GatekeeperItem.data`) cascataram para 150+ errors em call-sites que indexam livremente. Conforme contrato §7 MVP 14 Fase 14.9 (regra de parada > 2 dias): restante não foi tocado; criado backlog "any pass 2" como follow-up não-bloqueador (meta ≤20 não atingida mas gate §9 não depende — é type safety não-crítico).
 
 ---
 

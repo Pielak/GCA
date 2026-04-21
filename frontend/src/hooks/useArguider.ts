@@ -7,6 +7,8 @@ export interface GatekeeperItem {
   id: string
   item_type: 'gap' | 'show_stopper' | 'poor_definition' | 'improvement'
   item_id: string
+  // MVP 14 Fase 14.9: stop-rule hit — migração unknown cascata em ArguiderPage.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   data: Record<string, any>
   status: 'pending' | 'resolved' | 'ignored'
   resolution_note: string | null
@@ -33,6 +35,7 @@ export interface GatekeeperData {
   show_stoppers: GatekeeperItem[]
   poor_definitions: GatekeeperItem[]
   improvement_suggestions: GatekeeperItem[]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   module_candidates: any[]
 }
 

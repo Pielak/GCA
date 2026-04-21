@@ -1,4 +1,4 @@
-import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import axios, { AxiosError, AxiosRequestConfig, InternalAxiosRequestConfig } from 'axios'
 import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 
 // Detect API URL based on how the frontend is being accessed
@@ -81,21 +81,23 @@ api.interceptors.response.use(
     //   - string  (HTTPException comum)
     //   - array de {msg, loc, type, …}  (validation do Pydantic)
     // Sem este normalize, ${message} em alerts vira "[object Object]".
-    const detail = (error.response?.data as any)?.detail
+    const data = error.response?.data as { detail?: unknown; message?: unknown } | undefined
+    const detail = data?.detail
     let errorMessage: string
     if (typeof detail === 'string') {
       errorMessage = detail
     } else if (Array.isArray(detail)) {
       errorMessage = detail
-        .map((d: any) => {
+        .map((d: unknown) => {
           if (typeof d === 'string') return d
-          const loc = Array.isArray(d?.loc) ? d.loc.join('.') : ''
-          return loc ? `${loc}: ${d?.msg ?? JSON.stringify(d)}` : (d?.msg ?? JSON.stringify(d))
+          const item = d as { loc?: unknown; msg?: unknown }
+          const loc = Array.isArray(item?.loc) ? item.loc.join('.') : ''
+          return loc ? `${loc}: ${item?.msg ?? JSON.stringify(d)}` : (item?.msg ?? JSON.stringify(d)) as string
         })
         .join('; ')
     } else {
       errorMessage =
-        (error.response?.data as any)?.message ||
+        (typeof data?.message === 'string' ? data.message : undefined) ||
         getErrorMessage(error)
     }
 
@@ -108,12 +110,20 @@ api.interceptors.response.use(
 )
 
 // Helper methods
+// MVP 14 Fase 14.9: T default permanece `any` aqui — migrá-lo para
+// `unknown` vira refactor cross-file (stop-rule > 2d). Inner-handler
+// acima usa tipos estreitos (data/detail/message).
 export const apiClient = {
-  get: <T = any>(url: string, config?: any) => api.get<T>(url, config),
-  post: <T = any>(url: string, data?: any, config?: any) => api.post<T>(url, data, config),
-  put: <T = any>(url: string, data?: any, config?: any) => api.put<T>(url, data, config),
-  patch: <T = any>(url: string, data?: any, config?: any) => api.patch<T>(url, data, config),
-  delete: <T = any>(url: string, config?: any) => api.delete<T>(url, config),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  get: <T = any>(url: string, config?: AxiosRequestConfig) => api.get<T>(url, config),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  post: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.post<T>(url, data, config),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  put: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.put<T>(url, data, config),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  patch: <T = any>(url: string, data?: unknown, config?: AxiosRequestConfig) => api.patch<T>(url, data, config),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  delete: <T = any>(url: string, config?: AxiosRequestConfig) => api.delete<T>(url, config),
 }
 
 export default api
