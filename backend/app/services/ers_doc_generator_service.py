@@ -527,13 +527,14 @@ async def build_ers_markdown(db: AsyncSession, project_id: UUID) -> str:
     # ----------------- Seção 4 — Matriz de Rastreabilidade -----------------
     lines.append("## 4. Matriz de Rastreabilidade")
     lines.append("")
-    lines.append(
-        "_A matriz cruzando requisitos × casos de teste × arquivos/commits será "
-        "populada na Fase 19.4 do MVP 19. Por enquanto, os dados brutos de "
-        "`test_specs` e de auditoria de CodeGen estão acessíveis em `/projects/:id/qa` "
-        "e `/projects/:id/audit` respectivamente._"
+    # Import local pra evitar ciclo com traceability_service.
+    from app.services.traceability_service import (
+        build_traceability_matrix,
+        render_traceability_markdown,
     )
-    lines.append("")
+
+    matrix = await build_traceability_matrix(db, project_id)
+    lines.extend(render_traceability_markdown(matrix))
 
     lines.append("---")
     lines.append("")

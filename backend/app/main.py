@@ -25,6 +25,7 @@ from app.routers.backup_router import (
 from app.routers.help_router import router as help_router
 from app.routers.ers_router import router as ers_router
 from app.routers.glossary_router import router as glossary_router
+from app.routers.traceability_router import router as traceability_router
 from app.routers.incident_ticket_router import (
     router as incident_project_router,
     ticket_router as incident_ticket_router,
@@ -214,6 +215,7 @@ app.include_router(backup_status_router, prefix=f"{settings.API_PREFIX}", tags=[
 app.include_router(help_router, prefix=f"{settings.API_PREFIX}", tags=["help"])
 app.include_router(ers_router, prefix=f"{settings.API_PREFIX}", tags=["ers"])
 app.include_router(glossary_router, prefix=f"{settings.API_PREFIX}", tags=["glossary"])
+app.include_router(traceability_router, prefix=f"{settings.API_PREFIX}", tags=["traceability"])
 app.include_router(incident_project_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_ticket_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-incidents"])

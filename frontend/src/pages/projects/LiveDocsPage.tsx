@@ -11,6 +11,7 @@ import { useStaleSummary } from '@/hooks/useTestSpecs'
 import { LiveDocModal } from '@/components/livedocs/LiveDocModal'
 import { ERSCard } from '@/components/livedocs/ERSCard'
 import { GlossaryPanel } from '@/components/livedocs/GlossaryPanel'
+import { TraceabilityPanel } from '@/components/livedocs/TraceabilityPanel'
 
 /**
  * MVP 10 Fase 10.7 — Documentação Viva real (LiveDocs).
@@ -142,6 +143,10 @@ export function LiveDocsPage() {
       {/* MVP 19 Fase 19.3 — glossário vivo por projeto.
           Alimenta a seção 1.3 do ERS quando os termos são aprovados. */}
       {projectId && <GlossaryPanel projectId={projectId} />}
+
+      {/* MVP 19 Fase 19.4 — matriz de rastreabilidade (read-only).
+          Alimenta a seção 4 do ERS ao regenerar. */}
+      {projectId && <TraceabilityPanel projectId={projectId} />}
 
       {/* Stale banner — aggregate via stale-summary quando disponível */}
       {staleCount > 0 && (

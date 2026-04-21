@@ -208,8 +208,9 @@ async def test_markdown_ocg_vazio_emite_placeholders(db_session):
     # Seção 1.3 — placeholder do glossário agora aponta para a aba
     # (após Fase 19.3, o texto não cita mais "Fase 19.3" — é funcional).
     assert "Nenhum termo aprovado ainda" in md
-    # Placeholder da Fase 19.4 (matriz de rastreabilidade).
-    assert "Fase 19.4" in md
+    # Seção 4 — matriz agora é funcional (Fase 19.4). Sem requisitos
+    # cadastrados, o renderer emite placeholder dela mesma.
+    assert "Nenhum requisito registrado ainda" in md
 
 
 @pytest.mark.asyncio
