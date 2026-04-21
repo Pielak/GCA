@@ -309,6 +309,19 @@ async def set_project_status(
         return project
 
     project.status = new_status
+    await db.flush()
+
+    # MVP 13 Fase 13.6 — audit canônico de mudança de lifecycle.
+    await AuditService(db).log_project_event(
+        event_type=AuditEvents.PROJECT_STATUS_CHANGED,
+        actor_id=actor.id,
+        project_id=project.id,
+        action="set_status",
+        old_status=prev,
+        new_status=new_status,
+        extra={"reason": (reason or "")[:500]} if reason else None,
+    )
+
     await db.commit()
     await db.refresh(project)
 

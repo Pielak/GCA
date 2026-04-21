@@ -166,6 +166,52 @@ class QuestionnaireService:
                     analyzed_at=datetime.now(timezone.utc),
                 )
                 db.add(questionnaire)
+                await db.flush()
+
+                # MVP 13 Fase 13.6 — audit canônico do ciclo questionário.
+                # SUBMITTED: sempre. APPROVED/REJECTED: conforme result["approved"].
+                # Correlação entre os 2 eventos via correlation_id compartilhado.
+                from uuid import uuid4 as _uuid4
+                from app.services.audit_service import AuditEvents, AuditService
+                _corr = _uuid4()
+                _audit = AuditService(db)
+                await _audit.log_event(
+                    event_type=AuditEvents.QUESTIONNAIRE_SUBMITTED,
+                    resource_type="questionnaire",
+                    actor_id=None,  # submit externo via GP link — sem user autenticado
+                    actor_email=gp_email,
+                    resource_id=questionnaire.id,
+                    details={
+                        "project_id": str(project_id),
+                        "questionnaire_id": str(questionnaire.id),
+                        "adherence_score": result["adherenceScore"],
+                        "action": "submit",
+                    },
+                    correlation_id=_corr,
+                )
+                if result["approved"]:
+                    await _audit.log_questionnaire_event(
+                        event_type=AuditEvents.QUESTIONNAIRE_APPROVED,
+                        actor_id=None,
+                        actor_email=gp_email,
+                        project_id=project_id,
+                        questionnaire_id=questionnaire.id,
+                        action="auto_approve_on_submit",
+                        score=result["adherenceScore"],
+                        correlation_id=_corr,
+                    )
+                else:
+                    await _audit.log_questionnaire_event(
+                        event_type=AuditEvents.QUESTIONNAIRE_REJECTED,
+                        actor_id=None,
+                        actor_email=gp_email,
+                        project_id=project_id,
+                        questionnaire_id=questionnaire.id,
+                        action="auto_reject_on_submit",
+                        score=result["adherenceScore"],
+                        correlation_id=_corr,
+                    )
+
                 await db.commit()
 
                 logger.info(

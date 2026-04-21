@@ -412,6 +412,21 @@ class AdminService:
         request.approved_at = datetime.now(timezone.utc)
         request.rejection_reason = reason
 
+        await self.db.flush()
+
+        # MVP 13 Fase 13.6 — audit canônico de rejeição de projeto.
+        # resource_id usa o request_id (não há project_id ainda — não foi aprovado).
+        from app.services.audit_service import AuditEvents, AuditService
+        await AuditService(self.db).log_project_event(
+            event_type=AuditEvents.PROJECT_REJECTED,
+            actor_id=admin_id,
+            project_id=request_id,
+            action="reject",
+            old_status="pending",
+            new_status="rejected",
+            extra={"reason": reason[:500] if reason else None},
+        )
+
         await self.db.commit()
         await self.db.refresh(request)
 

@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.32  
+Versão: 3.33  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** Tema A completo (13.1-13.4). **Fase 13.5 FECHADA 2026-04-20** (inventário + helpers): 8 constantes novas em `AuditEvents` (PROJECT_*×3, QUESTIONNAIRE_*×2, CODEGEN_*×3); 3 helpers canônicos em `AuditService` (`log_project_event`, `log_questionnaire_event`, `log_codegen_event`) seguindo padrão 11.4; inventário binário publicado em `§3.0` do progresso (4 SIM / 7 NÃO em 4 domínios); 16 testes de shape/whitelist; **nenhum ponto instrumentado** (escopo 13.6/13.7). Suite pós-13.5: **1484/1484 passing** (+80 cumulativo MVP 13). Fases 13.6 + 13.7 seguem.
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** Tema A completo (13.1-13.4). **Fase 13.5 + 13.6 FECHADAS 2026-04-20**. Fase 13.6 (instrumentação projeto + questionário): `admin_service.reject_project_request` emite PROJECT_REJECTED; `admin_management_service.set_project_status` emite PROJECT_STATUS_CHANGED; `questionnaire_service.submit_questionnaire` emite QUESTIONNAIRE_SUBMITTED + APPROVED/REJECTED conforme score (ambos com correlation_id compartilhado). 5 testes (3 estáticos + 2 E2E contra gca_test). Suite pós-13.6: **1489/1489 passing** (+85 cumulativo MVP 13). Fase 13.7 (CodeGen + chain E2E) segue.
 
 ---
 
@@ -21,7 +21,7 @@ Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em exe
 
 **Tema B — Cobertura completa de `audit_log_global` (3 fases):**
 - ✅ **Fase 13.5** Inventário + helpers canônicos — **FECHADA 2026-04-20**. 8 constantes novas em `AuditEvents` + 3 helpers em `AuditService` (project/questionnaire/codegen). Inventário binário em `§3.0`: 4 SIM / 7 NÃO (reject_project_request, set_project_status, submit_questionnaire, 3 CodeGen endpoints, + lacunas N/A registradas). 16 testes; nenhum ponto instrumentado (escopo 13.6/13.7).
-- **Fase 13.6** Instrumentação projeto (aprovação/rejeição, status transitions) + questionário (submit + aprovação).
+- ✅ **Fase 13.6** Instrumentação projeto + questionário — **FECHADA 2026-04-20**. 3 pontos: `reject_project_request` (PROJECT_REJECTED), `set_project_status` (PROJECT_STATUS_CHANGED), `submit_questionnaire` (SUBMITTED + APPROVED|REJECTED com correlation_id compartilhado). 5 testes (3 estáticos, 2 E2E).
 - **Fase 13.7** Instrumentação OCG (update_from_arguider, rollback, consolidate) + CodeGen (scaffold, apply, regenerate-file) + teste E2E de chain integrity (`verify_chain()` íntegra após série de ações).
 
 **Regras duras (do contrato §7 MVP 13):**
