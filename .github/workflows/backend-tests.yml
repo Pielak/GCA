@@ -32,12 +32,13 @@ jobs:
         pip install poetry
         poetry install
 
-    # MVP 11 Fase 11.5 — garante que DT-041 (image drift pypdf/reportlab/esprima)
-    # não reaparece: imports críticos têm que funcionar direto da instalação poetry.
-    - name: Verify critical extraction libs are importable
+    # MVP 11 Fase 11.5 + MVP 14 Fase 14.3 — imports críticos têm que
+    # funcionar direto da instalação poetry (sem paliativo runtime).
+    # Inclui celery e slowapi (introduzidos em MVP 12.1 e MVP 13.1).
+    - name: Verify critical libs are importable
       run: |
         cd backend
-        poetry run python -c "import pypdf, reportlab, esprima; print('pypdf', pypdf.__version__); print('reportlab', reportlab.__version__); print('esprima OK')"
+        poetry run python -c "import pypdf, reportlab, esprima, celery, slowapi; print('pypdf', pypdf.__version__); print('reportlab', reportlab.__version__); print('celery', celery.__version__); print('esprima + slowapi OK')"
 
     - name: Run tests (excluding e2e lane)
       run: |
@@ -63,10 +64,13 @@ jobs:
     - name: Build backend image from scratch (no cache)
       run: docker build --no-cache -t gca-backend-ci:fase115 backend
 
-    - name: Verify extraction libs inside built image
+    - name: Verify critical libs inside built image
+      # MVP 14 Fase 14.3 — estende verificação para celery + slowapi
+      # (introduzidos em MVP 13.1 e 12.1 respectivamente). Garante que
+      # rebuild --no-cache persiste todas as 5 deps críticas.
       run: |
         docker run --rm gca-backend-ci:fase115 \
-          python -c "import pypdf, reportlab, esprima; print('image-build OK')"
+          python -c "import pypdf, reportlab, esprima, celery, slowapi; print('image-build OK')"
 
   e2e:
     # MVP 11 Fase 11.7 — lane dedicada de GUI E2E.

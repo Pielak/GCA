@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.38  
+Versão: 3.39  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1 + 14.2 FECHADAS 2026-04-20**. 14.2 (gatekeeper TODO): comment morto removido — `approve_module` documentado como "CodeGen pós-approve é manual por design" (fluxo canônico via POST /scaffold). Zero `create_task` em `gatekeeper_service`. 3 testes. Suite pós-14.2: **1511/1511 passing** (+3). Fases 14.3-14.11 seguem.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1 + 14.2 + 14.3 FECHADAS 2026-04-20**. 14.3 (rebuild --no-cache definitivo): imagem fresh via `docker compose build --no-cache backend` valida 5 libs críticas (celery 5.6.3 / slowapi / pypdf 4.3.1 / reportlab 4.4.10 / esprima); CI estendido — jobs `test` e `docker-image` verificam todas as 5 num único import check. 3 testes (1 runtime + 2 yml inspection com skip em container). Fases 14.4-14.11 seguem.
 
 ---
 
