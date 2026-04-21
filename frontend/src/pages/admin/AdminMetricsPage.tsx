@@ -373,12 +373,13 @@ function KpiCard({ icon, label, value, hint }: { icon: React.ReactNode; label: s
   )
 }
 
-function Section({ title, icon, children }: { title: string; icon?: React.ReactNode; children: React.ReactNode }) {
+function Section({ title, icon, hint, children }: { title: string; icon?: React.ReactNode; hint?: string; children: React.ReactNode }) {
   return (
     <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4">
       <div className="flex items-center gap-2 mb-3">
         {icon}
         <h2 className="text-slate-200 text-sm font-semibold">{title}</h2>
+        {hint && <span className="ml-2 text-slate-500 text-xs">{hint}</span>}
       </div>
       {children}
     </div>
