@@ -5,7 +5,7 @@ Global schema tables: users, organizations, projects, etc
 from datetime import datetime, timezone
 from uuid import uuid4
 from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, CheckConstraint, Integer, Float, Text, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
 from app.db.database import Base
@@ -1407,6 +1407,60 @@ class ProjectGlossaryTerm(Base):
         # UNIQUE com LOWER(term) é criada via migration 034 (SQLAlchemy não
         # suporta funções em UniqueConstraint sem Index Index func+DDL direto).
         Index("idx_glossary_project_status", project_id, status),
+    )
+
+
+class ExternalIssue(Base):
+    """MVP 20 Fase 20.1a — Vínculo com issue em tracker externo (Jira, Trello, …).
+
+    Cada linha = 1 issue criada/espelhada em um tracker configurado no projeto.
+    `status_canonical` guarda o estado CANÔNICO do GCA; o status específico do
+    provider (raw) fica em `status_raw` pra auditoria. Mapeamento provider→canônico
+    é configurável por projeto (via `/settings`).
+
+    Idempotência de webhook garantida por UNIQUE (project_id, provider, external_id)
+    — ver migration 035. Mesma issue notificada 2x → mesma row atualizada, sem duplicar.
+
+    Compartimentalização §2.2: project_id é NOT NULL e toda query filtra por ele;
+    issue do projeto A nunca aparece em tracker do projeto B.
+    """
+    __tablename__ = "external_issues"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    module_candidate_id = Column(UUID(as_uuid=True), ForeignKey("module_candidates.id", ondelete="SET NULL"), nullable=True)
+
+    # Valores canônicos (aplicação-level whitelist):
+    #   jira | trello | linear | asana | github
+    # V1 aceita apenas: jira, trello.
+    provider = Column(String(20), nullable=False)
+    # ID nativo do provider: Jira key (ex: PROJ-123), Trello card id (hash), etc.
+    external_id = Column(String(200), nullable=False)
+    url = Column(Text, nullable=True)
+
+    title = Column(String(500), nullable=False)
+    # Estado CANÔNICO do GCA (whitelist aplicação-level):
+    #   todo | in_progress | review | done | cancelled
+    status_canonical = Column(String(20), nullable=False, default="todo")
+    # Último estado recebido do provider (preserva naming específico).
+    status_raw = Column(String(100), nullable=True)
+    # Whitelist aplicação-level: low | medium | high | critical
+    priority = Column(String(20), nullable=True)
+
+    # Payload JSON com campos específicos do provider que não cabem no schema
+    # canônico: epic_key/sprint_id/labels/assignee_id (Jira), list_id/board_id
+    # /labels (Trello), etc. Evita UNION schema explodir.
+    provider_specific = Column(JSONB, nullable=False, default=dict)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    synced_at = Column(DateTime(timezone=True), nullable=True)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # UNIQUE via migration 035 (índice canônico + expressão).
+        Index("idx_external_issues_project", project_id),
+        Index("idx_external_issues_status", project_id, status_canonical),
     )
 
 
