@@ -229,8 +229,12 @@ class GatekeeperService:
 
         logger.info("gatekeeper.module_approved", module_id=str(module_id), name=module.name)
 
-        # TODO FASE 3: disparar CodeGen do módulo via asyncio.create_task
-        return {"success": True, "message": "Módulo aprovado. Geração de código será iniciada na Fase 3."}
+        # MVP 14 Fase 14.2: CodeGen pós-approve NÃO é auto-disparado.
+        # Fluxo canônico: Dev/GP invoca `POST /code-generation/scaffold`
+        # ou `POST /code-generation/regenerate-file` manualmente após
+        # a aprovação do módulo. Mantido intencional — approve +
+        # CodeGen são decisões separadas na UI do GP.
+        return {"success": True, "message": "Módulo aprovado."}
 
     async def reject_module(self, project_id: UUID, module_id: UUID, rejected_by: UUID, reason: str) -> dict:
         if not reason or not reason.strip():

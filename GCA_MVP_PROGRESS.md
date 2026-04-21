@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.37  
+Versão: 3.38  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** **Fase 14.1 FECHADA 2026-04-20** (Celery em questionnaire_service): 4 tasks novas em `app/tasks/questionnaire.py` (notify_admins_submitted_task, send_analysis_email_task, trigger_n8n_analysis_task, generate_ocg_task); `questionnaire_service.py` com zero asyncio.create_task; 15 testes; worker registra 11 tasks totais. Suite pós-14.1: **1508/1508 passing** (+15). Fases 14.2-14.11 seguem definidas.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1 + 14.2 FECHADAS 2026-04-20**. 14.2 (gatekeeper TODO): comment morto removido — `approve_module` documentado como "CodeGen pós-approve é manual por design" (fluxo canônico via POST /scaffold). Zero `create_task` em `gatekeeper_service`. 3 testes. Suite pós-14.2: **1511/1511 passing** (+3). Fases 14.3-14.11 seguem.
 
 ---
 
