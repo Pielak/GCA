@@ -34,7 +34,7 @@ export function DesignShowcasePage() {
   // Pipeline demo state
   const [pipelineStep, setPipelineStep] = useState(0)
   const [pipelineStatus, setPipelineStatus] = useState<'idle' | 'running' | 'success' | 'error'>('idle')
-  const [pipelineInterval, setPipelineInterval] = useState<NodeJS.Timeout | null>(null)
+  const [pipelineInterval, setPipelineInterval] = useState<ReturnType<typeof setInterval> | null>(null)
 
   // Operation bar demo state
   const [activeOp, setActiveOp] = useState(0)

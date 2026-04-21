@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.57  
+Versão: 3.58  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 em execução 2026-04-21**. **Fases 16.1-16.3 FECHADAS**: 16.3 (test_spec_generator C++-aware) adiciona `_detect_test_framework(stack)` retornando `"googletest"` para `backend.language in {c++, cpp, cplusplus}` (None para demais); `_build_prompt` anexa bloco `CPP_GOOGLETEST_GUIDANCE` (TEST/TEST_F/EXPECT_*/GTEST_SKIP/gtest_discover_tests) ao final do prompt quando C++; `_build_provenance` inclui `test_framework: "googletest"` no JSON quando C++ (omite para outras). Zero regressão nos 39 testes pré-existentes de test_spec_generator. 16 testes novos (58 total MVP 16). Fases 16.4-16.5 seguem.
+Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 em execução 2026-04-21**. **Fases 16.1-16.4 FECHADAS**: 16.4 (DesignShowcase tsc fix) substitui `NodeJS.Timeout` por `ReturnType<typeof setInterval>` (1 linha em `DesignShowcasePage.tsx:37`). **Tsc frontend = 0 errors** pela primeira vez desde MVP 14 (baseline estava em 1 residual desde 15.2). Fase 16.5 (dogfood validation) segue como única pendência.
 
 ---
 
