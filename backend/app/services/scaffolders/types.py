@@ -35,3 +35,6 @@ class ScaffoldSpec:
     requires_security: bool = False  # se OCG.security_controls inclui auth
     requires_redis: bool = False
     extra_dependencies: List[str] = field(default_factory=list)
+    # MVP 16 Fase 16.2 — padrão C++ (14/17/20/23). Ignorado por scaffolders
+    # não-C++. Default "17" corresponde ao baseline canônico da 16.1.
+    cpp_standard: Optional[str] = None

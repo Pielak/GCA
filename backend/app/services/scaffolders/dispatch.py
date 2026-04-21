@@ -24,6 +24,7 @@ from .php_laravel import scaffold_php_laravel
 from .kotlin_spring import scaffold_kotlin_spring
 from .nodejs_nestjs import scaffold_nodejs_nestjs
 from .nodejs_express import scaffold_nodejs_express
+from .cpp_cmake import scaffold_cpp_cmake
 
 logger = structlog.get_logger(__name__)
 
@@ -95,6 +96,11 @@ def _build_spec(
     requires_redis = bool(cache.get("enabled"))
     db_engine = db.get("engine") if isinstance(db.get("engine"), str) else None
 
+    # MVP 16 Fase 16.2 — cpp_standard é opcional; scaffolder C++ faz
+    # fallback para o baseline canônico "17" quando ausente ou inválido.
+    cpp_standard_raw = backend.get("cpp_standard")
+    cpp_standard = cpp_standard_raw if isinstance(cpp_standard_raw, str) else None
+
     return ScaffoldSpec(
         project_name=project_name,
         project_slug=project_slug,
@@ -103,6 +109,7 @@ def _build_spec(
         database=db_engine,
         requires_security=requires_security,
         requires_redis=requires_redis,
+        cpp_standard=cpp_standard,
     )
 
 
@@ -177,6 +184,17 @@ def dispatch_scaffold(
     if language == "go":
         logger.info("scaffold.dispatch", scaffolder="go_app", **log_ctx)
         return _augment("go_app", scaffold_go(spec))
+
+    # MVP 16 Fase 16.2 — C++ via CMake + GoogleTest (FetchContent).
+    # Aliases tolerantes porque o OCG persiste `backend.language` do texto
+    # original do questionário ou do agente 0 — "c++", "cpp", "cplusplus"
+    # todos são aceitos. DDL não se aplica (C++ tipicamente isola DB em
+    # serviço separado); o helper `_augment` passa adiante só se
+    # `data_model` for fornecido explicitamente, caso contrário fica sem
+    # artefato DDL — consistente com scaffolders atuais.
+    if language in ("c++", "cpp", "cplusplus"):
+        logger.info("scaffold.dispatch", scaffolder="cpp_cmake", **log_ctx)
+        return _augment("cpp_cmake", scaffold_cpp_cmake(spec))
 
     if language in ("csharp", "c#", "cs", ".net", "dotnet"):
         logger.info("scaffold.dispatch", scaffolder="csharp_aspnet", **log_ctx)

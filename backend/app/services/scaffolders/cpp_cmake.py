@@ -52,13 +52,26 @@ def _include_dir(spec: ScaffoldSpec) -> str:
     return f"include/{_cmake_target_name(spec)}"
 
 
+def _resolve_cpp_standard(spec: ScaffoldSpec) -> str:
+    """Resolve o padrão C++ do spec, com fallback no baseline canônico.
+
+    Aceita: "14", "17", "20", "23". Rejeita qualquer outro valor por
+    estar fora do whitelist canônico — cai para o default.
+    """
+    std = (spec.cpp_standard or "").strip()
+    if std in {"14", "17", "20", "23"}:
+        return std
+    return _CPP_STANDARD_DEFAULT
+
+
 def _cmakelists(spec: ScaffoldSpec) -> str:
     target = _cmake_target_name(spec)
+    cpp_std = _resolve_cpp_standard(spec)
     return f"""# Auto-gerado pelo GCA — raiz do projeto. [gca:auto]
 cmake_minimum_required(VERSION {_CMAKE_MIN_VERSION})
 project({target} VERSION 0.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD {_CPP_STANDARD_DEFAULT})
+set(CMAKE_CXX_STANDARD {cpp_std})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -321,6 +334,7 @@ ENTRYPOINT ["/app/{target}"]
 
 def _readme(spec: ScaffoldSpec) -> str:
     target = _cmake_target_name(spec)
+    cpp_std = _resolve_cpp_standard(spec)
     return f"""# {spec.project_name}
 
 > Scaffold inicial **C++ / CMake / GoogleTest** gerado pelo GCA (MVP 16
@@ -329,7 +343,7 @@ def _readme(spec: ScaffoldSpec) -> str:
 
 ## Stack
 
-- C++{_CPP_STANDARD_DEFAULT} (padrão baseline)
+- C++{cpp_std} (via `cpp_standard` no OCG.STACK.backend)
 - CMake {_CMAKE_MIN_VERSION}+
 - GoogleTest {_GOOGLETEST_TAG} (via FetchContent; sem vcpkg/conan em V1)
 - Artefato V1: **executável** (`{target}`). Biblioteca/header-only ficam para V2.

@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.55  
+Versão: 3.56  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 em execução 2026-04-21**. **Fase 16.1 FECHADA**: scaffolder `cpp_cmake.scaffold_cpp_cmake(spec)` gera 11 arquivos canônicos (CMakeLists + src/main.cpp + include/<target>/ + tests GoogleTest + .clang-format + .clang-tidy + Dockerfile multi-stage gcc:13→debian:bookworm-slim + README). Slug→target translation (hífen→underscore) para conformidade CMake. **Smoke compile validado**: projeto gerado compila com gcc:13 + cmake + ninja e executa. CI step `cpp-scaffold-compile` adicionado em `backend-tests.yml` (compila executável, sem GoogleTest FetchContent). 25 testes unitários novos. Fases 16.2-16.5 seguem.
+Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 em execução 2026-04-21**. **Fases 16.1-16.2 FECHADAS**: 16.2 (dispatch C++ + enum) adiciona `LinguagemBackend.CPP = "C++"` ao enum; `ScaffoldSpec.cpp_standard: Optional[str]` novo campo (default None → fallback "17"); `_build_spec` lê `backend.cpp_standard` do OCG.STACK; `dispatch_scaffold` branch `language in {c++, cpp, cplusplus}` → `scaffold_cpp_cmake`; whitelist canônica `{14, 17, 20, 23}`. Zero regressão nos 60 testes de dispatch+scaffolders pré-existentes. 17 testes novos (42 total MVP 16). Fases 16.3-16.5 seguem.
 
 ---
 

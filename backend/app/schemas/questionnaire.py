@@ -200,6 +200,8 @@ class LinguagemBackend(str, Enum):
     GO = "Go"
     PHP = "PHP"
     KOTLIN = "Kotlin"
+    # MVP 16 Fase 16.2 — codegen C++ suportado via scaffolder cpp_cmake.
+    CPP = "C++"
     OUTRA = "Outra"
 
 
