@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.54  
+Versão: 3.55  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 ABERTO 2026-04-21** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano). Escopo: **C++ fundacional (Cluster A do gap) + DesignShowcase tsc fix + dogfood validation**. 5 fases trancadas em ≈1.5 semanas. Estado inicial: **definido — não iniciado**; implementação da Fase 16.1 exige autorização adicional explícita (§7.0 regra 3).
+Status: **controle de avanço por fase** — MVPs 1-15 fechados. **MVP 16 em execução 2026-04-21**. **Fase 16.1 FECHADA**: scaffolder `cpp_cmake.scaffold_cpp_cmake(spec)` gera 11 arquivos canônicos (CMakeLists + src/main.cpp + include/<target>/ + tests GoogleTest + .clang-format + .clang-tidy + Dockerfile multi-stage gcc:13→debian:bookworm-slim + README). Slug→target translation (hífen→underscore) para conformidade CMake. **Smoke compile validado**: projeto gerado compila com gcc:13 + cmake + ninja e executa. CI step `cpp-scaffold-compile` adicionado em `backend-tests.yml` (compila executável, sem GoogleTest FetchContent). 25 testes unitários novos. Fases 16.2-16.5 seguem.
 
 ---
 

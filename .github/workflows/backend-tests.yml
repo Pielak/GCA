@@ -72,6 +72,58 @@ jobs:
         docker run --rm gca-backend-ci:fase115 \
           python -c "import pypdf, reportlab, esprima, celery, slowapi; print('image-build OK')"
 
+  cpp-scaffold-compile:
+    # MVP 16 Fase 16.1 — valida que o scaffold C++ emitido pelo
+    # `cpp_cmake.scaffold_cpp_cmake` compila de verdade. Sem isso os
+    # testes unitários só provam que o texto gerado tem as chaves certas,
+    # não que o CMake+GCC aceitam.
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install backend deps
+      run: |
+        cd backend
+        pip install poetry
+        poetry install
+
+    - name: Materialize C++ scaffold into /tmp/cpp_smoke
+      run: |
+        cd backend
+        mkdir -p /tmp/cpp_smoke
+        poetry run python -c "
+        import os, sys
+        sys.path.insert(0, '.')
+        from app.services.scaffolders import ScaffoldSpec, scaffold_cpp_cmake
+        spec = ScaffoldSpec(project_name='CiSmoke', project_slug='ci-smoke', package='com.gca.ci')
+        files = scaffold_cpp_cmake(spec)
+        for f in files:
+            path = os.path.join('/tmp/cpp_smoke', f.path)
+            os.makedirs(os.path.dirname(path) or '/tmp/cpp_smoke', exist_ok=True)
+            with open(path, 'w') as fp:
+                fp.write(f.content)
+        print(f'Wrote {len(files)} files')
+        "
+
+    - name: Compile C++ scaffold (executable, without tests)
+      # Tests opt-in do scaffold baixam GoogleTest via FetchContent — lento.
+      # V1 CI valida só a compilação do executável principal. MVP 17
+      # Cluster B cobre matrix multi-compiler + GoogleTest no CI.
+      run: |
+        docker run --rm -v /tmp/cpp_smoke:/src -w /src gcc:13-bookworm bash -c "
+          apt-get update -qq >/dev/null && \
+          apt-get install -y -qq cmake ninja-build >/dev/null && \
+          cmake -G Ninja -B build -DBUILD_TESTING=OFF && \
+          cmake --build build -j && \
+          ./build/bin/ci_smoke
+        "
+
   e2e:
     # MVP 11 Fase 11.7 — lane dedicada de GUI E2E.
     # MVP 12 Fase 12.6 — seed canônico (`scripts/seed_e2e.py`) garante
