@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.40  
+Versão: 3.41  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.4 FECHADAS 2026-04-20** (14.4 parcial — infra validada, rewrite suite é DT). 14.4 (canário e2e real): `vite.config.ts` ganha `preview.allowedHosts` para `gca-frontend` (dogfood revelou Vite bloqueando host); seletores login ajustados (`type="email"` sem `name=`); redirect `/` (não `/dashboard`); admin canônico `admin@gca.local` → `admin@gca-test.com` (pydantic EmailStr rejeita `.local`); playwright + chromium runtime. `test_e2e_01_setup_status` passa; `test_e2e_02_login_redireciona_dashboard` requer diagnóstico do `handleLogin` frontend (condicional por project dropdown) — fora do escopo canônico do 14.4 "canário". TODO registrado no arquivo apontando rewrite tests 03-14 como escopo próprio. Fases 14.5-14.11 seguem.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.5 FECHADAS 2026-04-20**. 14.5 (shadcn não usados): 13 arquivos removidos (os 12 do contrato `calendar`/`carousel`/`command`/`drawer`/`input-otp`/`resizable`/`sidebar`/`sonner`/`switch`/`tabs`/`toggle`/`tooltip` + `toggle-group` do mesmo grupo). tsc errors: 57 → 36. Diagnóstico revelou outros 21 shadcn também órfãos (accordion, alert, alert-dialog, aspect-ratio, avatar, badge, breadcrumb, button, card, chart, checkbox, collapsible, context-menu, dialog, dropdown-menu, form, hover-card, input, label, menubar, navigation-menu, pagination, popover, progress, radio-group, scroll-area, select, separator, sheet, skeleton, slider, table, textarea) — **fora do escopo §7 MVP 14 Fase 14.5** (lista explícita de 12). Registrado no §3 como TODO "shadcn pass 2" para fase/MVP futuro. Fases 14.6-14.11 seguem.
 
 ---
 
