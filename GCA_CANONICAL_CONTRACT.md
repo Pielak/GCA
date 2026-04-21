@@ -982,6 +982,76 @@ Portanto, a fase ativa não deve ser tratada como “expandir produto”, mas co
 
 ---
 
+### MVP 18 — Sistema de Ajuda integrado (infraestrutura + conteúdo)
+
+**Motivação:** Admin e GP não têm documentação operacional embutida no produto. `docs/gca_total.md` (criado 2026-04-21) enumera as 31 sub-seções de Admin+GP+infra mas vive fora da UI. Acrônimos (OCG, RBAC, GP, DT, P1-P7, DLQ, DDL, FK, etc) não têm glossário consultável em runtime. User pediu aba "Ajuda" tanto no sidebar Admin quanto no sidebar de projeto com documentação completa navegável + busca full-text + screenshots onde aplicável.
+
+**Escopo autorizado nesta onda:** apenas **Fases 18.1 + 18.2 (infraestrutura)**. Fases 18.3-18.5 (conteúdo + busca + integração final) exigem autorização adicional após review de 18.1+18.2 (§7.0 regra 3).
+
+**Não entra no MVP 18 (explícito):**
+- **Screenshots** — requer dogfood piloto + captura manual ou Playwright automação. MVP 19 potencial.
+- **Editor inline no Admin** para editar docs sem commit — parked.
+- **Versionamento do help** (diff entre versões) — docs vivem no git, suficiente.
+- **Tradução pt-BR → EN** — `feedback_portuguese_br` mantém pt-BR canônico.
+- **Export PDF do help completo** — parked.
+- **Help segmentado por papel** (Dev vs Tester vs QA) — MVP 18 entrega versão única com capítulos gerais; segmentação fica para iteração futura.
+- **Chamadas LLM no caminho crítico do help** — proibido; performance + compartimentalização.
+
+#### Em escopo (ONDA 1 — autorizada)
+
+**Fase 18.1 — Rotas + HelpPage skeleton + sidebar item (≈1d)**
+- 2 rotas novas: `/admin/help` (guard `RequireAdmin`) e `/projects/:id/help` (guard `ProjectMember` já existente via `ProjectDetailLayout`).
+- Componente `HelpPage.tsx` com layout 3 colunas: TOC navegável (esquerda) + conteúdo renderizado (centro) + campo de busca (topo, placeholder em 18.1 sem backend ainda).
+- Sidebar Admin ganha entrada "Ajuda" apontando para `/admin/help`.
+- `ProjectDetailLayout` nav ganha entrada "Ajuda" apontando para `/projects/:id/help`.
+- Skeleton: sem conteúdo real ainda — apenas 10 capítulos stub hardcoded no TOC para validar navegação. Clicar em capítulo exibe `<h1>` do capítulo + "Conteúdo em construção (MVP 18 Fase 18.3)".
+- Testes: navegação admin, navegação GP, guard RBAC (outros papéis 403).
+
+**Fase 18.2 — Backend /help endpoints + storage MD (≈1d)**
+- 3 endpoints novos em `help_router.py`:
+  - `GET /api/v1/help/toc` — retorna `{ chapters: [{ id, title, order, children?: [...] }] }` a partir de `help_content/toc.json`.
+  - `GET /api/v1/help/section/{section_id}` — retorna `{ id, title, markdown }` lendo `help_content/{section_id}.md`.
+  - `GET /api/v1/help/search?q=...` — **stub em 18.2** retornando lista vazia + header `X-Search-Backend: stub`. Implementação FTS5 vem em 18.4 (fora desta onda).
+- Storage canônico: `backend/app/help_content/toc.json` + `backend/app/help_content/*.md`.
+- Autorização: os 3 endpoints exigem usuário autenticado (qualquer papel). Conteúdo do help não é segmentado por papel em V1.
+- Serviço `help_service.py` abstrai I/O (facilita test + mock).
+- Conteúdo inicial V1: TOC com 10 capítulos stub (título + id) e 1 MD de exemplo (`help_content/01-visao-geral.md` com 3 parágrafos placeholder). Conteúdo real vem em 18.3.
+- Testes: 8+ unit cobrindo leitura TOC, leitura seção válida/inexistente (404), search stub retornando vazio, autorização, serialização.
+
+#### Fora do escopo desta onda (depende de nova autorização)
+
+- **Fase 18.3** Conteúdo real 10 capítulos (≈2d) — trabalhoso; merece review de tom/estrutura antes.
+- **Fase 18.4** Busca full-text SQLite FTS5 (≈1d).
+- **Fase 18.5** Renderer markdown frontend + testes e2e + integração final (≈0.5d).
+
+#### Regras duras
+
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- **Stop-rule dura >2d** por fase (especialmente 18.3 que tem inflação natural de texto).
+- §10 aplicável: zero refactor vizinho em `HelpTooltip`, `AppLayout`, `ProjectDetailLayout` além do necessário para inserir a entrada no sidebar.
+- Conteúdo em **pt-BR obrigatório** (`feedback_portuguese_br`).
+- RBAC imutável (§4) — nenhum novo papel.
+- Sem chamadas LLM no caminho crítico do help.
+- Help não acessa DB de outros projetos além do que o user já tem permissão (compartimentalização §2.2 preservada; conteúdo help é estático).
+- Storage do help NÃO é versionado por projeto — é global da instância (docs canônicas do produto).
+
+#### RBAC preservado (§4.1)
+
+- `/admin/help`: `RequireAdmin`.
+- `/projects/:id/help`: mesmo guard do `ProjectDetailLayout` (membro ativo aceito do projeto OR admin).
+- Endpoints `/api/v1/help/*`: usuário autenticado (qualquer papel); conteúdo idêntico para todos.
+
+#### Baseline de entrada (2026-04-21)
+
+- Suite backend: **1506 passing, 5 skipped**.
+- Frontend tsc: **0 errors**.
+- `any` frontend: 20.
+- DTs abertas: 0 (todas quitadas no MVP 17).
+- MVP 17 fechado (`a95a9f2`).
+- Gate §9 todos os 10 critérios SIM.
+
+---
+
 ## 9. Regras duras de implementação
 
 - Não antecipar feature de MVP futuro.

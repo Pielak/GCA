@@ -1,14 +1,34 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.61  
+Versão: 3.62  
 Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-17 fechados. **MVP 17 FECHADO 2026-04-21** com 2/2 fases entregues no mesmo dia da abertura. **Zero DTs abertas** no GCA pela primeira vez desde que o sistema de DT foi formalizado (17.1 quitou DT-078 via `CMD-SHELL` + `$$HOSTNAME`; 17.2 quitou DT-077 via regra dura em `CLAUDE.md §12`). Gate §9 todo verde; baseline técnico excepcionalmente limpo.
+Status: **controle de avanço por fase** — MVPs 1-17 fechados. **MVP 18 ABERTO 2026-04-21** pelo protocolo §7.0 — Sistema de Ajuda integrado (infraestrutura + conteúdo). **Onda 1 autorizada**: Fases 18.1 + 18.2 (infraestrutura). Fases 18.3-18.5 (conteúdo real + busca FTS5 + integração final) ficam fora desta onda; exigem autorização adicional após review da infraestrutura. Estado inicial: definido, em execução Onda 1.
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
+**MVP 18 — Sistema de Ajuda integrado (infraestrutura + conteúdo)** — **em execução 2026-04-21 — Onda 1 (18.1+18.2) autorizada**. Aberto pelo protocolo §7.0 após user pedir aba "Ajuda" tanto no sidebar Admin quanto no sidebar de projeto, com documentação completa + busca + screenshots. Plan fatiado em 5 fases; autorização stakeholder cobre apenas as 2 primeiras (infraestrutura); conteúdo real e busca FTS5 ficam para onda 2 após review.
+
+**Fases — Onda 1 (autorizada):**
+- ⏳ **Fase 18.1** Rotas + HelpPage skeleton + sidebar item (Admin + GP) com layout 3 colunas + guards RBAC.
+- ⏳ **Fase 18.2** Backend `/api/v1/help/{toc,section,search}` + storage canônico em `backend/app/help_content/` + serviço + 8+ testes. Search é stub em 18.2.
+
+**Fases — Onda 2 (não autorizada; aguarda review da Onda 1):**
+- Fase 18.3 Conteúdo real dos 10 capítulos canônicos (~2d).
+- Fase 18.4 Busca full-text via SQLite FTS5 (~1d).
+- Fase 18.5 Renderer markdown frontend + e2e + integração final (~0.5d).
+
+**Regras duras:** stop-rule >2d por fase; §10 anti-refactor-vizinho; conteúdo pt-BR obrigatório; RBAC imutável; sem LLM no caminho crítico; compartimentalização §2.2 preservada.
+
+**Fora explícito:** screenshots (MVP 19 potencial), editor inline, versionamento de help, tradução EN, export PDF, segmentação por papel, LLM no help.
+
+**Baseline de entrada:** 1506 passing, tsc=0, any=20, DTs abertas=0, MVP 17 fechado (`a95a9f2`).
+
+---
+
+### MVP anterior fechado
 **MVP 17 — Saneamento operacional Celery (DT-077 + DT-078)** — **FECHADO 2026-04-21 com 2/2 fases entregues**. Aberto + executado + fechado no mesmo dia em ciclo canônico §7.0. **Zero DTs abertas pós-MVP 17.**
 
 **Fases:**
@@ -641,10 +661,10 @@ A fase atual **não pode avançar** se qualquer um destes itens estiver aberto:
 - alteração sem migração/compatibilidade onde ela seria obrigatória;
 - feature nova adicionada para “contornar” dívida não resolvida.
 
-### Situação atual do gate (pós-MVP 17)
-**ABERTO — MVP 17 fechado com 2/2 fases entregues; zero DTs abertas.**
+### Situação atual do gate (MVP 18 — abertura Onda 1)
+**ABERTO PARA AVALIAÇÃO — MVP 18 em execução (Onda 1: Fases 18.1+18.2).**
 
-Baseline pós-MVP 17: **1506 passing, 5 skipped**; **tsc = 0**; any = 20; shadcn limpo (4 componentes próprios); C++ suportado como 9ª linguagem; Celery worker reporta `healthy`; Flower `:5555` ativo. **Zero blockers / zero criticals / zero major / zero minors abertos.** Critérios binários §9 (1-10) todos SIM.
+MVP 18 nasce com gate §9 aberto (10 critérios binários SIM): zero blocker/critical/contradição; suíte 1506 passing; tsc=0; DTs=0; MVP 17 fechado (`a95a9f2`). Gate vira "fechado" durante execução de cada fase e volta a "aberto" ao final da onda.
 
 ---
 
@@ -949,6 +969,7 @@ Antes de qualquer mudança:
 | 2026-04-21 | **Rejeição formal** de `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (proposta externa de 1.650h em 30 semanas sobre "OCG v2 com 15 seções"). Motivos binários: (a) incompatível com §7.0 (viola MVP iterativo — `feedback_mvp_over_end_to_end.md`); (b) desconectado do código real (OCG atual já tem 12 seções com fallback determinístico; doc propõe "15" sem identificar as 3 novas); (c) cita entidades inexistentes ("BRD Agent", "News Intake"); (d) estimativas fantasiosas (70h para definir conteúdo); (e) reinventa features já existentes (LiveDocs, Definition of Done, RBAC, hash chain). | Sem mudança de código; registro para trilha de decisão. `gca_session_23_2026_04_20_21.md` memória. | Preservar trilha canônica: propostas não vêm de fora do código; diagnóstico vem primeiro, MVP depois. Aplicou `feedback_honesty_over_completeness` + §10. |
 | 2026-04-21 | Abertura de **MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** pelo protocolo §7.0 (autorização explícita do stakeholder-soberano após diagnóstico curto de OCG + reaproveitamento de `gca_cpp_codegen_gap.md`). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 16` (nova subseção com 5 fases trancadas em ≈1.5 semanas) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.54, §1 MVP ativo = MVP 16 definido/não-iniciado, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = autorização Fase 16.1). Escopo: 16.1 scaffolder C++ CMake (≈2-3d); 16.2 enum `LinguagemBackend` + `cpp_standard` (≈1d); 16.3 test spec GoogleTest-aware (≈1d); 16.4 DesignShowcase tsc fix → 0 (≈0.5d); 16.5 dogfood validation (≈0.5d). **Fora explícito**: OCG v2 (rejeitado), Clusters B/C/D C++, auto-trigger consolidate, APPROVAL_STATUS banner UI, IaC scaffolder, policy-as-code, NoSQL avançado, questionário C++ expandido, SSO/Federation/FL, Futura Visão. Estado "definido — não iniciado"; implementação Fase 16.1 exige autorização adicional (§7.0 regra 3). Sem mudança de código. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 16), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§6`/`§9`/`§10` | Absorver em ciclo canônico o gap C++ documentado (`gca_cpp_codegen_gap.md` — 15/17 fases canônicas sem cobertura) + DT trivial do DesignShowcase + validação formal de dogfood. Escopo mínimo (1.5 semanas) respeita `feedback_mvp_over_end_to_end.md`. Protocolo §7.0 evita implementação silenciosa; fase individual precisa autorização explícita. Sem mudança de código neste commit. |
 | 2026-04-21 | Abertura + autorização de execução de **MVP 17 — Saneamento operacional Celery (DT-077 + DT-078)** em mensagem única do stakeholder-soberano (protocolo §7.0 + autorização em bloco dos 2 DTs abertas). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 17` (nova subseção com 2 fases triviais ~1h total) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.60, §1 MVP ativo = MVP 17 em execução, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = execução 17.1→17.2). Escopo: 17.1 healthcheck hostname (`-d celery@$HOSTNAME` com double-dollar); 17.2 documentação em `CLAUDE.md §12` sobre `docker compose up -d` pós-compose. **Fora explícito**: nenhum backlog parked absorvido; refactor adicional de docker-compose proibido; melhoria de Flower proibida. Stakeholder autorizou abertura + execução simultaneamente — §7.0 regra 3 atendida na mesma mensagem. Sem mudança de código neste commit. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 17), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§6`/`§9`/`§10` | Zerar backlog de DTs abertas em ciclo canônico trivial. MVP pequeno respeita `feedback_mvp_over_end_to_end.md`. Protocolo §7.0 mantido mesmo pra escopo ~1h. |
+| 2026-04-21 | Abertura de **MVP 18 — Sistema de Ajuda integrado (infraestrutura + conteúdo)** pelo protocolo §7.0. Stakeholder autorizou apenas **Onda 1 (Fases 18.1 + 18.2 — infraestrutura)**; Fases 18.3-18.5 (conteúdo real, busca FTS5, integração final + renderer) ficam fora desta onda e exigem autorização adicional após review (§7.0 regra 3). Commit atômico edita `GCA_CANONICAL_CONTRACT.md §7 MVP 18` (nova subseção com 5 fases, das quais 2 autorizadas nesta onda) e `GCA_MVP_PROGRESS.md` (cabeçalho 3.62, §1 MVP ativo = MVP 18 em execução Onda 1, §6 gate aberto para avaliação, §9 esta emenda, §10 próximo marco = executar 18.1 depois 18.2 e pausar para review). Escopo Onda 1: 18.1 rotas `/admin/help` + `/projects/:id/help` + HelpPage skeleton layout 3-col + sidebar entries + guards RBAC + testes navegação (~1d); 18.2 endpoints `GET /api/v1/help/{toc,section/{id},search}` (search é stub em 18.2) + storage canônico `backend/app/help_content/*.md + toc.json` + serviço + 8+ testes unit (~1d). **Fora explícito** do MVP 18: screenshots (MVP 19 potencial), editor inline no Admin, versionamento de help, tradução EN, export PDF, segmentação por papel, LLM no caminho crítico do help. Sem mudança de código neste commit de abertura. | `GCA_CANONICAL_CONTRACT.md §7` (nova subseção MVP 18), `GCA_MVP_PROGRESS.md` cabeçalho + `§1`/`§6`/`§9`/`§10` | Entregar documentação operacional embutida no produto sem inflação. User pediu aba "Ajuda" tanto Admin quanto GP com doc completa + busca + screenshots. Escopo fatiado: infraestrutura primeiro (Onda 1); conteúdo depois com review (Onda 2). Respeita `feedback_mvp_over_end_to_end.md` + `feedback_honesty_over_completeness.md` (não prometer conteúdo que não tenho review prévia). Protocolo §7.0 mantido com autorização granular por onda. |
 | 2026-04-21 | Fechamento de **MVP 17** com 2/2 fases entregues no mesmo dia da abertura. 17.1: `docker-compose.yml` serviço `celery-worker` — healthcheck migrado de `CMD celery ... -d celery@gca-celery-worker` para `CMD-SHELL celery ... -d celery@$$HOSTNAME`; `CMD` não interpola env vars, `CMD-SHELL` interpola no shell do container; `$$` escapa interpolação do compose. Validação binária: `docker compose up -d --force-recreate celery-worker` + `until docker ps | grep 'celery-worker.*healthy'` → worker reportou `healthy` em ~45s (alinhado com `start_period: 40s`). 17.2: `CLAUDE.md §12` (Convenções técnicas) ganha sub-seção "Regra dura de sincronização do docker-compose.yml (DT-077)" com 3 passos obrigatórios + armadilha histórica de 14.10 citada como caso concreto. Sem mudança no runtime do GCA; apenas docker-compose.yml + CLAUDE.md. **Zero DTs abertas pós-MVP 17** — primeira vez na história do sistema de DT canônico. Suite backend inalterada (1506 passing); tsc frontend inalterado (0). | `docker-compose.yml` (linhas 121-128), `CLAUDE.md §12` (sub-seção nova ~20 linhas), `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§3.3` (DT-077 + DT-078 marcadas Quitada) + `§6` + `§9` esta linha + `§10`. | Encerrar MVP 17 no ciclo canônico trivial (~1h real). Aplicou §10 (constraint estrito — nenhum refactor vizinho, zero melhoria não-solicitada). Produto fica com baseline zero-dívida formal. Sem novo MVP autorizado. |
 | 2026-04-21 | Fechamento de **MVP 16** com 5/5 fases entregues no mesmo dia da abertura. Fases commitadas atomicamente: 16.1 `ec46113` (scaffolder cpp_cmake 11 arquivos + CI step cpp-scaffold-compile + 25 testes unit; smoke compile gcc:13 validado local); 16.2 `66b20bc` (enum LinguagemBackend.CPP + ScaffoldSpec.cpp_standard + dispatch branch + whitelist {14/17/20/23} + 17 testes; zero regressão em 60 testes dispatch+scaffolders); 16.3 `f32f3fc` (_detect_test_framework + CPP_GOOGLETEST_GUIDANCE apêndice ao prompt + test_framework no provenance + 16 testes; zero regressão em 39 testes spec generator); 16.4 `0242e8e` (NodeJS.Timeout → ReturnType<typeof setInterval>; tsc 1→0); 16.5 dogfood validation (Flower ✅ após up -d, Celery ping ✅ 58ms, endpoints registrados ✅ via OpenAPI; rollback/consolidate E2E em prod não executado por regra anti-mutação; CI e2e lane aguarda próximo push; 2 DTs novas minor DT-077 + DT-078). Suite pós-MVP 16: 1506 passing (inalterado — scaffolder+specs não tocam caminho de execução em runtime); **tsc frontend = 0 pela primeira vez desde MVP 14**. C++ vira 9ª linguagem de codegen canonicamente suportada (V1 cobre Cluster A do gap; Clusters B/C/D parked). | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§3.3` (DTs 077/078) + `§6` (situação atual) + `§9` esta linha + `§10` | Encerrar MVP 16 no ciclo canônico. Aplicou `feedback_mvp_over_end_to_end.md` (MVP enxuto, 1.5 semanas) + `feedback_no_unauthorized_data.md` (dogfood checks binários sem mutação em prod) + §10 (constraint de escopo — nenhuma feature além das 5 fases; DTs residuais viraram registro). Produto ganha: (a) primeira linguagem systems-level suportada no codegen, (b) baseline técnico frontend finalmente limpo (tsc = 0), (c) observabilidade Celery ativa via Flower. Sem novo MVP autorizado. |
 | 2026-04-20 | Fechamento de **MVP 14** com 10/11 fases entregues + 1 N/A (14.11) + 1 parcial com stop-rule (14.9). Fases commitadas atomicamente: 14.1–14.5 prévias; 14.6 `886652c` (TestArtifactCard type alignment); 14.7 `fdeeddd` (OCG rollback_to_version formal + audit `OCG_ROLLED_BACK`); 14.8 `876a256` (OCG consolidate_ocg explícito + audit `OCG_CONSOLIDATED` + endpoint); 14.9 `1bed30d` (91→76 any; stop-rule > 2d); 14.10 `a0abfc3` (Flower :5555 + 3 gauges Celery Prometheus). 14.11 N/A: diagnóstico comprovou zero shadcn primitivo importado (os únicos imports `@/components/ui/*` são para 4 componentes próprios). Suite pós-MVP 14: **1506 passing, 5 skipped**. Backlog residual parked: "any pass 2" (76 restantes), "shadcn pass 2" (33 órfãos), "AdminMetrics HintCard", "14.4 e2e tests 02-14 rewrite". | `GCA_MVP_PROGRESS.md` cabeçalho + `§1` + `§6` (situação atual) + `§10` (próximo marco limpo — nenhum MVP autorizado) + `§9` esta linha | Encerrar MVP 14 no ciclo canônico. Temas A/B/C/D/F completos; Tema E (type safety) com redução segura + restante parked; Tema G (shadcn usado) N/A porque premissa não existe no código atual. Aplicar §10 (constraint de escopo): fases com stop-rule pararam no limite em vez de cascatar refactor cross-file; backlog residual documentado no §10. Sem próximo MVP autorizado. |
@@ -959,9 +980,19 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 ## 10. Próximo marco
 
-MVP 17 **FECHADO 2026-04-21 com 2/2 fases entregues** no mesmo dia da abertura. **Zero DTs abertas** — estado técnico excepcionalmente limpo. Próximo marco é **autorização explícita para novo MVP** (§7.0 regra 3). Nenhum MVP autorizado.
+MVP 18 **em execução — Onda 1 autorizada 2026-04-21**. Próximo marco é:
+1. Executar **Fase 18.1** (rotas + HelpPage skeleton + sidebar).
+2. Após 18.1 passar gate §9, executar **Fase 18.2** (endpoints backend + storage).
+3. Após 18.2, **pausar e aguardar review do stakeholder** antes de pedir autorização para Onda 2 (18.3-18.5).
 
-Sem backlog residual novo. Backlog parked (permanente) permanece igual:
+Onda 2 (aguarda autorização adicional):
+- **Fase 18.3** Conteúdo real dos 10 capítulos (~2d).
+- **Fase 18.4** Busca full-text via SQLite FTS5 (~1d).
+- **Fase 18.5** Renderer markdown frontend + e2e + integração final (~0.5d).
+
+Backlog parked (permanente, não entra em MVP atual):
+- Screenshots do help (MVP 19 potencial).
+- Editor inline de help no Admin.
 - Identity Federation / Data Federation / Federated Learning.
 - GCA Futura Visão (6 sub-projetos).
 - Clusters B/C/D do C++ codegen (CI matrix, sanitizers, Doxygen, CPack, ABI macros, embedded, GPU).
