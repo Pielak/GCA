@@ -64,6 +64,26 @@ class AuditEvents:
     ROLE_REVOKED = "role_revoked"
     ROLE_TRANSFERRED = "role_transferred"
 
+    # MVP 13 Fase 13.5 — Eventos canônicos de projeto
+    # Payload em details: {actor_id, project_id, action, old_status,
+    # new_status, timestamp, extra?}. Fase 13.6 instrumenta os pontos.
+    PROJECT_APPROVED = "project_approved"
+    PROJECT_REJECTED = "project_rejected"
+    PROJECT_STATUS_CHANGED = "project_status_changed"
+
+    # MVP 13 Fase 13.5 — Eventos canônicos de questionário
+    # Payload em details: {actor_id, project_id, questionnaire_id, action,
+    # score?, timestamp, extra?}. Fase 13.6 instrumenta os pontos.
+    QUESTIONNAIRE_APPROVED = "questionnaire_approved"
+    QUESTIONNAIRE_REJECTED = "questionnaire_rejected"
+
+    # MVP 13 Fase 13.5 — Eventos canônicos de CodeGen
+    # Payload em details: {actor_id, project_id, action, file_path?,
+    # files_count?, commit_sha?, timestamp, extra?}. Fase 13.7 instrumenta.
+    CODEGEN_SCAFFOLD_GENERATED = "codegen_scaffold_generated"
+    CODEGEN_SCAFFOLD_APPLIED = "codegen_scaffold_applied"
+    CODEGEN_FILE_REGENERATED = "codegen_file_regenerated"
+
 logger = structlog.get_logger(__name__)
 
 
@@ -174,6 +194,148 @@ class AuditService:
             actor_id=actor_id,
             actor_email=actor_email,
             resource_id=resource_id,
+            details=details,
+            correlation_id=correlation_id,
+        )
+
+    async def log_project_event(
+        self,
+        event_type: str,
+        actor_id: Optional[UUID],
+        project_id: UUID,
+        action: str,
+        old_status: Optional[str] = None,
+        new_status: Optional[str] = None,
+        actor_email: Optional[str] = None,
+        correlation_id: Optional[UUID] = None,
+        extra: Optional[dict] = None,
+    ) -> GlobalAuditLog:
+        """MVP 13 Fase 13.5 — registra evento canônico de projeto.
+
+        `event_type` deve ser um de: PROJECT_APPROVED, PROJECT_REJECTED,
+        PROJECT_STATUS_CHANGED. Payload canônico: actor_id + project_id
+        + action + old_status + new_status + timestamp.
+        """
+        allowed = {
+            AuditEvents.PROJECT_APPROVED,
+            AuditEvents.PROJECT_REJECTED,
+            AuditEvents.PROJECT_STATUS_CHANGED,
+        }
+        if event_type not in allowed:
+            raise ValueError(f"event_type inválido para log_project_event: {event_type!r}")
+
+        details: dict = {
+            "project_id": str(project_id),
+            "action": action,
+            "old_status": old_status,
+            "new_status": new_status,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            details["extra"] = extra
+
+        return await self.log_event(
+            event_type=event_type,
+            resource_type="project",
+            actor_id=actor_id,
+            actor_email=actor_email,
+            resource_id=project_id,
+            details=details,
+            correlation_id=correlation_id,
+        )
+
+    async def log_questionnaire_event(
+        self,
+        event_type: str,
+        actor_id: Optional[UUID],
+        project_id: UUID,
+        questionnaire_id: UUID,
+        action: str,
+        score: Optional[float] = None,
+        actor_email: Optional[str] = None,
+        correlation_id: Optional[UUID] = None,
+        extra: Optional[dict] = None,
+    ) -> GlobalAuditLog:
+        """MVP 13 Fase 13.5 — registra evento canônico de questionário.
+
+        `event_type` deve ser um de: QUESTIONNAIRE_APPROVED,
+        QUESTIONNAIRE_REJECTED. Para QUESTIONNAIRE_SUBMITTED (já existe
+        no catálogo antigo) o caller usa `log_event` direto. Payload:
+        actor_id + project_id + questionnaire_id + action + score +
+        timestamp.
+        """
+        allowed = {
+            AuditEvents.QUESTIONNAIRE_APPROVED,
+            AuditEvents.QUESTIONNAIRE_REJECTED,
+        }
+        if event_type not in allowed:
+            raise ValueError(f"event_type inválido para log_questionnaire_event: {event_type!r}")
+
+        details: dict = {
+            "project_id": str(project_id),
+            "questionnaire_id": str(questionnaire_id),
+            "action": action,
+            "score": score,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            details["extra"] = extra
+
+        return await self.log_event(
+            event_type=event_type,
+            resource_type="questionnaire",
+            actor_id=actor_id,
+            actor_email=actor_email,
+            resource_id=questionnaire_id,
+            details=details,
+            correlation_id=correlation_id,
+        )
+
+    async def log_codegen_event(
+        self,
+        event_type: str,
+        actor_id: Optional[UUID],
+        project_id: UUID,
+        action: str,
+        file_path: Optional[str] = None,
+        files_count: Optional[int] = None,
+        commit_sha: Optional[str] = None,
+        actor_email: Optional[str] = None,
+        correlation_id: Optional[UUID] = None,
+        extra: Optional[dict] = None,
+    ) -> GlobalAuditLog:
+        """MVP 13 Fase 13.5 — registra evento canônico de CodeGen.
+
+        `event_type` deve ser um de: CODEGEN_SCAFFOLD_GENERATED,
+        CODEGEN_SCAFFOLD_APPLIED, CODEGEN_FILE_REGENERATED. Payload:
+        actor_id + project_id + action + file_path + files_count +
+        commit_sha + timestamp.
+        """
+        allowed = {
+            AuditEvents.CODEGEN_SCAFFOLD_GENERATED,
+            AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
+            AuditEvents.CODEGEN_FILE_REGENERATED,
+        }
+        if event_type not in allowed:
+            raise ValueError(f"event_type inválido para log_codegen_event: {event_type!r}")
+
+        details: dict = {
+            "project_id": str(project_id),
+            "action": action,
+            "file_path": file_path,
+            "files_count": files_count,
+            "commit_sha": commit_sha,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            details["extra"] = extra
+
+        return await self.log_event(
+            event_type=event_type,
+            resource_type="codegen",
+            actor_id=actor_id,
+            actor_email=actor_email,
+            resource_id=project_id,
             details=details,
             correlation_id=correlation_id,
         )

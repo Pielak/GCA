@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.31  
+Versão: 3.32  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** **Tema A (fila persistente Celery/Redis) COMPLETO**: 13.1 + 13.2 + 13.3 (a/b/c) + 13.4. Fase 13.4 (monitoring + retry + DLQ): signal handlers `task_failure`/`task_retry`/`task_success` em `celery_app.py` emitem logs estruturados; lista DLQ in-memory (cap 200) acessível via `get_dlq_entries()`; endpoints admin `GET /admin/celery/dlq` e `GET /admin/celery/workers` expõem para inspeção; retry policy bounded em todas as 6 tasks (max 2, delay 30-60); 14 testes novos (signal handler, cap, limit, retry policy parametrizado × 6 tasks, retry ≠ infinito, 3 endpoints admin incluindo 403 non-admin). Suite pós-13.4: **1468/1468 passing** (+64 cumulativo MVP 13). Tema B (13.5-13.7 audit coverage) segue.
+Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em execução.** Tema A completo (13.1-13.4). **Fase 13.5 FECHADA 2026-04-20** (inventário + helpers): 8 constantes novas em `AuditEvents` (PROJECT_*×3, QUESTIONNAIRE_*×2, CODEGEN_*×3); 3 helpers canônicos em `AuditService` (`log_project_event`, `log_questionnaire_event`, `log_codegen_event`) seguindo padrão 11.4; inventário binário publicado em `§3.0` do progresso (4 SIM / 7 NÃO em 4 domínios); 16 testes de shape/whitelist; **nenhum ponto instrumentado** (escopo 13.6/13.7). Suite pós-13.5: **1484/1484 passing** (+80 cumulativo MVP 13). Fases 13.6 + 13.7 seguem.
 
 ---
 
@@ -20,7 +20,7 @@ Status: **controle de avanço por fase** — MVPs 1-12 fechados. **MVP 13 em exe
 - ✅ **Fase 13.4** Monitoring + retry + DLQ — **FECHADA 2026-04-20**. Signal handlers (`task_failure`/`task_retry`/`task_success`) + DLQ in-memory (cap 200) + endpoints admin `/admin/celery/dlq` e `/admin/celery/workers`; retry bounded em 6 tasks; 14 testes. Decisão: **não** ligar `CELERY_TASK_ALWAYS_EAGER` em conftest (vaza pro singleton e quebra testes async); padrão canônico é `.apply()` em teste isolado — documentado nas Fases 13.3b/c.
 
 **Tema B — Cobertura completa de `audit_log_global` (3 fases):**
-- **Fase 13.5** Inventário + helpers canônicos por domínio (`log_project_event`, `log_questionnaire_event`, `log_codegen_event`). Resultado publicado no §3 como lista binária "tem audit / falta audit".
+- ✅ **Fase 13.5** Inventário + helpers canônicos — **FECHADA 2026-04-20**. 8 constantes novas em `AuditEvents` + 3 helpers em `AuditService` (project/questionnaire/codegen). Inventário binário em `§3.0`: 4 SIM / 7 NÃO (reject_project_request, set_project_status, submit_questionnaire, 3 CodeGen endpoints, + lacunas N/A registradas). 16 testes; nenhum ponto instrumentado (escopo 13.6/13.7).
 - **Fase 13.6** Instrumentação projeto (aprovação/rejeição, status transitions) + questionário (submit + aprovação).
 - **Fase 13.7** Instrumentação OCG (update_from_arguider, rollback, consolidate) + CodeGen (scaffold, apply, regenerate-file) + teste E2E de chain integrity (`verify_chain()` íntegra após série de ações).
 
@@ -271,6 +271,49 @@ testes em DT-076). Superfície canônica entregue e validada em dogfood/suite:
 ---
 
 ## 3. Dívida aberta conhecida
+
+### 3.0 Inventário de audit_log_global (MVP 13 Fase 13.5)
+
+Inventário binário "tem audit / falta audit" nos 4 domínios do Tema B.
+Feito em 2026-04-20 pela Fase 13.5. Instrumentação dos pontos "NÃO"
+é escopo das Fases 13.6 (projeto + questionário) e 13.7 (OCG + CodeGen).
+
+**Projeto (3 NÃO de 5):**
+| Ponto | arquivo:linha | Audit? |
+|---|---|---|
+| `approve_project_request` | `admin_service.py:84` | SIM (GP_USER_CREATED/ACTIVATED + PROJECT_MEMBERSHIP_CREATED) |
+| `reject_project_request` | `admin_service.py:395` | **NÃO** (só logger.info) — Fase 13.6 |
+| `set_admin_flag` | `admin_management_service.py:80` | SIM (log_role_event desde 11.4) |
+| `lock_user` | `admin_service.py:704` | SIM (log_role_event desde 11.4) |
+| `set_project_status` | `admin_management_service.py:275` | **NÃO** — Fase 13.6 |
+
+**Questionário (1 NÃO de 1 ativo):**
+| Ponto | arquivo:linha | Audit? |
+|---|---|---|
+| `submit_questionnaire` | `questionnaire_service.py:22` | **NÃO** (só logger.info) — Fase 13.6 |
+| `approve_questionnaire` | N/A — aprovação implícita em score ≥ 90 | — |
+| `reject_questionnaire` | N/A — delega a `reject_project_request` | — |
+
+**OCG (1 SIM ativo + 2 N/A):**
+| Ponto | arquivo:linha | Audit? |
+|---|---|---|
+| `update_ocg_from_arguider` | `ocg_updater_service.py:102` | SIM (log_event no `_update_ocg_record`) |
+| `rollback_to_version` | N/A — não implementado como fluxo formal | — |
+| `consolidate_ocg` | N/A — implícito em `update_ocg_from_arguider` | — |
+
+**CodeGen (3 NÃO de 3):**
+| Ponto | arquivo:linha | Audit? |
+|---|---|---|
+| `generate_scaffold` | `code_generation.py:402` | **NÃO** (só logger.info) — Fase 13.7 |
+| `apply_scaffold` | `code_generation.py:777` | **NÃO** — Fase 13.7 |
+| `regenerate_file` | `code_generation.py:1157` | **NÃO** — Fase 13.7 |
+
+**Totais:** 4 SIM / 7 NÃO. Fase 13.5 entregou apenas helpers canônicos
+(`log_project_event`, `log_questionnaire_event`, `log_codegen_event`)
++ 8 constantes em `AuditEvents`; **não instrumentou nenhum ponto**.
+Instrumentação fica a cargo de 13.6 (4 pontos: reject_project_request,
+set_project_status, submit_questionnaire, + re-validar os 2 SIM de
+projeto) e 13.7 (3 pontos CodeGen + chain integrity E2E).
 
 ### 3.1 Blocker / Critical
 
