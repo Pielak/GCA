@@ -273,4 +273,33 @@ class MetricsService:
         lines.append(f'gca_users_total{{category="admin_active"}} {d["users"]["admin_active"]}')
         lines.append(f'gca_users_total{{category="inactive"}} {d["users"]["inactive"]}')
 
+        # MVP 14 Fase 14.10 — métricas de Celery (workers, broker, DLQ).
+        # Best-effort: falhas do broker não quebram o endpoint; métricas
+        # caem para 0/unreachable e o scrape externo alerta.
+        try:
+            from app.celery_app import (
+                check_broker_connection,
+                check_workers_alive,
+                get_dlq_entries,
+            )
+            broker = check_broker_connection()
+            workers = check_workers_alive(timeout=0.5)
+            dlq = get_dlq_entries(limit=200)
+        except Exception:  # noqa: BLE001
+            broker = {"reachable": False}
+            workers = {"workers": 0}
+            dlq = []
+
+        lines.append("# HELP gca_celery_broker_reachable 1 se o broker Redis respondeu, 0 caso contrário")
+        lines.append("# TYPE gca_celery_broker_reachable gauge")
+        lines.append(f"gca_celery_broker_reachable {1 if broker.get('reachable') else 0}")
+
+        lines.append("# HELP gca_celery_workers_online Workers Celery respondendo ao inspect ping")
+        lines.append("# TYPE gca_celery_workers_online gauge")
+        lines.append(f"gca_celery_workers_online {workers.get('workers', 0)}")
+
+        lines.append("# HELP gca_celery_dlq_entries Entradas atuais na DLQ in-memory (cap 200)")
+        lines.append("# TYPE gca_celery_dlq_entries gauge")
+        lines.append(f"gca_celery_dlq_entries {len(dlq)}")
+
         return "\n".join(lines) + "\n"

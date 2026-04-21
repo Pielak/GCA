@@ -80,6 +80,10 @@ slowapi = "^0.1.9"
 # `gca-celery-worker`.
 celery = {extras = ["redis"], version = "^5.3.0"}
 
+# MVP 14 Fase 14.10 — dashboard Flower (celery monitoring). Serviço
+# `gca-celery-flower` em docker-compose expõe :5555.
+flower = "^2.0.1"
+
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"
 pytest-asyncio = "^0.21.1"

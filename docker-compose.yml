@@ -126,6 +126,29 @@ services:
       retries: 3
       start_period: 40s
 
+  # MVP 14 Fase 14.10 — Flower (UI de monitoramento do Celery).
+  # Expõe dashboard em :5555 com filas, workers, DLQ visual e histórico.
+  # Não requer restart: o worker envia eventos; Flower lê do broker.
+  celery-flower:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gca-celery-flower
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    environment:
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+    command: celery -A app.celery_app flower --port=5555 --broker=redis://redis:6379/1 --persistent=True --db=/tmp/flower.db
+    volumes:
+      - gca-flower-data:/tmp
+
   # Frontend (React + Vite)
   frontend:
     image: node:20-alpine
@@ -160,6 +183,8 @@ volumes:
   # Backup-1: backups por projeto persistem entre restarts. Path no
   # container: /var/gca-backups. Caller: project_backup_service.
   gca-backups:
+  # MVP 14 Fase 14.10 — DB sqlite do Flower persiste histórico entre restarts.
+  gca-flower-data:
 
 networks:
   default:

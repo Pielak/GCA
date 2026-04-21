@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.45  
+Versão: 3.46  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.8 FECHADAS**; **14.9 PARCIALMENTE FECHADA com stop-rule acionada**; 14.10-14.11 seguem. 14.9 (remover 91 `any`): diagnóstico cirúrgico em api.ts/useAuthApi/useSuspiciousAccess/useIngestion removeu 15 `any` (91→76). Tentativas de migrar tipos compartilhados (`apiClient<T=any>` → `T=unknown`; `Record<string, any>` em `useArguider.GatekeeperItem.data`) cascataram para 150+ errors em call-sites que indexam livremente. Conforme contrato §7 MVP 14 Fase 14.9 (regra de parada > 2 dias): restante não foi tocado; criado backlog "any pass 2" como follow-up não-bloqueador (meta ≤20 não atingida mas gate §9 não depende — é type safety não-crítico).
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.8 + 14.10 FECHADAS**; **14.9 PARCIALMENTE FECHADA com stop-rule**; 14.11 segue. 14.10 (Flower + Prometheus Celery): serviço `gca-celery-flower` em docker-compose (porta 5555, persistência SQLite em volume `gca-flower-data`), `flower>=2.0.1` em pyproject + requirements.txt; endpoint `/api/v1/metrics/prometheus` ganha 3 gauges canônicos — `gca_celery_broker_reachable` (0|1), `gca_celery_workers_online` (count), `gca_celery_dlq_entries` (count). 2 testes novos.
 
 ---
 
