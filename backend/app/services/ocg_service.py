@@ -194,6 +194,95 @@ class OCGService:
             )
             raise
 
+    async def rollback_to_version(
+        self,
+        project_id: UUID,
+        version_to: int,
+        actor_id: Optional[UUID] = None,
+    ) -> dict:
+        """MVP 14 Fase 14.7 — rollback formal do OCG para versão anterior.
+
+        Lê snapshot de `OCGDeltaLog.ocg_snapshot` da versão alvo, grava
+        nova versão no OCG (`version_from + 1`), registra delta de
+        rollback e emite evento canônico `OCG_ROLLED_BACK`.
+        """
+        from app.services.audit_service import AuditService, AuditEvents
+
+        snap_result = await self.db.execute(
+            select(OCGDeltaLog)
+            .where(
+                OCGDeltaLog.project_id == project_id,
+                OCGDeltaLog.ocg_version_to == version_to,
+            )
+            .order_by(OCGDeltaLog.created_at.desc())
+            .limit(1)
+        )
+        delta = snap_result.scalar_one_or_none()
+        if not delta or not delta.ocg_snapshot:
+            raise ValueError(f"Snapshot não disponível para versão {version_to}")
+
+        snapshot = json.loads(delta.ocg_snapshot)
+
+        ocg_result = await self.db.execute(
+            select(OCG)
+            .where(OCG.project_id == project_id)
+            .order_by(OCG.created_at.desc())
+            .limit(1)
+        )
+        ocg = ocg_result.scalar_one_or_none()
+        if not ocg:
+            raise ValueError("OCG do projeto não encontrado")
+
+        version_from = ocg.version
+        new_version = version_from + 1
+
+        ocg.ocg_data = json.dumps(snapshot, ensure_ascii=False)
+        ocg.version = new_version
+        ocg.updated_at = datetime.now(timezone.utc)
+        self.db.add(ocg)
+
+        rollback_delta = OCGDeltaLog(
+            project_id=project_id,
+            document_id=None,
+            ocg_version_from=version_from,
+            ocg_version_to=new_version,
+            fields_changed=json.dumps(
+                {"__rollback__": {"restored_from_version": version_to}},
+                ensure_ascii=False,
+            ),
+            change_summary=f"Rollback para versão {version_to}",
+            changed_by=actor_id,
+            trigger_source="rollback",
+            ocg_snapshot=json.dumps(snapshot, ensure_ascii=False),
+        )
+        self.db.add(rollback_delta)
+        await self.db.flush()
+
+        await AuditService(self.db).log_ocg_event(
+            event_type=AuditEvents.OCG_ROLLED_BACK,
+            actor_id=actor_id,
+            project_id=project_id,
+            version_from=version_from,
+            version_to=new_version,
+            restored_from=version_to,
+        )
+
+        await self.db.commit()
+
+        logger.info(
+            "ocg.rolled_back",
+            project_id=str(project_id),
+            version_from=version_from,
+            version_to=new_version,
+            restored_from=version_to,
+        )
+
+        return {
+            "previous_version": version_from,
+            "new_version": new_version,
+            "restored_from": version_to,
+        }
+
     async def get_next_version(self, project_id: UUID) -> int:
         """Retorna a próxima versão do OCG para o projeto"""
         result = await self.db.execute(

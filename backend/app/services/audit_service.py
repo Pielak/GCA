@@ -84,6 +84,11 @@ class AuditEvents:
     CODEGEN_SCAFFOLD_APPLIED = "codegen_scaffold_applied"
     CODEGEN_FILE_REGENERATED = "codegen_file_regenerated"
 
+    # MVP 14 Fase 14.7 — Evento canônico de rollback de OCG
+    # Payload em details: {actor_id, project_id, version_from, version_to,
+    # restored_from, timestamp}. Emitido por OCGService.rollback_to_version.
+    OCG_ROLLED_BACK = "ocg_rolled_back"
+
 logger = structlog.get_logger(__name__)
 
 
@@ -333,6 +338,47 @@ class AuditService:
         return await self.log_event(
             event_type=event_type,
             resource_type="codegen",
+            actor_id=actor_id,
+            actor_email=actor_email,
+            resource_id=project_id,
+            details=details,
+            correlation_id=correlation_id,
+        )
+
+    async def log_ocg_event(
+        self,
+        event_type: str,
+        actor_id: Optional[UUID],
+        project_id: UUID,
+        version_from: int,
+        version_to: int,
+        restored_from: Optional[int] = None,
+        actor_email: Optional[str] = None,
+        correlation_id: Optional[UUID] = None,
+        extra: Optional[dict] = None,
+    ) -> GlobalAuditLog:
+        """MVP 14 Fase 14.7 — registra evento canônico de OCG.
+
+        Hoje cobre OCG_ROLLED_BACK. Payload: actor_id + project_id +
+        version_from + version_to + restored_from + timestamp.
+        """
+        allowed = {AuditEvents.OCG_ROLLED_BACK}
+        if event_type not in allowed:
+            raise ValueError(f"event_type inválido para log_ocg_event: {event_type!r}")
+
+        details: dict = {
+            "project_id": str(project_id),
+            "version_from": version_from,
+            "version_to": version_to,
+            "restored_from": restored_from,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        if extra:
+            details["extra"] = extra
+
+        return await self.log_event(
+            event_type=event_type,
+            resource_type="ocg",
             actor_id=actor_id,
             actor_email=actor_email,
             resource_id=project_id,

@@ -975,64 +975,24 @@ async def rollback_ocg(
     permissions: dict = Depends(require_action("project:manage_team")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Reverte OCG para snapshot de versão anterior. Cria nova versão com trigger_source='rollback'."""
-    from sqlalchemy import select
-    from app.models.base import OCGDeltaLog, OCG
-    import json as _json
-    from datetime import datetime, timezone
+    """Reverte OCG para snapshot de versão anterior. Cria nova versão com trigger_source='rollback'.
+
+    MVP 14 Fase 14.7: delega ao `OCGService.rollback_to_version`, que
+    emite evento canônico `OCG_ROLLED_BACK` em `audit_log_global`.
+    """
+    from app.services.ocg_service import OCGService
 
     current_user_id = permissions["user_id"]
+    try:
+        result = await OCGService(db).rollback_to_version(
+            project_id=project_id,
+            version_to=version_to,
+            actor_id=current_user_id,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
-    # Buscar snapshot
-    snap_result = await db.execute(
-        select(OCGDeltaLog)
-        .where(OCGDeltaLog.project_id == project_id, OCGDeltaLog.ocg_version_to == version_to)
-        .order_by(OCGDeltaLog.created_at.desc())
-        .limit(1)
-    )
-    delta = snap_result.scalar_one_or_none()
-    if not delta or not delta.ocg_snapshot:
-        raise HTTPException(status_code=404, detail="Snapshot não disponível para rollback")
-
-    snapshot = _json.loads(delta.ocg_snapshot)
-
-    # OCG atual
-    ocg_result = await db.execute(
-        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
-    )
-    ocg = ocg_result.scalar_one_or_none()
-    if not ocg:
-        raise HTTPException(status_code=404, detail="OCG do projeto não encontrado")
-
-    version_from = ocg.version
-    new_version = version_from + 1
-
-    ocg.ocg_data = _json.dumps(snapshot, ensure_ascii=False)
-    ocg.version = new_version
-    ocg.updated_at = datetime.now(timezone.utc)
-    db.add(ocg)
-
-    # Gravar delta de rollback (snapshot mantém histórico)
-    rollback_delta = OCGDeltaLog(
-        project_id=project_id,
-        document_id=None,
-        ocg_version_from=version_from,
-        ocg_version_to=new_version,
-        fields_changed=_json.dumps({"__rollback__": {"restored_from_version": version_to}}, ensure_ascii=False),
-        change_summary=f"Rollback para versão {version_to}",
-        changed_by=current_user_id,
-        trigger_source="rollback",
-        ocg_snapshot=_json.dumps(snapshot, ensure_ascii=False),
-    )
-    db.add(rollback_delta)
-    await db.commit()
-
-    return {
-        "success": True,
-        "previous_version": version_from,
-        "new_version": new_version,
-        "restored_from": version_to,
-    }
+    return {"success": True, **result}
 
 
 @router.get("/{project_id}/ocg/health")

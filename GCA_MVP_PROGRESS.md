@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.42  
+Versão: 3.43  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.6 FECHADAS 2026-04-20**. 14.6 (TesterReviewPage type mismatch): `TestArtifactCard.tsx` alinhado ao schema real (`title`/`test_type`) e à signature das props (`onEdit: (id: string) => void`). tsc errors: 36 → 34. Fases 14.7-14.11 seguem.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.7 FECHADAS 2026-04-20**. 14.7 (OCG rollback_to_version formal): `OCGService.rollback_to_version(project_id, version_to, actor_id)` lê snapshot de `OCGDeltaLog`, cria nova versão, grava delta de rollback e emite evento canônico `OCG_ROLLED_BACK` via `AuditService.log_ocg_event`. Router `POST /projects/{id}/ocg/rollback/{version_to}` delega ao service. 3 testes novos; regressão 4/4 em `test_ocg_history_rollback.py`. Fases 14.8-14.11 seguem.
 
 ---
 
