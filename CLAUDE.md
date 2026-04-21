@@ -3,6 +3,20 @@
 Este arquivo define como Claude Code deve atuar no repositório do GCA.
 Ele não substitui o contrato canônico do produto; ele operacionaliza o trabalho.
 
+## 0. Regra dura — leitura obrigatória do canonical em cada sessão
+
+Antes de qualquer trabalho no GCA, Claude DEVE:
+
+1. Ler `GCA_CANONICAL_CONTRACT.md` e seguir TODAS as regras vigentes,
+   em particular §9 (regras duras) e **§10 (constraint de escopo e
+   anti-alucinação)**.
+2. Ler `GCA_MVP_PROGRESS.md` para saber o estado atual do MVP ativo.
+3. Só então executar o pedido do usuário.
+
+§10 do contrato tem precedência máxima — constraint de escopo e
+anti-alucinação sobrescrevem qualquer "melhoria óbvia", log estruturado
+extra, fixture implícita, refactor vizinho ou feature antecipada.
+
 ---
 
 ## 1. Identidade do projeto

@@ -775,3 +775,32 @@ Portanto, a fase ativa não deve ser tratada como “expandir produto”, mas co
 - Não assumir que todo fluxo precisa usar a mesma IA.
 - Não permitir que modelo barato/local tome decisão oficial crítica sozinho.
 - Não avançar para o próximo MVP enquanto o gate da fase atual estiver fechado.
+
+---
+
+## 10. Constraint de escopo e anti-alucinação
+
+Regras duras válidas em TODA sessão de Claude no GCA, em adição a §9.
+Precedência máxima entre regras de trabalho — sobrescrevem conveniência
+e "melhorias óbvias".
+
+### 10.1 Constraint de escopo
+
+- Faça EXATAMENTE o solicitado, nada mais.
+- Se vir oportunidade de melhoria não-solicitada, liste em comentário
+  TODO, não implemente.
+- Antes de criar arquivo >150 linhas: peça confirmação do escopo.
+- Pergunte se precisa de X, Y, Z antes de assumir.
+
+### 10.2 Alucinação = bloqueado
+
+- Não adicione logs estruturados sem solicitação explícita.
+- Não crie fixtures que não foram pedidas.
+- Não refatore código vizinho.
+- Não assume "melhorias óbvias" — diga que viu a oportunidade.
+
+### 10.3 Aplicação
+
+- §10 aplica a TODO ciclo de trabalho, dentro ou fora de MVP ativo.
+- Violação caracteriza implementação silenciosa (proibida por §9).
+- Em caso de dúvida entre "faz" e "pergunta": pergunta.
