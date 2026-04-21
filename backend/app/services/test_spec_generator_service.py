@@ -178,6 +178,67 @@ TEMPLATE_BY_TYPE = {
 }
 
 
+# MVP 16 Fase 16.3 — bloco adicional anexado ao prompt quando o
+# `OCG.STACK.backend.language` é C++. Ensina o LLM a produzir os casos
+# de teste seguindo os idioms canônicos do GoogleTest em vez de formato
+# livre. Default do projeto C++ scaffoldado em 16.1.
+CPP_GOOGLETEST_GUIDANCE = """
+
+## Convenção C++ / GoogleTest (obrigatória)
+
+Este projeto usa **C++** com **GoogleTest** como framework de testes. Os
+casos descritos acima DEVEM ser escritos seguindo os idioms canônicos:
+
+- Cada caso de teste vira `TEST(SuiteName, TestName) { ... }` ou
+  `TEST_F(FixtureClass, TestName) { ... }` quando exigir setup/teardown.
+- Use **fixtures** (`class XxxFixture : public ::testing::Test`) para
+  testes que compartilham estado. Declare membros `protected:` e
+  sobrescreva `SetUp()` / `TearDown()`.
+- Assertivas:
+  - `EXPECT_EQ(a, b)` / `EXPECT_NE(a, b)` para igualdade.
+  - `EXPECT_TRUE(cond)` / `EXPECT_FALSE(cond)` para booleanos.
+  - `EXPECT_THROW(expr, Type)` / `EXPECT_NO_THROW(expr)` para exceções.
+  - `EXPECT_THAT(value, matcher)` com matchers do GMock (`HasSubstr`,
+    `ElementsAre`, `Contains`, etc) para expressões complexas.
+- Use `ASSERT_*` (em vez de `EXPECT_*`) apenas quando a falha torna o
+  resto do teste inválido.
+- Use `GTEST_SKIP() << "motivo"` para pular cenários não suportados em
+  um ambiente específico.
+- Nomes de Suite e Test devem ser identificadores C++ válidos (sem
+  hífens, acentos ou espaços); use CamelCase ou snake_case.
+- Arquivos de teste em `tests/` com nome `test_<módulo>.cpp` e
+  `#include <gtest/gtest.h>` no topo. Integre com CMake via
+  `add_executable(<target>_tests ...)` + `target_link_libraries(...
+  GTest::gtest_main)` + `gtest_discover_tests(...)`.
+
+Em cada caso listado acima, explicite:
+- Se é `TEST` ou `TEST_F`.
+- Nome da Suite/Fixture + nome do Test (identificadores C++ válidos).
+- Assertivas usadas (`EXPECT_EQ`, `EXPECT_THAT`, etc).
+
+Não omita o bloco `## Setup / fixtures` quando houver estado
+compartilhado entre casos."""
+
+
+def _detect_test_framework(stack: dict[str, Any]) -> Optional[str]:
+    """Retorna o framework canônico de teste derivado da linguagem backend.
+
+    MVP 16 Fase 16.3: só C++ → GoogleTest. Outras linguagens seguem
+    emitindo specs em formato livre (LLM decide o framework mais usual
+    da linguagem), preservando o comportamento pré-16.3.
+    """
+    backend = stack.get("backend") or {}
+    if not isinstance(backend, dict):
+        return None
+    lang = backend.get("language")
+    if not isinstance(lang, str):
+        return None
+    normalized = lang.lower().strip()
+    if normalized in ("c++", "cpp", "cplusplus"):
+        return "googletest"
+    return None
+
+
 async def generate_module_spec(
     db: AsyncSession,
     project_id: UUID,
@@ -471,7 +532,7 @@ def _build_prompt(
         except (ValueError, TypeError):
             pass
 
-    return template.format(
+    rendered = template.format(
         name=module.name or "(sem nome)",
         module_type=module.module_type or "feature",
         description=module.description or "(sem descrição)",
@@ -484,13 +545,27 @@ def _build_prompt(
         deps_label=deps_label,
     )
 
+    # MVP 16 Fase 16.3 — quando o backend é C++, anexa bloco com os idioms
+    # canônicos de GoogleTest pro LLM produzir specs em TEST/TEST_F em vez
+    # de formato livre. Sem GoogleTest guidance, o LLM chuta (às vezes
+    # Catch2, às vezes pseudo-código) e o Tester revisa tudo à mão.
+    if _detect_test_framework(stack) == "googletest":
+        rendered = rendered + CPP_GOOGLETEST_GUIDANCE
+
+    return rendered
+
 
 def _build_provenance(
     *, module: ModuleCandidate, ocg_ctx: dict[str, Any],
     neighbors: list[dict[str, Any]], prompt: str, config: dict[str, Any],
 ) -> dict[str, Any]:
-    """Serializa contexto pro modal da Fase 10.5 explicar 'como foi criado'."""
-    return {
+    """Serializa contexto pro modal da Fase 10.5 explicar 'como foi criado'.
+
+    MVP 16 Fase 16.3: inclui `test_framework` canônico (apenas
+    `googletest` por ora — C++). Demais linguagens: `test_framework`
+    omitido, preservando compatibilidade com provenance pré-16.3.
+    """
+    prov: dict[str, Any] = {
         "ocg_version": ocg_ctx.get("version"),
         "questionnaire_id": ocg_ctx.get("questionnaire_id"),
         "ingested_doc_ids": ocg_ctx.get("ingested_doc_ids", []),
@@ -509,6 +584,11 @@ def _build_provenance(
         "prompt_hash": hashlib.sha256(prompt.encode("utf-8")).hexdigest()[:16],
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    stack = ocg_ctx.get("data", {}).get("STACK_RECOMMENDATION") or {}
+    framework = _detect_test_framework(stack)
+    if framework:
+        prov["test_framework"] = framework
+    return prov
 
 
 def _host_of(url: str) -> str:
