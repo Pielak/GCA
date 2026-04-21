@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.41  
+Versão: 3.42  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.5 FECHADAS 2026-04-20**. 14.5 (shadcn não usados): 13 arquivos removidos (os 12 do contrato `calendar`/`carousel`/`command`/`drawer`/`input-otp`/`resizable`/`sidebar`/`sonner`/`switch`/`tabs`/`toggle`/`tooltip` + `toggle-group` do mesmo grupo). tsc errors: 57 → 36. Diagnóstico revelou outros 21 shadcn também órfãos (accordion, alert, alert-dialog, aspect-ratio, avatar, badge, breadcrumb, button, card, chart, checkbox, collapsible, context-menu, dialog, dropdown-menu, form, hover-card, input, label, menubar, navigation-menu, pagination, popover, progress, radio-group, scroll-area, select, separator, sheet, skeleton, slider, table, textarea) — **fora do escopo §7 MVP 14 Fase 14.5** (lista explícita de 12). Registrado no §3 como TODO "shadcn pass 2" para fase/MVP futuro. Fases 14.6-14.11 seguem.
+Status: **controle de avanço por fase** — MVPs 1-13 fechados. **MVP 14 em execução.** Fases **14.1-14.6 FECHADAS 2026-04-20**. 14.6 (TesterReviewPage type mismatch): `TestArtifactCard.tsx` alinhado ao schema real (`title`/`test_type`) e à signature das props (`onEdit: (id: string) => void`). tsc errors: 36 → 34. Fases 14.7-14.11 seguem.
 
 ---
 
