@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.49  
+Versão: 3.50  
 Data-base: 2026-04-20  
-Status: **controle de avanço por fase** — MVPs 1-14 fechados. **MVP 15 em execução 2026-04-20** (autorização + execução em mensagem única do stakeholder-soberano). 4 fases: 15.1 shadcn pass 2, 15.2 AdminMetrics HintCard, 15.3 e2e tests 02-14 rewrite, 15.4 any remainder (76→≤20). Suite de entrada: 1506/1506 passing.
+Status: **controle de avanço por fase** — MVPs 1-14 fechados. **MVP 15 em execução 2026-04-20**. **Fase 15.1 FECHADA**: 33 shadcn órfãos removidos de `src/components/ui/*` (restam apenas HelpTooltip, PipelineProgress, ReadOnlyBanner, StatusBadge — componentes próprios do GCA). Tsc: 34 → 2 errors (AdminMetrics HintCard + DesignShowcase NodeJS namespace — fora de escopo 15.1). Fases 15.2-15.4 seguem.
 
 ---
 
