@@ -1052,6 +1052,97 @@ Portanto, a fase ativa não deve ser tratada como “expandir produto”, mas co
 
 ---
 
+### MVP 19 — ERS Vivo (Especificação de Requisitos de Software — IEEE 830 Foundation)
+
+**Motivação:** a Doc Viva do GCA hoje regera documentação descritiva a cada commit do pipeline, mas **não produz um documento de Especificação de Requisitos de Software (ERS / SRS)** no padrão IEEE 830-1998. Os dados necessários para compor o ERS vivo **já existem** dispersos pelas seções do OCG, pelos `module_candidates`, pelos `test_specs`, pela auditoria de CodeGen e pelos `external_repos` — falta consolidá-los num documento estruturado com os 6 elementos essenciais de manutenção que o stakeholder listou: histórico de revisão, matriz de rastreabilidade, glossário, requisitos funcionais/não-funcionais categorizados, protótipos de interface, restrições e regras de negócio. **5 desses 6 elementos cabem neste MVP**; protótipos de interface ficam fora (MVP 20 potencial — requer decisão separada entre upload simples, integração Figma ou geração de wireframes via IA).
+
+**Escopo autorizado nesta onda:** 5 fases sequenciais. Execução de cada fase exige autorização adicional explícita (§7.0 regra 3). Estado inicial: **definido — não iniciado**.
+
+**Não entra no MVP 19 (explícito):**
+- **Protótipos de Interface** — upload de imagens/links, integração Figma, geração de wireframes. MVP 20 potencial; decisão de escopo pendente.
+- **Edição inline do ERS no Admin** — Admin editar o documento gerado sem commit. Parked.
+- **Tradução pt-BR → EN** do ERS. Parked (`feedback_portuguese_br` mantém pt-BR canônico).
+- **Export PDF** do ERS. Parked.
+- **Diff visual entre versões** do ERS além do texto bruto. Parked (versões em snapshot bastam em V1).
+- **Classificação automática** de requisitos funcional/não-funcional via agente — decisão explícita: classificação é manual pelo GP (ver decisões binárias abaixo).
+- **Materialização de view** da matriz de rastreabilidade. Parked (query sob demanda em V1).
+- **Ingestão de ERS existente** como entrada do projeto. Parked.
+
+#### Decisões binárias travadas para esta onda
+
+1. **Classificação de requisitos**: manual pelo GP. Cada `module_candidate` ganha campo `requirement_category ∈ {functional, non_functional, business_rule, null}`; default null; GP marca via UI no `/projects/:id/backlog` ou `/projects/:id/roadmap`. Agentes não classificam automaticamente em V1.
+2. **Regras de negócio**: nova seção `BUSINESS_RULES` no OCG (não campo livre em `PROJECT_PROFILE`). Fallback determinístico do Consolidator devolve `[]` quando agente não popula — preserva compatibilidade com OCGs pré-19.
+3. **Glossário vivo**: extração automática de termos candidatos a partir de documentos ingeridos + respostas do Arguidor. GP aprova, edita ou descarta antes do termo entrar no ERS. Termos do help global (cap. 1) **não** são duplicados — o ERS referencia o help para acrônimos canônicos do produto, só adiciona termos específicos do projeto.
+4. **Matriz de rastreabilidade**: query SQL consolidada sob demanda no momento da geração do ERS. Sem view materializada; sem triggers. Performance aceitável em projetos até ~500 módulos (ordem de grandeza cabe num projeto único em V1).
+5. **Histórico de revisão**: cada geração do ERS grava snapshot em nova tabela `live_doc_revisions` (version + doc_type='ers' + project_id + generated_at + generated_by + summary + markdown_snapshot). Sem diff visual; sem rollback do ERS (diferente do OCG); GP lê snapshots antigos em modo read-only.
+
+#### Em escopo — 5 fases sequenciais
+
+**Fase 19.1 — Schema expansion (≈1d)**
+- Migration: adiciona `requirement_category VARCHAR(20) NULL` em `module_candidates`. Valores aceitos via CHECK constraint ou application-level: `{functional, non_functional, business_rule, null}`.
+- Nova tabela `live_doc_revisions`: `id UUID PK`, `project_id UUID FK`, `doc_type VARCHAR(20)` (ex: `ers`), `version INT`, `generated_at TIMESTAMP`, `generated_by UUID FK users`, `summary TEXT`, `markdown_snapshot TEXT`, `trigger_source VARCHAR(50)`, indexes em `(project_id, doc_type, version)`.
+- Schema OCG ganha seção opcional `BUSINESS_RULES` em `OCGResponse` (default `[]`). Fallback em `agent_service.consolidate_ocg` preserva comportamento pré-19 (LLM não é obrigado a popular; helper determinístico fica no-op).
+- Testes: migration idempotente, constraint respeitada, OCG sem BUSINESS_RULES continua serializando, live_doc_revisions aceita inserts canônicos.
+
+**Fase 19.2 — Generator IEEE 830 (≈2d)**
+- Novo `ers_doc_generator_service.py`. Função canônica: `generate_ers(project_id) -> HelpSection`-like com markdown seguindo a estrutura IEEE 830 nas 4 seções + matriz + histórico.
+- Consome: `OCG` (PROJECT_PROFILE, DELIVERABLES, PILLAR_SCORES, STACK_RECOMMENDATION, ARCHITECTURE_OVERVIEW, COMPLIANCE_CHECKLIST, BUSINESS_RULES), `module_candidates` (com filtro por `requirement_category`), `external_repos`.
+- A Fase 19.3 (glossário) e 19.4 (matriz) completam as seções 1.3 e 4 respectivamente — em 19.2 essas seções vão com placeholder "será populado na próxima fase".
+- Integra ao `live_doc_generator_service` como novo `doc_type='ers'`.
+- Novo botão "Gerar ERS" em `/projects/:id/docs`.
+- Testes: generator produz markdown bem-formado com todas as seções 1-4 + header + histórico; OCG vazio produz ERS com placeholders explícitos em vez de erro; `module_candidates` sem categoria aparecem em seção "Não classificados".
+
+**Fase 19.3 — Glossário vivo por projeto (≈2d)**
+- Nova entidade `project_glossary_terms` (id, project_id, term, definition, source ∈ {ingested_doc, arguider_response, manual}, status ∈ {candidate, approved, rejected}, created_at, approved_by, approved_at).
+- Serviço de extração: detecta termos candidatos a partir do corpus do projeto (documentos ingeridos extraídos + `arguider_responses`). Heurísticas simples: siglas em maiúsculas (ex: SRS, ERP, OMS), termos entre aspas/negrito em documentos, definições explícitas (padrão "X é Y", "X significa Y").
+- UI: aba "Glossário" em `/projects/:id/ocg` ou subseção em `/projects/:id/docs`. Lista termos candidatos + aprovados + rejeitados. Botões aprovar/rejeitar/editar.
+- Integração com 19.2: seção 1.3 do ERS lista termos aprovados + referência ao help global para acrônimos canônicos (OCG, RBAC, etc).
+- Testes: extração idempotente (rodar 2x não duplica), aprovação muda status + grava audit, termos rejeitados não vão ao ERS, ERS gerado inclui termos aprovados na seção 1.3.
+
+**Fase 19.4 — Matriz de rastreabilidade (≈1,5d)**
+- Novo endpoint `GET /api/v1/projects/:id/traceability` — retorna JSON com cada `module_candidate` e lista de `test_specs` + arquivos/commits do `CodeGenAudit` associados.
+- Query SQL sob demanda: `LEFT JOIN module_candidates → test_specs (via test_spec.module_id) → audit_log_global (via resource_id=project_id + event_type=codegen_scaffold_applied/regenerated)`. Matching por heurística + `module_id` quando disponível.
+- UI: nova aba "Rastreabilidade" em `/projects/:id/qa` ou `/projects/:id/audit`. Tabela com módulos × testes × arquivos + filtros por categoria de requisito.
+- Integração 19.2: seção 4 do ERS embute versão markdown da matriz.
+- Testes: projeto vazio retorna matriz vazia sem erro; módulo sem teste aparece na matriz com "sem teste associado"; módulo sem commit aparece com "sem código gerado"; performance ≤500ms para projetos com até 200 módulos no DB de teste.
+
+**Fase 19.5 — Histórico de revisão do ERS (≈0,5d)**
+- Cada chamada de `generate_ers` grava snapshot em `live_doc_revisions` antes de retornar.
+- Endpoint `GET /api/v1/projects/:id/docs/ers/history` lista snapshots (version desc).
+- Endpoint `GET /api/v1/projects/:id/docs/ers/revisions/:version` retorna snapshot específico.
+- UI: timeline de versões na aba Doc Viva com link para cada snapshot.
+- Cabeçalho do ERS gerado inclui "Histórico de Revisão" listando as últimas N versões com data + autor + resumo.
+- Testes: snapshot persiste; histórico ordena corretamente; versão N é imutável (leitura somente); RBAC respeitado (membro aceito vê, outros 403).
+
+#### Regras duras
+
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- **Stop-rule dura >2d** por fase (especialmente 19.2 e 19.3; 19.4 tem risco de scope creep na heurística de matching).
+- §10 aplicável: zero refactor vizinho em `LiveDocsPage.tsx`, `Doc Viva` generator atual, schema do OCG além da seção BUSINESS_RULES nova, `module_candidates` além do campo novo.
+- Conteúdo do ERS em **pt-BR** (`feedback_portuguese_br`).
+- RBAC imutável (§4): nenhum novo papel. Classificação de requisito exige `project:manage_backlog` ou equivalente (Admin + GP); aprovação de glossário idem.
+- Sem LLM no caminho crítico do generator ERS — é consolidação determinística de dados já gerados pelo pipeline.
+- Compartimentalização §2.2 preservada: ERS de projeto A nunca referencia dados de B; glossário de A não vaza pra B.
+- 19.1 é pré-requisito de 19.2 (schema novo precisa existir antes do generator consumir).
+- 19.3 e 19.4 são pré-requisitos da **versão completa** do ERS — sem elas, 19.2 gera ERS com placeholders nas seções 1.3 e 4.
+- 19.5 depende de 19.1 (tabela `live_doc_revisions` criada lá).
+
+#### RBAC preservado (§4.1)
+
+- `GET /docs/ers`, `GET /traceability`, `GET /glossary`: membro aceito do projeto OR Admin.
+- `POST /generate-ers`, `POST /glossary/:termId/approve`, `PATCH /module_candidates/:id/category`: GP do projeto OR Admin.
+- Endpoints novos não introduzem papel nem permissão nova — só reaproveitam guards existentes.
+
+#### Baseline de entrada (2026-04-21)
+
+- Suite backend: **1617 passing, 5 skipped**.
+- Frontend tsc: **0 errors**.
+- `any` frontend: 20.
+- DTs abertas: 0.
+- MVP 18 fechado (`5790617`).
+
+---
+
 ## 9. Regras duras de implementação
 
 - Não antecipar feature de MVP futuro.
