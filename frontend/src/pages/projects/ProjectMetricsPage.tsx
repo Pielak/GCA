@@ -185,7 +185,7 @@ export function ProjectMetricsPage() {
 
 function SummaryCard({
   icon: Icon, label, value, color,
-}: { icon: any; label: string; value: string; color: string }) {
+}: { icon: React.ComponentType<{ className?: string }>; label: string; value: string; color: string }) {
   return (
     <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-3">
       <div className="flex items-center gap-1.5 text-slate-500 text-[11px] uppercase tracking-wider">

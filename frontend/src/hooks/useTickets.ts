@@ -43,7 +43,7 @@ export const useTickets = (
     queryKey: ['tickets', page, status, severity],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<any>('/admin/tickets', {
+        const response = await apiClient.get<{ tickets: SupportTicket[]; count: number; total?: number }>('/admin/tickets', {
           params: {
             page,
             page_size: 25,
@@ -62,7 +62,7 @@ export const useTickets = (
           } as TicketsResponse
         }
 
-        return response.data as TicketsResponse
+        return response.data as unknown as TicketsResponse
       } catch (error: unknown) {
         toast.error(getErrorMessage(error))
         throw error

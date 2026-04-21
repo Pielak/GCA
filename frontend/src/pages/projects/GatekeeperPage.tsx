@@ -53,7 +53,7 @@ export function GatekeeperPage() {
         const ocgScores = raw.ocg?.pillar_scores || {}
         const ocgStatus = raw.ocg?.status || {}
 
-        const pillars: PillarResult[] = Object.entries(ocgScores).map(([name, score]: [string, any]) => ({
+        const pillars: PillarResult[] = Object.entries(ocgScores as Record<string, unknown>).map(([name, score]) => ({
           pillar: name,
           score: typeof score === 'number' ? score : 0,
           status: (typeof score === 'number' ? score : 0) >= 80 ? 'ok' : (typeof score === 'number' ? score : 0) >= 60 ? 'warning' : 'blocker',
@@ -71,7 +71,7 @@ export function GatekeeperPage() {
           improvement_suggestions: raw.improvement_suggestions,
           module_candidates: raw.module_candidates,
           ocg_health: raw.ocg?.health || {},
-        } as any)
+        } as unknown as GatekeeperData)
       } catch {
         setData(null)
       } finally {

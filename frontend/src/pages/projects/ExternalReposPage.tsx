@@ -464,7 +464,19 @@ export function ExternalReposPage() {
               <>
                 {/* Tab 1: Stack Detectado */}
                 {activeTab === 'stack' && (() => {
-                  const stack: any = analysisData.stack || {}
+                  // Stack vem do backend em formato livre — usar acesso defensivo.
+                  const stack = (analysisData.stack || {}) as Record<string, unknown> & {
+                    language?: string | { primary?: string }
+                    primary_language?: string
+                    files_total?: number
+                    repository?: { files_total?: number }
+                    has_docker?: boolean
+                    has_dockerfile?: boolean
+                    has_tests?: boolean
+                    has_ci_cd?: boolean
+                    has_cicd?: boolean
+                    frameworks?: Array<string | { name?: string; version?: string }>
+                  }
                   const language =
                     typeof stack.language === 'string'
                       ? stack.language
@@ -475,7 +487,7 @@ export function ExternalReposPage() {
                   const hasTests = stack.has_tests ?? false
                   const hasCi = stack.has_ci_cd ?? stack.has_cicd ?? false
                   const frameworks: Array<string> = Array.isArray(stack.frameworks)
-                    ? stack.frameworks.map((fw: any) =>
+                    ? stack.frameworks.map((fw) =>
                         typeof fw === 'string'
                           ? fw
                           : fw?.version
@@ -534,7 +546,7 @@ export function ExternalReposPage() {
                     </div>
                     {analysisData.vulnerabilities?.items && Array.isArray(analysisData.vulnerabilities.items) ? (
                       <div className="space-y-2">
-                        {analysisData.vulnerabilities.items.map((vuln: any, i: number) => (
+                        {analysisData.vulnerabilities.items.map((vuln: { severity?: string; description?: string; name?: string; recommended_version?: string }, i: number) => (
                           <div key={i} className="bg-dark-200 rounded-lg p-3 flex items-start gap-3">
                             <span className={`text-xs px-2 py-0.5 rounded-full flex-shrink-0 mt-0.5 ${
                               vuln.severity === 'critical' ? 'bg-red-500/20 text-red-400'
@@ -586,7 +598,7 @@ export function ExternalReposPage() {
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       {['backend', 'frontend', 'database'].map(area => {
-                        const comp: any = analysisData.compatibility || {}
+                        const comp = (analysisData.compatibility || {}) as Record<string, { status?: string; compatible?: boolean; effort?: string; reason?: string; notes?: string } | undefined>
                         const data = comp[area] || comp[`gca_${area}_compatibility`]
                         if (!data) return null
                         const statusText =

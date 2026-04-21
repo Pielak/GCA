@@ -38,7 +38,7 @@ export const useAlerts = (
     queryKey: ['alerts', page, severity, status, limit],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<any>('/admin/alerts/history', {
+        const response = await apiClient.get<{ alerts: SystemAlert[]; count: number }>('/admin/alerts/history', {
           params: {
             page,
             page_size: limit,
@@ -57,7 +57,7 @@ export const useAlerts = (
           } as AlertsResponse
         }
 
-        return response.data as AlertsResponse
+        return response.data as unknown as AlertsResponse
       } catch (error: unknown) {
         toast.error(getErrorMessage(error))
         throw error

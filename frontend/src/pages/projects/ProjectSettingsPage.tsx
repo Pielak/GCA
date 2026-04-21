@@ -167,7 +167,7 @@ export function ProjectSettingsPage() {
     if (!projectId) return
     setTestingProvider(provider)
     try {
-      const res: any = await apiClient.post(
+      const res = await apiClient.post<{ ok?: boolean; valid?: boolean; provider?: string; error?: string; latency_ms?: number; model?: string; detail?: string }>(
         `/projects/${projectId}/settings/llm/validate?provider=${encodeURIComponent(provider)}`,
         {},
       )
@@ -451,7 +451,7 @@ export function ProjectSettingsPage() {
             </div>
           ) : (
             <div className="space-y-3">
-              {settings.llm.providers.map((p: any) => {
+              {settings.llm.providers.map((p: { provider: string; model?: string; last_validation_ok?: boolean; last_validated_at?: string; is_default?: boolean; api_key_configured?: boolean }) => {
                 const testResult = llmTestResults[p.provider]
                 const lastOk = p.last_validation_ok
                 const lastAt = p.last_validated_at

@@ -21,7 +21,7 @@ interface ReleaseItem {
   item_count: number
 }
 
-const STATUS_META: Record<string, { label: string; classes: string; icon: any }> = {
+const STATUS_META: Record<string, { label: string; classes: string; icon: React.ComponentType<{ className?: string }> }> = {
   pending: { label: 'Pendente', classes: 'bg-amber-500/10 text-amber-300 border-amber-500/30', icon: Clock },
   applied: { label: 'Aplicada', classes: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', icon: CheckCircle2 },
   rolled_back: { label: 'Revertida', classes: 'bg-slate-500/10 text-slate-400 border-slate-500/30', icon: AlertTriangle },

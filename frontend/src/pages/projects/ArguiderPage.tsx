@@ -151,31 +151,37 @@ export function ArguiderPage() {
       </div>
 
       {/* Contexto OCG */}
-      {(gatekeeper as any).ocg?.status && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <span className="text-slate-400 text-xs">Score OCG:</span>
-              <span className={`text-lg font-bold ${
-                ((gatekeeper as any).ocg.status.overall_score || 0) >= 80 ? 'text-emerald-400' :
-                ((gatekeeper as any).ocg.status.overall_score || 0) >= 60 ? 'text-amber-400' : 'text-red-400'
-              }`}>{((gatekeeper as any).ocg.status.overall_score || 0).toFixed(1)}</span>
-              <span className={`text-xs px-2 py-0.5 rounded-full ${
-                (gatekeeper as any).ocg.status.status === 'READY' ? 'bg-emerald-500/20 text-emerald-300' :
-                (gatekeeper as any).ocg.status.status === 'NEEDS_REVIEW' ? 'bg-amber-500/20 text-amber-300' :
-                (gatekeeper as any).ocg.status.status === 'AT_RISK' ? 'bg-amber-500/20 text-amber-300' :
-                'bg-red-500/20 text-red-300'
-              }`}>{(gatekeeper as any).ocg.status.status}</span>
-            </div>
-            <div className="flex items-center gap-4 text-xs text-slate-500">
-              <span>Versão: v{(gatekeeper as any).ocg.status.version || 1}</span>
-              {(gatekeeper as any).ocg.health?.confidence != null && (
-                <span>Confiança: {Math.round(((gatekeeper as any).ocg.health.confidence || 0) * 100)}%</span>
-              )}
+      {(() => {
+        const ocg = (gatekeeper as { ocg?: { status?: { overall_score?: number; status?: string; version?: number }; health?: { confidence?: number } } }).ocg
+        const status = ocg?.status
+        if (!status) return null
+        const overall = status.overall_score || 0
+        return (
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-slate-400 text-xs">Score OCG:</span>
+                <span className={`text-lg font-bold ${
+                  overall >= 80 ? 'text-emerald-400' :
+                  overall >= 60 ? 'text-amber-400' : 'text-red-400'
+                }`}>{overall.toFixed(1)}</span>
+                <span className={`text-xs px-2 py-0.5 rounded-full ${
+                  status.status === 'READY' ? 'bg-emerald-500/20 text-emerald-300' :
+                  status.status === 'NEEDS_REVIEW' ? 'bg-amber-500/20 text-amber-300' :
+                  status.status === 'AT_RISK' ? 'bg-amber-500/20 text-amber-300' :
+                  'bg-red-500/20 text-red-300'
+                }`}>{status.status}</span>
+              </div>
+              <div className="flex items-center gap-4 text-xs text-slate-500">
+                <span>Versão: v{status.version || 1}</span>
+                {ocg?.health?.confidence != null && (
+                  <span>Confiança: {Math.round((ocg.health.confidence || 0) * 100)}%</span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">

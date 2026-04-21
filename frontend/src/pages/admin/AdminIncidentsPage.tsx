@@ -37,7 +37,7 @@ const PRIORITY_CLASSES: Record<string, string> = {
   critica: 'bg-red-500/10 text-red-300 border-red-500/30',
 }
 
-const STATUS_META: Record<string, { label: string; icon: any; color: string }> = {
+const STATUS_META: Record<string, { label: string; icon: React.ComponentType<{ className?: string }>; color: string }> = {
   open: { label: 'Aberto', icon: AlertCircle, color: 'text-amber-400' },
   in_progress: { label: 'Em andamento', icon: PlayCircle, color: 'text-cyan-400' },
   resolved: { label: 'Resolvido', icon: CheckCircle2, color: 'text-emerald-400' },

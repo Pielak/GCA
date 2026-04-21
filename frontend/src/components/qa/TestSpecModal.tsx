@@ -55,8 +55,8 @@ export function TestSpecModal({ projectId, specId, onClose }: Props) {
   // GP e QA aprovam (contrato §4.1 + RBAC qa:approve)
   const { user } = useAuthStore()
   const roles = (user?.project_roles || [])
-    .filter((r: any) => r.project_id === projectId)
-    .map((r: any) => r.role)
+    .filter((r) => r.project_id === projectId)
+    .map((r) => r.role)
   const canApprove = user?.is_admin || roles.includes('gp') || roles.includes('qa')
 
   const handleReject = () => {
@@ -132,7 +132,7 @@ export function TestSpecModal({ projectId, specId, onClose }: Props) {
 
           {error && (
             <div className="bg-red-500/10 border border-red-500/30 rounded p-3 text-sm text-red-300">
-              {(error as any)?.message || 'Erro ao carregar spec.'}
+              {(error as { message?: string })?.message || 'Erro ao carregar spec.'}
             </div>
           )}
 

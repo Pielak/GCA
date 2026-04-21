@@ -32,7 +32,7 @@ export const usePendingProjects = () => {
     queryKey: ['projects', 'pending'],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<any>('/admin/projects/pending')
+        const response = await apiClient.get<ProjectRequest[] | { projects: ProjectRequest[] }>('/admin/projects/pending')
 
         // Handle nested format
         if (Array.isArray(response.data)) {
@@ -58,7 +58,7 @@ export const useAllProjects = () => {
     queryKey: ['projects', 'all'],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<any>('/api/v1/projects')
+        const response = await apiClient.get<ProjectRequest[] | { projects: ProjectRequest[] }>('/api/v1/projects')
 
         // Handle both array and nested formats
         if (Array.isArray(response.data)) {

@@ -467,9 +467,19 @@ export function AdminDashboardPage() {
       const summary = raw.summary || {}
       const projects = raw.projects || []
 
+      type ProjectRow = {
+        id: string
+        slug?: string
+        name?: string
+        status?: string
+        phase?: number
+        provisioning_status?: string
+      }
+      type AuditRow = { id: string; action?: string; detail?: string; level?: string; timestamp?: string }
+
       // Status distribution
       const statusCounts: Record<string, number> = {}
-      projects.forEach((p: any) => {
+      ;(projects as ProjectRow[]).forEach((p) => {
         const s = p.status || 'draft'
         statusCounts[s] = (statusCounts[s] || 0) + 1
       })
@@ -481,20 +491,20 @@ export function AdminDashboardPage() {
       }))
 
       // Recent projects
-      const recentProjects = projects.slice(0, 5).map((p: any) => ({
+      const recentProjects = (projects as ProjectRow[]).slice(0, 5).map((p) => ({
         id: p.id,
-        name: p.name || p.slug,
+        name: p.name || p.slug || '',
         status: p.status || 'draft',
         phase: p.phase || 1,
         outputProfile: p.provisioning_status || '',
       }))
 
       // Recent audit
-      let recentAudit: any[] = []
+      let recentAudit: Array<{ id: string; detail: string; level: string; timestamp: string }> = []
       try {
-        const auditRes = await apiClient.get('/admin/audit?limit=5')
-        recentAudit = (auditRes.data?.events || []).map((e: any) => ({
-          id: e.id, detail: e.action || e.detail, level: e.level || 'info', timestamp: e.timestamp,
+        const auditRes = await apiClient.get<{ events?: AuditRow[] }>('/admin/audit?limit=5')
+        recentAudit = (auditRes.data?.events || []).map((e) => ({
+          id: e.id, detail: e.action || e.detail || '', level: e.level || 'info', timestamp: e.timestamp || '',
         }))
       } catch { /* ignore */ }
 

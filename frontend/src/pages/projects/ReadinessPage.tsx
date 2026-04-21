@@ -42,7 +42,7 @@ interface ReadinessPayload {
   }
 }
 
-const statusMeta: Record<Deliverable['status'], { label: string; color: string; icon: any }> = {
+const statusMeta: Record<Deliverable['status'], { label: string; color: string; icon: React.ComponentType<{ className?: string }> }> = {
   verified:    { label: 'Verificado',     color: 'bg-emerald-900/30 border-emerald-700 text-emerald-300', icon: CheckCircle2 },
   present:     { label: 'Presente',       color: 'bg-blue-900/30 border-blue-700 text-blue-300',         icon: FileCheck2 },
   declared:    { label: 'Declarado',      color: 'bg-slate-800 border-slate-700 text-slate-400',          icon: Clock },
@@ -53,7 +53,7 @@ const statusMeta: Record<Deliverable['status'], { label: string; color: string; 
   error:       { label: 'Erro',           color: 'bg-orange-900/30 border-orange-700 text-orange-300',   icon: AlertCircle },
 }
 
-const categoryIcon: Record<string, any> = {
+const categoryIcon: Record<string, React.ComponentType<{ className?: string }>> = {
   doc: FileText, code: Code, test: FlaskConical, process: Settings, config: Settings, other: MoreHorizontal,
 }
 

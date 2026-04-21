@@ -56,7 +56,7 @@ export function QAReadinessPage() {
   const [results, setResults] = useState<TestExecution[]>([]);
   const [loading, setLoading] = useState(true);
   const [running, setRunning] = useState(false);
-  const [ocgTesting, setOcgTesting] = useState<any>(null);
+  const [ocgTesting, setOcgTesting] = useState<Record<string, unknown> | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -156,7 +156,7 @@ export function QAReadinessPage() {
           <div className="flex flex-wrap gap-2">
             {Object.entries(ocgTesting)
               .filter(([key]) => key !== 'source') // metadado interno do fallback determinístico
-              .map(([key, val]: [string, any]) => {
+              .map(([key, val]) => {
                 const label = key.replace(/_/g, ' ')
                 let display: string | null = null
                 if (typeof val === 'boolean') {

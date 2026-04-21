@@ -83,7 +83,7 @@ export function ExtractionReportCard({ projectId, documentId, enabled = true }: 
 
           {error && (
             <p className="text-xs text-red-400 py-2">
-              Falha ao gerar relatório: {(error as any)?.message || 'erro desconhecido'}
+              Falha ao gerar relatório: {(error as { message?: string })?.message || 'erro desconhecido'}
             </p>
           )}
 

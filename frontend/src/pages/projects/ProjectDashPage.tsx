@@ -44,10 +44,18 @@ export function ProjectDashPage() {
   const projectStatus = context?.projectStatus
   const { data: setupStatus } = useSetupStatus(id)
   const [loading, setLoading] = useState(true)
+  // MVP 15 Fase 15.4: `any` preservado — essas states são indexadas
+  // livremente por toda a página (ocg.PILLAR_SCORES, billing.by_operation,
+  // health.health, etc). Migração para tipo nomeado virou cross-file.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [ocg, setOcg] = useState<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [members, setMembers] = useState<any[]>([])
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [questionnaire, setQuestionnaire] = useState<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [health, setHealth] = useState<any>(null)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [billing, setBilling] = useState<any>(null)
 
   useEffect(() => {
@@ -82,7 +90,7 @@ export function ProjectDashPage() {
 
   // Extrair scores dos pilares do OCG
   const pillarScores = ocg?.PILLAR_SCORES || {}
-  const radarData = Object.entries(pillarScores).map(([key, val]: [string, any]) => {
+  const radarData = Object.entries(pillarScores as Record<string, { score?: number } | number>).map(([key, val]) => {
     const shortKey = key.replace(/_.*/, '') // P1_Business -> P1
     return {
       subject: PILLAR_NAMES[shortKey] || shortKey,
@@ -227,7 +235,7 @@ export function ProjectDashPage() {
                 <div>
                   <p className="text-slate-500 text-xs mb-2">Por Operação</p>
                   <div className="space-y-1.5">
-                    {billing.by_operation.map((op: any) => (
+                    {billing.by_operation.map((op: { operation: string; cost_usd: number; calls: number }) => (
                       <div key={op.operation} className="flex items-center justify-between">
                         <span className="text-slate-400 text-xs">{op.operation}</span>
                         <span className="text-slate-300 text-xs">${op.cost_usd.toFixed(4)} ({op.calls} chamadas)</span>
@@ -241,7 +249,7 @@ export function ProjectDashPage() {
                 <div>
                   <p className="text-slate-500 text-xs mb-2">Por Provedor</p>
                   <div className="space-y-1.5">
-                    {billing.by_provider.map((prov: any) => (
+                    {billing.by_provider.map((prov: { provider: string; cost_usd: number }) => (
                       <div key={prov.provider} className="flex items-center justify-between">
                         <span className="text-slate-400 text-xs capitalize">{prov.provider}</span>
                         <span className="text-slate-300 text-xs">${prov.cost_usd.toFixed(4)}</span>
@@ -307,7 +315,7 @@ export function ProjectDashPage() {
           </h3>
           {Object.keys(stack).length > 0 ? (
             <div className="space-y-2">
-              {Object.entries(stack).map(([layer, config]: [string, any]) => (
+              {Object.entries(stack as Record<string, { choice?: string; rationale?: string } | string>).map(([layer, config]) => (
                 <div key={layer} className="p-2 rounded-lg bg-slate-800/40">
                   <span className="text-violet-400 text-xs font-medium capitalize">{layer}</span>
                   {typeof config === 'object' && config !== null ? (
@@ -364,7 +372,7 @@ export function ProjectDashPage() {
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
           <h3 className="text-slate-200 text-sm font-semibold mb-4">Distribuição de Scores por Pilar</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            {Object.entries(pillarScores).map(([key, val]: [string, any]) => {
+            {Object.entries(pillarScores as Record<string, { score?: number; adherence_level?: string } | number>).map(([key, val]) => {
               const shortKey = key.replace(/_.*/, '')
               const score = typeof val === 'object' ? (val.score ?? 0) : (val ?? 0)
               const color = score >= 80 ? 'emerald' : score >= 60 ? 'amber' : 'red'

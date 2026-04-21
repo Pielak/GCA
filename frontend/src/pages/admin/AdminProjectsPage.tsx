@@ -25,7 +25,7 @@ interface PendingProject {
   rejection_reason: string
 }
 
-const LIFECYCLE_META: Record<string, { label: string; bg: string; text: string; icon?: any }> = {
+const LIFECYCLE_META: Record<string, { label: string; bg: string; text: string; icon?: React.ComponentType<{ className?: string }> }> = {
   active:   { label: 'Ativo',       bg: 'bg-emerald-500/10', text: 'text-emerald-300', icon: CheckCircle },
   paused:   { label: 'Pausado',     bg: 'bg-amber-500/10',   text: 'text-amber-300',   icon: Pause },
   inactive: { label: 'Desativado',  bg: 'bg-slate-500/10',   text: 'text-slate-400',   icon: Ban },
@@ -104,13 +104,15 @@ export function AdminProjectsPage() {
         apiClient.get('/admin/users'),
         apiClient.get(`/projects/${realProjectId}/members`).catch(() => ({ data: { members: [] } })),
       ])
-      const allUsers = usersRes.data?.users || []
-      const members = membersRes.data?.members || []
-      const currentGPList = members.filter((m: any) => m.role === 'gp')
-      setCurrentGPs(currentGPList.map((m: any) => ({ user_id: m.user_id, full_name: m.full_name || '', email: m.email || '' })))
+      type Member = { user_id: string; role: string; full_name?: string; email?: string }
+      type UserRow = { id: string; is_admin?: boolean; full_name?: string; email: string }
+      const allUsers: UserRow[] = usersRes.data?.users || []
+      const members: Member[] = membersRes.data?.members || []
+      const currentGPList = members.filter((m) => m.role === 'gp')
+      setCurrentGPs(currentGPList.map((m) => ({ user_id: m.user_id, full_name: m.full_name || '', email: m.email || '' })))
       // Available GPs: all users that are NOT already GP on this project
-      const currentGPIds = new Set(currentGPList.map((m: any) => m.user_id))
-      setAvailableGPs(allUsers.filter((u: any) => !u.is_admin && !currentGPIds.has(u.id)).map((u: any) => ({
+      const currentGPIds = new Set(currentGPList.map((m) => m.user_id))
+      setAvailableGPs(allUsers.filter((u) => !u.is_admin && !currentGPIds.has(u.id)).map((u) => ({
         id: u.id,
         full_name: u.full_name || '',
         email: u.email,
@@ -132,9 +134,10 @@ export function AdminProjectsPage() {
       showToast('Novo GP adicionado ao projeto', 'success')
       // Refresh current GPs
       const membersRes = await apiClient.get(`/projects/${gpModal.realProjectId}/members`)
-      const members = membersRes.data?.members || []
-      const currentGPList = members.filter((m: any) => m.role === 'gp')
-      setCurrentGPs(currentGPList.map((m: any) => ({ user_id: m.user_id, full_name: m.full_name || '', email: m.email || '' })))
+      type Member = { user_id: string; role: string; full_name?: string; email?: string }
+      const members: Member[] = membersRes.data?.members || []
+      const currentGPList = members.filter((m) => m.role === 'gp')
+      setCurrentGPs(currentGPList.map((m) => ({ user_id: m.user_id, full_name: m.full_name || '', email: m.email || '' })))
       if (currentGPList.length > 1) {
         setGpSubStep('confirm_remove')
       } else {
@@ -173,7 +176,7 @@ export function AdminProjectsPage() {
         apiClient.get('/projects'),
       ])
       setProjects(pendingRes.data.pending_projects || [])
-      setRealProjects((projectsRes.data.projects || []).map((p: any) => ({ id: p.id, slug: p.slug })))
+      setRealProjects((projectsRes.data.projects || []).map((p: { id: string; slug: string }) => ({ id: p.id, slug: p.slug })))
     } catch {
       setProjects([])
     } finally {

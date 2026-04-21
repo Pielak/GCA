@@ -63,7 +63,7 @@ export const useProjectTeamApi = (): UseProjectTeamApiReturn => {
         );
         return { success: true, data: response.data };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           success: false,
           error: {
@@ -84,7 +84,7 @@ export const useProjectTeamApi = (): UseProjectTeamApiReturn => {
         });
         return { success: true, invites: response.data.invites };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           success: false,
           error: {
@@ -105,7 +105,7 @@ export const useProjectTeamApi = (): UseProjectTeamApiReturn => {
         });
         return { success: true, data: response.data };
       } catch (error) {
-        const axiosError = error as AxiosError<any>;
+        const axiosError = error as AxiosError<{ detail?: string }>;
         return {
           success: false,
           error: {

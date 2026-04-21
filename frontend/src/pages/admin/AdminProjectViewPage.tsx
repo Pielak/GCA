@@ -93,7 +93,7 @@ export function AdminProjectViewPage() {
         const scores = ocg.pillar_scores || ocg.scores || {}
         const parsed: PillarScore[] = Object.entries(scores).map(([k, v]) => ({
           pillar: k,
-          score: typeof v === 'number' ? v : (v as any)?.score || 0,
+          score: typeof v === 'number' ? v : (v as { score?: number })?.score || 0,
         }))
         setPillarScores(parsed)
         setOverallScore(ocg.overall_score ?? ocg.score ?? null)

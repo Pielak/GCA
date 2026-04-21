@@ -56,7 +56,7 @@ export function Sidebar() {
       try {
         const res = await apiClient.get('/projects')
         const data = res.data.projects || res.data || []
-        setProjects(data.map((p: any) => ({ id: p.id, name: p.name, status: p.status, role: p.role || '' })))
+        setProjects(data.map((p: { id: string; name: string; status: string; role?: string }) => ({ id: p.id, name: p.name, status: p.status, role: p.role || '' })))
       } catch {}
       if (isAdmin) {
         try {

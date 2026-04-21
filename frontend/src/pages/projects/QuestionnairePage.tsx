@@ -70,7 +70,7 @@ export function QuestionnairePage() {
   const fetchExisting = async () => {
     if (!projectId) return
     try {
-      const res: any = await apiClient.get(`/projects/${projectId}/questionnaire`)
+      const res = await apiClient.get<{ questionnaire?: ExistingQuestionnaire }>(`/projects/${projectId}/questionnaire`)
       if (res?.data?.questionnaire) setExisting(res.data.questionnaire)
     } catch { /* sem questionário ainda */ }
   }
@@ -107,7 +107,7 @@ export function QuestionnairePage() {
     const form = new FormData()
     form.append('file', file)
     try {
-      const res: any = await apiClient.post(
+      const res = await apiClient.post<{ message?: string }>(
         `/projects/${projectId}/questionnaire/upload-pdf`,
         form,
       )
@@ -513,7 +513,14 @@ function InlineFixPanel({
         setSaving(false)
         return
       }
-      const res: any = await apiClient.post(
+      const res = await apiClient.post<{
+        approved?: boolean
+        adherence_score?: number
+        adherence?: number
+        gaps?: string[]
+        blockers?: string[]
+        criticals?: string[]
+      }>(
         `/projects/${projectId}/questionnaire/correct`,
         { corrections },
       )

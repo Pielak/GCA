@@ -26,7 +26,7 @@ export const useUsers = (page: number = 1, filter: 'all' | 'active' | 'inactive'
     queryKey: ['users', page, filter],
     queryFn: async () => {
       try {
-        const response = await apiClient.get<any>('/admin/users', {
+        const response = await apiClient.get<{ users: User[]; count: number }>('/admin/users', {
           params: {
             page,
             page_size: 20,
@@ -44,7 +44,7 @@ export const useUsers = (page: number = 1, filter: 'all' | 'active' | 'inactive'
           } as UsersResponse
         }
 
-        return response.data as UsersResponse
+        return response.data as unknown as UsersResponse
       } catch (error: unknown) {
         toast.error(getErrorMessage(error))
         throw error

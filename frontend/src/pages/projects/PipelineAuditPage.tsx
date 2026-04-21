@@ -10,7 +10,7 @@ interface AuditEntry {
   phase: string
   status: string
   duration_seconds: number | null
-  context: any
+  context: Record<string, unknown>
   timestamp: string
 }
 
