@@ -1160,6 +1160,109 @@ Implementação canônica: serviço `ers_freshness_tracker` mantém, por projeto
 
 ---
 
+### MVP 20 — Integrações externas do ecossistema corporativo (Issue Tracker + Security Scanners + Slack Notifier)
+
+**Motivação:** hoje o GCA é uma ilha em relação ao ecossistema corporativo do cliente. Três dores concretas bloqueiam adoção em mid-market e enterprise:
+
+1. **Backlog do GCA ↔ ticket oficial (Jira/Trello) desincronizado** — PMs e devs perguntam "onde aparece isso no meu Jira?" e a resposta hoje é "não aparece". Reintroduzir manualmente cada módulo aprovado do GCA como ticket no tracker é atrito recorrente; divergência entre os dois estados é inevitável.
+2. **Segurança do cliente já roda em Sonar / Snyk / GitHub Advanced Security / gitleaks** — o CISO exige relatório de segurança com rastreabilidade. Hoje o P7 do OCG é avaliado por LLM sobre texto, não por findings reais da ferramenta que o cliente já paga. Reimplementar SAST internamente seria concorrer com ferramentas commodity maduras — caminho errado. **Adapters que consomem findings existentes e mapeiam para P7** preservam o moat do GCA (governança) sem competir com o que o cliente já tem.
+3. **Visibilidade distribuída** — eventos importantes do pipeline (módulo aprovado, OCG consolidado, CodeGen completo, ERS regenerado, finding HIGH) ficam presos na UI do GCA. Time híbrido/remoto perde o ritmo e não desenvolve hábito diário com o produto.
+
+Os três temas compartilham a mesma tese arquitetural — **"GCA como hub que consome ferramentas externas via adapter pattern, não como produto que reimplementa cada uma"** — e a mesma plumbing (porta canônica + múltiplos adapters + `ProjectSecret` vault + config UI por projeto). Por isso cabem num único MVP coeso, mesmo cobrindo três tipos de integração distintos.
+
+**Escopo autorizado nesta onda:** 4 fases sequenciais. Execução de cada fase exige autorização adicional explícita (§7.0 regra 3). Estado inicial: **definido — não iniciado**.
+
+**Não entra no MVP 20 (explícito):**
+- **ChatOps bi-direcional** (aprovar/rejeitar módulos via botões no Slack/Teams) — MVP 23 potencial, após SSO canônico pronto e primeiro cliente externo validar o uso uni-direcional.
+- **Microsoft Teams notifier** — MVP 23 potencial. Teams Bot Framework custa ~2x o Slack; justificado quando cliente específico exigir.
+- **Linear, Asana, GitHub Issues, Monday, ClickUp** — adapters sob demanda (~1.5-2d cada), disparados por pedido explícito de cliente pagante.
+- **Reimplementação de SAST interno** — rejeitado por design. GCA consome, não reimplementa.
+- **Custom Semgrep rules GCA-específicas** — parked até haver corpus de findings real em dogfood.
+- **DAST** (OWASP ZAP, runtime scan em staging) — parked. Depende de ambiente staging disciplinado; volta no roadmap após 3 clientes em produção.
+- **Dependabot/Renovate integration além do OSV-Scanner** — parked.
+- **Figma MCP** — MVP 22 potencial (tema distinto: entrada UX/UI, não integração corporativa genérica).
+- **Onboarding polish / expansão de Ajuda** — MVP 22 potencial (tema distinto).
+- **SSO corporativo (LDAP/SAML/OIDC)** — pré-requisito do ChatOps, mas entra em MVP próprio futuro.
+
+#### Decisões binárias travadas para esta onda
+
+1. **Config é por projeto, não instância-wide.** Cada projeto escolhe seu tracker, seus scanners e seu canal Slack. Compartimentalização §2.2 preservada.
+2. **Status mapping é configurável por projeto.** Cliente Jira com workflow customizado mapeia seu estado ("Em análise pelo jurídico" → canonical `review`) via UI do `/settings` — GCA não força naming.
+3. **Security adapters consomem, não reimplementam.** `SonarAdapter` chama SonarCloud/SonarQube API, `SnykAdapter` chama Snyk API, `GitleaksAdapter` roda gitleaks local ou consome findings já gerados pelo cliente. GCA nunca gera finding próprio em V1.
+4. **Slack é uni-direcional em V1.** Mensagens vão, reações/comandos não voltam. Bi-direcional (ChatOps) é MVP 23 separado por mudar perfil de segurança do produto.
+5. **Webhooks recebidos pelo GCA exigem signing secret + idempotência por `message_id`.** Zero endpoint público sem validação de assinatura. Replay prevention por nonce/timestamp obrigatória.
+6. **Modo "link-only" disponível por projeto.** Cliente regulado (BACEN, ANS, órgãos públicos) que não aceita payload do projeto trafegando por Slack configura modo onde a mensagem só diz "evento X no módulo Y, clique para ver" sem conteúdo sensível. Default é payload rico.
+7. **P7 do OCG passa a consumir `security_findings` reais quando existirem.** Quando o projeto não tem scanner configurado, P7 mantém heurística LLM atual (comportamento pré-20 preservado). Quando scanner configurado e findings existem, P7 recalcula com base em `count(HIGH) / count(MEDIUM) / count(LOW)` ponderado — regra binária publicada no release notes.
+8. **Primeira resposta de reação vale.** Não se aplica a V1 (uni-direcional), mas fica documentada como regra pro futuro ChatOps: 3 GPs reagem no canal → primeira vale, demais viram comentário.
+
+#### Em escopo — 4 fases sequenciais
+
+**Fase 20.1 — Issue Tracker Bridge (porta canônica + Jira + Trello) (~4-5d)**
+- Porta canônica `IssueTrackerPort` com operações mínimas: `create_issue(module_candidate_id) → external_id`, `update_status(external_id, canonical_status)`, `link_commit(external_id, commit_sha)`, `add_comment(external_id, markdown)`, `webhook_handler(payload) → IssueEvent`.
+- Modelo `ExternalIssue` + migration 035: `(id, project_id, module_candidate_id, provider ∈ {jira, trello}, external_id, status_canonical ∈ {todo, in_progress, review, done}, url, synced_at, provider_specific jsonb)`.
+- `JiraAdapter` completo: auth (API token + email, OAuth2 deixado pra fase futura), CRUD issue, webhook signed, status mapping configurável por projeto, escape de pipe/markdown na descrição.
+- `TrelloAdapter` minimalista: cards em lista canônica, movimentação entre listas como status, labels para priority, webhook com validação HMAC.
+- UI: painel de config em `/projects/:id/settings` → nova aba "Issue Tracker", seguindo padrão visual dos Provedores de IA (imagem #7 do carrossel LinkedIn). Campos: provider, credencial (via `ProjectSecret` vault), status mapping JSON editável, canal default.
+- Integração com backlog: quando módulo aprovado pelo GP (`ModuleCandidate.status = 'aprovado'`), dispara `IssueTrackerPort.create_issue` se config existir. Status `completed` do `GeneratedModule` → `done` no tracker. Webhook de volta do tracker sincroniza status canonical.
+- Audit: cada criação/sync vira `GlobalAuditLog` com `event_type ∈ {EXTERNAL_ISSUE_CREATED, EXTERNAL_ISSUE_STATUS_SYNCED}` + `details.external_id` + `details.provider`.
+- Testes: porta absorve Jira-isms (Trello força a abstração correta); status mapping configurável por projeto funciona; webhook duplicado é idempotente; auth inválido retorna erro claro; compartimentalização — issue do projeto A nunca aparece em Jira do projeto B.
+
+**Fase 20.2 — Security Adapters (Sonar + Snyk + gitleaks) (~1.5-2d)**
+- Porta canônica `SecurityScannerPort` com operações: `fetch_findings(project_config) → list[SecurityFinding]`, `normalize_severity(raw) → {HIGH, MEDIUM, LOW, INFO}`.
+- Modelo `SecurityFinding` + migration 036: `(id, project_id, source_scanner ∈ {sonar, snyk, gitleaks}, external_id, file_path, line_start, line_end, rule_id, cwe_id, severity, title, description, status ∈ {open, fixed, accepted_risk}, accepted_risk_justification, first_seen_at, last_seen_at)`.
+- `SonarAdapter`: consome SonarCloud Web API (`/api/issues/search`) ou SonarQube on-prem. Credencial via `ProjectSecret`. Normaliza severidade Sonar (BLOCKER/CRITICAL/MAJOR/MINOR/INFO) para canonical.
+- `SnykAdapter`: consome Snyk REST API (`/orgs/:id/projects/:pid/issues`). Normaliza severidade Snyk (critical/high/medium/low).
+- `GitleaksAdapter`: duas modalidades — (a) roda `gitleaks detect --report-format json` no repo do projeto durante CodeGen; (b) consome relatório já gerado pelo CI do cliente.
+- UI: `SecurityFindingsPanel` no `/projects/:id/docs` (aba Security) ou integrado no `/projects/:id/gatekeeper`. Agrupa por severidade; botão "Marcar como risco aceito" com modal de justificativa obrigatória.
+- Recálculo de P7 do OCG: serviço `p7_updater` lê `security_findings` com `status='open'`, aplica fórmula canônica (`score = 100 - 20*count_HIGH - 5*count_MEDIUM - 1*count_LOW, clamp 0..100`), atualiza pilar P7 via pipeline normal de OCG update (preserva delta-log).
+- Quando findings HIGH existem e P7 < 70, regra canônica §7 pilares-1 entra em ação (OCG status → BLOCKED).
+- Testes: Sonar mock retorna findings, adapter normaliza, P7 recalcula; fórmula clamp respeitada; accepted_risk não conta pra score; gitleaks no repo dummy detecta secret fake; compartimentalização — findings do projeto A nunca aparecem no dashboard do B.
+
+**Fase 20.3 — Slack Notifier uni-direcional (~1-1.5d)**
+- Porta canônica `NotifierPort` com operação única: `send(event_type, payload, project_config) → delivery_id`.
+- `SlackAdapter` via Incoming Webhook URL (simples; OAuth fica pra V2).
+- Eventos canônicos disparadores: `MODULE_APPROVED`, `OCG_CONSOLIDATED`, `CODEGEN_COMPLETED`, `ERS_REGENERATED`, `SECURITY_FINDING_HIGH` (novo, disparado pela 20.2), `BACKUP_FAILED`.
+- Config por projeto: canal destino + set de events opt-in (default = todos).
+- Formatação: Block Kit com header + campos estruturados + botão link profundo pra tela do GCA.
+- **Modo "link-only"** por config: quando ativo, mensagem só diz "evento X, ver detalhes em <link>" sem payload sensível. Para cliente regulado.
+- Fallback: se Slack retorna erro ou timeout, evento vai pra `user_notifications` (tabela já existente) com flag `delivery_failed`, retry via Celery em 1min / 5min / 15min com backoff.
+- Testes: cada evento dispara adapter; modo link-only não vaza payload; retry funciona; compartimentalização — evento do projeto A nunca cai em canal configurado no B.
+
+**Fase 20.4 — Dogfood + release notes + atualização da Ajuda (~0.5-1d)**
+- Smoke live em projeto dogfood do próprio GCA: criar módulo, aprovar, ver issue aparecer no Jira (sandbox); subir finding manual em Sonar dummy, ver P7 atualizar; regenerar ERS, ver mensagem chegar no Slack.
+- Atualizar `backend/app/help_content/` com novo capítulo **"Integrações Externas"** cobrindo: como conectar Jira, como conectar Trello, como conectar Sonar, como conectar Snyk, como configurar Slack notifier, como usar modo link-only. Screenshots reais do dogfood (conforme `docs/screenshots/` pattern).
+- Atualizar slide 15 do `GCA_LinkedIn_Landscape.pptx` marcando Jira/Trello/Sonar/Snyk/Slack como ✅ (saem de "AMANHÃ" pra "HOJE").
+- Suite de testes total deve permanecer ≥1617 passing; tsc frontend = 0; zero DTs abertas no fim do MVP.
+
+#### Regras duras
+
+- Cada fase exige revalidação §9 antes de passar para a próxima.
+- **Stop-rule dura >2d** por fase.
+- §10 aplicável: **zero refactor** em Gatekeeper, OCG updater, backlog service, CodeGen dispatch além dos pontos de extensão estritamente necessários para as 3 integrações. Nenhuma feature antecipada de MVP futuro.
+- Conteúdo pt-BR (`feedback_portuguese_br`).
+- RBAC imutável (§4). Config de integração: Admin + GP. Aceitar risco de segurança: GP + Admin (dupla assinatura canônica).
+- **Sem LLM no caminho crítico** das 3 integrações — adapter pattern determinístico. LLM não decide quando criar issue, não decide severidade de finding, não formata mensagem Slack (template fixo).
+- Compartimentalização §2.2 preservada: config de um projeto nunca vaza para outro; webhook recebido sem `project_id` resolvível é rejeitado; canal Slack que recebe evento do projeto A nunca recebe evento do projeto B sem config explícita.
+- 20.1 é pré-requisito de 20.2 apenas para reuso do padrão de adapter; 20.2 e 20.3 são independentes entre si tecnicamente, mas a ordem de entrega é fixa para preservar revisão incremental.
+- **ChatOps bi-direcional (Slack/Teams) é explicitamente fora de escopo** — qualquer "só uma reaçãozinha" durante a Fase 20.3 é inflação que requer autorização nova.
+
+#### RBAC preservado (§4.1)
+
+- `POST /projects/:id/integrations/{issue-tracker|security|notifier}`: GP do projeto OR Admin.
+- `GET /projects/:id/external-issues`, `GET /projects/:id/security/findings`: membro aceito do projeto OR Admin.
+- `PATCH /security/findings/:id/accept-risk`: GP + Admin dupla assinatura (implementação via 2-phase commit no backend; UI já orientada para isso).
+- Endpoints de webhook (recebidos): públicos com signing secret obrigatório; resolvem `project_id` do payload + valida HMAC antes de qualquer escrita.
+
+#### Baseline de entrada (2026-04-21)
+
+- Suite backend: **1617 passing, 5 skipped** + 68 testes MVP 19 (1685 total).
+- Frontend tsc: **0 errors**.
+- `any` frontend: 20.
+- DTs abertas: 0.
+- MVP 19 fechado (`01c03ff`).
+
+---
+
 ## 9. Regras duras de implementação
 
 - Não antecipar feature de MVP futuro.
