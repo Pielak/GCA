@@ -218,6 +218,7 @@ async def test_e2e_14_smoke_todas_as_rotas(page: Page):
 
     MVP 15 Fase 15.3: removidas `/dashboard`, `/projects/{id}/legacy`,
     `/projects/{id}/merge` — rotas ausentes em `routes.tsx`.
+    MVP 18 Fase 18.5: adiciona `/admin/help` e `/projects/{id}/help`.
     """
     await login(page)
     rotas = [
@@ -227,10 +228,12 @@ async def test_e2e_14_smoke_todas_as_rotas(page: Page):
         f"/projects/{PROJECT_ID}/docs",
         f"/projects/{PROJECT_ID}/roadmap",
         f"/projects/{PROJECT_ID}/codegen",
+        f"/projects/{PROJECT_ID}/help",
         "/admin",
         "/admin/users",
         "/admin/projects",
         "/admin/audit",
+        "/admin/help",
     ]
     erros = []
     for rota in rotas:
@@ -239,3 +242,42 @@ async def test_e2e_14_smoke_todas_as_rotas(page: Page):
             erros.append(f"{rota} → HTTP {resp.status}")
 
     assert erros == [], f"Rotas com erro 5xx: {erros}"
+
+
+# MVP 18 Fase 18.5 — tests e2e da aba Ajuda (Admin + GP)
+
+@pytest.mark.asyncio
+async def test_e2e_15_help_admin_abre_com_toc(page: Page):
+    """/admin/help deve carregar + mostrar o TOC com 10 capítulos."""
+    await login(page)
+    await page.goto(f"{BASE_URL}/admin/help")
+    # Header "Ajuda" visível
+    await page.wait_for_selector('text=Ajuda', timeout=8_000)
+    # Primeiro capítulo visível no TOC
+    await page.wait_for_selector('text=Visão geral', timeout=5_000)
+    # Campo de busca presente
+    search = page.locator('input[placeholder*="Buscar"]').first
+    assert await search.is_visible()
+
+
+@pytest.mark.asyncio
+async def test_e2e_16_help_gp_abre_dentro_do_projeto(page: Page):
+    """/projects/{id}/help deve carregar com mesma estrutura do admin."""
+    await login(page)
+    await page.goto(f"{BASE_URL}/projects/{PROJECT_ID}/help")
+    await page.wait_for_selector('text=Ajuda', timeout=8_000)
+    await page.wait_for_selector('text=Visão geral', timeout=5_000)
+
+
+@pytest.mark.asyncio
+async def test_e2e_17_help_busca_fts5_destaca_termo(page: Page):
+    """Digitar 'OCG' no campo de busca deve popular resultados com snippet."""
+    await login(page)
+    await page.goto(f"{BASE_URL}/admin/help")
+    await page.wait_for_selector('input[placeholder*="Buscar"]', timeout=8_000)
+    search = page.locator('input[placeholder*="Buscar"]').first
+    await search.fill("OCG")
+    # Aguarda debounce + resposta FTS5.
+    await page.wait_for_selector('text=Resultados', timeout=5_000)
+    # Pelo menos um snippet com <mark>.
+    await page.wait_for_selector('mark', timeout=5_000)
