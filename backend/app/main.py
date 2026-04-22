@@ -26,6 +26,7 @@ from app.routers.help_router import router as help_router
 from app.routers.ers_router import router as ers_router
 from app.routers.glossary_router import router as glossary_router
 from app.routers.traceability_router import router as traceability_router
+from app.routers.integration_router import router as integration_router
 from app.routers.incident_ticket_router import (
     router as incident_project_router,
     ticket_router as incident_ticket_router,
@@ -87,6 +88,16 @@ async def lifespan(app: FastAPI):
                                 tags=[r.tag for r in applied])
         except Exception as e:
             logger.error("release.startup_sync_failed", error=str(e))
+
+    # MVP 20 Fase 20.1d: registra adapters built-in de integrações
+    # (Jira, Trello) no registry canônico da porta. Idempotente, sempre
+    # roda (inclusive em pytest) pra que os testes de integração
+    # tenham os adapters disponíveis.
+    try:
+        from app.services.integration_config_service import register_builtin_adapters
+        register_builtin_adapters()
+    except Exception as e:
+        logger.error("integrations.registration_failed", error=str(e))
 
     # DT-3 dogfood: watchdog limpa docs presos em 'processing' por
     # reinício de backend (asyncio.create_task morre com o processo).
@@ -216,6 +227,7 @@ app.include_router(help_router, prefix=f"{settings.API_PREFIX}", tags=["help"])
 app.include_router(ers_router, prefix=f"{settings.API_PREFIX}", tags=["ers"])
 app.include_router(glossary_router, prefix=f"{settings.API_PREFIX}", tags=["glossary"])
 app.include_router(traceability_router, prefix=f"{settings.API_PREFIX}", tags=["traceability"])
+app.include_router(integration_router, prefix=f"{settings.API_PREFIX}", tags=["integrations"])
 app.include_router(incident_project_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_ticket_router, prefix=f"{settings.API_PREFIX}", tags=["incident-tickets"])
 app.include_router(incident_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-incidents"])

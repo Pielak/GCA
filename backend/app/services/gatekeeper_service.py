@@ -234,7 +234,57 @@ class GatekeeperService:
         # ou `POST /code-generation/regenerate-file` manualmente após
         # a aprovação do módulo. Mantido intencional — approve +
         # CodeGen são decisões separadas na UI do GP.
+
+        # MVP 20 Fase 20.1d — se integração de Issue Tracker configurada
+        # no projeto, cria issue no tracker externo automaticamente.
+        # Best-effort: falha aqui NUNCA bloqueia a aprovação.
+        await self._maybe_create_external_issue(project_id, module_id, approved_by)
+
         return {"success": True, "message": "Módulo aprovado."}
+
+    async def _maybe_create_external_issue(
+        self, project_id: UUID, module_id: UUID, approved_by: UUID,
+    ) -> None:
+        """Best-effort hook — aprovação de módulo cria issue no tracker externo.
+
+        Silencia qualquer exceção pra não bloquear o fluxo canônico de
+        aprovação. Divergência entre GCA e tracker é sincronizada depois
+        via endpoint manual (`POST /integrations/sync`) ou próxima edição.
+        """
+        try:
+            from app.services.integration_config_service import build_provider_config
+            from app.services.issue_tracker_service import create_issue_from_module
+
+            data = {}
+            # Import tardio do settings loader evita ciclo.
+            from app.services.integration_config_service import load_settings_json
+            data = await load_settings_json(self.db, project_id)
+            if not data or not data.get("enabled") or not data.get("active_provider"):
+                return
+
+            provider = data["active_provider"]
+            config = await build_provider_config(self.db, project_id, provider=provider)
+            if config is None:
+                return
+
+            await create_issue_from_module(
+                self.db,
+                project_id=project_id,
+                module_candidate_id=module_id,
+                provider=provider,
+                config=config,
+                actor_id=approved_by,
+            )
+            await self.db.commit()
+            logger.info("integrations.issue_created_on_approve",
+                         project_id=str(project_id),
+                         module_id=str(module_id),
+                         provider=provider)
+        except Exception as exc:
+            logger.warning("integrations.issue_creation_failed",
+                            project_id=str(project_id),
+                            module_id=str(module_id),
+                            error=str(exc))
 
     async def reject_module(self, project_id: UUID, module_id: UUID, rejected_by: UUID, reason: str) -> dict:
         if not reason or not reason.strip():

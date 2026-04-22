@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle, Plus, Trash2, Star } from 'lucide-react'
+import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle, Plus, Trash2, Star, GitMerge } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -9,9 +9,10 @@ import { useSetupStatus } from '@/hooks/useSetupStatus'
 import { RepositoryPage } from '@/pages/projects/RepositoryPage'
 import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
 import { getErrorMessage } from '@/lib/errors'
+import { IssueTrackerPanel } from '@/components/settings/IssueTrackerPanel'
 
-type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario'
-const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario']
+type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations'
+const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario', 'integrations']
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic (Claude)',
@@ -427,6 +428,11 @@ export function ProjectSettingsPage() {
               ? <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
               : <AlertCircle className="w-3.5 h-3.5 text-amber-400" aria-label="Submetido com pendências" />}
         </button>
+        <button onClick={() => setActiveTab('integrations')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'integrations' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <GitMerge className="w-3.5 h-3.5" /> Integrações
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">opcional</span>
+        </button>
       </div>
 
       {/* Tab: Provedor de IA — lista multi-provider + form "adicionar" */}
@@ -754,6 +760,11 @@ export function ProjectSettingsPage() {
         <div className="-mx-6 -my-0">
           <QuestionnairePage />
         </div>
+      )}
+
+      {/* MVP 20 Fase 20.1d — Tab: Integrações (Issue Tracker). */}
+      {activeTab === 'integrations' && projectId && (
+        <IssueTrackerPanel projectId={projectId} />
       )}
     </div>
   )

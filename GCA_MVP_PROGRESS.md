@@ -1,8 +1,8 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.71  
-Data-base: 2026-04-21  
-Status: **controle de avanço por fase** — MVPs 1-19 fechados. **MVP 20 ABERTO 2026-04-21 pelo protocolo §7.0** após discussão estratégica com stakeholder-soberano sobre ROI real vs. reimplementação de ferramentas commodity. Definido — não iniciado. Tema único: **"GCA como hub que consome ferramentas externas via adapter pattern"**. 3 integrações entram juntas por compartilharem tese arquitetural e plumbing (porta canônica + ProjectSecret vault + config UI): Issue Tracker Bridge (Jira+Trello), Security Adapters (Sonar+Snyk+gitleaks), Slack Notifier uni-direcional. 4 fases sequenciais (~7-9d com pair programming). ChatOps bi-direcional, Teams, Figma MCP, onboarding polish, SSO, Linear/Asana/GitHub Issues parked para MVPs futuros.
+Versão: 3.72  
+Data-base: 2026-04-22  
+Status: **controle de avanço por fase** — MVPs 1-19 fechados. **MVP 20 em execução 2026-04-22**. **Fase 20.1 — Issue Tracker Bridge — FECHADA** com 4 sub-fases sequenciais entregues e regressão 178/178 verde (68 MVP 19 + 110 MVP 20): 20.1a foundation (porta + modelo + migration 035 + service skeleton, 19 testes), 20.1b JiraAdapter + orquestração (43 testes incluindo service), 20.1c TrelloAdapter (34 testes), 20.1d endpoints HTTP + integration_config_service + hook em approve_module + registration de adapters no startup + IssueTrackerPanel.tsx integrado no `/settings` (14 testes e2e). Smoke live: 6 endpoints registrados no OpenAPI (/projects/:id/integrations/issue-tracker + credentials/:provider/:key + /projects/:id/external-issues + /integrations/webhooks/issue-tracker/:provider/:project_id), autenticação 401 canônica sem token. Próximas fases sequenciais: **20.2 Security Adapters** (~1.5-2d) e **20.3 Slack Notifier** (~1-1.5d). 20.4 dogfood + release notes fecha MVP 20.
 
 ---
 
