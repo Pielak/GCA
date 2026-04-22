@@ -1,465 +1,61 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 3.76  
+Versão: 4.0  
 Data-base: 2026-04-22  
-Status: **controle de avanço por fase** — MVPs 1-22 fechados. **MVP 22 FECHADO 2026-04-22** com fase única entregue — `TeamsAdapter` implementando `NotifierPort` canônico (MVP 20.3) via Incoming Webhook + Adaptive Card v1.4; registry builtin atualizado; 12 testes unit verdes. Regressão ampla: 52/52 verde (slack + teams + help). **Recomendação estratégica aplicada pós-MVP 22**: Figma MCP removido do roadmap canônico como MVP separado; substituído por **MVP 23 potencial — Design via Ingestão** (resolve 70-80% do valor do Figma via ingestão de mocks+CSS+instruções já suportada, com prompt enhancement no CodeGen — custo ~3-5d vs ~1.5-2sem do Figma MCP). Histórico anterior: **MVP 21 FECHADO 2026-04-22** com 3/3 fases entregues em 3 commits atômicos (zero código novo, apenas markdown + toc.json + 7 screenshots para `frontend/public/images/help/`). Regressão 38/38 verde em suite de Ajuda (FTS5 reindexa por mtime). Smoke live confirma: `GET /help/toc` retorna 11 capítulos; busca FTS5 encontra termos canônicos novos — `BUSINESS_RULES` (2 hits), `P7 determinístico` (8), `accepted_risk` (4), `ERS` (7), `Glossário vivo` (4), `issue tracker` (6), `Jira` (5), `Trello` (5), `Slack` (6), `Sonar` (6). Histórico anterior: **MVP 21 ABERTO 2026-04-22** — "Ajuda refresh" para sincronizar conteúdo de help com MVPs 14-20. Stakeholder sinalizou que conteúdo desatualizado é produto desatualizado; capítulos existentes não refletem ERS Vivo, glossário, matriz de rastreabilidade, integrações externas, P7 determinístico, novos eventos de audit. 3 fases: 21.1 saneamento de caps 01/04/05/08/09/10 (~3-4h); 21.2 cap 07 GP expandido com ERS/Glossário/Rastreabilidade/Integrações/Métricas/Backups (~3-4h); 21.3 screenshots + release + smoke (~2-3h). Total ~1-1.5d. Zero código novo. MVP anterior (MVP 20 FECHADO 2026-04-22) com 4/4 fases entregues em 7 commits atômicos. 245/245 testes verdes (68 MVP 19 + 157 MVP 20 + 20 MVP 18 revalidados). 3 integrações canônicas ao vivo via Adapter-Port pattern: **Issue Tracker** (JiraAdapter + TrelloAdapter via IssueTrackerPort), **Security Scanners** (SonarAdapter + SnykAdapter + GitleaksAdapter via SecurityScannerPort, com recálculo determinístico de P7 via fórmula ponderada), **Slack Notifier** uni-direcional (SlackAdapter via NotifierPort, 6 eventos canônicos, modo link-only pra regulado). Hooks instrumentados em `approve_module` (MODULE_APPROVED + cria issue no tracker), `generate_and_commit_ers` (ERS_REGENERATED), `_upsert_finding` (SECURITY_FINDING_HIGH para novos critical/high). Capítulo "11 — Integrações Externas" publicado na Ajuda integrada. Slide 15 do carrossel LinkedIn atualizado: Jira/Trello/Sonar/Snyk/Slack saem de "amanhã" para "hoje disponível"; MS Teams/Linear/Asana/Monday/Figma ficam como roadmap futuro. Sem MVP autorizado — próximo marco aguarda abertura via §7.0.
+Status: **controle de avanço por fase** — MVPs 1-22 fechados. Estado atual detalhado em §1. Detalhes históricos dos MVPs 1-15 em [`docs/mvp_archive/`](docs/mvp_archive/). Emendas antigas em [`docs/emendas_archive/`](docs/emendas_archive/).
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 22 — Teams Notifier uni-direcional** — **FECHADO 2026-04-22** com fase única entregue (extensão mínima do `NotifierPort` canônico).
+Nenhum MVP autorizado. Próximo marco aguarda decisão do stakeholder entre:
 
-**Entregas:**
-- `backend/app/services/adapters/teams_adapter.py` (novo, ~230 linhas): Adaptive Card v1.4 envelope em `attachments`; TextBlock header + context + FactSet com fields + Action.OpenUrl. Severity → Adaptive Card color (info/success/warning/danger → default/good/warning/attention). Modo `link_only_mode` degrada pra card minimalista sem FactSet.
-- `register_builtin_notifiers` inclui `TeamsAdapter` no startup.
-- `_REQUIRED_CREDENTIALS` do `notifier_service` aceita `teams: ('webhook_url',)`.
-- 12 testes unit novos com `httpx.MockTransport` (registry + casos negativos + sucesso 200/202 + link-only + HTTP errors + severity mapping).
-- Infraestrutura existente de config (`integration_config_service`) já absorvia o novo provider sem mudanças. Zero endpoint novo, zero migração.
-
-**Implementação:** 1 sessão; 3-5d nominal reduzido a ~3h real por reuso integral do pattern do MVP 20.3.
-
----
+- **MVP 23 potencial — Design via Ingestão** (~3-5d) — resolve UX/UI via ingestão existente (PDF/PNG/CSS) + prompt enhancement no CodeGen, em vez de Figma MCP. Detalhes no `gca_mvp_20_21_22_23_roadmap.md` (memória).
+- **MVP 24 potencial — AI governance moat** (~2-3 sem) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado. Abrir após MVP 20 em 1 cliente externo por ≥ 1 ciclo.
+- **MVP 25 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps bi-direcional.
+- **MVP 26 potencial — ChatOps bi-direcional** (~1.5-2 sem) — pré-requisitos: MVP 25 SSO + cliente pagante validando uso uni-direcional.
 
 ### MVP anterior fechado
-
-**MVP 21 — Ajuda refresh (sincroniza conteúdo com MVPs 14-20)** — **FECHADO 2026-04-22** com 3/3 fases entregues. Stakeholder indicou gap: capítulos de Ajuda não refletem features entregues nos MVPs 19+20 (ERS Vivo, glossário, matriz, 3 integrações externas, P7 determinístico, novos eventos de audit). Escopo: **3 fases em conteúdo markdown + toc.json** (zero código novo). 21.1 saneamento de 6 capítulos técnicos existentes (~3-4h); 21.2 cap 07 GP expandido em 4 sub-seções novas (~3-4h); 21.3 screenshots reaproveitados de `docs/screenshots/` + release + smoke FTS5 (~2-3h). Total planejado ~1-1.5d. Capítulo 11 (Integrações) NÃO sofre refresh — foi entregue novo na 20.4 e está atualizado.
-
-**Regras duras:** stop-rule >1d por fase; zero mudança em `help_service.py` / renderer / FTS5 / `help_router.py`; conteúdo determinístico derivado do contrato + código existente (sem LLM); RBAC imutável.
-
-**Fora explícito:** vídeos, tradução EN, casos por vertical (MVP 22), editor inline, novos capítulos temáticos.
-
----
-
-### MVP anterior fechado
-
-**MVP 20 — Integrações externas do ecossistema corporativo (Issue Tracker + Security + Slack)** — **FECHADO 2026-04-22** com 4/4 fases entregues em 7 commits atômicos. 245/245 testes verdes. Aberto pelo protocolo §7.0 após discussão estratégica com stakeholder-soberano sobre onde o GCA gera mais ROI pro cliente. Conclusão binária: **reimplementar SAST interno é perder** (commodity madura com Sonar/Snyk/Fortify/Checkmarx); **reimplementar tracker interno é perder** (cliente já tem Jira/Trello e exige integração); **a diferenciação do GCA está em governança do OCG + orquestração do pipeline, não em reinventar ferramentas**. MVP 20 agrupa 3 integrações que compartilham tese arquitetural ("GCA como hub") e plumbing (porta canônica + `ProjectSecret` vault + config UI por projeto), entregáveis em 4 fases sequenciais.
-
-**4 fases sequenciais:**
-- ⏳ **Fase 20.1** Issue Tracker Bridge — porta `IssueTrackerPort` + adapters Jira + Trello + modelo `ExternalIssue` (migration 035) + UI de config + integração com backlog (módulo aprovado → issue no tracker; status sync via webhook) (~4-5d).
-- ⏳ **Fase 20.2** Security Adapters — porta `SecurityScannerPort` + adapters Sonar + Snyk + gitleaks + modelo `SecurityFinding` (migration 036) + `SecurityFindingsPanel` UI + recálculo determinístico de P7 do OCG com findings reais (~1.5-2d).
-- ⏳ **Fase 20.3** Slack Notifier uni-direcional — porta `NotifierPort` + adapter Slack via Incoming Webhook + eventos canônicos (MODULE_APPROVED, OCG_CONSOLIDATED, CODEGEN_COMPLETED, ERS_REGENERATED, SECURITY_FINDING_HIGH, BACKUP_FAILED) + modo "link-only" pra cliente regulado + retry via Celery (~1-1.5d).
-- ⏳ **Fase 20.4** Dogfood + release notes + capítulo "Integrações Externas" na Ajuda + atualização do slide 15 do carrossel LinkedIn (~0.5-1d).
-
-**8 decisões binárias travadas no contrato §7 MVP 20:**
-1. Config é **por projeto**, não instância-wide.
-2. Status mapping é **configurável por projeto** via UI.
-3. Security adapters **consomem, não reimplementam** — GCA nunca gera finding próprio em V1.
-4. Slack é **uni-direcional em V1** — bi-direcional é MVP 23 separado.
-5. Webhooks recebidos pelo GCA exigem **signing secret + idempotência por `message_id`** + replay prevention.
-6. **Modo "link-only"** configurável por projeto — cliente regulado não trafega payload sensível.
-7. P7 do OCG passa a consumir `security_findings` reais quando scanner configurado; sem config, mantém heurística pré-20 (preserva comportamento).
-8. Primeira resposta de reação vale (documentada pra futuro ChatOps, não aplicável em V1).
-
-**Fora explícito (parked para MVPs futuros):**
-- ChatOps bi-direcional (aprovar via botão no Slack) → MVP 23 potencial
-- Microsoft Teams → MVP 23 potencial
-- Linear, Asana, GitHub Issues, Monday → sob demanda, ~1.5-2d cada
-- Reimplementação SAST interno → rejeitado por design
-- Custom Semgrep rules GCA → parked
-- DAST (ZAP) → parked até 3 clientes em produção
-- Figma MCP → MVP 22 potencial (tema distinto)
-- Onboarding polish + Ajuda expandida → MVP 22 potencial
-- SSO (LDAP/SAML/OIDC) → MVP próprio futuro
-
-**Regras duras:** stop-rule >2d por fase; §10 anti-refactor-vizinho estrito (Gatekeeper, OCG updater, backlog service, CodeGen dispatch não são tocados além dos pontos de extensão necessários); conteúdo pt-BR; RBAC imutável; sem LLM no caminho crítico das 3 integrações; compartimentalização §2.2 preservada. 20.1 é pré-requisito de 20.2 apenas pra reuso do padrão adapter; 20.2 e 20.3 são independentes entre si.
-
-**Baseline de entrada:** 1685 testes passing (1617 + 68 MVP 19), tsc frontend = 0, `any` = 20, DTs abertas = 0, MVP 19 fechado (`01c03ff`).
-
----
-
-### MVP anterior fechado
-**MVP 19 — ERS Vivo (Especificação de Requisitos de Software — IEEE 830 Foundation)** — **FECHADO 2026-04-21 com 4/4 fases entregues no mesmo dia**. Aberto pelo protocolo §7.0 após discovery com o stakeholder sobre os 6 elementos essenciais de manutenção do IEEE 830-1998. 5 dos 6 cabem neste MVP; protótipos ficam fora (MVP 20 potencial). **Emenda crítica no mesmo dia**: ERS passa a ser arquivo versionado no repositório Git do projeto (`docs/ERS.md`) via `git_service` existente em vez de snapshots em banco — menor custo operacional, maior portabilidade, aderência ao padrão "docs as code". Elimina tabela `live_doc_revisions` e Fase 19.5 (histórico = `git log -p docs/ERS.md`). Escopo executado: **4 fases** (~1d cada pelo dogfood do sistema, bem abaixo do planejado ~5-6d).
-
-**4 fases sequenciais (revisadas pós-emenda 2026-04-21):**
-- ⏳ **Fase 19.1** Schema expansion (~1d): `requirement_category` em `module_candidates`; nova seção `BUSINESS_RULES` no OCG. Sem tabela de snapshots (emenda removeu).
-- ⏳ **Fase 19.2** Generator IEEE 830 + commit no Git do projeto (~2d): `ers_doc_generator_service.generate_and_commit_ers()` consolida OCG + módulos + test_specs + audit CodeGen + external_repos em markdown IEEE 830 e commita como `docs/ERS.md` via `git_service`. Serviço `ers_freshness_tracker` para stale detection.
-- ✅ **Fase 19.3 FECHADA 2026-04-21**: `glossary_service.py` com 4 heurísticas regex (SIGLA solta aceitando dígitos após 1ª letra, "Expansão (SIGLA)", "SIGLA: definição", "X é/significa Y") extrai candidatos idempotentemente sobre módulos + análises + gatekeeper items + OCG profile via ON CONFLICT DO NOTHING. Migration 034 cria `project_glossary_terms` com UNIQUE(project_id, LOWER(term)). Router com GET /glossary (+ ?status filter), POST /glossary/extract, POST /glossary (manual), PATCH /glossary/:id (approve/reject/update). Seção 1.3 do ERS integrada via `list_approved_for_ers` (zero placeholder). `GlossaryPanel.tsx` 3 colunas + botões inline. 25 testes unit; 52/52 regressão 19.1+19.2+19.3 verde.
-- ✅ **Fase 19.4 FECHADA 2026-04-21**: `traceability_service.build_traceability_matrix` correlaciona requisitos × test_specs × generated_modules via `module_candidate_id` em LEFT JOIN semântico em Python (cada requisito aparece mesmo sem spec/código). Ordem IEEE 830: RF → RNF → BR → uncategorized, 1-based por categoria. Renderer markdown (`render_traceability_markdown`) injeta tabela + sumário agregado na Seção 4 do ERS — placeholder "Fase 19.4" removido. Router `GET /projects/:id/traceability` com RBAC (membro aceito ou Admin). `TraceabilityPanel.tsx` read-only (8 pills + tabela 5-col) integrado no LiveDocsPage. 16 testes unit; 68/68 regressão MVP 19 verde. Zero LLM no caminho crítico; zero view materializada (decisão binária #4 respeitada).
-
-**6 decisões binárias travadas no contrato §7 MVP 19:**
-1. Classificação de requisitos é **manual** pelo GP (agentes não classificam em V1).
-2. `BUSINESS_RULES` é **nova seção** no OCG (não campo livre em PROJECT_PROFILE).
-3. Glossário tem **aprovação obrigatória** do GP antes de termo entrar no ERS.
-4. Matriz de rastreabilidade é **query sob demanda** (sem view materializada em V1).
-5. **Persistência do ERS é `docs/ERS.md` no repo do projeto** (via `git_service`); histórico = `git log -p docs/ERS.md`. Elimina `live_doc_revisions`.
-6. **Regeneração é manual**: sistema detecta stale automaticamente via eventos do pipeline, mas não regenera sozinho. GP clica "Regenerar ERS" quando faz sentido.
-
-**Pré-requisito operacional**: projeto precisa ter repositório Git conectado em `/projects/:id/settings`. Sem repo, botão "Regenerar ERS" fica desabilitado com mensagem explicativa.
-
-**Export PDF**: não entra no escopo, mas a escolha do formato markdown habilita conversão trivial via Pandoc, WeasyPrint, mdpdf ou print-to-PDF do GitHub — fica como operação opcional do cliente.
-
-**Regras duras:** stop-rule >2d por fase; §10 anti-refactor-vizinho; conteúdo pt-BR; RBAC imutável; sem LLM no caminho crítico do generator (consolidação determinística); compartimentalização §2.2 preservada. 19.1 é pré-requisito de 19.2+; 19.3 e 19.4 completam as seções 1.3 e 4 do ERS.
-
-**Baseline de entrada:** 1617 passing, tsc=0, any=20, DTs abertas=0, MVP 18 fechado (`5790617`).
-
----
-
-### MVP anterior fechado
-**MVP 18 — Sistema de Ajuda integrado (infraestrutura + conteúdo)** — **FECHADO 2026-04-21 com 5/5 fases entregues em 2 ondas canônicas**. Onda 1 (18.1+18.2) autorizada na abertura; review do skeleton OK; Onda 2 (18.3+18.4+18.5) autorizada em bloco após review. Nenhuma inflação de escopo; screenshots + editor inline + tradução EN permanecem parked (MVP 19+ potencial).
-
-**5 fases FECHADAS 2026-04-21 em 2 ondas canônicas:**
-
-Onda 1 (infraestrutura):
-- ✅ **Fase 18.1** Rotas + HelpPage skeleton + sidebar Admin + ProjectDetailLayout. `HelpPage.tsx` layout 3-col. 2 rotas novas + 2 entries sidebar. Tsc=0. Commit `e238c25`.
-- ✅ **Fase 18.2** `help_service` + `help_router` com 3 endpoints (toc, section/{id}, search stub). Storage `help_content/*.md + toc.json`. Proteção path-traversal. 21 testes. Smoke live OK. Commit `e238c25`.
-
-Onda 2 (conteúdo + busca + renderer):
-- ✅ **Fase 18.3** 10 capítulos pt-BR canônicos (~1475 linhas MD): visão geral + glossário (25+ acrônimos), instalação, RBAC (5 papéis), pipeline canônico, OCG (12 seções + rollback + consolidate), Admin (11 sub-seções), GP (20 sub-seções), codegen (9 linguagens + DDL), observabilidade, troubleshooting. Referências cruzadas via `?section=ID`. Commit `3c3df05`.
-- ✅ **Fase 18.4** Busca FTS5 real: SQLite `:memory:` + tokenize `unicode61 remove_diacritics 2` + rebuild automático por mtime + sanitização de query + snippets destacando termo com `<mark>...</mark>` ordenados por rank. 17 testes novos. Smoke live: busca "OCG" retornou 05-ocg, 04-pipeline, 07-gp. Commit `f757d22`.
-- ✅ **Fase 18.5** Renderer markdown: `react-markdown@9` + `remark-gfm@4` + `rehype-highlight@7` + `highlight.js@11` + CSS escoped `.help-article` (tabelas, listas, code blocks, blockquotes, links violet). Integração busca FTS5 com debounce 300ms + lista resultados clicáveis com snippet. E2E: 3 testes novos (15/16/17). Frontend rebuild + restart OK.
-
-**Baseline de saída:** 1617 passing (+111 vs baseline pré-18 de 1506); tsc frontend = 0; `any` = 20; zero DTs abertas; zero regressão.
-
-**Fora explícito** (parked para MVP futuro): screenshots, editor inline, versionamento help, tradução EN, export PDF, segmentação por papel, LLM no caminho crítico.
-
-**Regras duras:** stop-rule >2d por fase; §10 anti-refactor-vizinho; conteúdo pt-BR obrigatório; RBAC imutável; sem LLM no caminho crítico; compartimentalização §2.2 preservada.
-
-**Fora explícito:** screenshots (MVP 19 potencial), editor inline, versionamento de help, tradução EN, export PDF, segmentação por papel, LLM no help.
-
-**Baseline de entrada:** 1506 passing, tsc=0, any=20, DTs abertas=0, MVP 17 fechado (`a95a9f2`).
-
----
-
-### MVP anterior fechado
-**MVP 17 — Saneamento operacional Celery (DT-077 + DT-078)** — **FECHADO 2026-04-21 com 2/2 fases entregues**. Aberto + executado + fechado no mesmo dia em ciclo canônico §7.0. **Zero DTs abertas pós-MVP 17.**
-
-**Fases:**
-- ✅ **Fase 17.1** Fix healthcheck hostname (DT-078): `docker-compose.yml` mudou `CMD` → `CMD-SHELL` + `-d celery@$$HOSTNAME` (double-dollar escapa interpolação do compose; shell interpola `$HOSTNAME` para o ID real do container). Validação binária: após `docker compose up -d --force-recreate celery-worker`, container reportou `Up (healthy)` em ~45s.
-- ✅ **Fase 17.2** Regra dura em `CLAUDE.md §12` (DT-077): sub-seção nova "Regra dura de sincronização do docker-compose.yml (DT-077)" exige `docker compose up -d` sem argumentos após qualquer mudança em `docker-compose.yml`. Armadilha histórica de 14.10 (Flower declarado mas não subiu) documentada como caso concreto. Sem bug técnico para corrigir no código — fix é disciplina operacional.
-
-**Baseline de entrada:** 1506 passing; tsc = 0; DTs abertas = 2.
-**Baseline de saída:** 1506 passing (inalterado — fase 17 não toca código-fonte de runtime); tsc = 0; **DTs abertas = 0**.
-
----
-
-### MVP anterior fechado
-**MVP 16 — C++ fundacional + saneamento final do baseline frontend + dogfood validation** — **FECHADO 2026-04-21 com 5/5 fases entregues**. Aberto pelo protocolo §7.0 após diagnóstico OCG + reaproveitamento de `gca_cpp_codegen_gap.md`. Rejeita formalmente a proposta `TASK_MELHORIAS_OCG_REALISTA_v1.1.md` (1650h em 30 semanas) por incompatibilidade com §7.0 e §10.
-
-**Fases:**
-- ✅ **Fase 16.1** Scaffolder C++ CMake — `cpp_cmake.py` com 11 arquivos (CMakeLists, src/main.cpp, include/<target>/, tests GoogleTest, configs .clang-format/.clang-tidy, Dockerfile multi-stage, README). Slug→target translation (hífen→underscore). Smoke compile validado gcc:13. CI step `cpp-scaffold-compile` em backend-tests.yml. 25 testes unitários. Commit `ec46113`.
-- ✅ **Fase 16.2** Enum `LinguagemBackend.CPP` + `ScaffoldSpec.cpp_standard` + dispatch branch `{c++, cpp, cplusplus}` → `scaffold_cpp_cmake` + whitelist canônica `{14, 17, 20, 23}` com fallback "17". Zero regressão em 60 testes dispatch+scaffolders existentes. 17 testes novos. Commit `66b20bc`.
-- ✅ **Fase 16.3** `test_spec_generator_service` C++-aware — `_detect_test_framework` + `CPP_GOOGLETEST_GUIDANCE` bloco anexado ao prompt quando C++ + `test_framework` no provenance. Zero regressão em 39 testes do test_spec pré-existentes. 16 testes novos. Commit `f32f3fc`.
-- ✅ **Fase 16.4** `NodeJS.Timeout` → `ReturnType<typeof setInterval>` em `DesignShowcasePage.tsx:37`. **Tsc frontend = 0 errors** pela primeira vez desde MVP 14. Commit `0242e8e`.
-- ✅ **Fase 16.5** Dogfood validation — 5 checks binários: **Check 1 ✅** Flower `:5555` HTTP 200 (após `docker compose up -d celery-flower`); **Check 2 ✅** Celery ping roundtrip 58ms; **Check 3 ⚠️** OCG rollback endpoint registrado no OpenAPI + unit tests (14.7) passam — E2E em prod não executado (regra anti-mutação); **Check 4 ⚠️** idem para consolidate (14.8); **Check 5 ⚠️** CI e2e lane não disparada (requer push ao remoto — ação visível a terceiros). **2 DTs novas** registradas em §3.3: DT-077 (Flower auto-start) + DT-078 (worker healthcheck hostname). Falhas são **minor**; fechamento do MVP não bloqueado per regra dura.
-
-**Baseline de entrada:** 1506 passing, 5 skipped; tsc = 1; any = 20.
-**Baseline de saída:** 1506 passing, 5 skipped; **tsc = 0**; any = 20; +58 testes unitários novos; C++ é 9ª linguagem scaffoldada canonicamente.
-
----
-
-### MVP anterior fechado
-**MVP 15 — Limpeza do backlog parked pós-MVP 14** — **FECHADO 2026-04-21** com 4/4 fases entregues.
-
-**Fases:**
-- ✅ **Fase 15.1** shadcn pass 2 — 33 arquivos órfãos removidos de `src/components/ui/*`; tsc 34→2. Commit `24f34df`.
-- ✅ **Fase 15.2** AdminMetrics HintCard — prop `hint?: string` adicionada ao `Section` local; tsc 2→1. Commit `ed0d075`.
-- ✅ **Fase 15.3** e2e tests 02-14 rewrite — 12 tests (antes 14) alinhados a rotas/seletores canônicos pós-MVPs 8-14; removidos 08 legacy + 09 merge. Commit `f54e2b7`.
-- ✅ **Fase 15.4** any remainder — meta ≤ 20 atingida (76→20, −74%) via tipagem narrow em hooks (useAuthApi, useProjects, useAlerts, useTickets, useUsers, useSuspiciousAccess, useIngestion, useArguider, useProjectTeamApi), pages (QuestionnairePage, AdminDashboardPage, AdminProjectsPage, ProjectDashPage, ExternalReposPage, ProjectSettingsPage, ArguiderPage, ReadinessPage, QAReadinessPage, ProjectMetricsPage, PipelineAuditPage, IncidentDetailPage, AdminReleasesPage, AdminIncidentsPage, AdminProjectViewPage, GatekeeperPage) e componentes (TestSpecModal, ExtractionReportCard, Sidebar). Tsc no baseline permanece 1 (DesignShowcase NodeJS namespace — fora de escopo).
-
-**Baseline de entrada:** 1506 passing, 5 skipped; tsc = 34.
-**Baseline de saída:** 1506 passing (inalterado — nenhum teste novo), 5 skipped; tsc = 1 (residual isolado).
-
----
-
-### MVP 14 (referência histórica)
-**MVP 14 — Saneamento de follow-up pós-MVP 13 + OCG maturity + type safety + observabilidade Celery** — **FECHADO 2026-04-20 com 10/11 fases entregues + 1 N/A + 1 parcial com stop-rule**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0; fechado no mesmo dia após suite verde **1506/1506 passing (+13 vs baseline 1493)**.
-
-**Fases:**
-- ✅ **Fase 14.1** Celery em `questionnaire_service` — FECHADA 2026-04-20.
-- ✅ **Fase 14.2** Auditoria `gatekeeper_service` TODO — FECHADA 2026-04-20.
-- ✅ **Fase 14.3** Rebuild `--no-cache` definitivo — FECHADA 2026-04-20.
-- ✅ **Fase 14.4** Canário e2e dogfood real — FECHADA 2026-04-20 (parcial: 02–14 TODO rewrite, 01 + infra validados).
-- ✅ **Fase 14.5** shadcn/ui não usados — FECHADA 2026-04-20 (13 removidos; tsc 57→36).
-- ✅ **Fase 14.6** TesterReviewPage type mismatch — FECHADA 2026-04-20 (tsc 36→34; commit `886652c`).
-- ✅ **Fase 14.7** OCG `rollback_to_version` formal — FECHADA 2026-04-20 (service + audit `OCG_ROLLED_BACK`; 3 testes; commit `fdeeddd`).
-- ✅ **Fase 14.8** OCG `consolidate_ocg` explícito — FECHADA 2026-04-20 (service + audit `OCG_CONSOLIDATED` + endpoint; 4 testes; commit `876a256`).
-- 🟡 **Fase 14.9** Remover 91 `any` — **PARCIAL com stop-rule acionada** (91→76; 15 removidos; tipos compartilhados cascatam > 2d; restante parked como "any pass 2"; commit `1bed30d`).
-- ✅ **Fase 14.10** Flower + Prometheus Celery — FECHADA 2026-04-20 (serviço `gca-celery-flower` na porta 5555 + 3 gauges canônicos; 2 testes; commit `a0abfc3`).
-- ➖ **Fase 14.11** Refactor shadcn usado — **N/A**: diagnóstico confirmou zero shadcn primitivo importado; 33 órfãos seguem no backlog "shadcn pass 2" (fora do MVP 14 per contrato §7).
-
-**Objetivo:** fechar em ordem Tema A (14.1-14.2) → B (14.3-14.4) → C (14.5-14.6) → D (14.7-14.8) → E (14.9) → F (14.10) → G (14.11). Cada fase commitável independentemente com gate §9 atendido.
-
-**Temas:**
-- **A Saneamento Celery residual**: 14.1 questionnaire_service; 14.2 gatekeeper_service TODO.
-- **B CI/operacional**: 14.3 rebuild --no-cache definitivo; 14.4 canário e2e real.
-- **C TSC baseline**: 14.5 shadcn/ui não usados; 14.6 TesterReviewPage type mismatch.
-- **D OCG maturity**: 14.7 rollback_to_version formal; 14.8 consolidate_ocg explícito.
-- **E Type safety frontend**: 14.9 remover 91 `any` restantes (meta ≤ 20).
-- **F Observabilidade Celery**: 14.10 Flower + Prometheus `/metrics`.
-- **G Refactor shadcn usado**: 14.11 normalizar imports + props + alinhar convenção.
-
-**Explicitamente fora** (contrato §7 MVP 14):
-- Identity Federation (SSO OIDC/SAML) — sem cliente real para testar.
-- Data Federation — exige emenda §3 + 3 decisões pendentes do `gca_federation_roadmap.md`.
-- Federated Learning — GCA consome LLM, não treina.
-
-**Regras duras:** nenhuma feature nova; 14.9 e 14.11 têm regra de parada se diagnóstico inicial revelar > 2 dias; watchdog DT-073 ativo até 14.1+14.2 provarem cobertura completa; RBAC imutável (§4).
-
-**Baseline de entrada:** suíte **1493 passing, 4 skipped** pós-MVP 13; frontend build íntegro; 10 commits MVP 13 em main.
-
----
-
-### MVP anterior fechado
-**MVP 13 — Robustez estrutural: fila persistente + cobertura completa de auditoria** — **FECHADO 2026-04-20 com 7/7 fases entregues**. Aberto no contrato §7 pelo protocolo §7.0 a partir de autorização explícita do stakeholder-soberano. Absorveu as 2 fases diferidas do MVP 12 (12.8 Celery e 12.10 audit coverage) em ciclo canônico dedicado a robustez (não saneamento).
-
-**Objetivo:** fechar em ordem Tema A (13.1→13.4) depois Tema B (13.5→13.7); Tema B pode rodar em paralelo ao A após 13.5 produzir inventário. Cada fase commitável independentemente com gate §9 atendido.
-
-**Tema A — Fila persistente Celery/Redis (4 fases):**
-- ✅ **Fase 13.1** Setup Celery + infra — **FECHADA 2026-04-20**. `celery[redis]` em pyproject/requirements; `celery_app.py` com broker DB 1 / result DB 2 / task `ping` / timezone via `BACKUP_TIMEZONE` / JSON-only / retry bounded; serviço `gca-celery-worker` no docker-compose (concurrency=2, healthcheck `inspect ping`). Smoke validado: `ping.delay().get() == "pong"`; `celery inspect ping` retorna 1 node online. 15 testes novos.
-- ✅ **Fase 13.2** Lifespan + worker lifecycle — **FECHADA 2026-04-20**. `check_broker_connection` e `check_workers_alive` em `celery_app.py`; smoke não-fatal do broker no startup; `/health` expandido com bloco `celery.broker.reachable` + `celery.workers.workers/nodes`; 7 testes. Worker segue em processo separado (`gca-celery-worker`).
-- ✅ **Fase 13.3** Refactor pipeline Arguider + OCG Updater + auto-CodeGen — **FECHADA 2026-04-20** em 3 sub-fases. **13.3a**: pipeline_ingest_task + router reanalyze (1 ponto). **13.3b**: 3 tasks novas + reuso em upload_document (6 pontos). **13.3c**: auto_generate_task + external_repo_fallback_task (3 pontos). **Total: 10 pontos migrados**. Escopo canônico 100% Celery (ingestion_service, ocg_updater_service, external_repos_router, ingestion_router — todos zero `create_task`). Questionnaire/Gatekeeper fora do escopo per §7.
-- ✅ **Fase 13.4** Monitoring + retry + DLQ — **FECHADA 2026-04-20**. Signal handlers (`task_failure`/`task_retry`/`task_success`) + DLQ in-memory (cap 200) + endpoints admin `/admin/celery/dlq` e `/admin/celery/workers`; retry bounded em 6 tasks; 14 testes. Decisão: **não** ligar `CELERY_TASK_ALWAYS_EAGER` em conftest (vaza pro singleton e quebra testes async); padrão canônico é `.apply()` em teste isolado — documentado nas Fases 13.3b/c.
-
-**Tema B — Cobertura completa de `audit_log_global` (3 fases):**
-- ✅ **Fase 13.5** Inventário + helpers canônicos — **FECHADA 2026-04-20**. 8 constantes novas em `AuditEvents` + 3 helpers em `AuditService` (project/questionnaire/codegen). Inventário binário em `§3.0`: 4 SIM / 7 NÃO (reject_project_request, set_project_status, submit_questionnaire, 3 CodeGen endpoints, + lacunas N/A registradas). 16 testes; nenhum ponto instrumentado (escopo 13.6/13.7).
-- ✅ **Fase 13.6** Instrumentação projeto + questionário — **FECHADA 2026-04-20**. 3 pontos: `reject_project_request` (PROJECT_REJECTED), `set_project_status` (PROJECT_STATUS_CHANGED), `submit_questionnaire` (SUBMITTED + APPROVED|REJECTED com correlation_id compartilhado). 5 testes (3 estáticos, 2 E2E).
-- ✅ **Fase 13.7** Instrumentação CodeGen + chain integrity E2E — **FECHADA 2026-04-20**. 3 endpoints CodeGen instrumentados (generate_scaffold, apply_scaffold, regenerate_file) com eventos canônicos. Teste E2E grava série de 7 eventos canônicos de 4 domínios e valida `verify_chain()` íntegra. OCG `update_from_arguider` já era SIM desde 11.4; rollback/consolidate seguem N/A per inventário §3.0. 4 testes.
-
-**Regras duras (do contrato §7 MVP 13):**
-- Fase 13.3 pode ser sub-dividida (13.3a Arguider / 13.3b OCG / 13.3c CodeGen) se o diagnóstico revelar entrelaçamento maior que o mapeado em 12.8.
-- Infraestrutura (13.1+13.2) é pré-requisito de 13.3/13.4 — ordem obrigatória no Tema A.
-- Performance durante refactor Celery não pode degradar ≥20% vs asyncio baseline (medir antes/depois).
-- Retry infinito proibido; DLQ obrigatória; max_retries bounded.
-- Nenhuma expansão de RBAC ou papel canônico (§4).
-- `audit_log_global` mantém hash chain SHA-256 atual; Merkle/blockchain fora.
-
-**Baseline de entrada:** suíte **1404 passing, 4 skipped** pós-MVP 12 contra `gca_test` isolado. Redis já healthy no docker-compose. Frontend build íntegro. Fase 11.4 já estabeleceu padrão canônico de `log_role_event` que 13.5 replicará por domínio.
-
----
-
-### MVP anterior
-**MVP 12 — Saneamento pós-MVP 11: hardening de fronteira, configurabilidade, higiene de schema e maturidade** — **FECHADO 2026-04-20 com 8/10 fases entregues + 2 diferidas (12.8 e 12.10 → MVP 13)**.
-
-**Objetivo do MVP 12 (contrato §7) — FECHADO:** resolver em ordem A→B→C→D→E→F→G —
-1. **Tema A — Segurança de fronteira:** ✅ Fase 12.1 rate limit em `POST /public/project-requests` (slowapi + env `PUBLIC_RATE_LIMIT`; 3 testes).
-2. **Tema B — Configurabilidade operacional:** ✅ Fase 12.2 timezone configurável em BackupScheduler (env `BACKUP_TIMEZONE`; fallback em valor inválido; 10 testes).
-3. **Tema C — Higiene de schema + cleanup:** ✅ Fase 12.3 consolidar `accepted_at`/`joined_at` (fix + helpers + docstring; 11 testes); 12.4 deprecar `ProjectRequest.initial_password_hash`; 12.5 remover TODOs SMTP de fluxo deprecado.
-4. **Tema D — CI maturity:** ✅ Fase 12.6 canário `seed_e2e.py` idempotente + CI roda seed + `continue-on-error` removido (3 testes).
-5. **Tema E — Type safety frontend:** ✅ Fase 12.7 redução de `any` (237→91, −61,6%) via helpers canônicos `getErrorMessage`/`getErrorStatus`/`ApiError` em `lib/errors.ts` + substituição em massa em ~40 arquivos.
-6. **Tema F — Robustez estrutural:** 12.8 fila persistente Celery/Redis ⏸️ diferida (regra de parada); ✅ Fase 12.9 consolidação de helper de prompt CodeGen (builder canônico `codegen_prompt_builder.py` + 13 testes).
-7. **Tema G — Observabilidade compliance:** 12.10 cobertura completa de `audit_log_global` (projeto, questionário, OCG, CodeGen) ⏸️ diferida para MVP 13 (regra de parada).
-
-**Regras duras:** fases 12.8 (Celery) e 12.10 (hash chain) foram diferidas em 2026-04-20 após o diagnóstico inicial revelar escopo estrutural (3-4 dias cada). Re-escopadas para **MVP 13 — Robustez estrutural** (não autorizado ainda). Watchdog DT-073 continua cobrindo o sintoma operacional de asyncio; cobertura parcial da Fase 11.4 (role events) continua operando em `audit_log_global`. Nenhuma feature nova introduzida no MVP 12; apenas saneamento.
-
-**Baseline de entrada:** suíte **1360/1360 passing, 3 skipped** contra `gca_test` isolado. MVP 11 com gate §9 atendido em todas as 7 fases.
-
----
-
-### MVP encerrado (referência)
-**MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — **FECHADO 2026-04-20** (todas as 7 fases).
-
-**Fases:**
-- **Fase 11.1 — GP convida outro GP do mesmo projeto** — **FECHADA 2026-04-20**. Backend: `InviteTeamMemberRequest.role` virou `Literal["dev","tester","qa","gp"]` em `backend/app/routers/projects.py`; whitelist canônica rejeita lixo (admin/tech_lead/vazio/"GP" maiúsculo → 422). Frontend: `ProjectTeamPage.tsx` adicionou `'gp'` ao type `InviteRole` e ao `ROLE_OPTIONS` com label "GP (co-gestor do projeto)". Compartimentalização preservada: `require_action('project:manage_team')` resolvido dentro do `project_id` do path + check no serviço de que o chamador é GP **daquele** projeto. Audit do DB de produção: só role `gp` em uso (1 membro) — zero risco de backwards-incompat. Testes: `test_mvp11_fase111_gp_invite.py` com 13 casos (feliz GP→GP, whitelist 5 inválidos × sanidade 4 canônicos, RBAC 3 papéis). Suite pós-11.1: **1279/1279 passing** (+13).
-- **Fase 11.2 — GP transferir soberania do projeto** — **FECHADA 2026-04-20**. Endpoint `POST /projects/{id}/transfer-gp/{target_user_id}` (RBAC `project:manage_team`). Novo método `ProjectTeamService.transfer_gp_sovereignty` inverte papéis atomicamente: chamador vira `dev`, alvo vira `gp`. Pré-condições: chamador é GP ativo; alvo é membro ativo **integrado** (`joined_at != null`); alvo não é GP; alvo != chamador. Emite 2 eventos `role_transferred` (phase='transferred') com mesmo `correlation_id`, `extra.direction` ∈ {outgoing, incoming}. Testes: `test_mvp11_fase112_transfer_gp.py` (9 casos — caminho feliz + audit de correlation_id + 5 pré-condições negadas + 3 RBAC). Suite pós-11.2: **1296/1296 passing** (+9).
-- **Fase 11.3 — Guard reforçado de último Admin ativo** — **FECHADA 2026-04-20**. Helper canônico `guard_last_admin_on_action(db, target_user)` em `admin_management_service.py`: se target é admin ativo e restariam 0 após a ação, levanta `PermissionError` (pré-check antes de autorizar). Integração em 3 caminhos: (a) `admin_service.lock_user` importa e chama o guard + também bloqueia self-lock quando `actor_id == user_id`; (b) `block_user` router (admin.py) chama o guard; (c) `delete_user` router chama o guard. `set_admin_flag(False)` mantém guard pré-existente. Router `lock_user` traduz `PermissionError` em HTTP 403. Testes: `test_mvp11_fase113_last_admin_guard.py` com 7 casos — 6 passing (set_admin_flag last-self, lock_user self, lock_user last-admin via service, delete_user last-admin via guard helper, guard noop para não-admin, guard noop para admin inativo) + 1 skip (block_user via HTTP não isola "último" sem quebrar `require_admin`; coberto pelo test unitário do guard). Suite pós-11.3: **1302/1302 passing** (+6).
-- **Fase 11.4 — Auditoria canônica de role events em `audit_log_global`** — **FECHADA 2026-04-20**. 3 eventos canônicos registrados em `AuditEvents` (`ROLE_GRANTED`/`ROLE_REVOKED`/`ROLE_TRANSFERRED`). Novo helper `AuditService.log_role_event` com whitelist de event_type + payload canônico `{target_user_id, project_id (nullable na instância), old_role, new_role, phase, timestamp, extra?}`. 6 pontos de emissão injetados: (a) `project_team_service.invite_team_member` → role_granted phase=invited; (b) `accept_invite` → role_granted phase=accepted (actor é o próprio convidado); (c) `revoke_invite` → role_revoked phase=revoked; (d) `admin_management_service.set_admin_flag(True)` → role_granted phase=admin_promoted (project_id=None); (e) `set_admin_flag(False)` → role_revoked phase=admin_demoted; (f) `invite_admin` → role_granted phase=invited|admin_promoted; (g) `admin_service.lock_user(..., actor_id)` → role_revoked phase=user_deactivated com extra `{was_admin, had_gp_role, active_memberships_count}`. Router `admin.py` passa `current_user_id` para `lock_user` como `actor_id`. `ROLE_TRANSFERRED` reservado (Fase 11.2 emite). Testes: `test_mvp11_fase114_role_audit.py` com 8 casos (6 pontos de emissão + catálogo + whitelist do helper). Suite pós-11.4: **1287/1287 passing** (+8).
-- **Fase 11.5 — DT-041 image drift** — **FECHADA 2026-04-20**. Rebuild `docker compose build --no-cache backend` validado: `pypdf 4.3.1`, `reportlab 4.4.10`, `esprima 4.0.1` importáveis diretamente da imagem construída a partir do `pyproject.toml` (linhas 60-64). Paliativo runtime removido (não é mais necessário `pip install` pós-container-up). CI (`.github/workflows/backend-tests.yml`) ganha: (a) step `Verify critical extraction libs are importable` no job `test` — garante que alteração no `pyproject.toml` que quebre as libs falha o CI; (b) job novo `docker-image` que roda `docker build --no-cache` da imagem e valida `python -c "import pypdf, reportlab, esprima"` dentro do container construído. Também corrige path do pytest no job test: `tests/` → `app/tests/` com `--ignore=app/tests/e2e/test_fluxo_completo.py` (playwright ainda fora do CI — fechado na Fase 11.7). Suite backend inalterada: **1302/1302 passing** (11.5 é fase de infra; nenhum teste unitário novo, validação é o rebuild real + CI).
-- **Fase 11.6 — DT-076 V2 cobertura multi-DB** — **FECHADA 2026-04-20**. `ddl_generator_service.py` ganha suporte real a SQLite, SQL Server, Oracle e MongoDB — V1 (pg/mysql) preservada sem regressão. Mapeamento canônico→dialeto expandido em `_TYPE_MAP` (5 dialetos); `SCHEMA_HEADER` ganha 3 entradas novas (sqlite/sqlserver/oracle); `_render_create_table` agora trata `IF OBJECT_ID` (T-SQL) e bloco anônimo com `EXCEPTION` (PL/SQL); `_render_create_index` faz check via `sys.indexes` (T-SQL) e bloco com ORA-00955 tolerance (Oracle); `_render_insert` dialetiza idempotência (`ON CONFLICT` / `INSERT IGNORE` / `INSERT OR IGNORE` / `IF NOT EXISTS + SELECT` / `SELECT FROM DUAL WHERE NOT EXISTS`). Novo `_render_mongodb_artifacts` emite `collections.json` com JSON Schema validators + `seed.js` com `updateOne({...}, {$setOnInsert}, {upsert: true})` para idempotência + `createIndex` por índice declarado. Matriz framework×dialeto: Alembic/Flyway/Knex/TypeORM/EFCore/go-migrate cobrem 5 SQL; Laravel cobre 4 (skipa Oracle); mongo retorna None em frameworks SQL-only e emite stubs nativos em TypeORM (driver mongo via `createCollection`) + EFCore (Cosmos provider no-op). V1 testes atualizados (oracle/sqlite agora emitem artefatos). Testes novos: `test_mvp11_fase116_multi_db.py` com 56 casos (5 dialetos × schema/seed + MongoDB upsert + FK em todos SQL + matriz 6 frameworks × 5 SQL + skips Laravel-Oracle + skips SQL-frameworks-Mongo + TypeORM/EFCore stubs Mongo). Suite pós-11.6: **1360/1360 passing** (+58 vs baseline F113).
-- **Fase 11.7 — Playwright GUI E2E** — **FECHADA 2026-04-20**. `test_fluxo_completo.py` sai do `--ignore` (antes era explicitamente removido da coleta por ausência de `playwright`) e passa a integrar a suíte canônica via marker `e2e` declarado em `backend/pyproject.toml`. Arquivo ganha: (a) `pytest.importorskip("playwright")` no topo — em ambiente sem playwright (caso do container default), o módulo é skipado limpamente na coleta; (b) `pytestmark = pytest.mark.e2e` — aplica marker em todos os testes do módulo; (c) URLs configuráveis via env vars `E2E_BASE_URL`/`E2E_API_URL`/`E2E_ADMIN_EMAIL`/`E2E_ADMIN_PASS`/`E2E_PROJECT_ID` (defaults apontam para serviços internos da stack docker — elimina IP hardcoded 192.168.1.3 que era dogfood LAN). CI (`backend-tests.yml`): job `test` roda `-m "not e2e"` (substituindo `--ignore=app/tests/e2e/test_fluxo_completo.py`); job novo `e2e` instala `playwright` + `chromium --with-deps` on-demand, sobe stack docker, aguarda `/setup/status` e roda `-m e2e`. Lane e2e é `continue-on-error: true` nesta iteração (fail não bloqueia merge enquanto seed canônico do CI não está estabilizado — teste continua visível e executável, não mais invisível). Suite default: **1360 passed, 3 skipped** (3º skip é o e2e via importorskip).
-
-**Objetivo:** resolver em dois temas, sem misturar —
-1. **Simetria de soberania RBAC (compartimentalizada):** Fases 11.1 (✅), 11.2, 11.3, 11.4.
-2. **Higiene operacional residual:** Fases 11.5, 11.6, 11.7.
-
-**Gate esperado ao fim:** RBAC simétrico entre instância (Admin↔Admin) e projeto (GP↔GP) sem quebrar compartimentalização §2.2; `audit_log_global` registra todo evento de papel; imagem backend idempotente; suíte verde com GUI E2E dentro do caminho canônico.
-
-**Baseline de entrada:** suíte 1266/1266 passing pós-DT-076 (validada em 2026-04-20). **Baseline atual pós-11.1: 1279/1279 passing.**
-
-### MVPs fechados recentes (2026-04-19 / 2026-04-20)
-- **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
-- **MVP 6 Emenda 2026-04-19** — fechada mesmo dia (commits `3f2e373`/`9ec8d09`/`21362ed`). Sustentação + anexos + contexto obrigatório.
-- **MVP 7** — fechado 2026-04-19 (commits `71f0082`/`d02f2d2`/`d59ad8e`). 4 sub-fases: backend core + destrutiva/rollback + frontend + completion tasks.
-- **MVP 8 — Ingestão inteligente de documentos** — fechado 2026-04-20 (Fase 4 `6ea89f3`; demais fases em commits anteriores). 6 fases: (1) feedback de progresso `arguider_stage` + `arguider_progress_percent`; (2) extração rica de `.docx` com tabelas estruturadas; (3) pipeline de camadas `.pdf` com AcroForm + texto pesquisável + OCR via LLM Vision; (4) normalização heurística de seções implícitas; (5) relatório de extração read-only na UI; (6) suite de fixtures de regressão (`24de5d2`/`b26ae5f`).
-- **MVP 9 — Roadmap multicategoria com pré-ingestão guiada** — fechado 2026-04-20 (Fase 9.2.ext `899e180`). 8 fases: 9.1 categorias canônicas, 9.1.1 Foundation generator, 9.1.2 status pt-BR, 9.2 detalhamento on-demand Ollama, 9.2.ext WebFetch curado, 9.3 orquestração Premium (readiness + DAG), 9.4 plano de deploy com export Markdown, 9.5 ciclo resposta GP → ingestão → `adicionado` → DELIVERABLE automático.
-- **MVP 10 — Planos de Teste e Documentação Viva reativos ao OCG** — fechado 2026-04-20 (consolidação `a82df0c`). 8 fases: 10.1 schema `test_specs`/`live_docs`, 10.2 gerador Ollama unit/integration/e2e, 10.3 specs globais security/compliance via Premium, 10.4 stale detection on-the-fly, 10.5 UI Plano de Testes com modal + banner stale, 10.6 approve/reject + Tester Review tab Specs, 10.7 LiveDocs reais (Ollama módulo + Premium consolidado), 10.8 Regenerar granular por tipo.
-
-### DTs dogfood fechadas em 2026-04-20 (pós-MVP 10)
-- **DT-073** (watchdog ingestão), **DT-074** (PII via extractor), **DT-075** (fila persistente diferida) — commit `7f47a22`.
-- **DT-076** (DDL não gerado — crítica estrutural cross-pipeline) — 6 fases atômicas: F1 `013d292` OCG ganha bloco `DATA_MODEL`; F2 `d1dbc4f` `ddl_generator_service` (schema+seed+migrations em 7 frameworks: Alembic/Flyway/Knex/TypeORM/Laravel/EFCore/go-migrate); F3 `92aeb38` dispatch do CodeGen injeta schema/migrations; F4 `676ee33` Backlog deriva itens do `DATA_MODEL`; F5 `0dccd1d` Doc Viva ganha seção Modelo de dados; F6 `349647a` consolidação no PROGRESS.md. V1 cobre PostgreSQL + MySQL; Oracle/SQL Server/SQLite/Mongo diferidos para V2 com placeholder explicativo. Adicionou 104 testes (35+38+13+7+11).
-
-### MVPs fechados
-- **MVP 6 (forma original)** — fechado 2026-04-19 (commits `8042918` + `c9230be`).
-- **MVP 6 Emenda 2026-04-19** — fechada 2026-04-19 (commits `3f2e373` emenda contrato, `9ec8d09` backend, `<próximo>` frontend/docs). Adicionou Sustentação (flag cross-instância `is_support`; Admin herda), anexos (até 5/10MB/9 extensões), contexto obrigatório (section_reference autopreenchido + flow_description bloqueante). Regra dura mantida: Admin sobrepõe Support; UI de Sustentação não promove Support a Admin.
-
-### Próximos MVPs definidos (contrato §7)
-- **MVP 11 — Simetria de soberania RBAC e higiene operacional residual** — adicionado 2026-04-20 pelo protocolo §7.0 (autorização do stakeholder-soberano). Estado: **definido — não iniciado**. Destravado pelo fechamento do MVP 10 + gate §9 atendido. 7 fases (11.1–11.7) descritas no contrato §7 MVP 11.
-
-### MVP anterior fechado
-**MVP 6 — Validação assistida em campo (tickets de incidente)** — executado e fechado em 2026-04-19. 4 fases sequenciais, cada uma com build + commit:
-- Fase 1 — backend (migration 022, IncidentTicket + IncidentTicketComment, service com roteamento automático por papel, 3 sub-routers, 15 testes).
-- Fase 2 — frontend por projeto (IncidentListPage, IncidentDetailPage, NewIncidentModal, sidebar subnav, 2 rotas).
-- Fase 3 — frontend admin (AdminIncidentsPage com filtros, sidebar admin, 1 rota).
-- Fase 4 — docs + smoke dogfood + commit consolidado.
-Suite final: 667/667 (+15).
-
-### MVP anterior fechado
-**MVP 5 — Hardening operacional** (executado 2026-04-18 / fechado 2026-04-19)
-
-### MVP anterior
-**MVP 4 — Qualidade, documentação e entrega — ENCERRADO 2026-04-18**
-com gate ABERTO. Polimento UX (DT-052 a DT-056) aplicado. CodeGen
-multi-linguagem (DT-058 sprints 1-3 + ext) implementado: 6 linguagens
-com scaffold determinístico (Java Spring/Quarkus, Kotlin Spring, Go,
-C#, PHP, Node.js NestJS/Express).
-
-MVP 3 — Geração assistida controlada — **ENCERRADO 2026-04-18** com
-todos os 10 critérios §9 atendendo SIM (veredito binário). Suite pytest
-contra `gca_test` isolado: 357 passed, 0 failed, 0 errors em 14:59.
-Prod DB (`gca`) intacta — 0 contaminação. Todos os 9 itens do §7 MVP 3
-implementados: CodeGen controlado, geração cirúrgica, preview antes do
-commit (DT-043 flow), integração Git, commits rastreáveis, validação
-pós-geração, bloqueios por papel (DT-042), docstrings obrigatórias,
-análise de adequação do provedor (DT-043).
-
-### Objetivo do MVP 5 (contrato §7) — **FECHADO**
-Endurecer operação para deploy real em clientes:
-- criptografia de segredos e PATs
-- hardening de produção
-- observabilidade complementar (métricas, traces)
-- rotinas de backup/restore maduras
-- melhorias de deploy/upgrade por cliente
-- absorver DTs herdadas: **DT-016** (SMTP compartimentalizado),
-  **DT-041** (image drift `--no-cache` rebuild), e validação Sprint 4
-  da DT-058 (5 projetos-piloto, 1 por linguagem, requer autorização)
-  fica como pendência de validação não-bloqueadora.
-
-### Objetivo do MVP 6 (contrato §7) — **definido, não iniciado**
-Criar o canal oficial de **tickets de incidente** dentro da instância para que
-usuários reais (que vão encontrar bugs e necessidades não previstas) tenham
-rota clara de comunicação:
-- Dev/Tester/QA abre ticket no projeto → GPs do projeto recebem.
-- GP abre ticket → Admins da instância recebem.
-- Seção cross-projeto na área administrativa agrega tickets escalados.
-- Campos: título, descrição, prioridade (baixa/média/alta/crítica), categoria
-  (bug/dúvida/pedido/incidente de pipeline), status (aberto/em andamento/
-  resolvido/fechado).
-- Conversa por comentários (sem anexos no V1).
-- Notificação in-app em cada evento.
-- Auditoria compartimentalizada em `audit_log_global`.
-- Isolamento por projeto mantido.
-
-Fora de escopo no MVP 6: anexos de arquivo, SLA com escalonamento automático,
-integração externa (Jira/Linear/Zendesk/email bidirecional), pesquisa de
-satisfação, tickets cross-projeto.
-
-### Objetivo do MVP 7 (contrato §7) — **definido, não iniciado**
-Institucionalizar a **entrega versionada preservando dados do usuário**, para
-que correções de tickets (MVP 6) ou novas features cheguem sem destruir o que
-o usuário já persistiu:
-- Release tem tag semântica + changelog visível + lista de MVPs fechados e
-  tickets resolvidos que a motivaram.
-- Default **não-destrutivo**: migrations preservam dado (colunas novas
-  nullable ou com default; remoção passa por deprecação; mudança de tipo
-  via coluna paralela).
-- Quando a migração **precisa** ser destrutiva:
-  - aviso explícito pré-aplicação com descrição do impacto;
-  - snapshot automático (reaproveita DT-063) antes da aplicação;
-  - botão de restaurar estado anterior;
-  - assistente pós-release para completar dados novos exigidos pela feature
-    que motivou o ticket.
-- Changelog segmentado por papel (Admin/GP/Dev/Tester/QA vêem só o que lhes
-  afeta).
-- Auditoria em cada release aplicada, restauração de snapshot e preenchimento
-  pós-release.
-
-Fora de escopo no MVP 7: downgrade de container (continua manual via DT-062),
-compartilhamento de correção entre instâncias diferentes, marketplace/A-B
-testing de release, edição retroativa arbitrária fora do assistente
-pós-release.
-
-**Dependência:** MVP 7 só inicia depois de MVP 6 fechado (a rastreabilidade
-ticket → release exige tickets persistidos).
-
-### Objetivo do momento
-Amadurecer o ciclo de **qualidade → entrega**: QA Readiness com métricas
-por pilar, execução e revisão de testes com evidência exportável,
-Documentação Viva atualizando a cada mudança, Roadmap coerente com
-backlog derivado do OCG, e Release Bundle empacotando artefatos
-verificáveis. Mantém o rigor dos MVPs anteriores: correção local
-preferível a refatoração sistêmica; sem expansão além do §7.
-
-### Princípio desta fase
-Mesmo dos MVPs anteriores:
-1. diagnosticar;
-2. classificar dívida;
-3. corrigir blockers e criticals antes de feature nova;
-4. revalidar após cada passo;
-5. só então considerar avanço para o MVP 5.
+**MVP 22 — Teams Notifier uni-direcional** — FECHADO 2026-04-22. `TeamsAdapter` via Incoming Webhook + Adaptive Card v1.4; registry builtin atualizado; 12 testes unit verdes; 52/52 regressão. Execução ~3h por reuso do pattern Adapter-Port do MVP 20.3. Figma MCP removido do roadmap canônico como MVP separado (fica sob demanda).
+
+### MVPs anteriores recentes (resumo)
+
+- **MVP 21** (2026-04-22) — Ajuda refresh sincronizando conteúdo com MVPs 14-20. 3 fases. 38 testes de help verdes. toc.json v21.2 com 12 capítulos (novo: "Convites e primeiro acesso").
+- **MVP 20** (2026-04-22) — Integrações externas via Adapter-Port. 4 fases: Issue Tracker Bridge (Jira + Trello), Security Scanners (Sonar + Snyk + gitleaks), Slack Notifier uni-direcional, hooks + Ajuda + release. 245/245 testes verdes.
+- **MVP 19** (2026-04-21) — ERS Vivo IEEE 830. 4 fases: schema expansion + ERS generator + glossário vivo + matriz de rastreabilidade. 68/68 testes verdes. `docs/ERS.md` regenerado no Git do projeto.
+- **MVP 18** (2026-04-21) — Sistema de Ajuda integrado. FTS5 SQLite + renderer react-markdown + 10 capítulos iniciais.
+- **MVP 17** (2026-04-21) — Saneamento Celery (DT-077 Flower auto-start + DT-078 healthcheck hostname).
+- **MVP 16** (2026-04-21) — C++ fundacional (9ª scaffolder, 8ª linguagem canônica) + DesignShowcase tsc → 0.
+- **MVPs 1-15** — FECHADOS. Detalhes em [`docs/mvp_archive/`](docs/mvp_archive/).
+
+### Princípio de execução (comum a todos)
+1. Diagnosticar antes de implementar.
+2. Classificar dívida encontrada.
+3. Blocker/critical primeiro, revalidar.
+4. Só então expandir.
+5. Fixes descobertos no dogfood viram `fix:`, não MVP novo.
 
 ---
 
 ## 2. Escopo ativo
 
-### MVP em execução
-**MVP 14 — Saneamento de follow-up pós-MVP 13 + OCG maturity + type safety + observabilidade Celery** — no estado **definido — não iniciado**. Aberto no contrato §7 em 2026-04-20 pelo protocolo §7.0. Escopo travado em 11 fases / 7 temas. Commit de abertura é documental (§7 contrato + §1/§2/§6/§9/§10 progresso). Implementação por fase exige autorização explícita adicional (§7.0 regra 3).
+**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
 
-### Baseline ao fechamento do MVP 10 + DT-076 (2026-04-20)
-Suíte baseline: **1266/1266 passing** contra `gca_test` isolado (+104
-testes em DT-076). Superfície canônica entregue e validada em dogfood/suite:
-- **MVP 1** — auth, RBAC 5 papéis, cadastro/aprovação de projeto,
-  questionário externo/interno, OCG persistido básico, Gatekeeper
-  básico, auditoria mínima, configuração de IA, roteamento híbrido.
-- **MVP 2** — ingestão, quarentena PII, OCG versionado com deltas,
-  backlog derivado do OCG, Arguidor, reavaliação do Gatekeeper.
-- **MVP 3** — CodeGen controlado em 6 linguagens (Java/Kotlin/Go/C#/PHP/Node),
-  preview, commits rastreáveis, RBAC por papel, análise de adequação do
-  provedor.
-- **MVP 4** — QA Readiness com RBAC (DT-044), LiveDocs refrescável,
-  Roadmap derivado do OCG, Release Bundle com gate `qa:approve`,
-  evidências exportáveis.
-- **MVP 5** — hardening: secrets/PAT criptografados, `/metrics` +
-  dashboard (DT-060), backup/restore compartimentalizado por projeto
-  (DT-063), `upgrade.sh` idempotente (DT-062).
-- **MVP 6** (+ Emenda) — tickets de incidente por projeto, roteamento
-  por papel, Sustentação cross-instância (`is_support`), anexos
-  (5/10MB/9 tipos), `flow_description` obrigatório, `section_reference`
-  autopreenchido.
-- **MVP 7** — releases com tag semântica + changelog segmentado por
-  papel, default não-destrutivo com auto-apply no startup, migração
-  destrutiva com snapshot automático (DT-063) e rollback por projeto,
-  completion tasks pós-release. Release v0.8.0 retroativa aplicada na
-  instância dogfood.
-- **MVP 8** — ingestão inteligente: `arguider_stage`/`progress_percent`
-  + feedback UI; extração rica de `.docx` (tabelas → parágrafos);
-  pipeline `.pdf` em camadas (AcroForm → texto pesquisável → OCR LLM
-  Vision); normalização heurística de seções; relatório read-only;
-  fixtures de regressão com documentos reais.
-- **MVP 9** — Roadmap multicategoria: 6 categorias canônicas, Fase 1
-  de Fundação derivada do OCG (não do Arguidor), status pt-BR
-  (sugerido/aguardando_resposta/adicionado/concluído), detalhamento
-  on-demand via Ollama (baixa criticidade §6.2), WebFetch curado,
-  orquestração Premium (DAG + `readiness_status`, alta criticidade §6.2),
-  plano de deploy com export Markdown, ciclo resposta GP → ingestão →
-  `adicionado` criando `DELIVERABLE` automático.
-- **MVP 10** — Planos de Teste e Documentação Viva reativos ao OCG:
-  schema `test_specs`/`live_docs`, geração Ollama de unit/integration/e2e,
-  specs Premium globais de security/compliance, stale detection versionada
-  por OCG, UI Plano de Testes + Tester Review tab Specs, LiveDocs por
-  módulo (Ollama) + consolidada (Premium), Regenerar granular por tipo.
-- **DT-073/074/075** — watchdog da fila de ingestão, PII via extractor,
-  reclassificação de fila diferida (`7f47a22`).
-- **DT-076** — bloco `DATA_MODEL` no OCG + `ddl_generator_service` (7
-  frameworks de migration) + integração ponta-a-ponta em CodeGen,
-  Backlog e Doc Viva (6 commits atômicos, F1-F6).
-
-### Dívidas estruturais residuais — agora capturadas no MVP 11
-- **DT-041 (Minor)** — rebuild `--no-cache` da imagem para persistir
-  `pypdf`/`reportlab`/`esprima`. Entra em Fase **11.5**. Paliativo
-  via `pip install` em runtime continua cobrindo o ambiente atual
-  até execução.
-- **DT-076 V2 (Minor, diferida)** — suporte a Oracle, SQL Server,
-  SQLite e MongoDB em `ddl_generator_service`. Entra em Fase **11.6**.
-  V1 (PostgreSQL + MySQL) segue cobrindo o fluxo canônico até lá.
-- **Playwright GUI E2E** — `test_fluxo_completo.py` permanece no
-  `--ignore` até Fase **11.7**.
+### Baseline atual
+- Suíte backend: **245+ passing** (MVPs 19+20+21+22 agregados em regressão recente).
+- Frontend tsc: **0 errors**.
+- DTs abertas: **0**.
+- Último commit do produto: verificar `git log --oneline | head -1`.
+- 4 integrações externas operacionais: Jira, Trello, Slack, Teams.
+- 8 linguagens canônicas de codegen (Python, Node×2, Java×2, Kotlin, C#, Go, PHP, C++).
 
 ### Fora de escopo sempre (até autorização explícita)
-- qualquer feature fora dos MVPs 1-11 do contrato soberano;
-- marketplace, A/B de release, multi-instância avançada, downgrade
-  de container, compartilhamento de correção entre instâncias de
-  clientes diferentes — todos explicitamente "fora de escopo" em §7.
+- SSO/Federation/Federated Learning — parked formal.
+- Figma MCP como MVP canônico — rejeitado; fica sob demanda.
+- Reimplementação SAST/tracker/chat — política canônica é adapter, não reinvenção.
+- Linear/Asana/GitHub Issues/Monday/Miro — adapters sob demanda (~1.5-2d cada).
+- White-label / extension points — só quando 2º cliente pedir.
 
 ---
 
