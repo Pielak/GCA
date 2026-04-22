@@ -1011,7 +1011,7 @@ async def invite_admin_user(
 ) -> InviteAdminResponse:
     """
     Invite a new admin user via email with temporary password.
-    Creates an InvitationToken (expires 2 hours). User is NOT created until
+    Creates an InvitationToken (expires 7 days). User is NOT created until
     they validate the temp password and set a permanent one.
     """
     from app.models.base import InvitationToken
@@ -1054,7 +1054,7 @@ async def invite_admin_user(
             token=invite_token,
             temporary_password_hash=hash_password(temp_password),
             invited_by_id=current_user_id,
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=2),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=7),
         )
         db.add(invitation)
         await db.commit()
@@ -1082,7 +1082,7 @@ async def invite_admin_user(
 
         return InviteAdminResponse(
             success=True,
-            message=f"Convite enviado para {request.email}. Senha temporária expira em 2 horas.",
+            message=f"Convite enviado para {request.email}. Senha temporária expira em 7 dias.",
             user_id=str(invitation.id)
         )
 

@@ -939,7 +939,7 @@ Suporte: https://gca.com/support
                 <div style="background-color: #fef3c7; padding: 12px; border-left: 4px solid #dc2626; border-radius: 3px; margin: 16px 0;">
                     <p style="color: #dc2626; font-weight: bold; margin-top: 0;">⚠️ IMPORTANTE:</p>
                     <ul style="margin-bottom: 0;">
-                        <li>A senha temporária <strong>expira em 24 horas</strong></li>
+                        <li>A senha temporária <strong>expira em 7 dias</strong></li>
                         <li>Você <strong>será obrigado a alterar</strong> a senha no primeiro login</li>
                         <li>Use uma senha <strong>forte (mín. 12 caracteres)</strong></li>
                         <li>Não compartilhe esta senha com ninguém</li>
@@ -981,7 +981,7 @@ Próximas Etapas:
 Primeiro Acesso: {first_access_link}
 
 IMPORTANTE:
-- A senha temporária expira em 24 horas
+- A senha temporária expira em 7 dias
 - Você será obrigado a alterar a senha no primeiro login
 - Use uma senha forte (mín. 12 caracteres)
 - Não compartilhe esta senha com ninguém
@@ -1027,7 +1027,7 @@ Suporte: https://gca.com/support
                     <div style="background-color: #fef3c7; padding: 16px; border-radius: 8px; margin: 20px 0;">
                         <p style="margin: 0; color: #92400e;"><strong>Sua Senha Temporária:</strong></p>
                         <p style="font-family: monospace; font-size: 18px; background: white; padding: 10px; text-align: center; margin: 10px 0;">{temporary_password}</p>
-                        <p style="margin: 0; color: #92400e; font-size: 12px;">⚠️ Expira em 24 horas</p>
+                        <p style="margin: 0; color: #92400e; font-size: 12px;">⚠️ Expira em 7 dias</p>
                     </div>
                     <p style="color: #333;">Requisitos para senha permanente:</p>
                     <ul style="color: #333;">
@@ -1052,7 +1052,7 @@ Bem-vindo ao GCA!
 {invited_by_name} o convidou para ser administrador.
 
 Sua Senha Temporária: {temporary_password}
-(Expira em 24 horas)
+(Expira em 7 dias)
 
 Requisitos para senha permanente:
 - Mínimo 10 caracteres
