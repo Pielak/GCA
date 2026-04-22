@@ -4,17 +4,18 @@ O **OCG** é a fonte única de verdade de um projeto no GCA. Não é um document
 
 Princípio que governa o uso: **nenhum módulo do pipeline opera ignorando o OCG atual**. Se o OCG está incompleto, o módulo ou pede ao GP (via Arguidor), ou bloqueia.
 
-## As 12 seções do OCG
+## As 13 seções do OCG
 
 | Seção | Para que serve |
 |---|---|
 | `PROJECT_PROFILE` | Metadados do projeto (nome, slug, tipo, criticidade, classificação), derivados do questionário. |
-| `PILLAR_SCORES` | Os 7 pilares (P1–P7) com score de 0 a 100, nível de aderência, se é bloqueante e contagem de achados. |
+| `PILLAR_SCORES` | Os 7 pilares (P1–P7) com score de 0 a 100, nível de aderência, se é bloqueante e contagem de achados. **P7 (Segurança)** pode ser recalculado determinísticamente a partir de findings reais quando há scanner configurado — ver seção "P7 determinístico" abaixo. |
 | `COMPOSITE_SCORE` | Score composto: `{ overall, is_blocking, status }`. Status possível: READY, NEEDS_REVIEW, AT_RISK, BLOCKED. |
 | `STACK_RECOMMENDATION` | Stack recomendada por camada: backend (linguagem + framework + tipo), frontend (stack + linguagem), database (engine + perfil), cache, messaging, deployment. **É a seção mais consumida pelo CodeGen.** |
 | `CRITICAL_FINDINGS` | Achados críticos extraídos dos agentes dos pilares (severidade `critical`). |
 | `TESTING_REQUIREMENTS` | Tipos de teste exigidos, cobertura alvo, ferramentas. Alimenta os specs do Tester Review. |
 | `COMPLIANCE_CHECKLIST` | Itens de LGPD, GDPR, compliance setorial. Alimenta módulos e Gatekeeper. |
+| `BUSINESS_RULES` (**MVP 19**) | Nova seção com regras de negócio do projeto (ex: "nota fiscal em até 24h pós-venda", "estoque negativo proibido"). Populada por agentes IA durante ingestão quando detecta padrões, ou manualmente pelo GP via API. Default `[]` — OCGs anteriores ao MVP 19 continuam serializando sem quebrar. |
 | `DELIVERABLES` | Entregáveis esperados por categoria (doc, code, test, process, config, other). Base do Definition of Done. |
 | `ARCHITECTURE_OVERVIEW` | Estilo arquitetural, componentes, fluxo de dados, modelo de execução (Cloud, On-premises, Híbrido). |
 | `RISK_ANALYSIS` | Riscos classificados como alto, médio ou baixo, com mitigação sugerida. |
@@ -22,6 +23,39 @@ Princípio que governa o uso: **nenhum módulo do pipeline opera ignorando o OCG
 | `DATA_MODEL` | Modelo de dados derivado: engine, tabelas, FKs, dados de seed, warnings. Alimenta o DDL generator. |
 
 Junto vai o `context_health` — `{ depth, confidence, quality }` — que flui com as operações de expand e contract.
+
+## Classificação de requisitos (MVP 19)
+
+Cada candidato a módulo (`module_candidate`) ganha o campo `requirement_category` via UI de backlog / roadmap:
+
+| Valor canônico | Sigla no ERS | Significado |
+|---|---|---|
+| `functional` | **RF** | Requisito funcional — comportamento do sistema ("o sistema permite login"). |
+| `non_functional` | **RNF** | Requisito não-funcional — atributos de qualidade ("latência P95 < 200ms"). |
+| `business_rule` | **BR** | Regra de negócio — restrição operacional ("nota fiscal até 24h pós-venda"). |
+| `null` | — | Ainda não classificado pelo GP. Aparece em seção separada do ERS pedindo classificação. |
+
+**Classificação é manual pelo GP em V1** — agentes IA não decidem sozinhos. Regra dura do contrato para preservar governança.
+
+A classificação alimenta a Seção 3 do ERS (Requisitos Específicos) com numeração automática: RF-001, RF-002, RNF-001, BR-001, etc. Ordem canônica IEEE 830: RF → RNF → BR → uncategorized.
+
+## P7 determinístico (MVP 20)
+
+Quando o projeto **não tem** scanner de segurança configurado em `/settings` → Integrações, P7 permanece sendo avaliado pelo agente IA do pilar (comportamento pré-MVP 20).
+
+Quando o projeto **tem** Sonar, Snyk ou gitleaks configurado:
+
+- Toda vez que um finding é ingerido (via `POST /integrations/sync` ou webhook do scanner), o service recalcula P7 pela fórmula determinística:
+
+```
+penalty = 25 × N_critical + 10 × N_high + 3 × N_medium + 1 × N_low
+P7_score = clamp(0, 100, 100 - penalty)
+```
+
+- Findings com status `accepted_risk` (marcados formalmente pelo GP com justificativa mínima 10 caracteres) **não** contam no penalty.
+- Findings com status `fixed` (scanner confirmou resolução) **não** contam no penalty.
+
+Resultado prático: o CISO pode pedir "qual é o P7 desse projeto?" e receber resposta lastreada em dados reais do scanner que a empresa já paga, não em heurística opaca do LLM.
 
 ## Versionamento e histórico
 

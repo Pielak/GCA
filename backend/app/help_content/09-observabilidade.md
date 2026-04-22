@@ -117,13 +117,17 @@ Toda ação crítica emite entrada em `audit_log_global` com:
 - **Projeto**: `project_approved`, `project_rejected`, `project_status_changed`.
 - **Questionário**: `QUESTIONNAIRE_SUBMITTED`, `questionnaire_approved`, `questionnaire_rejected`.
 - **Papéis**: `role_granted`, `role_revoked`, `role_transferred`.
-- **OCG**: `OCG_UPDATED`, `ocg_rolled_back`, `ocg_consolidated`.
+- **OCG**: `OCG_UPDATED`, `OCG_ROLLED_BACK` (MVP 14 — rollback formal com payload `{version_from, version_to, restored_from, actor_id}`), `OCG_CONSOLIDATED` (MVP 14 — consolidação explícita com `{composite_before, composite_after, status_before, status_after}`).
 - **Ingestão**: `DOCUMENT_INGESTED`, `DOCUMENT_QUARANTINED`.
-- **Pipeline**: `GATEKEEPER_EVALUATED`, `ARGUIDER_QUESTION_OPENED`, `ARGUIDER_RESPONSE_REGISTERED`, `BACKLOG_REGENERATED`, `LIVEDOCS_UPDATED`.
+- **Pipeline**: `GATEKEEPER_EVALUATED`, `ARGUIDER_QUESTION_OPENED`, `ARGUIDER_RESPONSE_REGISTERED`, `BACKLOG_REGENERATED`.
+- **Documentação viva (MVP 19)**: `LIVEDOCS_UPDATED` — `details.doc_type` distingue `module_doc`, `index`, `architecture`, ou `ers` (MVP 19.2 regenera `docs/ERS.md` no Git). Quando `doc_type=ers`, detalhes incluem `{commit_sha, path: 'docs/ERS.md', version_to, stale_reasons[]}`.
 - **CodeGen**: `codegen_scaffold_generated`, `codegen_scaffold_applied`, `codegen_file_regenerated`, `CODEGEN_REQUESTED`, `CODEGEN_COMPLETED`, `CODE_VALIDATION_COMPLETED`.
 - **QA**: `QA_EXECUTION_REQUESTED`, `QA_EXECUTION_COMPLETED`.
 - **Credenciais**: `CREDENTIAL_STATUS_CHANGED`.
 - **Webhooks**: `WEBHOOK_HEALTH_CHANGED`.
+- **Integrações externas (MVP 20)**:
+  - `EXTERNAL_ISSUE_CREATED` — módulo aprovado no GCA disparou criação de issue no tracker externo. Payload: `{project_id, module_candidate_id, provider, external_id, url}`.
+  - `EXTERNAL_ISSUE_STATUS_SYNCED` — webhook do tracker atualizou o status canônico da `ExternalIssue` local. Payload: `{project_id, provider, external_id, status_canonical, status_raw, event_type}`.
 - **Chain**: `AUDIT_CHAIN_VERIFIED` registrado após cada run de verificação.
 
 ### Verificação de integridade

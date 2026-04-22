@@ -4,7 +4,9 @@ O GCA gera **scaffolds iniciais** (estrutura do projeto) a partir do `STACK_RECO
 
 O LLM continua responsável pelo código de negócio (módulos individuais); a estrutura inicial (arquivos de build, configs, entrypoint) vem de template determinístico.
 
-## 9 linguagens suportadas
+## 8 linguagens canônicas · 9 scaffolders determinísticos
+
+No enum `LinguagemBackend` o produto aceita **8 linguagens canônicas**: Python, Node.js, Java, C#, Go, PHP, Kotlin, C++ (mais `Outra` pra projetos LLM-only em linguagem não listada). Para a escolha de backend, Java e Node.js têm 2 frameworks cada, resultando em **9 scaffolders determinísticos**:
 
 | Linguagem / Framework | Framework de migration | Observações |
 |---|---|---|
@@ -16,9 +18,11 @@ O LLM continua responsável pelo código de negócio (módulos individuais); a e
 | PHP + Laravel | Laravel migrations | PHP 8.3, Eloquent |
 | Node.js + NestJS | TypeORM | TypeScript, enterprise, mais opinionado |
 | Node.js + Express | Knex | TypeScript, minimalista |
-| **C++ + CMake + GoogleTest** | — | C++17 baseline (permitido 14/17/20/23); executable; Dockerfile multi-stage (gcc:13 → debian:bookworm-slim) |
+| **C++ + CMake + GoogleTest** | — | C++17 baseline (permitido 14/17/20/23); executable; Dockerfile multi-stage (gcc:13 → debian:bookworm-slim). Adicionado no MVP 16 como 9ª linguagem de codegen. |
 
 **Python fica em LLM-only** — o GCA não gera scaffold determinístico para Python. O ecossistema tem FastAPI, Django e Flask maduros, e template determinístico tem menos valor aí. O DDL (Alembic) é injetado mesmo em projetos Python.
+
+**Expansão futura:** novas linguagens (Rust, Swift, Scala, Cobol) e saídas no-code (workflows n8n, Bubble, Retool) entram no GCA via o mesmo padrão de scaffolder — cada adapter novo custa ~2-3d de desenvolvimento.
 
 ## Como o GCA escolhe o scaffolder
 

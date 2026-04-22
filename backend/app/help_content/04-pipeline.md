@@ -162,16 +162,43 @@ Detalhes em [cap. 8 — Codegen](?section=08-codegen).
 - QA revisa a execução no gate `qa:approve` que libera o Release Bundle.
 - Banner "Stale" aparece quando o OCG mudou depois da última geração do spec.
 
-## 10. Documentação Viva + Release Bundle
+## 10. Documentação Viva + ERS + Release Bundle
 
 - **Doc Viva** regenera a cada commit relevante do pipeline.
 - Consolidação geral por modelo premium; por módulo via modelo local.
 - Seção "Modelo de dados" embute o DDL gerado.
+- **ERS Vivo (IEEE 830)** — `docs/ERS.md` regenerado no repositório Git do projeto via `git_service` existente, em 4 seções canônicas:
+  1. **Introdução** — propósito, escopo, definições (glossário vivo).
+  2. **Descrição Geral** — perspectiva, funções, usuários, restrições.
+  3. **Requisitos Específicos** — RF / RNF / BR categorizados pelo GP.
+  4. **Matriz de Rastreabilidade** — cada requisito × test_spec × arquivo gerado + cobertura agregada.
+- **Glossário vivo** extrai termos candidatos do corpus (módulos + Arguidor + OCG profile) por 4 heurísticas regex determinísticas. GP aprova antes do termo entrar na seção 1.3 do ERS.
+- Histórico do ERS = `git log -p docs/ERS.md` (decisão canônica: zero snapshot em banco).
 - **Release Bundle** é um pacote markdown com:
   - Versão do OCG no momento do release.
   - Commits incluídos.
   - Artefatos: schema.sql, seed.sql, migrations.
   - Evidência de testes executados.
+
+## 11. Integrações externas (MVP 20)
+
+Quando o projeto tem integrações configuradas em `/settings` → aba "Integrações", eventos canônicos do pipeline disparam ações nas ferramentas externas do cliente — best-effort, nunca bloqueiam o fluxo principal.
+
+- **Aprovação de módulo** (`MODULE_APPROVED`):
+  - Cria issue automaticamente no tracker configurado (Jira ou Trello) com título `<PREFIX>-<short_id> — <nome>` (prefix RF/RNF/BR conforme `requirement_category`).
+  - Status do tracker sincroniza de volta via webhook assinado com HMAC + replay prevention.
+  - Notificação Slack opcional com link pro backlog do GCA.
+
+- **Regeneração do ERS** (`ERS_REGENERATED`):
+  - Notifica Slack com versão do OCG, SHA do commit e razões de stale (ex: "OCG v7 → v8, DOCUMENT_INGESTED").
+
+- **Finding de segurança crítico** (`SECURITY_FINDING_HIGH`):
+  - Dispara apenas em NOVO finding critical/high detectado pelo scanner configurado (Sonar/Snyk/gitleaks). Re-sync de finding existente NÃO re-notifica.
+  - Pilar P7 do OCG é recalculado determinísticamente a partir dos findings abertos: `100 - Σ (count × weight)`, clamp 0..100. Pesos: critical=25, high=10, medium=3, low=1.
+
+- **Modo link-only** disponível por projeto (regulado): mensagem Slack só tem link pro GCA, zero payload sensível trafega por terceiros.
+
+Detalhes de config, credenciais e whitelist de providers em [cap. 11 — Integrações Externas](?section=11-integracoes).
 
 ## Propagação de eventos
 
@@ -183,14 +210,16 @@ Eventos principais:
 - Questionário: submetido, aprovado, rejeitado.
 - Ingestão: documento ingerido, documento quarentenado.
 - Pipeline: Gatekeeper avaliou, Arguidor pergunta aberta, Arguidor resposta registrada.
-- OCG: atualizado, revertido (rollback), consolidado.
+- OCG: atualizado, revertido (`OCG_ROLLED_BACK`), consolidado (`OCG_CONSOLIDATED`).
 - Backlog: regenerado.
 - CodeGen: scaffold gerado, scaffold aplicado, arquivo regenerado, validação concluída.
 - QA: execução requisitada, execução concluída.
-- Doc Viva: atualizada.
+- Doc Viva / ERS: atualizada (`LIVEDOCS_UPDATED` com `doc_type=ers` quando é ERS).
+- Integrações externas (MVP 20): `EXTERNAL_ISSUE_CREATED` (módulo aprovado → issue no tracker), `EXTERNAL_ISSUE_STATUS_SYNCED` (webhook do tracker atualizou status canônico).
 
 ## Ver também
 
 - [OCG — Objeto de Contexto Global](?section=05-ocg) — fonte central do pipeline.
-- [Codegen](?section=08-codegen) — detalhes das 9 linguagens e DDL.
+- [Codegen](?section=08-codegen) — detalhes das 8 linguagens canônicas e DDL.
 - [Observabilidade](?section=09-observabilidade) — auditoria, saúde e métricas.
+- [Integrações Externas](?section=11-integracoes) — Jira, Trello, Sonar, Snyk, Slack.

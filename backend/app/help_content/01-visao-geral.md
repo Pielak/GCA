@@ -9,9 +9,10 @@ O **GCA** (Gestão de Codificação Assistida) conduz um projeto de TI do questi
 - **Aceita ingestão de documentos complementares** (PDF, DOCX, XLSX, imagens) com extração rica + quarentena automática de PII.
 - **Gera perguntas dirigidas** (Arguidor) quando detecta gaps ou conflitos no contexto, e usa as respostas para enriquecer o OCG.
 - **Deriva backlog e roadmap** automaticamente a partir do OCG.
-- **Gera código inicial (scaffold)** em 9 linguagens com DDL de banco incluído.
+- **Gera código inicial (scaffold)** em 8 linguagens canônicas com DDL de banco incluído.
 - **Produz planos de teste, executa, registra evidência**, com gate de aprovação pelo QA.
-- **Mantém documentação viva** que se atualiza a cada mudança relevante.
+- **Mantém documentação viva** que se atualiza a cada mudança relevante — inclui ERS IEEE 830 regenerado no Git do projeto (`docs/ERS.md`) com matriz de rastreabilidade e glossário vivo.
+- **Integra com ferramentas corporativas externas** (Jira/Trello pra tracker, Sonar/Snyk/gitleaks pra security, Slack pra notificação) via adapter pattern — GCA consome, não reimplementa.
 - **Registra tudo em auditoria encadeada** verificável.
 
 ## Fluxo ponta-a-ponta
@@ -29,11 +30,14 @@ Resposta do GP → OCG expande ou contrai
    ↓
 Backlog + Roadmap derivados automaticamente
    ↓
-CodeGen scaffold por linguagem (9 linguagens suportadas)
+CodeGen scaffold por linguagem (8 linguagens canônicas)
    ↓
 QA Readiness + Tester Review (gate qa:approve)
    ↓
-Documentação Viva + Release Bundle
+Documentação Viva + ERS IEEE 830 + Release Bundle
+   ↓
+Integrações externas: Jira/Trello issue automática ·
+Sonar/Snyk findings em P7 · Slack notifica eventos canônicos
 ```
 
 Detalhamento em [cap. 4 — Pipeline](?section=04-pipeline).
@@ -108,13 +112,38 @@ Detalhes dos papéis em [cap. 3 — RBAC](?section=03-rbac).
 | **DLQ** | Dead Letter Queue — fila de tarefas que falharam após todos os retries. |
 | **Prometheus** | Formato de métricas em texto; o GCA expõe em `/api/v1/metrics/prometheus` para integração com Grafana e similares. |
 
+### ERS, glossário e rastreabilidade (MVP 19)
+
+| Termo | Significado |
+|---|---|
+| **ERS** | Especificação de Requisitos de Software — documento IEEE 830-1998 regenerado automaticamente como `docs/ERS.md` no repositório Git do projeto. Versionamento nativo via `git log -p docs/ERS.md`. |
+| **IEEE 830** | Norma da IEEE para estrutura canônica de ERS em 4 seções: Introdução, Descrição Geral, Requisitos Específicos, Matriz de Rastreabilidade. O GCA segue a versão 1998. |
+| **BUSINESS_RULES** | Nova seção do OCG com regras de negócio do projeto (ex: "nota fiscal até 24h pós-venda"). Populada por agentes IA durante ingestão ou manualmente pelo GP. |
+| **requirement_category** | Classificação canônica de cada `module_candidate`: `functional` (RF), `non_functional` (RNF) ou `business_rule` (BR). Manual pelo GP — agentes não classificam em V1. |
+| **RF / RNF / BR** | Siglas canônicas para requisitos: Funcional, Não-Funcional, Regra de Negócio. Aparecem no ERS numerados (RF-001, RNF-014, BR-009). |
+| **Glossário vivo** | Termos específicos do projeto (siglas, produtos, entidades) extraídos automaticamente por 4 heurísticas regex do corpus já persistido (módulos + Arguidor + OCG profile). GP aprova ou rejeita antes do termo entrar no ERS. |
+| **Matriz de rastreabilidade** | Seção 4 do ERS cruzando cada requisito × test_spec × arquivo de código gerado. Query determinística sob demanda — sem view materializada. |
+
+### Integrações externas (MVP 20)
+
+| Termo | Significado |
+|---|---|
+| **Adapter-Port pattern** | Padrão arquitetural do MVP 20+: toda integração externa expõe uma porta ABC (`IssueTrackerPort`, `SecurityScannerPort`, `NotifierPort`) e adapters concretos implementam o contrato. GCA consome, não reimplementa. |
+| **IssueTrackerPort** | Porta canônica que define o contrato pra trackers (Jira, Trello, futuro Linear/Asana). 6 operações: create_issue, update_status, get_issue, add_comment, verify_webhook, parse_webhook. |
+| **SecurityScannerPort** | Porta canônica pra scanners (Sonar, Snyk, gitleaks). Duas operações: fetch_findings + normalize_severity. |
+| **NotifierPort** | Porta canônica pra canais de notificação (Slack, futuro MS Teams). Operação única: send. Uni-direcional em V1. |
+| **ExternalIssue** | Tabela que vincula módulos aprovados do GCA a issues no tracker externo configurado. UNIQUE (project_id, provider, external_id) garante idempotência de webhook. |
+| **SecurityFinding** | Tabela que guarda findings consumidos de scanners externos. Status canônico: `open` / `fixed` / `accepted_risk`. |
+| **Modo link-only** | Configuração por projeto (regulado BACEN/ANS) que faz o notifier Slack enviar só link pro GCA, sem payload sensível. |
+| **accepted_risk** | Status que um finding de segurança recebe quando GP marca formalmente como risco aceito (justificativa mínima 10 caracteres). Não conta no cálculo determinístico de P7. |
+
 ### Auditoria e segurança
 
 | Termo | Significado |
 |---|---|
 | **Hash chain SHA-256** | Cada evento de auditoria carrega o hash do evento anterior, criando uma cadeia verificável — qualquer alteração quebra a cadeia. |
-| **Audit log global** | Trilha canônica de todos os eventos críticos: aprovações, mudanças de papel, mudanças no OCG, geração de código, etc. |
-| **Vault** | Armazenamento criptografado de segredos (chaves de IA, tokens Git). Usa AES-GCM via Fernet. |
+| **Audit log global** | Trilha canônica de todos os eventos críticos: aprovações, mudanças de papel, mudanças no OCG, geração de código, EXTERNAL_ISSUE_CREATED, EXTERNAL_ISSUE_STATUS_SYNCED, LIVEDOCS_UPDATED (doc_type=ers), OCG_ROLLED_BACK, OCG_CONSOLIDATED. |
+| **Vault** | Armazenamento criptografado de segredos (chaves de IA, tokens Git, credenciais de integração). Usa pgcrypto (pgp_sym_encrypt/decrypt). |
 
 ## Capítulos deste help
 
@@ -125,6 +154,7 @@ Detalhes dos papéis em [cap. 3 — RBAC](?section=03-rbac).
 5. [OCG — Objeto de Contexto Global](?section=05-ocg) — a peça central do produto.
 6. [Área Administrativa](?section=06-admin) — tour do que Admin acessa.
 7. [Área de Gestão de Projeto](?section=07-gp) — tour do que GP acessa.
-8. [Codegen e linguagens suportadas](?section=08-codegen) — as 9 linguagens e o DDL generator.
+8. [Codegen e linguagens suportadas](?section=08-codegen) — as 8 linguagens e o DDL generator.
 9. [Observabilidade](?section=09-observabilidade) — saúde, métricas, auditoria, monitoramento.
 10. [Solução de problemas](?section=10-troubleshooting) — FAQs com diagnósticos práticos.
+11. [Integrações Externas](?section=11-integracoes) — Jira/Trello, Sonar/Snyk/gitleaks, Slack.

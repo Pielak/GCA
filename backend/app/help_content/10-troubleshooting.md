@@ -201,6 +201,63 @@ Erros comuns:
 - **Out of memory** — o build do GoogleTest via FetchContent consome memória. Docker Desktop com 2GB pode falhar; use 4GB+.
 - **Download do GoogleTest falhou** — rede bloqueada. Configure proxy no Docker ou use vcpkg offline (V2, ainda não suportado).
 
+## ERS Vivo (MVP 19)
+
+### Botão "Regenerar ERS" aparece desabilitado
+
+O projeto precisa ter **repositório Git conectado** em `/projects/:id/settings` → aba Repositório. O ERS é commitado como `docs/ERS.md` no repo do projeto via `git_service`; sem repo, não há destino possível.
+
+Diagnóstico: abrir a aba Repositório e conferir se o toggle "Repositório configurado" está verde. Se não, seguir o fluxo de conexão (GitHub/GitLab/Bitbucket com PAT).
+
+### ERS regenerado mas `docs/ERS.md` não apareceu no repo
+
+1. Confirme que o commit foi feito: `GET /api/v1/projects/:id/audit` filtrando por `event_type=LIVEDOCS_UPDATED` e `details.doc_type=ers`. O `details.commit_sha` deve estar preenchido.
+2. Se o commit_sha aparece mas o arquivo não: o PAT pode ter expirado entre testar a config e disparar o regen. Rote o token em `/settings` → Repositório e dispare novamente.
+
+### Seção 1.3 (Glossário) vazia no ERS regenerado
+
+O glossário tem aprovação obrigatória pelo GP (decisão canônica MVP 19). Termos extraídos automaticamente ficam em status `candidate` até o GP aprovar via `/projects/:id/docs` → aba Glossário. Se nada foi aprovado, a seção mostra placeholder "Nenhum termo aprovado ainda" — **não é bug**.
+
+## Integrações externas (MVP 20)
+
+### Webhook do Jira/Trello retorna `{"accepted": false, "reason": "invalid_signature_or_irrelevant"}`
+
+Duas causas possíveis:
+
+1. **Signing secret divergente** — o secret configurado no Jira/Trello tem que bater com o gravado no vault do projeto (`secret_key='jira:webhook_secret'` ou `trello:webhook_secret`). Rote o secret em ambos lados e reconfigure o webhook.
+2. **Evento irrelevante** — Jira dispara eventos como `jira:user_created` que o parser filtra silenciosamente. `jira:issue_created`, `issue_updated`, `issue_deleted` são os três relevantes. Trello: `createCard`, `updateCard`, `deleteCard`, `commentCard`.
+
+### Módulo aprovado mas nenhuma issue foi criada no Jira
+
+Fluxo é best-effort — a falha na criação **não** bloqueia a aprovação (decisão canônica). Verifique:
+
+1. `GET /projects/:id/integrations/issue-tracker` retorna `enabled=true`, `active_provider='jira'` e `has_credentials.jira.api_token=true`? Se não, falta config.
+2. Logs do backend: `docker logs gca-backend | grep integrations.issue_creation_failed`. O erro real aparece no `details.error`.
+3. Causa comum: `default_project_key` errado (ex: "PROJ-5" em vez de "PROJ"), ou o usuário do `api_token` não tem permissão de criar issue naquele projeto Jira.
+
+### P7 do OCG não recalcula mesmo com findings no Sonar
+
+Cenário esperado: P7 só consome findings reais **quando o scanner está configurado no projeto**. Sem config, o P7 mantém a heurística anterior (decisão #7 do contrato MVP 20).
+
+Se o scanner está configurado e ainda assim P7 parece estático:
+
+1. Confirme findings em `GET /projects/:id/security/findings` — se vazio, o sync ainda não rodou.
+2. Dispare sync manual via endpoint admin ou re-execute o scanner do cliente e reenvie os findings.
+3. Se findings aparecem mas P7 continua vindo do LLM, pode ser cache do OCG — recarregue a aba Gatekeeper.
+
+### Credencial de integração desaparece após reinício
+
+Credenciais vão pro vault encrypted via `pgcrypto`. O problema canônico é:
+
+- **GCA_MASTER_KEY mudou** entre runs — o `pgp_sym_decrypt` retorna vazio quando a master key é diferente da usada para encriptar. Solução: manter a master key em `.env` imutável; se precisar rotacionar, re-configurar todas as credenciais do vault em um único ciclo coordenado.
+
+### Notificação Slack não chega
+
+1. **`enabled=false`** — confira em `/settings` → Integrações → Slack.
+2. **Event não está em `opted_in_events`** — se a lista foi configurada explicitamente, só os eventos listados chegam. Lista vazia ou não configurada = opt-in em todos (default).
+3. **Modo `link_only_mode=true` ativo** — mensagem aparece mas sem payload de contexto. Se o time esperava ver os `fields` do Block Kit, desabilite o modo link-only (cliente não-regulado).
+4. **Webhook URL inválido / revogado** — Slack retorna 404 ou 400 não-retryable. Gere novo Incoming Webhook e atualize via `PUT /integrations/issue-tracker/credentials/slack/webhook_url`.
+
 ## Busca no help
 
 ### Busca retorna lista vazia
