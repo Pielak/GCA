@@ -1,5 +1,5 @@
 {
-  "version": "21.0",
+  "version": "21.1",
   "chapters": [
     { "id": "01-visao-geral", "title": "Visão geral & Glossário", "order": 1 },
     { "id": "02-instalacao", "title": "Instalação & primeiro setup", "order": 2 },

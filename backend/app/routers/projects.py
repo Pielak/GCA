@@ -235,7 +235,13 @@ async def list_project_members(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Lista membros ativos do projeto."""
+    """Lista membros ativos integrados do projeto.
+
+    Regra canônica (ver `is_active_integrated_member` em
+    `project_team_service.py`): `is_active AND joined_at IS NOT NULL`.
+    Convidados pendentes (com invite_token e sem joined_at) são
+    excluídos daqui — aparecem em `/pending-invites` separadamente.
+    """
     from app.models.base import Project, ProjectMember, User
     from sqlalchemy import select
 
@@ -244,7 +250,8 @@ async def list_project_members(
         .join(User, ProjectMember.user_id == User.id)
         .where(
             (ProjectMember.project_id == project_id) &
-            (ProjectMember.is_active == True)
+            (ProjectMember.is_active == True) &
+            (ProjectMember.joined_at != None)
         )
         .order_by(ProjectMember.invited_at.asc())
     )

@@ -218,6 +218,29 @@ Diagnóstico: abrir a aba Repositório e conferir se o toggle "Repositório conf
 
 O glossário tem aprovação obrigatória pelo GP (decisão canônica MVP 19). Termos extraídos automaticamente ficam em status `candidate` até o GP aprovar via `/projects/:id/docs` → aba Glossário. Se nada foi aprovado, a seção mostra placeholder "Nenhum termo aprovado ainda" — **não é bug**.
 
+## Gestão de equipe
+
+### Usuário convidado aparece como membro ativo mesmo sem aceitar convite
+
+Estado esperado no banco (ProjectMember):
+
+- **Convite pendente:** `is_active = true`, `invite_token IS NOT NULL`, `joined_at IS NULL`.
+- **Membro integrado:** `is_active = true`, `joined_at IS NOT NULL` (preenchido ao aceitar o convite ou, no caso de GP criado por aprovação direta de projeto, ao ser criado pelo `gp_management_service`).
+
+Regra canônica em `project_team_service.is_active_integrated_member()`: membro integrado exige `is_active AND joined_at IS NOT NULL`. O campo `accepted_at` sozinho não basta — o caminho de aprovação de projeto cria GP com `joined_at` preenchido mas `accepted_at NULL`.
+
+Se a tela de Equipe mostrar o mesmo usuário em **Convites Pendentes** e **Membros da Equipe** simultaneamente: era bug conhecido do endpoint `GET /projects/:id/members` que filtrava apenas `is_active=true` sem checar `joined_at`. Corrigido — endpoint agora alinha com a regra canônica.
+
+Como confirmar o estado real:
+
+```sql
+SELECT pm.is_active, pm.joined_at, pm.invited_at, pm.accepted_at, pm.invite_token IS NOT NULL AS tem_token
+FROM project_members pm
+JOIN users u ON u.id = pm.user_id
+WHERE u.email = 'pessoa@empresa.com'
+  AND pm.project_id = '...';
+```
+
 ## Integrações externas (MVP 20)
 
 ### Webhook do Jira/Trello retorna `{"accepted": false, "reason": "invalid_signature_or_irrelevant"}`
