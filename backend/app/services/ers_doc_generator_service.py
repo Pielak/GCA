@@ -652,6 +652,25 @@ async def generate_and_commit_ers(
         stale_count=len(stale_reasons_snapshot),
     )
 
+    # MVP 20 Fase 20.4 — dispara notificação Slack canônica best-effort.
+    try:
+        from app.services.notifier_service import send_event
+        await send_event(
+            db, project_id, "ERS_REGENERATED",
+            title="ERS regenerado",
+            fields=[
+                ("OCG v", str(ocg_version) if ocg_version is not None else "—"),
+                ("Commit", commit_sha[:8] if commit_sha else "?"),
+                ("Razões", _summarize_reasons(stale_reasons_snapshot) or "regen manual"),
+            ],
+            link_path=f"/projects/{project_id}/docs",
+            severity="info",
+        )
+    except Exception as exc:
+        logger.warning("notifier.ers_regenerated_failed",
+                        project_id=str(project_id),
+                        error=str(exc))
+
     return {
         "success": True,
         "commit_sha": commit_sha,

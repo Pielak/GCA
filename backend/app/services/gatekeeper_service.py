@@ -240,7 +240,37 @@ class GatekeeperService:
         # Best-effort: falha aqui NUNCA bloqueia a aprovação.
         await self._maybe_create_external_issue(project_id, module_id, approved_by)
 
+        # MVP 20 Fase 20.4 — dispara notificação Slack canônica.
+        # Best-effort: falha NUNCA bloqueia a aprovação.
+        await self._maybe_notify_module_approved(project_id, module)
+
         return {"success": True, "message": "Módulo aprovado."}
+
+    async def _maybe_notify_module_approved(
+        self, project_id: UUID, module,
+    ) -> None:
+        """Hook canônico de MODULE_APPROVED — best-effort."""
+        try:
+            from app.services.notifier_service import send_event
+            prefix = {
+                "functional": "RF", "non_functional": "RNF",
+                "business_rule": "BR",
+            }.get(module.requirement_category, "REQ")
+            await send_event(
+                self.db, project_id, "MODULE_APPROVED",
+                title=f"Módulo aprovado: {module.name}",
+                fields=[
+                    ("ID", f"{prefix}-{str(module.id)[:8]}"),
+                    ("Tipo", module.module_type),
+                    ("Prioridade", module.priority),
+                ],
+                link_path=f"/projects/{project_id}/backlog",
+                severity="success",
+            )
+        except Exception as exc:
+            logger.warning("notifier.module_approved_failed",
+                            project_id=str(project_id),
+                            error=str(exc))
 
     async def _maybe_create_external_issue(
         self, project_id: UUID, module_id: UUID, approved_by: UUID,

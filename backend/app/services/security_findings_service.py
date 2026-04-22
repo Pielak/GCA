@@ -122,6 +122,30 @@ async def _upsert_finding(
     )
     db.add(fresh)
     await db.flush()
+
+    # MVP 20 Fase 20.4 — notifica apenas finding NOVO de severidade alta
+    # (critical/high). Best-effort; duplicata em re-sync não re-notifica.
+    if fresh.status == "open" and payload.severity in ("critical", "high"):
+        try:
+            from app.services.notifier_service import send_event
+            await send_event(
+                db, project_id, "SECURITY_FINDING_HIGH",
+                title=f"Finding {payload.severity}: {payload.title[:80]}",
+                fields=[
+                    ("Severity", payload.severity),
+                    ("Scanner", source_scanner),
+                    ("CWE", payload.cwe_id or "—"),
+                    ("Arquivo", payload.file_path or "—"),
+                ],
+                link_path=f"/projects/{project_id}/gatekeeper",
+                severity="danger",
+            )
+        except Exception as exc:
+            logger.warning("notifier.security_finding_failed",
+                            project_id=str(project_id),
+                            external_id=payload.external_id,
+                            error=str(exc))
+
     return fresh
 
 

@@ -37,7 +37,7 @@ from app.services.help_service import (
 def test_load_toc_retorna_10_capitulos_canonicos():
     """toc.json canônico (criado em 18.2) tem 10 capítulos."""
     chapters = load_toc()
-    assert len(chapters) == 10
+    assert len(chapters) == 11
     # Primeiro = visão geral (order=1).
     assert chapters[0].id == "01-visao-geral"
     assert chapters[0].title == "Visão geral & Glossário"
@@ -203,7 +203,7 @@ async def test_endpoint_toc_retorna_capitulos():
     assert resp.status_code == 200
     body = resp.json()
     assert "chapters" in body
-    assert len(body["chapters"]) == 10
+    assert len(body["chapters"]) == 11
     assert body["chapters"][0]["id"] == "01-visao-geral"
 
 
