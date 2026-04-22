@@ -12,7 +12,7 @@ O **GCA** (Gestão de Codificação Assistida) conduz um projeto de TI do questi
 - **Gera código inicial (scaffold)** em 8 linguagens canônicas com DDL de banco incluído.
 - **Produz planos de teste, executa, registra evidência**, com gate de aprovação pelo QA.
 - **Mantém documentação viva** que se atualiza a cada mudança relevante — inclui ERS IEEE 830 regenerado no Git do projeto (`docs/ERS.md`) com matriz de rastreabilidade e glossário vivo.
-- **Integra com ferramentas corporativas externas** (Jira/Trello pra tracker, Sonar/Snyk/gitleaks pra security, Slack pra notificação) via adapter pattern — GCA consome, não reimplementa.
+- **Integra com ferramentas corporativas externas** (Jira/Trello pra tracker, Sonar/Snyk/gitleaks pra security, Slack + Microsoft Teams pra notificação) via adapter pattern — GCA consome, não reimplementa.
 - **Registra tudo em auditoria encadeada** verificável.
 
 ## Fluxo ponta-a-ponta
@@ -131,7 +131,7 @@ Detalhes dos papéis em [cap. 3 — RBAC](?section=03-rbac).
 | **Adapter-Port pattern** | Padrão arquitetural do MVP 20+: toda integração externa expõe uma porta ABC (`IssueTrackerPort`, `SecurityScannerPort`, `NotifierPort`) e adapters concretos implementam o contrato. GCA consome, não reimplementa. |
 | **IssueTrackerPort** | Porta canônica que define o contrato pra trackers (Jira, Trello, futuro Linear/Asana). 6 operações: create_issue, update_status, get_issue, add_comment, verify_webhook, parse_webhook. |
 | **SecurityScannerPort** | Porta canônica pra scanners (Sonar, Snyk, gitleaks). Duas operações: fetch_findings + normalize_severity. |
-| **NotifierPort** | Porta canônica pra canais de notificação (Slack, futuro MS Teams). Operação única: send. Uni-direcional em V1. |
+| **NotifierPort** | Porta canônica pra canais de notificação. Providers V1: Slack + Microsoft Teams. Operação única: send. Uni-direcional em V1. |
 | **ExternalIssue** | Tabela que vincula módulos aprovados do GCA a issues no tracker externo configurado. UNIQUE (project_id, provider, external_id) garante idempotência de webhook. |
 | **SecurityFinding** | Tabela que guarda findings consumidos de scanners externos. Status canônico: `open` / `fixed` / `accepted_risk`. |
 | **Modo link-only** | Configuração por projeto (regulado BACEN/ANS) que faz o notifier Slack enviar só link pro GCA, sem payload sensível. |
@@ -157,4 +157,5 @@ Detalhes dos papéis em [cap. 3 — RBAC](?section=03-rbac).
 8. [Codegen e linguagens suportadas](?section=08-codegen) — as 8 linguagens e o DDL generator.
 9. [Observabilidade](?section=09-observabilidade) — saúde, métricas, auditoria, monitoramento.
 10. [Solução de problemas](?section=10-troubleshooting) — FAQs com diagnósticos práticos.
-11. [Integrações Externas](?section=11-integracoes) — Jira/Trello, Sonar/Snyk/gitleaks, Slack.
+11. [Integrações Externas](?section=11-integracoes) — Jira/Trello, Sonar/Snyk/gitleaks, Slack/Teams.
+12. [Convites e primeiro acesso](?section=12-convites) — fluxos canônicos de convite (admin + projeto) com senha provisória.

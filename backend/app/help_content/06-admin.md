@@ -20,7 +20,7 @@ Visão consolidada da instância:
 Escopo: todos os usuários da instância (não só admins).
 
 - **Lista** com filtro por ativos/inativos/todos.
-- **Convidar Administrador** — envia convite por email com token de 5 dias.
+- **Convidar Administrador** — envia convite por email com senha provisória canônica RF-001 (10 caracteres, 1 maiúscula, 1 dígito, 1 especial); token expira em 7 dias. Fluxo completo detalhado no [Capítulo 12 — Convites](?section=12-convites). Diferença em relação ao convite de equipe: usuário **só é criado** após passar pelos 2 passos de validação (validar senha provisória → definir senha permanente); máximo 3 tentativas antes do token invalidar.
 - **Bloquear** e **desbloquear** usuário — respeita a regra dura de "não deixar o último Admin sem acesso".
 - **Excluir usuário** — mesma proteção.
 - **Promover/rebaixar Admin** — seta ou remove o flag `is_admin`.

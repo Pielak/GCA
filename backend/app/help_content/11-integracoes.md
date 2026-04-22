@@ -10,7 +10,7 @@ Três integrações canônicas estão disponíveis:
 |---|---|---|
 | **Issue Tracker** | Jira, Trello | Módulos aprovados viram issues automaticamente; status sincroniza via webhook |
 | **Security Scanner** | Sonar, Snyk, gitleaks | Findings reais alimentam o pilar P7 do OCG |
-| **Notifier** | Slack | Eventos do pipeline viram mensagem no canal do time |
+| **Notifier** | Slack · Microsoft Teams | Eventos do pipeline viram mensagem no canal do time |
 
 Todas as três são **opcionais** — o GCA funciona 100% sem elas. Quando
 configuradas, amplificam o valor sem mudar o fluxo canônico.
@@ -117,12 +117,13 @@ auditoria SHA-256. Admin co-assina em V2.
 
 ---
 
-## 3. Slack Notifier (uni-direcional)
+## 3. Notifier — Slack + Microsoft Teams (uni-direcional)
 
-### 3.1 Eventos canônicos
+Mesma porta canônica (`NotifierPort`), dois providers disponíveis em V1. GP escolhe qual usar por projeto — um projeto pode ter Slack enquanto outro tem Teams, sem interferência.
 
-O GCA envia mensagem ao canal configurado quando os seguintes eventos
-canônicos acontecem:
+### 3.1 Eventos canônicos (comum aos dois providers)
+
+O GCA envia mensagem ao canal configurado quando os seguintes eventos canônicos acontecem:
 
 | Evento | Quando dispara |
 |---|---|
@@ -133,25 +134,29 @@ canônicos acontecem:
 | `SECURITY_FINDING_HIGH` | Novo finding critical/high detectado |
 | `BACKUP_FAILED` | Backup automático falhou |
 
-### 3.2 Configurar
+### 3.2 Configurar Slack
 
-Na aba Integrações do projeto:
+Na aba **Integrações** de `/projects/:id/settings`, painel **Notificações**:
 
-- **Webhook URL**: gere em https://api.slack.com/apps → novo app → Incoming
-  Webhooks → escolher canal destino
-- **Canal** (opcional, só pra exibição): `#gca-events` ou similar
-- **Eventos opt-in** (opcional): lista de eventos que o time quer receber.
-  Sem configurar = recebe todos.
-- **Modo link-only** (regulado): quando ativo, mensagem só tem link pro
-  GCA; zero payload sensível trafega por Slack. Use em cliente BACEN, ANS,
-  órgão público que não permite dado sensível em terceiros.
+- **Webhook URL**: gere em https://api.slack.com/apps → novo app → Incoming Webhooks → escolher canal destino. Formato: `https://hooks.slack.com/services/T.../B.../xxx`.
+- **Canal** (opcional, só pra exibição): `#gca-events` ou similar.
+- **Eventos opt-in** (opcional): lista de eventos que o time quer receber. Sem configurar = recebe todos.
+- **Modo link-only** (regulado): quando ativo, mensagem só tem link pro GCA; zero payload sensível trafega por Slack. Use em cliente BACEN, ANS, órgão público que não permite dado sensível em terceiros.
 
-### 3.3 Uni-direcional em V1
+Formato Slack: **Block Kit** canônico com header + context (projeto + timestamp) + section fields + botão "Abrir no GCA". Severity mapeia para cor nativa Slack (info=azul, success=verde, warning=amarelo, danger=vermelho).
 
-Nesta versão mensagens **vão** do GCA pro Slack; reações/botões no Slack
-**não voltam** pro GCA. ChatOps bi-direcional (aprovar módulo com emoji)
-fica como roadmap futuro — exige SSO corporativo e revisão de superfície
-de ataque.
+### 3.3 Configurar Microsoft Teams
+
+Mesmo painel, provider = **Teams**. URL de webhook pode vir de 2 caminhos:
+
+- **Power Automate** (recomendado, 2025+): novo fluxo "Post to a channel when a webhook request is received" → copiar URL do trigger. Substituto canônico do Office 365 Connector que foi descontinuado em dez/2024.
+- **Office 365 Connector legado**: ainda funciona em tenants que não migraram, mas é descontinuado; planeje migração.
+
+Mesmo conjunto de campos do Slack (canal/eventos/link-only). Formato Teams: **Adaptive Card v1.4** com TextBlock header + FactSet + Action.OpenUrl. Severity mapeia para Adaptive Card color (info=default, success=good, warning=warning, danger=attention).
+
+### 3.4 Uni-direcional em V1
+
+Para ambos os providers: mensagens **vão** do GCA pro canal; reações/botões/`@gca` **não voltam** pro GCA. ChatOps bi-direcional (aprovar módulo com emoji ou botão de Adaptive Card) fica como roadmap futuro — exige SSO corporativo + validação do uso uni-direcional em cliente pagante + ADR de segurança pros endpoints públicos que receberiam comando de fora.
 
 ---
 
@@ -169,8 +174,8 @@ GCA via adapter.
 
 ## 5. Novas integrações sob demanda
 
-Linear, Asana, GitHub Issues, Monday, ClickUp, Microsoft Teams,
-Mattermost, Discord — **todos cabem** no padrão adapter canônico do GCA.
-Custo estimado por novo adapter: ~1.5-2 dias de desenvolvimento.
+Linear, Asana, GitHub Issues, Monday, ClickUp, Mattermost, Rocket.Chat,
+Discord — **todos cabem** no padrão adapter canônico do GCA. Custo
+estimado por novo adapter: ~1.5-2 dias de desenvolvimento.
 
 Entre em contato para discutir integração específica do seu stack.

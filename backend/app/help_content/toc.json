@@ -1,5 +1,5 @@
 {
-  "version": "21.1",
+  "version": "21.2",
   "chapters": [
     { "id": "01-visao-geral", "title": "Visão geral & Glossário", "order": 1 },
     { "id": "02-instalacao", "title": "Instalação & primeiro setup", "order": 2 },
@@ -11,6 +11,7 @@
     { "id": "08-codegen", "title": "Codegen e linguagens suportadas", "order": 8 },
     { "id": "09-observabilidade", "title": "Observabilidade", "order": 9 },
     { "id": "10-troubleshooting", "title": "Solução de problemas", "order": 10 },
-    { "id": "11-integracoes", "title": "Integrações Externas (Jira, Trello, Sonar, Snyk, Slack)", "order": 11 }
+    { "id": "11-integracoes", "title": "Integrações Externas (Jira, Trello, Sonar, Snyk, Slack, Teams)", "order": 11 },
+    { "id": "12-convites", "title": "Convites e primeiro acesso", "order": 12 }
   ]
 }
