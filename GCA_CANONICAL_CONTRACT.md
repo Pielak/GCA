@@ -1160,6 +1160,66 @@ Implementação canônica: serviço `ers_freshness_tracker` mantém, por projeto
 
 ---
 
+### MVP 21 — Ajuda refresh (sincroniza conteúdo com MVPs 14-20)
+
+**Motivação:** MVP 18 entregou a infraestrutura de Ajuda (capítulos + FTS5 + renderer) em 2026-04-21. Desde então MVP 19 (ERS Vivo IEEE 830 + glossário + matriz) e MVP 20 (3 integrações externas + hooks + P7 determinístico) entregaram features visíveis ao GP que **não aparecem** na Ajuda. Stakeholder sinalizou: conteúdo desatualizado é produto desatualizado; comprador percebe e perde confiança.
+
+**Escopo autorizado:** 3 fases sequenciais em conteúdo (zero código novo). Execução de cada fase exige revalidação.
+
+**Não entra no MVP 21 (explícito):**
+- Vídeos / capturas animadas — requer gravação manual
+- Tradução EN — parked desde MVP 18
+- Casos por vertical (fintech, legaltech, healthtech) — MVP 22 potencial
+- Editor inline de Ajuda — parked
+- Novos capítulos temáticos além do refresh dos existentes
+
+#### Decisões binárias travadas
+
+1. Screenshots reaproveitados do `docs/screenshots/` existente (7 imagens já capturadas no MVP 20). **Sem** novas capturas.
+2. Sem mudança estrutural do `toc.json` além do bump de versão (v20.4 → v21.0). Ordem dos capítulos preservada.
+3. Alteração em `test_mvp18_fase182_help.py` permitida apenas em assertions que não refletem mais o conteúdo (count de chapters já ajustado na 20.4; só linha de "primeiro chapter id" pode aparecer se a UI mudar ordem).
+4. Capítulo 11 (Integrações) **não** sofre refresh — foi entregue novo na 20.4 e está atualizado.
+
+#### Em escopo — 3 fases sequenciais
+
+**Fase 21.1 — Saneamento de capítulos técnicos (~3-4h)**
+- `01-visao-geral.md`: adiciona glossário de termos do MVP 19+20 (OCG delta, BUSINESS_RULES, requirement_category, ExternalIssue, SecurityFinding, IssueTrackerPort, SecurityScannerPort, NotifierPort, matriz de rastreabilidade, glossário vivo).
+- `04-pipeline.md`: documenta hooks canônicos de eventos (MODULE_APPROVED → Slack; ERS_REGENERATED; SECURITY_FINDING_HIGH) e fluxo "approve → issue Jira → status sync webhook".
+- `05-ocg.md`: adiciona seção `BUSINESS_RULES`; documenta `requirement_category` em module_candidates (whitelist functional/non_functional/business_rule); documenta fórmula determinística de P7 quando scanner configurado.
+- `08-codegen.md`: confirma 8 linguagens canônicas (Python, Node Express, Node NestJS, Java Spring, Java Quarkus, Kotlin Spring, C# ASP.NET, Go, PHP Laravel, C++ CMake) com matriz de scaffolder.
+- `09-observabilidade.md`: adiciona eventos canônicos novos de audit: EXTERNAL_ISSUE_CREATED, EXTERNAL_ISSUE_STATUS_SYNCED, LIVEDOCS_UPDATED (doc_type=ers), OCG_ROLLED_BACK, OCG_CONSOLIDATED.
+- `10-troubleshooting.md`: adiciona 4-5 entradas: ERS sem repo conectado, webhook signature inválida, credencial de integração faltando no vault, P7 não recalcula (scanner não configurado), Slack notification não chegou (opted_in_events/link_only).
+
+**Fase 21.2 — Capítulo 07 (GP) expandido (~3-4h)**
+- Nova sub-seção "Documentação Viva" dentro do 07 documentando 3 abas: LiveDocs, ERS Vivo, Glossário do Projeto, Rastreabilidade.
+- Nova sub-seção "Integrações" dentro do 07 apontando pro capítulo 11 + quando usar.
+- Nova sub-seção "Métricas" (custo de IA) + "Backups" (automático diário + manual + rollback) — reaproveitando as imagens do `docs/screenshots/metricas.png` e `backup.png`.
+- Pequeno update na sub-seção "Aprovação de módulo" citando que integração de tracker cria issue automaticamente quando configurada.
+
+**Fase 21.3 — Screenshots + release + smoke (~2-3h)**
+- Referências `![](/images/help/X.png)` nos capítulos relevantes usando os 7 screenshots já em `docs/screenshots/`.
+- `toc.json` versão → "21.0".
+- Smoke live em `/help` (admin e projeto) confirmando que capítulos renderizam e busca encontra termos novos (ex: "BUSINESS_RULES", "P7 findings", "issue tracker").
+- Release note no `GCA_MVP_PROGRESS.md`.
+
+#### Regras duras
+
+- Zero código novo — apenas conteúdo markdown + `toc.json` + ajustes de testes de help.
+- Stop-rule >1d por fase.
+- §10 aplicável: nenhuma refatoração de `help_service.py`, `help_router.py` ou renderer frontend.
+- Sem LLM no caminho crítico — conteúdo escrito deterministicamente a partir do contrato canônico + código existente.
+- RBAC imutável.
+- Busca FTS5 deve continuar encontrando termos canônicos novos após rebuild automático por mtime (MVP 18 Fase 18.4 — sem ação extra).
+
+#### Baseline de entrada
+
+- Suite backend: **245 passing** (68 MVP 19 + 157 MVP 20 + 20 MVP 18).
+- Frontend tsc: 0 errors.
+- DTs abertas: 0.
+- MVP 20 fechado (`494db2f`).
+
+---
+
 ### MVP 20 — Integrações externas do ecossistema corporativo (Issue Tracker + Security Scanners + Slack Notifier)
 
 **Motivação:** hoje o GCA é uma ilha em relação ao ecossistema corporativo do cliente. Três dores concretas bloqueiam adoção em mid-market e enterprise:
