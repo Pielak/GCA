@@ -22,6 +22,12 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
+from app.services.rnf_contracts import (
+    RnfContracts,
+    contract_as_prompt_block,
+    from_ocg_dict,
+)
+
 
 # ─── Blocos compartilhados ────────────────────────────────────────────
 
@@ -93,6 +99,277 @@ def _ocg_context_block(
     return "\n\n".join(parts)
 
 
+# ─── MVP 23 Fase 23.3 — RNF stack-aware ──────────────────────────────
+
+
+def _detect_stack_key(stack: Mapping[str, Any] | None) -> str:
+    """Resolve a linguagem/framework canônico pra escolher dicas RNF.
+
+    Retorna valores canônicos: 'python', 'node_express', 'node_nestjs',
+    'java_spring', 'java_quarkus', 'kotlin_spring', 'csharp', 'go',
+    'php', 'cpp', 'generic'. Fallback 'generic' quando não conseguir
+    detectar.
+    """
+    if not stack or not isinstance(stack, Mapping):
+        return "generic"
+    backend = stack.get("backend") or {}
+    if not isinstance(backend, Mapping):
+        return "generic"
+    lang = str(backend.get("language", "")).lower()
+    framework = str(backend.get("framework", "")).lower()
+    if "python" in lang:
+        return "python"
+    if "node" in lang or "typescript" in lang or "javascript" in lang:
+        if "nest" in framework:
+            return "node_nestjs"
+        return "node_express"
+    if "kotlin" in lang:
+        return "kotlin_spring"
+    if "java" in lang:
+        if "quarkus" in framework:
+            return "java_quarkus"
+        return "java_spring"
+    if "c#" in lang or ".net" in lang or "dotnet" in lang or "csharp" in lang:
+        return "csharp"
+    if "go" == lang.strip() or "golang" in lang:
+        return "go"
+    if "php" in lang:
+        return "php"
+    if "c++" in lang or "cpp" in lang:
+        return "cpp"
+    return "generic"
+
+
+# Dicas canônicas de implementação por stack × controle.
+# Cada chave do dict externo é um stack_key; cada chave interno é um
+# controle canônico (rate_limit, sqli, hardcoded_secrets, pii_logging).
+_STACK_HINTS: dict[str, dict[str, str]] = {
+    "python": {
+        "rate_limit": (
+            "Use `slowapi` (FastAPI) ou `flask-limiter` (Flask). "
+            "Exemplo FastAPI: `from slowapi import Limiter; "
+            "@limiter.limit(\"60/minute\")` no endpoint."
+        ),
+        "sqli": (
+            "Use SQLAlchemy ORM com parâmetros nomeados (`text('SELECT :id')`) "
+            "ou Core `select()`. NUNCA concatene string em query."
+        ),
+        "hardcoded_secrets": (
+            "Leia via `app.core.config.settings` (pydantic-settings) ou "
+            "`os.environ`. NUNCA hardcode chave no código."
+        ),
+        "pii_logging": (
+            "`structlog` já mascara por default se configurado. "
+            "Nunca inclua senha/token/CPF em `logger.info/debug`. "
+            "Use `logger.bind(masked_field='...')` quando necessário."
+        ),
+    },
+    "node_express": {
+        "rate_limit": (
+            "Use `express-rate-limit`: "
+            "`app.use(rateLimit({ windowMs: 60000, max: 60 }))`."
+        ),
+        "sqli": (
+            "Use Knex ou query parameterizada — ex: "
+            "`db.raw('SELECT * FROM x WHERE id = ?', [id])`. "
+            "Nunca template literal com user input em SQL."
+        ),
+        "hardcoded_secrets": (
+            "Leia via `process.env.X` ou lib `dotenv`. NUNCA hardcode."
+        ),
+        "pii_logging": "Use logger estruturado (pino/winston) com redaction.",
+    },
+    "node_nestjs": {
+        "rate_limit": (
+            "Use `@nestjs/throttler`: "
+            "`@UseGuards(ThrottlerGuard)` + `@Throttle(60, 60)`."
+        ),
+        "sqli": (
+            "Use TypeORM QueryBuilder com `.setParameter()` ou ORM repositories. "
+            "Nunca concatene SQL."
+        ),
+        "hardcoded_secrets": (
+            "Use `@nestjs/config` com `ConfigService`. Nunca hardcode."
+        ),
+        "pii_logging": "Logger Nest com contexto estruturado; redact de PII.",
+    },
+    "java_spring": {
+        "rate_limit": (
+            "Use `@RateLimiter(name = \"default\")` de `resilience4j` "
+            "OU filter Bucket4j."
+        ),
+        "sqli": (
+            "Use Spring Data JPA / Hibernate (queries derivadas ou "
+            "`@Query` com `:param`). NUNCA concatene string em JPQL."
+        ),
+        "hardcoded_secrets": (
+            "Use `@Value(\"${app.secret}\")` + Spring Boot profiles. "
+            "Nunca hardcode."
+        ),
+        "pii_logging": (
+            "Logback com MDC; nunca logar password/token diretamente."
+        ),
+    },
+    "java_quarkus": {
+        "rate_limit": (
+            "Use `io.smallrye.faulttolerance.api.RateLimit` ou extensão "
+            "`quarkus-smallrye-rate-limit`."
+        ),
+        "sqli": (
+            "Use Panache com métodos nomeados ou `Query.setParameter()`. "
+            "Nunca concatene string em JPQL/SQL nativo."
+        ),
+        "hardcoded_secrets": (
+            "Use `@ConfigProperty(name = \"app.secret\")` + arquivo "
+            "`application.properties`. Nunca hardcode."
+        ),
+        "pii_logging": "JBoss Logging com MDC; redact de PII.",
+    },
+    "kotlin_spring": {
+        "rate_limit": "Use `resilience4j-spring-boot` com `@RateLimiter`.",
+        "sqli": "Use Spring Data JPA / Exposed DSL. Nunca concatene SQL.",
+        "hardcoded_secrets": "Use `@Value(\"\\${app.secret}\")`.",
+        "pii_logging": "Logback com MDC.",
+    },
+    "csharp": {
+        "rate_limit": (
+            "Use `Microsoft.AspNetCore.RateLimiting` (fixed window): "
+            "`services.AddRateLimiter(o => o.AddFixedWindowLimiter(...))`."
+        ),
+        "sqli": (
+            "Use Entity Framework Core com LINQ; para SQL raw, use "
+            "`FromSqlInterpolated($\"\")` (parametriza automaticamente)."
+        ),
+        "hardcoded_secrets": (
+            "Use `IConfiguration` + `appsettings.json` + User Secrets / "
+            "Azure Key Vault. Nunca hardcode."
+        ),
+        "pii_logging": "Use Serilog com filtros de PII.",
+    },
+    "go": {
+        "rate_limit": (
+            "Use `golang.org/x/time/rate` com `rate.NewLimiter(rate.Limit(1), 60)` "
+            "ou middleware `didip/tollbooth`."
+        ),
+        "sqli": (
+            "Use `database/sql` com `?` placeholders ou sqlx "
+            "NamedQuery — ex: `db.Exec(\"SELECT * FROM x WHERE id = $1\", id)`."
+        ),
+        "hardcoded_secrets": (
+            "Use `os.Getenv(\"X\")` ou lib `viper`. Nunca hardcode."
+        ),
+        "pii_logging": "Zerolog/zap com redact de campos sensíveis.",
+    },
+    "php": {
+        "rate_limit": (
+            "Laravel: middleware `throttle:60,1`. "
+            "Puro PHP: lib `symfony/rate-limiter`."
+        ),
+        "sqli": (
+            "Use Eloquent ORM ou prepared statements via PDO: "
+            "`$stmt->bindValue(':id', $id)`. Nunca concatene SQL."
+        ),
+        "hardcoded_secrets": (
+            "Use `env('APP_SECRET')` + arquivo `.env`. Nunca hardcode."
+        ),
+        "pii_logging": "Monolog com processors de redact.",
+    },
+    "cpp": {
+        "rate_limit": (
+            "Depende do framework HTTP (Crow, Pistache); use middleware "
+            "custom com `std::chrono` + token bucket."
+        ),
+        "sqli": (
+            "Use prepared statements da lib do DB (libpq `PQexecParams`, "
+            "MySQL C API `mysql_stmt_bind_param`). NUNCA concatene."
+        ),
+        "hardcoded_secrets": (
+            "Leia de env var ou arquivo de config parametrizado. Nunca hardcode."
+        ),
+        "pii_logging": "spdlog com filtros custom.",
+    },
+}
+
+
+def _rnf_stack_hints_block(
+    stack: Mapping[str, Any] | None,
+    rnf: RnfContracts,
+) -> str:
+    """Bloco canônico com dicas de implementação por stack.
+
+    Só emite dicas para controles que o contrato realmente exige
+    (ex: se rate_limit_rpm_public é None, não emite dica de rate limit).
+    Retorna string vazia quando não há dica aplicável.
+    """
+    stack_key = _detect_stack_key(stack)
+    hints = _STACK_HINTS.get(stack_key, {})
+    if not hints:
+        return ""
+
+    applicable: list[tuple[str, str]] = []
+    s = rnf.security
+
+    if s.rate_limit_rpm_public is not None or s.rate_limit_rpm_authenticated is not None:
+        if "rate_limit" in hints:
+            applicable.append(("Rate limiting", hints["rate_limit"]))
+
+    for cwe in s.required_cwe_protections:
+        cwe_norm = cwe.upper().replace("CWE-", "")
+        if cwe_norm == "89" and "sqli" in hints:
+            applicable.append((f"CWE-89 (SQL injection)", hints["sqli"]))
+        elif cwe_norm == "798" and "hardcoded_secrets" in hints:
+            applicable.append((f"CWE-798 (credenciais hardcoded)", hints["hardcoded_secrets"]))
+
+    if s.sensitive_data_categories and "pii_logging" in hints:
+        applicable.append((
+            f"Dados sensíveis ({', '.join(s.sensitive_data_categories)})",
+            hints["pii_logging"],
+        ))
+
+    if not applicable:
+        return ""
+
+    stack_label = {
+        "python": "Python",
+        "node_express": "Node.js + Express",
+        "node_nestjs": "Node.js + NestJS",
+        "java_spring": "Java + Spring Boot",
+        "java_quarkus": "Java + Quarkus",
+        "kotlin_spring": "Kotlin + Spring",
+        "csharp": "C# / ASP.NET",
+        "go": "Go",
+        "php": "PHP / Laravel",
+        "cpp": "C++",
+        "generic": "stack genérica",
+    }.get(stack_key, stack_key)
+
+    lines = [f"## Implementação recomendada ({stack_label})"]
+    for label, hint in applicable:
+        lines.append(f"- **{label}**: {hint}")
+    return "\n".join(lines)
+
+
+def _rnf_full_block(
+    rnf_contracts_raw: Any,
+    stack: Mapping[str, Any] | None,
+) -> str:
+    """Compõe o bloco completo de RNF_CONTRACTS para o prompt do codegen.
+
+    Chamado pelos builders. Retorna string vazia quando não há contrato
+    declarado — caller não injeta bloco.
+    """
+    if rnf_contracts_raw is None or rnf_contracts_raw == {}:
+        return ""
+    rnf = from_ocg_dict(rnf_contracts_raw)
+    if rnf.is_empty:
+        return ""
+    main_block = contract_as_prompt_block(rnf)
+    stack_hints = _rnf_stack_hints_block(stack, rnf)
+    if stack_hints:
+        return f"{main_block}\n\n{stack_hints}"
+    return main_block
+
+
 # ─── Scaffold (multi-arquivo) ─────────────────────────────────────────
 
 
@@ -111,10 +388,15 @@ def build_scaffold_prompt(
     critical_findings: Sequence[Any] | None,
     compliance: Sequence[Any] | None,
     ingested_docs_context: str = "",
+    rnf_contracts: Any | None = None,
 ) -> str:
     """Prompt canônico para `POST /scaffold`.
 
-    Equivalente ao prompt in-line anterior (code_generation.py:486-569).
+    MVP 23 Fase 23.3: aceita `rnf_contracts` (dict vindo de
+    `OCGResponse.RNF_CONTRACTS`). Quando presente, injeta bloco
+    estruturado de contratos + dicas de implementação por stack.
+    Caller pode passar None quando OCG não tem RNF ou V1 ainda não
+    migrou — bloco é omitido silenciosamente.
     """
     modules_block = _fmt_json(modules, fallback="Nenhum módulo identificado no OCG")
     arguider_modules_block = _fmt_json(list(arguider_modules)[:10] if arguider_modules else None, fallback="")
@@ -122,6 +404,8 @@ def build_scaffold_prompt(
     gaps_block = _fmt_json(list(arguider_gaps)[:10] if arguider_gaps else None, fallback="Nenhum gap identificado")
     findings_block = _fmt_json(list(critical_findings)[:5] if critical_findings else None, fallback="Nenhum")
     compliance_block = _fmt_json(list(compliance)[:5] if compliance else None, fallback="Não definido")
+    rnf_block = _rnf_full_block(rnf_contracts, stack)
+    rnf_section = f"\n\n{rnf_block}\n" if rnf_block else ""
 
     return f"""{_HEADER_SCAFFOLD}
 
@@ -146,7 +430,7 @@ def build_scaffold_prompt(
 
 ## Compliance
 {compliance_block}
-
+{rnf_section}
 ## Documentos Ingeridos
 {ingested_docs_context if ingested_docs_context else 'Nenhum documento ingerido'}
 
@@ -207,10 +491,12 @@ def build_regenerate_file_prompt(
     path: str,
     instruction: str | None,
     current_content: str | None,
+    rnf_contracts: Any | None = None,
 ) -> str:
     """Prompt canônico para `POST /regenerate-file`.
 
-    Equivalente ao prompt in-line anterior (code_generation.py:1263-1296).
+    MVP 23 Fase 23.3: aceita `rnf_contracts` opcional. Quando presente,
+    injeta bloco canônico + dicas de stack logo após o contexto do OCG.
     """
     extra = instruction or "Reescreva completamente o arquivo mantendo o propósito detectado pelo path."
     current_block = (
@@ -218,6 +504,8 @@ def build_regenerate_file_prompt(
         if current_content
         else ""
     )
+    rnf_block = _rnf_full_block(rnf_contracts, stack)
+    rnf_section = f"\n\n{rnf_block}\n" if rnf_block else ""
 
     return f"""{_HEADER_REGENERATE}
 
@@ -226,7 +514,7 @@ def build_regenerate_file_prompt(
 {_project_block(project_name, slug=None, description=project_description)}
 
 {_ocg_context_block(stack, architecture, compact=True)}
-
+{rnf_section}
 ## Arquivo a gerar
 Caminho: `{path}`
 

@@ -485,6 +485,9 @@ async def generate_scaffold(
 
     # MVP 12 Fase 12.9 — prompt consolidado via builder canônico.
     from app.services.codegen_prompt_builder import build_scaffold_prompt
+    # MVP 23 Fase 23.3 — contratos RNF do OCG entram como contrato obrigatório
+    # no prompt; stack-aware hints guiam implementação por linguagem/framework.
+    rnf_contracts = ocg_data.get("RNF_CONTRACTS")
     prompt = build_scaffold_prompt(
         project_name=project.name,
         project_slug=project.slug,
@@ -499,6 +502,7 @@ async def generate_scaffold(
         critical_findings=critical_findings,
         compliance=compliance,
         ingested_docs_context=doc_context,
+        rnf_contracts=rnf_contracts,
     )
 
     # 5. Chamar LLM
@@ -1203,6 +1207,9 @@ async def regenerate_single_file(
     ocg_data = await _load_ocg_context(db, project_id)
     stack = ocg_data.get("STACK_RECOMMENDATION", {})
     architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
+    # MVP 23 Fase 23.3 — RNF injetado também em regenerate-file
+    # (refactor consciente preserva contratos quando arquivo é rescrito).
+    rnf_contracts = ocg_data.get("RNF_CONTRACTS")
 
     # MVP 12 Fase 12.9 — prompt consolidado via builder canônico.
     from app.services.codegen_prompt_builder import build_regenerate_file_prompt
@@ -1214,6 +1221,7 @@ async def regenerate_single_file(
         path=request.path,
         instruction=request.instructions,
         current_content=request.current_content,
+        rnf_contracts=rnf_contracts,
     )
 
     api_key = app_settings.ANTHROPIC_API_KEY
