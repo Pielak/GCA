@@ -585,6 +585,73 @@ Implementação canônica: serviço `ers_freshness_tracker` mantém, por projeto
 
 ---
 
+### MVP 23 — RNF_CONTRACTS no OCG + CodeGen contract-aware
+
+**Motivação:** hoje P2 (compliance), P4 (performance) e P7 (segurança) ficam no OCG como texto livre e achados de pilar — o CodeGen lê o OCG mas **não tem contratos estruturados** que obrigatoriamente entram no prompt e na validação. Resultado: RNFs viram tickets separados ("adicione rate limit", "parametrize query") em vez de sair no código gerado de primeira.
+
+**Tese:** RNFs estruturados como contrato no OCG → consumidos no prompt de codegen → validados estaticamente pós-geração → testados via test specs. Fecha o elo `requisito não-funcional → código que atende`.
+
+**Escopo autorizado:** 6 fases sequenciais (~6-7d nominais, ~4-5d com pair programming). Execução em bloco autorizada com abertura (padrão MVP 17/22).
+
+**6 decisões binárias travadas:**
+
+1. `RNF_CONTRACTS` é **seção nova do OCG**, não campo livre em `STACK_RECOMMENDATION`.
+2. Todos os campos aceitam **null** — OCGs pré-23 seguem funcionando (fallback determinístico).
+3. Validação pós-geração é **estática em V1** (grep estruturado por middleware/decorator presente). Validação semântica via LLM fica em MVP futuro.
+4. `enforcement: "runtime"|"static"|"both"` é metadata canônica — determina se vira middleware em runtime ou check de lint/SAST.
+5. Arguidor **só pergunta RNF quando faltar**; GP pode preencher direto via endpoint PUT sem passar pelo Arguidor.
+6. UI rica (aba "Contratos RNF") fica pra Fase 23.5; V1 funcional até lá via endpoint PUT + JSON editável.
+
+**Não entra no MVP 23 (explícito):**
+- ❌ Validação semântica via LLM ("este código realmente mitiga CWE-89?") → MVP 25+
+- ❌ Geração de perfis de carga (Locust, k6) → sob demanda
+- ❌ Integração com APM (Datadog, New Relic, Sentry) → MVP 26+
+- ❌ Reescrita retroativa de módulos existentes → só aplica a novos ou regenerados
+
+**6 fases canônicas:**
+
+**Fase 23.1 — Schema `RNF_CONTRACTS` no OCG + migration** (~1d)
+- Nova sub-seção em `OCGResponse` com 4 blocos: `performance`, `security`, `compliance`, `availability`.
+- Default `{}`; fallback zero-impact em OCGs antigos.
+- Migration (se schema SQL precisar coluna dedicada) OU apenas campo JSON do `OCGResponse` (preferível — segue padrão BUSINESS_RULES).
+- Testes: schema aceita None, dict vazio, dict parcial, dict completo; OCG pré-23 desserializa sem quebra.
+
+**Fase 23.2 — Arguidor dirigido** (~1d)
+- Template canônico de perguntas dispara quando `RNF_CONTRACTS` vazio + módulo crítico em fila.
+- Perguntas canônicas: SLA latência P95, rate limits público/autenticado, CWEs obrigatórios, regulações (LGPD/GDPR), disponibilidade.
+- Resposta alimenta `RNF_CONTRACTS` via `ocg_updater`.
+
+**Fase 23.3 — `codegen_prompt_builder` consome RNF** (~1.5d)
+- Prompt de codegen injeta bloco estruturado: *"este módulo DEVE atender latency_p95 ≤ X, rate_limit Y, CWE-89 via ORM, CWE-798 via vault"*.
+- Stack-aware: Python/FastAPI → `slowapi`; Node/Express → `express-rate-limit`; Java/Spring → `@RateLimiter(name)`.
+- Docstring do código gerado documenta qual contrato RNF está atendendo (rastreabilidade inline).
+
+**Fase 23.4 — Test spec + validação estática** (~1.5d)
+- `test_spec_generator` inclui cenários RNF: asserções de latency, testes de rate limit (expected 429), regressão de segurança por CWE declarado.
+- `code_validation_service` novo check: grep estruturado verifica middleware/decorator declarado no contrato está presente.
+- Falha → status `rnf_contract_violation` no `CodeGenAudit`.
+
+**Fase 23.5 — UI GP edita `RNF_CONTRACTS`** (~1d)
+- Aba "Contratos RNF" em `/projects/:id/ocg` (ou painel novo no backlog).
+- JSON schema validado via Pydantic; GP edita, salva, sistema re-trigger codegen dos módulos afetados.
+
+**Fase 23.6 — Dogfood + Ajuda + release** (~0.5d)
+- Smoke live em projeto dogfood.
+- Novo capítulo na Ajuda (provável cap 13) ou expansão em cap 05 OCG documentando RNF_CONTRACTS.
+- `toc.json` versão 23.0 (pula 22 por consistência com numeração de MVP).
+
+**Regras duras:**
+- Stop-rule >1.5d por fase.
+- §10 aplicável: zero refactor vizinho em `ocg_service`, `codegen_service`, `arguider_service` além dos pontos de extensão necessários.
+- Sem LLM no caminho crítico da validação estática (grep determinístico).
+- Compartimentalização §2.2 preservada.
+- RBAC imutável: escrita em `RNF_CONTRACTS` exige GP + Admin; leitura é membro aceito.
+- Rastreabilidade: toda alteração em `RNF_CONTRACTS` emite `OCG_UPDATED` canônico.
+
+**Baseline de entrada (pós-MVP 22, pós-reforma documental):** 245+ backend passing, tsc frontend = 0, DTs abertas = 0, MVP 22 fechado (`f3ab38b`), docs reformados (`544f00a`).
+
+---
+
 ### MVP 22 — Teams Notifier uni-direcional (extensão do NotifierPort)
 
 **Motivação:** cliente mid-market pedindo Microsoft Teams agora. Padrão Adapter-Port canônico (MVP 20) já absorvia outros notifiers — extensão natural é adicionar `TeamsAdapter` implementando o mesmo `NotifierPort` existente.

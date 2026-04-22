@@ -1,20 +1,32 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 4.0  
+Versão: 4.1  
 Data-base: 2026-04-22  
-Status: **controle de avanço por fase** — MVPs 1-22 fechados. Estado atual detalhado em §1. Detalhes históricos dos MVPs 1-15 em [`docs/mvp_archive/`](docs/mvp_archive/). Emendas antigas em [`docs/emendas_archive/`](docs/emendas_archive/).
+Status: **controle de avanço por fase** — MVPs 1-22 fechados. **MVP 23 ABERTO + EM EXECUÇÃO 2026-04-22** (RNF_CONTRACTS no OCG + CodeGen contract-aware). Detalhes históricos dos MVPs 1-15 em [`docs/mvp_archive/`](docs/mvp_archive/). Emendas antigas em [`docs/emendas_archive/`](docs/emendas_archive/).
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-Nenhum MVP autorizado. Próximo marco aguarda decisão do stakeholder entre:
+**MVP 23 — RNF_CONTRACTS no OCG + CodeGen contract-aware** — ABERTO + EM EXECUÇÃO 2026-04-22. Fecha o elo `requisito não-funcional → código que atende`: RNFs (P2 compliance + P4 performance + P7 segurança) viram contrato estruturado no OCG, consumidos no prompt do CodeGen, testados via specs e validados estaticamente pós-geração.
 
-- **MVP 23 potencial — Design via Ingestão** (~3-5d) — resolve UX/UI via ingestão existente (PDF/PNG/CSS) + prompt enhancement no CodeGen, em vez de Figma MCP. Detalhes no `gca_mvp_20_21_22_23_roadmap.md` (memória).
-- **MVP 24 potencial — AI governance moat** (~2-3 sem) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado. Abrir após MVP 20 em 1 cliente externo por ≥ 1 ciclo.
-- **MVP 25 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps bi-direcional.
-- **MVP 26 potencial — ChatOps bi-direcional** (~1.5-2 sem) — pré-requisitos: MVP 25 SSO + cliente pagante validando uso uni-direcional.
+**6 fases sequenciais (~6-7d nominais):**
+- ⏳ 23.1 Schema `RNF_CONTRACTS` no OCG + migration + testes (~1d)
+- ⏳ 23.2 Arguidor dirigido para RNF (~1d)
+- ⏳ 23.3 `codegen_prompt_builder` consome RNF stack-aware (~1.5d)
+- ⏳ 23.4 Test specs + validação estática pós-geração (~1.5d)
+- ⏳ 23.5 UI GP edita `RNF_CONTRACTS` (~1d)
+- ⏳ 23.6 Dogfood + Ajuda + release (~0.5d)
+
+**Ganho esperado:** de ~65-70% pra ~75-78% de redução de trabalho humano no codegen.
+
+### Próximos candidatos (renumerados pós-MVP 23)
+
+- **MVP 24 potencial — Design via Ingestão** (~3-5d) — substituto universal do Figma MCP.
+- **MVP 25 potencial — AI governance moat** (~2-3 sem) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado.
+- **MVP 26 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps.
+- **MVP 27 potencial — ChatOps bi-direcional** (~1.5-2 sem) — pré-requisitos: MVP 26 + cliente validando uso uni-direcional.
 
 ### MVP anterior fechado
 **MVP 22 — Teams Notifier uni-direcional** — FECHADO 2026-04-22. `TeamsAdapter` via Incoming Webhook + Adaptive Card v1.4; registry builtin atualizado; 12 testes unit verdes; 52/52 regressão. Execução ~3h por reuso do pattern Adapter-Port do MVP 20.3. Figma MCP removido do roadmap canônico como MVP separado (fica sob demanda).
