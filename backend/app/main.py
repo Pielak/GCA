@@ -99,6 +99,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("integrations.registration_failed", error=str(e))
 
+    # MVP 20 Fase 20.2: registra adapters built-in de security scanners
+    # (Sonar, Snyk, gitleaks) no registry canônico da porta.
+    try:
+        from app.services.security_findings_service import register_builtin_scanners
+        register_builtin_scanners()
+    except Exception as e:
+        logger.error("security.registration_failed", error=str(e))
+
     # DT-3 dogfood: watchdog limpa docs presos em 'processing' por
     # reinício de backend (asyncio.create_task morre com o processo).
     # Também resolve sintoma operacional da DT-5 (sem fila persistente).

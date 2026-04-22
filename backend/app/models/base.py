@@ -1464,6 +1464,57 @@ class ExternalIssue(Base):
     )
 
 
+class SecurityFinding(Base):
+    """MVP 20 Fase 20.2 — Finding de segurança consumido de scanner externo.
+
+    GCA NÃO gera finding próprio em V1 (decisão binária #3 MVP 20). Adapters
+    consomem Sonar/Snyk/gitleaks do cliente e normalizam para schema canônico.
+
+    Idempotência de re-sync via UNIQUE (project_id, source_scanner, external_id)
+    garantida pela migration 036 — re-processar findings do mesmo scanner
+    atualiza last_seen_at sem duplicar.
+
+    P7 do OCG consome `count(status='open')` ponderado por severity.
+    """
+    __tablename__ = "security_findings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+
+    # Whitelist aplicação-level: sonar | snyk | gitleaks
+    source_scanner = Column(String(20), nullable=False)
+    external_id = Column(String(200), nullable=False)
+
+    file_path = Column(Text, nullable=True)
+    line_start = Column(Integer, nullable=True)
+    line_end = Column(Integer, nullable=True)
+
+    # Whitelist aplicação-level: critical | high | medium | low | info
+    severity = Column(String(20), nullable=False)
+    cwe_id = Column(String(20), nullable=True)
+    rule_id = Column(String(200), nullable=True)
+
+    title = Column(String(500), nullable=False)
+    description = Column(Text, nullable=True)
+    url = Column(Text, nullable=True)
+
+    # Whitelist aplicação-level: open | fixed | accepted_risk
+    status = Column(String(30), nullable=False, default="open")
+    accepted_risk_justification = Column(Text, nullable=True)
+    accepted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    accepted_at = Column(DateTime(timezone=True), nullable=True)
+    admin_co_signed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    admin_co_signed_at = Column(DateTime(timezone=True), nullable=True)
+
+    first_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    fixed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_security_findings_project_status", project_id, status),
+    )
+
+
 class GeneratedModule(Base):
     """Módulo gerado pelo CodeGen a partir de um candidato aprovado"""
     __tablename__ = "generated_modules"
