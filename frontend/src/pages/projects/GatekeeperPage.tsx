@@ -42,6 +42,8 @@ export function GatekeeperPage() {
   const [loading, setLoading] = useState(true)
   const [showOverride, setShowOverride] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
+  // Índice do pilar com detalhes expandidos; -1 = nenhum aberto.
+  const [expandedPillar, setExpandedPillar] = useState<number>(-1)
 
   useEffect(() => {
     const load = async () => {
@@ -231,12 +233,67 @@ export function GatekeeperPage() {
             {pillar.notes && <p className="text-slate-400 text-xs ml-7">{pillar.notes}</p>}
             {pillar.status === 'blocker' && (
               <div className="ml-7 mt-2 flex gap-2">
-                <button className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-violet-900/30 text-violet-400 hover:bg-violet-900/50 transition-colors">
+                <button
+                  type="button"
+                  onClick={() => navigate(`/projects/${id}/arguider`)}
+                  title="Abrir Arguidor para revisar perguntas dirigidas deste pilar"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-violet-900/30 text-violet-400 hover:bg-violet-900/50 transition-colors"
+                >
                   <Zap className="w-3 h-3" /> Acionar Arguidor
                 </button>
-                <button className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors">
-                  <Info className="w-3 h-3" /> Ver detalhes
+                <button
+                  type="button"
+                  onClick={() => setExpandedPillar(expandedPillar === i ? -1 : i)}
+                  title="Expandir achados críticos deste pilar"
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors"
+                >
+                  <Info className="w-3 h-3" /> {expandedPillar === i ? 'Ocultar detalhes' : 'Ver detalhes'}
                 </button>
+              </div>
+            )}
+            {expandedPillar === i && (
+              <div className="ml-7 mt-3 space-y-2">
+                {(() => {
+                  const findings = (data.criticalFindings || []).filter(
+                    (f) => (f.pillar || '').toLowerCase() === pillar.pillar.toLowerCase()
+                  )
+                  if (findings.length === 0) {
+                    return (
+                      <p className="text-slate-500 text-xs italic">
+                        Sem findings críticos associados a este pilar. Score baixo
+                        indica lacuna genérica no contexto — Arguidor pode gerar
+                        perguntas dirigidas.
+                      </p>
+                    )
+                  }
+                  return findings.map((f, fi) => (
+                    <div
+                      key={fi}
+                      className="bg-slate-950/40 border border-slate-800 rounded-lg p-3 text-xs"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] uppercase ${
+                            f.severity === 'critical'
+                              ? 'bg-red-900/40 text-red-400'
+                              : f.severity === 'high'
+                              ? 'bg-amber-900/40 text-amber-400'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {f.severity}
+                        </span>
+                        <span className="text-slate-300">{f.finding}</span>
+                      </div>
+                      {f.action && (
+                        <p className="text-slate-500 text-[11px] ml-0 mt-1">
+                          <strong className="text-slate-400">Ação sugerida:</strong>{' '}
+                          {f.action}
+                        </p>
+                      )}
+                    </div>
+                  ))
+                })()}
               </div>
             )}
           </div>
