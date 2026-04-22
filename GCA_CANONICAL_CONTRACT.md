@@ -1160,6 +1160,40 @@ Implementação canônica: serviço `ers_freshness_tracker` mantém, por projeto
 
 ---
 
+### MVP 22 — Teams Notifier uni-direcional (extensão do NotifierPort)
+
+**Motivação:** cliente mid-market pedindo Microsoft Teams agora. Padrão Adapter-Port canônico (MVP 20) já absorvia outros notifiers — extensão natural é adicionar `TeamsAdapter` implementando o mesmo `NotifierPort` existente.
+
+**Escopo autorizado:** fase única (pequena). Execução autorizada em bloco com abertura.
+
+**Não entra no MVP 22 (explícito):**
+- Interatividade bi-direcional (ChatOps): aprovar módulo via botão no Teams → MVP 24 potencial, pré-requisito SSO.
+- Bot Framework registrado no Azure AD com identidade própria: V1 usa Incoming Webhook (caminho pragmático).
+- Parsing de respostas ou comandos `@gca` no Teams — MVP 24.
+- Adaptive Card Extensions, Teams Tabs, integração profunda com Teams apps.
+
+**Decisões binárias:**
+1. Incoming Webhook via Power Automate Workflow (substituto canônico do Office 365 Connector deprecated em Dez/2024) OR Connector legado — adapter aceita ambos; cliente escolhe.
+2. Adaptive Card v1.4 (TextBlock + FactSet + Action.OpenUrl) — idioma canônico do Teams moderno.
+3. Mapeamento severity → Adaptive Card color: info=default, success=good, warning=warning, danger=attention.
+4. Modo `link_only_mode` degrada pra card minimalista sem FactSet (mesma política do Slack).
+
+**Fase única — TeamsAdapter (~3-5d com pair programming)**
+- `backend/app/services/adapters/teams_adapter.py` implementando `NotifierPort`.
+- `register_builtin_notifiers` inclui `TeamsAdapter`.
+- `_REQUIRED_CREDENTIALS` do `notifier_service` aceita `teams: ('webhook_url',)`.
+- 10+ testes unit com `httpx.MockTransport` cobrindo: sem webhook, evento fora de opt-in, sucesso 200 (Workflow) e 202 (legacy), body Adaptive Card canônico, link-only sem actions, link-only não vaza fields, 429/5xx retryable, 4xx non-retryable, timeout retryable, severity→color mapping.
+- Dogfood pelo endpoint de config existente (PUT `/integrations/issue-tracker/credentials/...` aceita o secret_type de notifier_credentials com a mesma plumbing).
+
+**Regras duras:**
+- Zero novo endpoint. Zero migração. Zero mudança em porta.
+- Stop-rule >1d (é extensão trivial; se ficar difícil algum teste, stop).
+- Preservar todo o contrato do `NotifierPort` MVP 20.3 sem mudanças.
+
+**Baseline de entrada:** 245 passing + 38 help + MVP 21 commits. tsc=0. MVP 21 fechado (`dd10bc8`).
+
+---
+
 ### MVP 21 — Ajuda refresh (sincroniza conteúdo com MVPs 14-20)
 
 **Motivação:** MVP 18 entregou a infraestrutura de Ajuda (capítulos + FTS5 + renderer) em 2026-04-21. Desde então MVP 19 (ERS Vivo IEEE 830 + glossário + matriz) e MVP 20 (3 integrações externas + hooks + P7 determinístico) entregaram features visíveis ao GP que **não aparecem** na Ajuda. Stakeholder sinalizou: conteúdo desatualizado é produto desatualizado; comprador percebe e perde confiança.

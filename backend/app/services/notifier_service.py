@@ -60,14 +60,17 @@ SECRET_TYPE = "notifier_credentials"
 # Credenciais esperadas por provider.
 _REQUIRED_CREDENTIALS: dict[str, tuple[str, ...]] = {
     "slack": ("webhook_url",),
+    "teams": ("webhook_url",),
 }
 
 
 def register_builtin_notifiers() -> None:
     """Registra adapters built-in. Chamado no startup."""
     from app.services.adapters.slack_adapter import SlackAdapter
+    from app.services.adapters.teams_adapter import TeamsAdapter
 
     register_notifier(SlackAdapter())
+    register_notifier(TeamsAdapter())
     logger.info("notifier.adapters_registered",
                  providers=registered_notifiers())
 
