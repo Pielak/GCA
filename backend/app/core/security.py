@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 from uuid import UUID
 import base64
+import string
 
 from jose import JWTError, jwt
 import bcrypt
@@ -58,6 +59,41 @@ def validate_password_strength(password: str) -> tuple[bool, Optional[str]]:
         return False, "Password must contain at least one special character"
 
     return True, None
+
+
+def generate_temporary_password() -> str:
+    """Gera senha temporária canônica do GCA (RF-001).
+
+    Regras canônicas:
+      - Exatamente 10 caracteres
+      - Pelo menos 1 maiúscula
+      - Pelo menos 1 dígito
+      - Pelo menos 1 caractere especial (!@#$%^&*)
+
+    Usado por:
+      - Admin invitando admin novo (routers/admin.py)
+      - GP invitando membro novo (services/project_team_service.py)
+
+    Mantém único padrão canônico para o fluxo de convite + troca de senha
+    (GCA_INVITATION_SYSTEM — RF-001).
+    """
+    uppercase = string.ascii_uppercase
+    lowercase = string.ascii_lowercase
+    digits = string.digits
+    special = "!@#$%^&*"
+
+    password = (
+        secrets.choice(uppercase)
+        + secrets.choice(digits)
+        + secrets.choice(special)
+        + "".join(
+            secrets.choice(uppercase + lowercase + digits + special)
+            for _ in range(7)
+        )
+    )
+    password_list = list(password)
+    secrets.SystemRandom().shuffle(password_list)
+    return "".join(password_list)
 
 
 # ============================================================================

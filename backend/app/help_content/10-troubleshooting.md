@@ -220,6 +220,19 @@ O glossário tem aprovação obrigatória pelo GP (decisão canônica MVP 19). T
 
 ## Gestão de equipe
 
+### Convidado não recebeu a senha provisória no email
+
+Fluxo canônico (RF-001) do convite de equipe:
+
+1. GP preenche email + papel em `/projects/:id/team` → **Enviar Convite**.
+2. Se o email **nunca** existiu no GCA, o sistema gera senha provisória canônica (10 caracteres: 1 maiúscula + 1 dígito + 1 especial) e grava o hash no User.
+3. Email é enviado com: link para aceitar + **senha provisória em texto claro** no corpo.
+4. Usuário clica no link → vai para `/p/:slug` → faz login com email + senha provisória.
+5. Sistema detecta `first_access_completed=false` → dispara tela de troca obrigatória de senha.
+6. Usuário define senha pessoal → `accepted_at` e `joined_at` são marcados automaticamente → entra no projeto.
+
+Se o email do convite **não** incluiu a senha provisória: regressão histórica foi corrigida — todos os convites emitidos após o fix incluem a senha corretamente. Para convite anterior órfão, a opção canônica é **revogar e reenviar** o convite pelo GP.
+
 ### Usuário convidado aparece como membro ativo mesmo sem aceitar convite
 
 Estado esperado no banco (ProjectMember):

@@ -796,8 +796,17 @@ Suporte: https://gca.com/support
         role_name: str,
         accept_link: str,
         project_url: str = "",
+        temp_password: Optional[str] = None,
     ) -> tuple[bool, Optional[str]]:
-        """Send team invitation email with project-specific URL"""
+        """Send team invitation email with project-specific URL.
+
+        Quando `temp_password` é fornecida (usuário novo no GCA), o email
+        inclui bloco com senha provisória e instruções canônicas (RF-001):
+        usuário loga com email + senha provisória; sistema detecta
+        `first_access_completed=False` e dispara a troca de senha
+        obrigatória antes do primeiro acesso. Quando None (usuário já
+        existente no GCA), só envia o convite — user já tem senha dele.
+        """
         subject = f"Convite para participar do projeto {project_name}"
 
         # Bloco opcional com URL do projeto
@@ -807,6 +816,28 @@ Suporte: https://gca.com/support
             project_url_html = f"""
                 <li><strong>URL do Projeto:</strong> <a href="{project_url}">{project_url}</a></li>"""
             project_url_text = f"\n- URL do Projeto: {project_url}"
+
+        # Bloco de senha provisória (somente quando user é novo)
+        temp_password_html = ""
+        temp_password_text = ""
+        if temp_password:
+            temp_password_html = f"""
+                <div style="background-color: #fef3c7; padding: 16px; border-left: 4px solid #d97706; border-radius: 3px; margin: 20px 0;">
+                    <p style="margin: 0 0 8px 0;"><strong>Primeiro acesso ao GCA</strong></p>
+                    <p style="margin: 0 0 12px 0; font-size: 14px;">Como este e seu primeiro acesso, use a senha provisoria abaixo para fazer login. Voce sera solicitado a definir uma senha pessoal no primeiro acesso.</p>
+                    <p style="margin: 0;"><strong>Email:</strong> <code style="background-color: #fff; padding: 4px 8px; border-radius: 3px; font-family: monospace;">{to_email}</code></p>
+                    <p style="margin: 8px 0 0 0;"><strong>Senha Provisoria:</strong> <code style="background-color: #fff; padding: 8px; border-radius: 3px; font-family: monospace; font-weight: bold; font-size: 16px; letter-spacing: 1px;">{temp_password}</code></p>
+                </div>
+            """
+            temp_password_text = f"""
+
+PRIMEIRO ACESSO AO GCA
+Como este e seu primeiro acesso, use a senha provisoria abaixo para fazer login.
+Voce sera solicitado a definir uma senha pessoal no primeiro acesso.
+
+  Email: {to_email}
+  Senha Provisoria: {temp_password}
+"""
 
         html_content = f"""
         <html>
@@ -821,7 +852,7 @@ Suporte: https://gca.com/support
                     <li><strong>Seu Papel:</strong> {role_name}</li>
                     <li><strong>Gestor do Projeto:</strong> {gp_name}</li>{project_url_html}
                 </ul>
-
+                {temp_password_html}
                 <p style="background-color: #d1fae5; padding: 12px; border-left: 4px solid #16a34a; border-radius: 3px;">
                     <strong>Proximo Passo:</strong> Clique no botao abaixo para aceitar o convite e configurar seu acesso.
                 </p>
@@ -854,7 +885,7 @@ Detalhes do Projeto:
 - Nome: {project_name}
 - Seu Papel: {role_name}
 - Gestor do Projeto: {gp_name}{project_url_text}
-
+{temp_password_text}
 Aceitar Convite: {accept_link}
 
 Este convite expira em 7 dias.

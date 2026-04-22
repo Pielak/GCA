@@ -253,6 +253,23 @@ async def project_login(
             detail="Você não é membro deste projeto",
         )
 
+    # 3.1 — Se o login é o primeiro acesso efetivo do convidado
+    # (invite_token presente e joined_at ainda None), marca o convite
+    # como aceito. Sem isso o user permaneceria em "Convites Pendentes"
+    # mesmo após logar. Regra canônica alinha com
+    # `is_active_integrated_member` de project_team_service.
+    from datetime import datetime, timezone as _tz
+    if member.joined_at is None:
+        now = datetime.now(_tz.utc)
+        member.accepted_at = now
+        member.joined_at = now
+        await db.commit()
+        logger.info(
+            "auth.project_login_invite_auto_accepted",
+            user_id=str(user.id),
+            project_id=str(project.id),
+        )
+
     # 4. Criar tokens com contexto de projeto no JWT
     access_token, refresh_token, expires_in = AuthService.create_tokens(
         user,

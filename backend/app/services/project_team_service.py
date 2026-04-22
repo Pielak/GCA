@@ -8,7 +8,7 @@ import structlog
 import secrets
 
 from app.models.base import User, Project, ProjectMember
-from app.core.security import hash_password
+from app.core.security import generate_temporary_password, hash_password
 from app.core.config import settings
 from app.services.email_service import EmailService
 from app.services.audit_service import AuditService, AuditEvents
@@ -103,8 +103,11 @@ class ProjectTeamService:
             user = result.scalar_one_or_none()
 
             if not user:
-                # Create new user with temporary password
-                temp_password = secrets.token_urlsafe(12)
+                # Senha temporária canônica do GCA (RF-001): 10 chars,
+                # 1 upper + 1 digit + 1 special. Usuário troca no primeiro
+                # acesso (first_access_completed=False aciona FirstAccessModal
+                # ao logar).
+                temp_password = generate_temporary_password()
                 user = User(
                     email=email,
                     full_name=email.split("@")[0],  # Use email prefix as default name
@@ -116,6 +119,8 @@ class ProjectTeamService:
                 db.add(user)
                 await db.flush()
             else:
+                # Usuário já existe — login com senha que ele já tem.
+                # Não precisa gerar senha nova.
                 temp_password = None
 
             # Create invitation token
@@ -157,7 +162,9 @@ class ProjectTeamService:
             project_url = f"{settings.FRONTEND_URL}/p/{slug}"
             accept_link = f"{project_url}?invite={invite_token}"
 
-            # Send invitation email
+            # Send invitation email — quando user é novo, inclui senha
+            # provisória canônica (RF-001); quando existente, email só
+            # informa o convite porque o user já tem senha dele.
             EmailService.send_team_invitation_email(
                 to_email=email,
                 user_name=user.full_name,
@@ -166,6 +173,7 @@ class ProjectTeamService:
                 role_name=role.replace("_", " ").title(),
                 accept_link=accept_link,
                 project_url=project_url,
+                temp_password=temp_password,
             )
 
             # Notificação in-app para o convidado (se já for usuário existente)

@@ -998,31 +998,9 @@ async def acknowledge_alert(
 
 # ========== ADMIN USER MANAGEMENT ==========
 
-def generate_temporary_password() -> str:
-    """
-    Generate a temporary password that meets requirements:
-    - 10 characters minimum
-    - At least 1 uppercase letter
-    - At least 1 digit
-    - At least 1 special character
-    """
-    uppercase = string.ascii_uppercase
-    lowercase = string.ascii_lowercase
-    digits = string.digits
-    special = "!@#$%^&*"
-
-    password = (
-        secrets.choice(uppercase) +
-        secrets.choice(digits) +
-        secrets.choice(special) +
-        ''.join(secrets.choice(uppercase + lowercase + digits + special) for _ in range(7))
-    )
-
-    # Shuffle to randomize position
-    password_list = list(password)
-    secrets.SystemRandom().shuffle(password_list)
-
-    return ''.join(password_list)
+# Helper movido para `app.core.security.generate_temporary_password` em
+# 2026-04-22 — evita duplicação com project_team_service.
+from app.core.security import generate_temporary_password  # noqa: E402  (re-export)
 
 
 @router.post("/invite-admin", response_model=InviteAdminResponse)
