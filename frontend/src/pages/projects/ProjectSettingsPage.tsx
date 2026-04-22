@@ -10,6 +10,7 @@ import { RepositoryPage } from '@/pages/projects/RepositoryPage'
 import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
 import { getErrorMessage } from '@/lib/errors'
 import { IssueTrackerPanel } from '@/components/settings/IssueTrackerPanel'
+import { NotifierPanel } from '@/components/settings/NotifierPanel'
 
 type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations'
 const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario', 'integrations']
@@ -762,9 +763,12 @@ export function ProjectSettingsPage() {
         </div>
       )}
 
-      {/* MVP 20 Fase 20.1d — Tab: Integrações (Issue Tracker). */}
+      {/* MVP 20 Fase 20.1d + Fix pós-MVP 22 — Tab: Integrações. */}
       {activeTab === 'integrations' && projectId && (
-        <IssueTrackerPanel projectId={projectId} />
+        <div className="space-y-6">
+          <IssueTrackerPanel projectId={projectId} />
+          <NotifierPanel projectId={projectId} />
+        </div>
       )}
     </div>
   )

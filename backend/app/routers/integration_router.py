@@ -1,18 +1,24 @@
-"""MVP 20 Fase 20.1d — Endpoints HTTP de integrações externas.
+"""MVP 20 Fase 20.1d + Fix pós-MVP 22 — Endpoints HTTP de integrações externas.
 
 Endpoints canônicos:
 
-  Config (autenticados, GP+Admin):
+  Issue Tracker — Config (autenticados, GP+Admin):
     GET  /api/v1/projects/:id/integrations/issue-tracker
     PUT  /api/v1/projects/:id/integrations/issue-tracker
     PUT  /api/v1/projects/:id/integrations/issue-tracker/credentials/:provider/:key
     DELETE /api/v1/projects/:id/integrations/issue-tracker/credentials/:provider/:key
 
-  Consulta (autenticados, membro aceito):
+  Issue Tracker — Consulta (autenticados, membro aceito):
     GET  /api/v1/projects/:id/external-issues
 
-  Webhook (PÚBLICO com signing secret):
+  Issue Tracker — Webhook (PÚBLICO com signing secret):
     POST /api/v1/integrations/webhooks/issue-tracker/:provider/:project_id
+
+  Notifier (Slack + Teams) — Config (autenticados, GP+Admin):
+    GET  /api/v1/projects/:id/integrations/notifier
+    PUT  /api/v1/projects/:id/integrations/notifier
+    PUT  /api/v1/projects/:id/integrations/notifier/credentials/:provider/:key
+    DELETE /api/v1/projects/:id/integrations/notifier/credentials/:provider/:key
 
 RBAC preservado (§4.1):
 - Leitura de config sanitizada: GP + Admin.
@@ -41,9 +47,20 @@ from app.services.issue_tracker_service import (
     apply_webhook_event,
     list_external_issues,
 )
+from app.services.notifier_service import (
+    ALL_CANONICAL_EVENTS,
+    delete_notifier_credential,
+    get_safe_notifier_config_for_display,
+    save_settings_json as save_notifier_settings_json,
+    set_notifier_credential,
+)
 from app.services.ports.issue_tracker_port import (
     IssueTrackerConfigError,
     registered_providers,
+)
+from app.services.ports.notifier_port import (
+    NotifierConfigError,
+    registered_notifiers,
 )
 
 
@@ -227,6 +244,125 @@ async def delete_cred(
 ) -> dict:
     await _require_gp_or_admin(project_id, user_id, db)
     await delete_credential(db, project_id, provider, cred_key)
+    await db.commit()
+    return {"success": True, "provider": provider, "credential": cred_key}
+
+
+# ─── Endpoints de Notifier (Slack + Teams) ────────────────────────────
+
+
+class NotifierProviderSettings(BaseModel):
+    """Settings por provider de notifier — tudo non-secret.
+
+    `opted_in_events` é lista de event_types canônicos; None ou lista vazia
+    = opted in em todos (default). `link_only_mode` degrada o card pra
+    link-only (cliente regulado). `gca_base_url` é usado pra montar link
+    profundo pro GCA no card.
+    """
+    channel: str = Field("", max_length=100)
+    opted_in_events: Optional[list[str]] = Field(default=None)
+    link_only_mode: bool = Field(default=False)
+    gca_base_url: str = Field("", max_length=500)
+    extra: dict = Field(default_factory=dict)
+
+
+class NotifierSettings(BaseModel):
+    enabled: bool = True
+    active_provider: Optional[str] = Field(
+        None,
+        description="Provider padrão (slack|teams); null desativa notifier.",
+    )
+    providers: dict[str, NotifierProviderSettings] = Field(default_factory=dict)
+
+
+@router.get("/projects/{project_id}/integrations/notifier")
+async def get_notifier_config(
+    project_id: UUID,
+    user_id: Optional[UUID] = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Retorna config do notifier sanitizada (sem credenciais)."""
+    await _require_gp_or_admin(project_id, user_id, db)
+    return await get_safe_notifier_config_for_display(db, project_id)
+
+
+@router.put("/projects/{project_id}/integrations/notifier")
+async def update_notifier_settings(
+    project_id: UUID,
+    payload: NotifierSettings = Body(...),
+    user_id: Optional[UUID] = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Atualiza settings non-secret do notifier (Slack/Teams)."""
+    user = await _require_gp_or_admin(project_id, user_id, db)
+
+    if payload.active_provider and payload.active_provider not in registered_notifiers():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Provider '{payload.active_provider}' não disponível. "
+                f"Registrados: {registered_notifiers()}"
+            ),
+        )
+
+    providers_dict: dict = {}
+    for prov_name, prov_settings in payload.providers.items():
+        if prov_name not in ("slack", "teams"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Provider '{prov_name}' não suportado em V1 (slack, teams).",
+            )
+        # Valida whitelist de eventos canônicos — filtra desconhecidos silenciosamente.
+        serialized = prov_settings.dict()
+        opted = serialized.get("opted_in_events")
+        if opted:
+            serialized["opted_in_events"] = [
+                e for e in opted if e in ALL_CANONICAL_EVENTS
+            ]
+        providers_dict[prov_name] = serialized
+
+    data = {
+        "enabled": payload.enabled,
+        "active_provider": payload.active_provider,
+        "providers": providers_dict,
+    }
+    await save_notifier_settings_json(db, project_id, data, updated_by=user.id)
+    await db.commit()
+    return await get_safe_notifier_config_for_display(db, project_id)
+
+
+@router.put("/projects/{project_id}/integrations/notifier/credentials/{provider}/{cred_key}")
+async def put_notifier_credential(
+    project_id: UUID,
+    provider: str,
+    cred_key: str,
+    payload: CredentialWrite = Body(...),
+    user_id: Optional[UUID] = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Armazena 1 credencial do notifier no vault (encrypted)."""
+    user = await _require_gp_or_admin(project_id, user_id, db)
+    try:
+        await set_notifier_credential(
+            db, project_id, provider, cred_key, payload.value,
+            updated_by=user.id,
+        )
+    except NotifierConfigError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    await db.commit()
+    return {"success": True, "provider": provider, "credential": cred_key}
+
+
+@router.delete("/projects/{project_id}/integrations/notifier/credentials/{provider}/{cred_key}")
+async def delete_notifier_cred(
+    project_id: UUID,
+    provider: str,
+    cred_key: str,
+    user_id: Optional[UUID] = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    await _require_gp_or_admin(project_id, user_id, db)
+    await delete_notifier_credential(db, project_id, provider, cred_key)
     await db.commit()
     return {"success": True, "provider": provider, "credential": cred_key}
 

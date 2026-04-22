@@ -180,6 +180,101 @@ async def build_notifier_config(
     return selected, config
 
 
+# ─── API pra router (config UI) ───────────────────────────────────────
+
+
+async def get_safe_notifier_config_for_display(
+    db: AsyncSession,
+    project_id: UUID,
+) -> dict:
+    """Retorna config SEM credenciais (safe pra exibir no /settings).
+
+    Formato:
+      {
+        "enabled": bool,
+        "active_provider": "slack" | "teams" | null,
+        "providers": {
+            "slack": {"channel": "#x", "opted_in_events": [...] | null,
+                      "link_only_mode": bool, "gca_base_url": "..."},
+            "teams": {...},
+        },
+        "has_credentials": {
+            "slack": {"webhook_url": true},
+            "teams": {"webhook_url": false},
+        },
+        "registered_providers": ["slack", "teams"],
+        "canonical_events": [...6 eventos...]
+      }
+    """
+    data = await load_settings_json(db, project_id)
+    enabled = data.get("enabled", False)
+    active = data.get("active_provider")
+    providers = data.get("providers") or {}
+
+    vault = VaultService()
+    has_credentials: dict[str, dict[str, bool]] = {}
+    for prov in ("slack", "teams"):
+        flags: dict[str, bool] = {}
+        for key in _REQUIRED_CREDENTIALS.get(prov, ()):
+            val = await vault.get_secret(
+                db, project_id, SECRET_TYPE, f"{prov}:{key}",
+            )
+            flags[key] = bool(val)
+        has_credentials[prov] = flags
+
+    return {
+        "enabled": enabled,
+        "active_provider": active,
+        "providers": providers,
+        "has_credentials": has_credentials,
+        "registered_providers": registered_notifiers(),
+        "canonical_events": list(ALL_CANONICAL_EVENTS),
+    }
+
+
+async def set_notifier_credential(
+    db: AsyncSession,
+    project_id: UUID,
+    provider: str,
+    cred_key: str,
+    value: str,
+    updated_by: Optional[UUID] = None,
+) -> None:
+    """Grava 1 credencial do notifier no vault (encrypted)."""
+    allowed = set(_REQUIRED_CREDENTIALS.get(provider, ()))
+    if not allowed:
+        raise NotifierConfigError(
+            f"Provider '{provider}' não tem credenciais canônicas definidas."
+        )
+    if cred_key not in allowed:
+        raise NotifierConfigError(
+            f"Credencial '{cred_key}' não é válida para {provider}. "
+            f"Aceitas: {sorted(allowed)}"
+        )
+    vault = VaultService()
+    ok = await vault.store_secret(
+        db, project_id, SECRET_TYPE, f"{provider}:{cred_key}",
+        value, created_by=updated_by,
+    )
+    if not ok:
+        raise NotifierConfigError(
+            f"Falha ao armazenar credencial '{cred_key}' no vault"
+        )
+
+
+async def delete_notifier_credential(
+    db: AsyncSession,
+    project_id: UUID,
+    provider: str,
+    cred_key: str,
+) -> None:
+    """Remove credencial do notifier do vault."""
+    vault = VaultService()
+    await vault.delete_secret(
+        db, project_id, SECRET_TYPE, f"{provider}:{cred_key}",
+    )
+
+
 # ─── Send (best-effort, nunca bloqueia caller) ───────────────────────
 
 
