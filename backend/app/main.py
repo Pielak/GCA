@@ -107,6 +107,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error("security.registration_failed", error=str(e))
 
+    # MVP 20 Fase 20.3: registra adapters built-in de notifiers (Slack).
+    try:
+        from app.services.notifier_service import register_builtin_notifiers
+        register_builtin_notifiers()
+    except Exception as e:
+        logger.error("notifier.registration_failed", error=str(e))
+
     # DT-3 dogfood: watchdog limpa docs presos em 'processing' por
     # reinício de backend (asyncio.create_task morre com o processo).
     # Também resolve sintoma operacional da DT-5 (sem fila persistente).
