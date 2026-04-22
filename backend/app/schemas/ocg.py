@@ -240,6 +240,42 @@ class OCGResponse(BaseModel):
     # populado. Alimenta a seção 3.3 do ERS (Fase 19.2).
     BUSINESS_RULES: Any = []
 
+    # MVP 23 Fase 23.1 — contratos de Requisitos Não-Funcionais.
+    # Dict com 4 blocos canônicos: performance, security, compliance,
+    # availability. Consumido pelo codegen_prompt_builder (Fase 23.3)
+    # como contrato obrigatório que o código gerado deve atender, e
+    # pelo code_validation_service (Fase 23.4) como grep estruturado
+    # pós-geração. Default {} preserva compat com OCGs pré-23 — campos
+    # null/ausentes significam "sem contrato declarado, LLM usa bom
+    # senso default". Populado pelo GP via endpoint PUT ou pelo Arguidor
+    # (Fase 23.2) quando detecta gap. Alimenta também test_spec_generator
+    # (Fase 23.4) para gerar cenários de latency/rate-limit/security.
+    #
+    # Forma canônica do dict (todos os campos opcionais):
+    #   {
+    #     "performance": {
+    #       "latency_p95_ms": int | null,
+    #       "throughput_rps": int | null,
+    #       "per_operation": [{"op": str, "budget_ms": int}]
+    #     },
+    #     "security": {
+    #       "required_cwe_protections": [str, ...],   # ex: ["CWE-89"]
+    #       "rate_limit_rpm_public": int | null,
+    #       "rate_limit_rpm_authenticated": int | null,
+    #       "sensitive_data_categories": [str, ...]    # ex: ["PII"]
+    #     },
+    #     "compliance": [
+    #       {"regulation": str, "requirement_id": str,
+    #        "enforcement": "runtime"|"static"|"both"}
+    #     ],
+    #     "availability": {
+    #       "uptime_pct": float | null,
+    #       "rpo_minutes": int | null,
+    #       "rto_minutes": int | null
+    #     }
+    #   }
+    RNF_CONTRACTS: Any = {}
+
     class Config:
         from_attributes = True
         extra = "allow"
