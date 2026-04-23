@@ -392,3 +392,153 @@ async def get_extraction_report(
     report["document_id"] = str(document_id)
     report["original_filename"] = doc.original_filename
     return report
+
+
+@router.get("/projects/{project_id}/ingestion/{document_id}/ocg-delta")
+async def get_ocg_delta_for_document(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP 27 Fase 1 — Impacto deste documento no OCG (antes/depois por pilar).
+
+    Retorna o delta mais recente do `ocg_delta_log` associado a este
+    document_id: versão from/to, overall antes/depois, score de cada pilar
+    antes/depois, delta em pontos por pilar. Cliente renderiza tabela +
+    cores (verde/vermelho/neutro) sem lógica de comparação no front.
+
+    Quando o documento ainda não afetou o OCG (arguider pendente, updater
+    rejeitou, ou propagação não rodou), retorna `has_delta=false` com
+    mensagem explicativa. Nunca 404 por ausência de delta — só 404 se o
+    doc não existe ou não pertence ao projeto.
+    """
+    from app.models.base import IngestedDocument, OCGDeltaLog
+    from sqlalchemy import select as _select
+    import json as _json
+    import re as _re
+
+    doc = await db.get(IngestedDocument, document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    # Delta mais recente atribuído a este doc
+    delta = (await db.execute(
+        _select(OCGDeltaLog)
+        .where(
+            OCGDeltaLog.project_id == project_id,
+            OCGDeltaLog.document_id == document_id,
+        )
+        .order_by(OCGDeltaLog.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+
+    if delta is None:
+        return {
+            "document_id": str(document_id),
+            "original_filename": doc.original_filename,
+            "has_delta": False,
+            "message": (
+                "O OCG ainda não foi atualizado com base neste documento. "
+                "Pode estar em fila de análise, ter sido rejeitado por conflito, "
+                "ou o updater não rodou (ex: lock ocupado por outra operação)."
+            ),
+        }
+
+    def _extract_pillars(snap_obj) -> dict:
+        """Extrai {n: {key, score}} das chaves PILLAR_SCORES.Pn_* ou Pn."""
+        if not isinstance(snap_obj, dict):
+            return {}
+        pillars = snap_obj.get("PILLAR_SCORES") or {}
+        out = {}
+        for key, val in pillars.items():
+            if not isinstance(val, dict) or not isinstance(key, str):
+                continue
+            match = _re.match(r"P(\d+)(?:_|$)", key, flags=_re.IGNORECASE)
+            if not match:
+                continue
+            n = int(match.group(1))
+            score = val.get("score")
+            if score is None:
+                continue
+            try:
+                out[n] = {"key": key, "score": float(score)}
+            except (TypeError, ValueError):
+                continue
+        return out
+
+    def _extract_overall(snap_obj) -> float | None:
+        if not isinstance(snap_obj, dict):
+            return None
+        comp = snap_obj.get("COMPOSITE_SCORE")
+        if isinstance(comp, dict):
+            v = comp.get("value")
+            if v is None:
+                v = comp.get("overall")
+            if v is not None:
+                try:
+                    return float(v)
+                except (TypeError, ValueError):
+                    return None
+        # Fallback: overall_score top-level (legado)
+        legacy = snap_obj.get("overall_score")
+        if legacy is not None:
+            try:
+                return float(legacy)
+            except (TypeError, ValueError):
+                return None
+        return None
+
+    snap_after = _json.loads(delta.ocg_snapshot) if delta.ocg_snapshot else {}
+
+    # Snapshot ANTES = delta cuja ocg_version_to == delta atual.ocg_version_from
+    prev_delta = (await db.execute(
+        _select(OCGDeltaLog)
+        .where(
+            OCGDeltaLog.project_id == project_id,
+            OCGDeltaLog.ocg_version_to == delta.ocg_version_from,
+        )
+        .order_by(OCGDeltaLog.created_at.desc())
+        .limit(1)
+    )).scalar_one_or_none()
+    snap_before = _json.loads(prev_delta.ocg_snapshot) if prev_delta and prev_delta.ocg_snapshot else {}
+
+    pillars_before = _extract_pillars(snap_before)
+    pillars_after = _extract_pillars(snap_after)
+    overall_before = _extract_overall(snap_before)
+    overall_after = _extract_overall(snap_after)
+
+    pillars_compare = []
+    for n in range(1, 8):
+        b = pillars_before.get(n, {})
+        a = pillars_after.get(n, {})
+        s_before = b.get("score")
+        s_after = a.get("score")
+        d = None
+        if s_before is not None and s_after is not None:
+            d = round(s_after - s_before, 2)
+        pillars_compare.append({
+            "pillar": n,
+            "key": a.get("key") or b.get("key") or f"P{n}",
+            "score_before": s_before,
+            "score_after": s_after,
+            "delta": d,
+        })
+
+    overall_delta = None
+    if overall_before is not None and overall_after is not None:
+        overall_delta = round(overall_after - overall_before, 2)
+
+    return {
+        "document_id": str(document_id),
+        "original_filename": doc.original_filename,
+        "has_delta": True,
+        "version_from": delta.ocg_version_from,
+        "version_to": delta.ocg_version_to,
+        "trigger_source": delta.trigger_source,
+        "overall_before": overall_before,
+        "overall_after": overall_after,
+        "overall_delta": overall_delta,
+        "pillars": pillars_compare,
+        "created_at": delta.created_at.isoformat() if delta.created_at else None,
+    }

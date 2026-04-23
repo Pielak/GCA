@@ -240,3 +240,45 @@ export const useDeleteDocument = (projectId: string | undefined) => {
     },
   })
 }
+
+// MVP 27 Fase 1 — Impacto do documento no OCG (antes/depois por pilar)
+export interface OCGPillarDelta {
+  pillar: number
+  key: string
+  score_before: number | null
+  score_after: number | null
+  delta: number | null
+}
+
+export interface OCGDeltaForDocument {
+  document_id: string
+  original_filename: string
+  has_delta: boolean
+  message?: string
+  version_from?: number
+  version_to?: number
+  trigger_source?: string
+  overall_before?: number | null
+  overall_after?: number | null
+  overall_delta?: number | null
+  pillars?: OCGPillarDelta[]
+  created_at?: string | null
+}
+
+export const useOCGDeltaForDocument = (
+  projectId: string | undefined,
+  documentId: string | undefined,
+  enabled: boolean = true,
+) => {
+  return useQuery({
+    queryKey: ['ingestion', 'ocg-delta', projectId, documentId],
+    queryFn: async () => {
+      const response = await apiClient.get<OCGDeltaForDocument>(
+        `/projects/${projectId}/ingestion/${documentId}/ocg-delta`,
+      )
+      return response.data
+    },
+    enabled: !!projectId && !!documentId && enabled,
+    staleTime: 1000 * 30,
+  })
+}

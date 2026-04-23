@@ -6,6 +6,7 @@ import { useDocuments, useUploadDocument, useDeleteDocument, useEligibleModules,
 import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
 import { IngestionProgressBar } from '@/components/ingestion/IngestionProgressBar';
 import { ExtractionReportCard } from '@/components/ingestion/ExtractionReportCard';
+import { OCGDeltaCard } from '@/components/ingestion/OCGDeltaCard';
 import { apiClient } from '@/lib/api';
 import { getErrorMessage } from '@/lib/errors'
 
@@ -468,8 +469,9 @@ export function IngestionPage() {
                    default; GP expande sob demanda. */}
                 {(doc.arguider_status === 'completed' || doc.arguider_status === 'error') &&
                   doc.content_status !== 'lost' && projectId && (
-                  <div className="px-5 pb-3 -mt-1">
+                  <div className="px-5 pb-3 -mt-1 space-y-2">
                     <ExtractionReportCard projectId={projectId} documentId={doc.id} />
+                    <OCGDeltaCard projectId={projectId} documentId={doc.id} />
                   </div>
                 )}
                 {isQuarantined && (
