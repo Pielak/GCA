@@ -1212,6 +1212,38 @@ class IngestionService:
                 # Extrair texto (fora do loop — não depende do provider)
                 doc_text = await extractor.extract_text(file_bytes, file_type)
 
+                # MVP 29 Fase 3 — gerar DocumentCanonical pra enviar ao
+                # Arguidor dirigido (3-5× menos tokens que texto bruto).
+                # Best-effort: se falhar, cai no texto bruto original.
+                doc_canonical = None
+                canonical_doc_type = {
+                    "md": "MD", "pdf": "PDF", "docx": "DOCX",
+                }.get((file_type or "").lower())
+                if canonical_doc_type:
+                    try:
+                        from app.services.document_canonicalizer import canonicalize
+                        _doc_row = await db.get(IngestedDocument, document_id)
+                        _orig_name = _doc_row.original_filename if _doc_row else ""
+                        doc_canonical = canonicalize(
+                            file_bytes, _orig_name, canonical_doc_type,
+                        )
+                        logger.info(
+                            "ingestion.canonicalized",
+                            document_id=str(document_id),
+                            document_type=canonical_doc_type,
+                            sections=len(doc_canonical.sections),
+                            requirements=len(doc_canonical.requirements),
+                            raw_chars=len(doc_text or ""),
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "ingestion.canonicalize_failed",
+                            document_id=str(document_id),
+                            error=str(exc),
+                            fallback="raw_text",
+                        )
+                        doc_canonical = None
+
                 # MVP 8 Fase 1 — texto extraído, próximo estágio será "analyzing"
                 # (a atualização real acontece dentro do loop, antes do
                 # arguider.analyze_document)
@@ -1308,6 +1340,7 @@ class IngestionService:
                                 document_text=doc_text,
                                 current_ocg=_current_ocg,
                                 previous_analyses=_prev_analyses,
+                                canonical=doc_canonical,  # MVP 29 Fase 3
                             )
                         successful_provider = provider
                         if idx > 0:

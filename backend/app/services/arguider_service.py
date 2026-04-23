@@ -433,8 +433,16 @@ class ArguiderService:
         document_text: str,
         current_ocg: dict,
         previous_analyses: list[dict] | None = None,
+        canonical: "object | None" = None,
     ) -> dict:
-        """Executa análise completa do Arguidor para um documento."""
+        """Executa análise completa do Arguidor para um documento.
+
+        MVP 29: quando `canonical` (DocumentCanonical) é fornecido, o
+        prompt é construído a partir da versão estruturada (3-5× menos
+        tokens que texto bruto). `document_text` permanece aceito como
+        fallback pra casos onde canonização não é possível (XLSX/IMAGE
+        no MVP, ou falha na canonização).
+        """
         try:
             # Atualizar status
             doc = await self.db.execute(
@@ -446,8 +454,22 @@ class ArguiderService:
                 document.arguider_started_at = datetime.now(timezone.utc)
                 await self.db.commit()
 
-            # Construir prompt
-            user_prompt = self._build_prompt(document_text, current_ocg, previous_analyses or [])
+            # Construir prompt. MVP 29: canonical estruturado é preferido
+            # (~3-5× menos tokens); texto bruto fica como fallback.
+            if canonical is not None:
+                effective_doc_text = self._canonical_to_prompt_text(canonical)
+                logger.info(
+                    "arguider.canonical_used",
+                    document_id=str(document_id),
+                    canonical_chars=len(effective_doc_text),
+                    raw_chars=len(document_text),
+                    reduction_pct=round(
+                        (1 - len(effective_doc_text) / max(len(document_text), 1)) * 100, 1
+                    ),
+                )
+            else:
+                effective_doc_text = document_text
+            user_prompt = self._build_prompt(effective_doc_text, current_ocg, previous_analyses or [])
 
             # Chamar LLM do projeto (multi-provider, DT-032)
             start_time = datetime.now(timezone.utc)
@@ -637,6 +659,91 @@ class ArguiderService:
                 document.arguider_error_message = str(e)[:500]
                 await self.db.commit()
             raise
+
+    def _canonical_to_prompt_text(self, canonical) -> str:
+        """MVP 29 Fase 3 — serializa DocumentCanonical como bloco dirigido
+        pra alimentar `_build_prompt`. Substitui o texto bruto por uma
+        representação estruturada que já tem requisitos/atores/entidades
+        identificados deterministicamente.
+
+        Redução típica: PDF/DOCX de 15-20k chars → 2-4k chars estruturados.
+        LLM gasta reasoning em análise (que é o trabalho dele), não em
+        entender layout do documento.
+        """
+        lines: list[str] = []
+        lines.append(f"[CANONICAL v{getattr(canonical, 'extractor_version', 'v1.0.0')}]")
+        lines.append(f"Título: {canonical.title}")
+        lines.append(f"Tipo: {canonical.document_type}")
+        if canonical.stats:
+            lines.append(f"Stats: {canonical.stats}")
+        lines.append("")
+
+        # Requisitos identificados deterministicamente
+        lines.append(f"## Requisitos identificados ({len(canonical.requirements)}):")
+        if canonical.requirements:
+            for r in canonical.requirements[:30]:
+                lines.append(f"- {r}")
+        else:
+            lines.append("- (nenhum identificado por regex determinística)")
+        lines.append("")
+
+        # Atores
+        lines.append("## Atores:")
+        if canonical.actors:
+            lines.append(", ".join(canonical.actors))
+        else:
+            lines.append("— (nenhum identificado)")
+        lines.append("")
+
+        # Entidades agrupadas por tipo
+        lines.append("## Entidades extraídas:")
+        by_type: dict[str, list[str]] = {}
+        for e in canonical.entities:
+            by_type.setdefault(e.entity_type, []).append(e.value)
+        if by_type:
+            for entity_type, values in sorted(by_type.items()):
+                unique_sorted = sorted(set(values))
+                lines.append(f"- {entity_type}: {', '.join(unique_sorted)}")
+        else:
+            lines.append("— (nenhuma)")
+        lines.append("")
+
+        # Referências
+        if canonical.refs:
+            lines.append("## Referências mencionadas:")
+            for ref in canonical.refs[:15]:
+                lines.append(f"- {ref}")
+            lines.append("")
+
+        # Regras de negócio
+        if canonical.rules:
+            lines.append(f"## Regras de negócio identificadas ({len(canonical.rules)}):")
+            for rule in canonical.rules[:15]:
+                lines.append(f"- {rule[:200]}")
+            lines.append("")
+
+        # Seções semânticas (apenas tipos reconhecidos, não "unknown")
+        lines.append("## Seções estruturadas (semantic_type != unknown):")
+        meaningful = [s for s in canonical.sections if s.semantic_type != "unknown"]
+        if meaningful:
+            for section in meaningful[:40]:
+                tag = f"[{section.semantic_type}]"
+                depth = max(1, min(section.depth, 6))
+                prefix = "#" * depth
+                snippet = section.content[:200].replace("\n", " ")
+                lines.append(f"{prefix} {tag} {snippet}")
+        else:
+            lines.append("— (nenhuma seção com semantic_type reconhecido)")
+        lines.append("")
+
+        lines.append(
+            "Nota: esta é a forma canônica determinística do documento. Use os "
+            "dados acima como base factual (requisitos/atores/entidades já foram "
+            "extraídos por regex + dicionário, sem alucinação). Foque seu "
+            "raciocínio em gaps, show_stoppers, poor_definitions e candidatos "
+            "de módulo."
+        )
+        return "\n".join(lines)
 
     def _build_prompt(self, doc_text: str, ocg: dict, prev: list) -> str:
         prev_summary = "Nenhuma análise anterior."
