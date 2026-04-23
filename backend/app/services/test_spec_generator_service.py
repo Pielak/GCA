@@ -39,6 +39,11 @@ from app.models.base import (
 from app.services.rnf_contracts import (
     RnfContracts, extract_test_scenarios, from_ocg_dict,
 )
+# DT-086 consolidada: helpers LLM provider-agnósticos centralizados
+from app.services.llm_low_criticality import (
+    resolve_llm_config as _resolve_llm_config,
+    call_llm as _call_llm_low_crit,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -46,10 +51,6 @@ logger = structlog.get_logger(__name__)
 #: Tipos de spec que este service aceita. `security` e `compliance` ficam
 #: pra Fase 10.3 (Premium obrigatório).
 SUPPORTED_TYPES_LOCAL = ("unit", "integration", "e2e")
-
-#: Timeout generoso (Ollama 7B em CPU pode levar ~1-2 min na 1ª chamada,
-#: depois fica em memória). Mesmo padrão da Fase 9.2 (DT-069).
-OLLAMA_READ_TIMEOUT_SECONDS = 240
 
 
 SYSTEM_PROMPT = """Você é um engenheiro de teste sênior. Sempre responde
@@ -270,13 +271,13 @@ async def generate_module_spec(
     if not module or module.project_id != project_id:
         raise ValueError(f"Módulo {module_id} não encontrado no projeto {project_id}")
 
-    config = await _resolve_ollama_config(db, project_id)
+    config = await _resolve_llm_config(db, project_id)
     if not config:
         raise RuntimeError(
-            "Nenhum provider Ollama configurado no projeto. "
-            "Geração de specs unit/integration exige LLM local "
-            "(contrato §6.2 — baixa criticidade). Configure em "
-            "Settings → IA ou rode sem gerar."
+            "Nenhum provider de IA configurado no projeto. Geração de "
+            "specs unit/integration aceita qualquer provider (§6.2 — baixa "
+            "criticidade). Configure Anthropic, Ollama, DeepSeek, OpenAI, "
+            "Grok ou Gemini em Settings → IA."
         )
 
     ocg_ctx = await _load_ocg_context(db, project_id)
@@ -289,9 +290,9 @@ async def generate_module_spec(
         ocg_ctx=ocg_ctx, neighbors=neighbors, rnf=rnf,
     )
 
-    content = await _call_ollama(
-        base_url=config["base_url"], model=config["model"],
-        system_prompt=SYSTEM_PROMPT, user_prompt=prompt,
+    content = await _call_llm_low_crit(
+        config=config, system_prompt=SYSTEM_PROMPT, user_prompt=prompt,
+        max_tokens=3000, log_context="test_spec",
     )
     content = _strip_outer_fence(content.strip())
 
@@ -407,24 +408,8 @@ async def regenerate_project_specs(
 # Internals
 # ---------------------------------------------------------------------------
 
-async def _resolve_ollama_config(
-    db: AsyncSession, project_id: UUID,
-) -> Optional[dict[str, Any]]:
-    """Mesma lógica do module_details_service.9.2 — Ollama na chain
-    com base_url válido."""
-    from app.services.ai_key_resolver import AIKeyResolver
-    chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
-    for entry in chain:
-        if (entry.get("provider") or "").lower() != "ollama":
-            continue
-        base_url = entry.get("base_url")
-        if not base_url:
-            continue
-        return {
-            "base_url": base_url.rstrip("/"),
-            "model": entry.get("model") or "qwen2.5-coder:7b",
-        }
-    return None
+# _resolve_ollama_config removida — DT-086 consolidada no helper
+# `app.services.llm_low_criticality.resolve_llm_config` (import acima).
 
 
 async def _load_ocg_context(db: AsyncSession, project_id: UUID) -> dict[str, Any]:
@@ -669,49 +654,8 @@ async def _find_existing(
     return row.scalar_one_or_none()
 
 
-async def _call_ollama(
-    *, base_url: str, model: str, system_prompt: str, user_prompt: str,
-) -> str:
-    """Copy cirúrgico do padrão da Fase 9.2 (DT-069): timeout 240s,
-    OpenAI-compatible, RuntimeError em timeout com mensagem clara."""
-    import time
-    url = f"{base_url}/v1/chat/completions"
-    payload = {
-        "model": model,
-        "max_tokens": 3000,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-    timeout = httpx.Timeout(
-        connect=10.0, read=OLLAMA_READ_TIMEOUT_SECONDS, write=10.0, pool=5.0,
-    )
-    started = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                url, json=payload, headers={"Content-Type": "application/json"},
-            )
-            resp.raise_for_status()
-            body = resp.json()
-    except httpx.ReadTimeout as exc:
-        elapsed = time.monotonic() - started
-        logger.warning(
-            "test_spec.ollama_timeout",
-            base_url=base_url, model=model, elapsed_s=round(elapsed, 1),
-        )
-        raise RuntimeError(
-            f"Ollama ({model}) não respondeu em {OLLAMA_READ_TIMEOUT_SECONDS}s. "
-            "Modelo pode estar carregando do disco (1ª chamada). Tente novamente."
-        ) from exc
-    elapsed = time.monotonic() - started
-    logger.info("test_spec.ollama_call_ok", model=model, elapsed_s=round(elapsed, 1))
-    choices = body.get("choices") or []
-    if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "") or ""
+# _call_ollama removida — DT-086 consolidada no helper
+# `app.services.llm_low_criticality.call_llm` (import acima como _call_llm_low_crit).
 
 
 def _strip_outer_fence(text: str) -> str:

@@ -283,180 +283,26 @@ def _build_user_prompt(module: ModuleCandidate, ocg_data: dict[str, Any]) -> str
     return base
 
 
-#: Timeout generoso pra Ollama em CPU. qwen2.5-coder:7b leva 30-180s
-#: por chamada quando não há GPU dedicada. Se o user tem GPU, a
-#: resposta volta em ≤10s — timeout só protege contra hang real.
-OLLAMA_READ_TIMEOUT_SECONDS = 240
-
-#: Timeout pros providers cloud (Anthropic/DeepSeek/OpenAI/Grok): mais curto,
-#: respostas tipicamente em <30s pra prompts desse tamanho (~1500 tokens).
-CLOUD_READ_TIMEOUT_SECONDS = 60
-
-#: Modelos default por provider pra baixa criticidade (§6.2). Preferência
-#: por modelos rápidos/baratos já que detalhamento é insumo pro GP, não
-#: produção. Cliente pode override via project_settings.
-_LOW_CRITICALITY_DEFAULT_MODELS: dict[str, str] = {
-    "anthropic": "claude-haiku-4-5-20251001",
-    "openai": "gpt-4o-mini",
-    "deepseek": "deepseek-chat",
-    "grok": "grok-2",
-    "gemini": "gemini-2.0-flash",
-    "ollama": "qwen2.5-coder:7b",
-}
-
-
-async def _resolve_llm_config(
-    db: AsyncSession, project_id: UUID
-) -> dict[str, Any] | None:
-    """Resolve provider de IA pra detalhamento on-demand (baixa criticidade §6.2).
-
-    Ordem de preferência (primeiro que encontrar válido):
-      1. Ollama (se configurado com base_url) — zero custo de tokens externos.
-      2. Provider default do projeto (qualquer: Anthropic, DeepSeek, OpenAI, Grok, Gemini).
-
-    Retorna dict `{provider, base_url, api_key, model}` ou None se nenhum
-    provider estiver válido. Respeita §6.2 do contrato canônico: "IA
-    configurável por cliente — não hardcodar provedor".
-    """
-    from app.services.ai_key_resolver import AIKeyResolver
-
-    chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
-
-    # 1. Prefere Ollama quando configurado (grátis, adequado pra baixa criticidade)
-    for entry in chain:
-        if (entry.get("provider") or "").lower() != "ollama":
-            continue
-        base_url = entry.get("base_url")
-        if not base_url:
-            logger.warning(
-                "module_details.ollama_without_base_url",
-                project_id=str(project_id),
-            )
-            continue
-        return {
-            "provider": "ollama",
-            "base_url": base_url.rstrip("/"),
-            "api_key": None,
-            "model": entry.get("model") or _LOW_CRITICALITY_DEFAULT_MODELS["ollama"],
-        }
-
-    # 2. Fallback pro provider default do projeto (qualquer cloud)
-    default_provider = await AIKeyResolver._resolve_project_provider(db, project_id)
-    if not default_provider:
-        return None
-    api_key = await AIKeyResolver.get_project_key(db, project_id, provider=default_provider)
-    if not api_key:
-        return None
-
-    # Procura modelo configurado pelo projeto na chain; senão usa default baixa-crit
-    model_from_chain = None
-    for entry in chain:
-        if (entry.get("provider") or "").lower() == default_provider.lower():
-            model_from_chain = entry.get("model")
-            break
-
-    return {
-        "provider": default_provider,
-        "base_url": None,
-        "api_key": api_key,
-        "model": model_from_chain or _LOW_CRITICALITY_DEFAULT_MODELS.get(default_provider, "deepseek-chat"),
-    }
+# Helpers LLM centralizados em `llm_low_criticality` (DT-086 consolidada).
+# Aliases locais pra compat com callers existentes do módulo.
+from app.services.llm_low_criticality import (
+    resolve_llm_config as _resolve_llm_config,
+    call_llm as _call_llm_base,
+)
 
 
 async def _call_llm(
     *, config: dict[str, Any], system_prompt: str, user_prompt: str,
 ) -> str:
-    """Dispatch pro provider correto (Anthropic SDK ou httpx OpenAI-compat
-    pros demais). Retorna texto cru — caller faz parse. Contrato §6.2:
-    qualquer provider configurado serve pra baixa criticidade.
-    """
-    import time
-    provider = config["provider"]
-    model = config["model"]
-
-    # Anthropic: SDK nativo
-    if provider == "anthropic":
-        from anthropic import AsyncAnthropic
-        client = AsyncAnthropic(api_key=config["api_key"])
-        started = time.monotonic()
-        response = await client.messages.create(
-            model=model,
-            max_tokens=1500,
-            temperature=0.2,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-        elapsed = time.monotonic() - started
-        logger.info("module_details.llm_call_ok", provider=provider, model=model, elapsed_s=round(elapsed, 1))
-        if not response.content:
-            return ""
-        return response.content[0].text
-
-    # Ollama / OpenAI-compat (deepseek, openai, grok)
-    provider_urls = {
-        "ollama": f"{config['base_url']}/v1/chat/completions" if config.get("base_url") else None,
-        "deepseek": "https://api.deepseek.com/chat/completions",
-        "openai": "https://api.openai.com/v1/chat/completions",
-        "grok": "https://api.x.ai/v1/chat/completions",
-    }
-    url = provider_urls.get(provider)
-    if not url:
-        raise RuntimeError(
-            f"Provider '{provider}' não suportado no detalhamento on-demand. "
-            "Configure Anthropic, Ollama, DeepSeek, OpenAI ou Grok em Settings → IA."
-        )
-
-    headers = {"Content-Type": "application/json"}
-    if config.get("api_key"):
-        headers["Authorization"] = f"Bearer {config['api_key']}"
-
-    payload = {
-        "model": model,
-        "max_tokens": 1500,
-        "temperature": 0.2,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-    }
-
-    read_timeout = OLLAMA_READ_TIMEOUT_SECONDS if provider == "ollama" else CLOUD_READ_TIMEOUT_SECONDS
-    timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0)
-
-    started = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
-            body = resp.json()
-    except httpx.ReadTimeout as exc:
-        elapsed = time.monotonic() - started
-        logger.warning(
-            "module_details.llm_timeout",
-            provider=provider, model=model,
-            elapsed_s=round(elapsed, 1), limit_s=read_timeout,
-        )
-        if provider == "ollama":
-            raise RuntimeError(
-                f"Ollama ({model}) não respondeu em {read_timeout}s. Modelo "
-                "pode estar carregando do disco (primeira chamada) ou rodando "
-                "em CPU lenta. Tente novamente — fica em memória após o primeiro uso."
-            ) from exc
-        raise RuntimeError(
-            f"{provider} ({model}) não respondeu em {read_timeout}s."
-        ) from exc
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"{provider} API retornou erro {exc.response.status_code}: "
-            f"{exc.response.text[:200]}"
-        ) from exc
-
-    elapsed = time.monotonic() - started
-    logger.info("module_details.llm_call_ok", provider=provider, model=model, elapsed_s=round(elapsed, 1))
-    choices = body.get("choices") or []
-    if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "") or ""
+    """Wrapper que fixa log_context e max_tokens padrão do detalhamento."""
+    return await _call_llm_base(
+        config=config,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=1500,
+        temperature=0.2,
+        log_context="module_details",
+    )
 
 
 _FENCE_RE = re.compile(r"^\s*```(?:json)?\s*\n?(?P<body>.*?)\n?```\s*$", re.DOTALL)
