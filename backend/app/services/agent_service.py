@@ -835,19 +835,19 @@ Return complete JSON analysis with score, classification, findings, and recommen
         from sqlalchemy import select as _select
 
         try:
-            # Extrair scores dos pilares (flexível: P1, P1_Business, etc.)
+            # Extrair scores dos pilares com a regra canônica (mesma do
+            # ocg_updater_service — commit ece2848). Aceita P1_business_case,
+            # P2_compliance, P3_scope, P4_performance, P5_architecture,
+            # P6_data, P7_security + forma curta P1/P2/... (case-insensitive).
+            # A versão anterior buscava chaves que não existiam no JSON real
+            # (P1_Business, P3_Features, etc.) e deixava todas as colunas
+            # pN_*_score zeradas após REGENERATE — bug gêmeo do já corrigido
+            # no updater reativo.
+            from app.services.ocg_updater_service import _extract_pillar_score
             ps = ocg_response.PILLAR_SCORES
             def _get_pillar_score(ps: dict, pillar_num: int) -> float:
-                """Busca score do pilar com fallback para diferentes formatos de chave"""
-                for key in [f"P{pillar_num}", f"P{pillar_num}_Business", f"P{pillar_num}_Rules",
-                           f"P{pillar_num}_Features", f"P{pillar_num}_NFR", f"P{pillar_num}_Architecture",
-                           f"P{pillar_num}_Data", f"P{pillar_num}_Security"]:
-                    val = ps.get(key)
-                    if isinstance(val, dict):
-                        return val.get("score", 0)
-                    elif isinstance(val, (int, float)):
-                        return val
-                return 0
+                score = _extract_pillar_score(ps, pillar_num)
+                return score if score is not None else 0.0
 
             # Campos comuns ao INSERT e ao UPDATE
             overall_score = (
