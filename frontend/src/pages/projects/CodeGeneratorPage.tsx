@@ -10,7 +10,39 @@ import {
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 import { OperationBar, PulseIndicator } from '@/components/ui/PipelineProgress'
-import { getErrorMessage } from '@/lib/errors'
+import { getErrorMessage, getErrorStatus } from '@/lib/errors'
+
+/**
+ * DT-089 — Formatter de erros do CodeGenerator com mensagens amigáveis
+ * por contexto. Trata 403 de RBAC especificamente (causa mais comum
+ * quando user não tem code:write) + fallback genérico pra outros erros.
+ */
+function formatCodeGenError(err: unknown, action: string): string {
+  const status = getErrorStatus(err)
+  const msg = getErrorMessage(err)
+  if (status === 403) {
+    // Backend manda detail claro em PT-BR; aumentamos com dica do fluxo:
+    return (
+      `${msg}\n\n` +
+      `Projetos pequenos podem atribuir múltiplos papéis à mesma pessoa ` +
+      `(gp + dev + qa). Peça ao Admin pra adicioná-lo como 'dev' no projeto ` +
+      `via Admin → Projetos → Membros.`
+    )
+  }
+  if (status === 400 && /git/i.test(msg)) {
+    return (
+      `${msg}\n\n` +
+      `Configure o repositório Git do projeto em Admin → Projetos antes de ${action}.`
+    )
+  }
+  if (status === 409) {
+    return (
+      `${msg}\n\n` +
+      `Aguarde a outra operação terminar e tente novamente.`
+    )
+  }
+  return `Falha ao ${action}: ${msg}`
+}
 
 // ============================================================================
 // Tipos
@@ -296,8 +328,7 @@ export function CodeGeneratorPage() {
         setHasChanges(false)
       }
     } catch (err: unknown) {
-      const detail = getErrorMessage(err)
-      alert(`Falha na geração: ${detail}`)
+      alert(formatCodeGenError(err, 'gerar scaffold'))
     } finally {
       setScaffoldGenerating(false)
     }
@@ -331,8 +362,7 @@ export function CodeGeneratorPage() {
       setScaffoldPendingApply(false)
       loadTree()
     } catch (err: unknown) {
-      const detail = getErrorMessage(err)
-      alert(`Falha ao aplicar: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`)
+      alert(formatCodeGenError(err, 'aplicar scaffold'))
     } finally {
       setScaffoldApplying(false)
     }
@@ -511,7 +541,7 @@ export function CodeGeneratorPage() {
         loadTree()
       }
     } catch (err: unknown) {
-      alert(getErrorMessage(err))
+      alert(formatCodeGenError(err, 'salvar arquivo'))
     } finally {
       setSaving(false)
     }
@@ -645,7 +675,7 @@ export function CodeGeneratorPage() {
         setTimeout(() => setSaveSuccess(false), 2500)
       }
     } catch (err: unknown) {
-      alert(getErrorMessage(err) || 'Falha ao regenerar arquivo')
+      alert(formatCodeGenError(err, 'regenerar arquivo'))
     } finally {
       setRegenerating(false)
     }
