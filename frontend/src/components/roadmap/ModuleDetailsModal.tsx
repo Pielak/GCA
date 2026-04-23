@@ -88,11 +88,11 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
       setDetails(res.data)
     } catch (err: unknown) {
       const status = getErrorStatus(err)
-      if (status === 503) {
-        setError('Ollama (LLM local) não está configurado para este projeto. Configure em Settings → IA para usar detalhamento on-demand.')
-      } else if (status === 404) {
+      if (status === 404) {
         setError('Módulo não encontrado.')
       } else {
+        // 503 e outros — repassar a mensagem do backend (que agora lista
+        // os 6 providers aceitos em vez de forçar Ollama, commit a9d243b)
         setError(getErrorMessage(err))
       }
     } finally {
