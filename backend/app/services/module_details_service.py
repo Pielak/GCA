@@ -131,16 +131,16 @@ async def get_or_generate_details(
     ocg_data = await _load_latest_ocg(db, project_id)
     prompt = _build_user_prompt(module, ocg_data or {})
 
-    config = await _resolve_ollama_config(db, project_id)
+    config = await _resolve_llm_config(db, project_id)
     if not config:
         raise RuntimeError(
-            "Nenhum provider Ollama configurado no projeto. Detalhamento "
-            "on-demand exige LLM local — configure em Settings → IA."
+            "Nenhum provider de IA configurado no projeto. Configure em "
+            "Settings → Provedor de IA (qualquer um: Anthropic, Ollama local, "
+            "DeepSeek, OpenAI, Grok ou Gemini) para usar detalhamento on-demand."
         )
 
-    response_text = await _call_ollama(
-        base_url=config["base_url"],
-        model=config["model"],
+    response_text = await _call_llm(
+        config=config,
         system_prompt=DETAIL_PROMPT_SYSTEM,
         user_prompt=prompt,
     )
@@ -149,13 +149,13 @@ async def get_or_generate_details(
     # Persistir cache
     module.details_json = json.dumps(parsed, ensure_ascii=False)
     module.details_generated_at = datetime.now(timezone.utc)
-    module.details_provider = "ollama"
+    module.details_provider = config["provider"]
     module.details_model = config["model"]
     await db.commit()
 
     parsed["_cached"] = False
     parsed["_generated_at"] = module.details_generated_at.isoformat()
-    parsed["_provider"] = "ollama"
+    parsed["_provider"] = config["provider"]
     parsed["_model"] = config["model"]
     # MVP 9 Fase 9.3 — anexa readiness se disponível
     parsed["readiness"] = _build_readiness_payload(module)
@@ -283,14 +283,46 @@ def _build_user_prompt(module: ModuleCandidate, ocg_data: dict[str, Any]) -> str
     return base
 
 
-async def _resolve_ollama_config(
+#: Timeout generoso pra Ollama em CPU. qwen2.5-coder:7b leva 30-180s
+#: por chamada quando não há GPU dedicada. Se o user tem GPU, a
+#: resposta volta em ≤10s — timeout só protege contra hang real.
+OLLAMA_READ_TIMEOUT_SECONDS = 240
+
+#: Timeout pros providers cloud (Anthropic/DeepSeek/OpenAI/Grok): mais curto,
+#: respostas tipicamente em <30s pra prompts desse tamanho (~1500 tokens).
+CLOUD_READ_TIMEOUT_SECONDS = 60
+
+#: Modelos default por provider pra baixa criticidade (§6.2). Preferência
+#: por modelos rápidos/baratos já que detalhamento é insumo pro GP, não
+#: produção. Cliente pode override via project_settings.
+_LOW_CRITICALITY_DEFAULT_MODELS: dict[str, str] = {
+    "anthropic": "claude-haiku-4-5-20251001",
+    "openai": "gpt-4o-mini",
+    "deepseek": "deepseek-chat",
+    "grok": "grok-2",
+    "gemini": "gemini-2.0-flash",
+    "ollama": "qwen2.5-coder:7b",
+}
+
+
+async def _resolve_llm_config(
     db: AsyncSession, project_id: UUID
 ) -> dict[str, Any] | None:
-    """Procura provider 'ollama' na chain do projeto. Retorna
-    {base_url, model} ou None se ausente/sem base_url."""
+    """Resolve provider de IA pra detalhamento on-demand (baixa criticidade §6.2).
+
+    Ordem de preferência (primeiro que encontrar válido):
+      1. Ollama (se configurado com base_url) — zero custo de tokens externos.
+      2. Provider default do projeto (qualquer: Anthropic, DeepSeek, OpenAI, Grok, Gemini).
+
+    Retorna dict `{provider, base_url, api_key, model}` ou None se nenhum
+    provider estiver válido. Respeita §6.2 do contrato canônico: "IA
+    configurável por cliente — não hardcodar provedor".
+    """
     from app.services.ai_key_resolver import AIKeyResolver
 
     chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
+
+    # 1. Prefere Ollama quando configurado (grátis, adequado pra baixa criticidade)
     for entry in chain:
         if (entry.get("provider") or "").lower() != "ollama":
             continue
@@ -302,30 +334,82 @@ async def _resolve_ollama_config(
             )
             continue
         return {
+            "provider": "ollama",
             "base_url": base_url.rstrip("/"),
-            "model": entry.get("model") or "qwen2.5-coder:7b",
+            "api_key": None,
+            "model": entry.get("model") or _LOW_CRITICALITY_DEFAULT_MODELS["ollama"],
         }
-    return None
+
+    # 2. Fallback pro provider default do projeto (qualquer cloud)
+    default_provider = await AIKeyResolver._resolve_project_provider(db, project_id)
+    if not default_provider:
+        return None
+    api_key = await AIKeyResolver.get_project_key(db, project_id, provider=default_provider)
+    if not api_key:
+        return None
+
+    # Procura modelo configurado pelo projeto na chain; senão usa default baixa-crit
+    model_from_chain = None
+    for entry in chain:
+        if (entry.get("provider") or "").lower() == default_provider.lower():
+            model_from_chain = entry.get("model")
+            break
+
+    return {
+        "provider": default_provider,
+        "base_url": None,
+        "api_key": api_key,
+        "model": model_from_chain or _LOW_CRITICALITY_DEFAULT_MODELS.get(default_provider, "deepseek-chat"),
+    }
 
 
-#: Timeout generoso pra Ollama em CPU. qwen2.5-coder:7b leva 30-180s
-#: por chamada quando não há GPU dedicada. Se o user tem GPU, a
-#: resposta volta em ≤10s — timeout só protege contra hang real.
-OLLAMA_READ_TIMEOUT_SECONDS = 240
-
-
-async def _call_ollama(
-    *, base_url: str, model: str, system_prompt: str, user_prompt: str,
+async def _call_llm(
+    *, config: dict[str, Any], system_prompt: str, user_prompt: str,
 ) -> str:
-    """POST OpenAI-compatible em /v1/chat/completions do daemon Ollama
-    do projeto. Retorna o texto cru da resposta — caller faz parse.
-
-    Timeout dividido: connect=10s (fail rápido se daemon caiu),
-    read=240s (modelo 7b em CPU pode demorar). Logs marcam tempo
-    decorrido pra debug.
+    """Dispatch pro provider correto (Anthropic SDK ou httpx OpenAI-compat
+    pros demais). Retorna texto cru — caller faz parse. Contrato §6.2:
+    qualquer provider configurado serve pra baixa criticidade.
     """
     import time
-    url = f"{base_url}/v1/chat/completions"
+    provider = config["provider"]
+    model = config["model"]
+
+    # Anthropic: SDK nativo
+    if provider == "anthropic":
+        from anthropic import AsyncAnthropic
+        client = AsyncAnthropic(api_key=config["api_key"])
+        started = time.monotonic()
+        response = await client.messages.create(
+            model=model,
+            max_tokens=1500,
+            temperature=0.2,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        elapsed = time.monotonic() - started
+        logger.info("module_details.llm_call_ok", provider=provider, model=model, elapsed_s=round(elapsed, 1))
+        if not response.content:
+            return ""
+        return response.content[0].text
+
+    # Ollama / OpenAI-compat (deepseek, openai, grok)
+    provider_urls = {
+        "ollama": f"{config['base_url']}/v1/chat/completions" if config.get("base_url") else None,
+        "deepseek": "https://api.deepseek.com/chat/completions",
+        "openai": "https://api.openai.com/v1/chat/completions",
+        "grok": "https://api.x.ai/v1/chat/completions",
+    }
+    url = provider_urls.get(provider)
+    if not url:
+        raise RuntimeError(
+            f"Provider '{provider}' não suportado no detalhamento on-demand. "
+            "Configure Anthropic, Ollama, DeepSeek, OpenAI ou Grok em Settings → IA."
+        )
+
+    headers = {"Content-Type": "application/json"}
+    if config.get("api_key"):
+        headers["Authorization"] = f"Bearer {config['api_key']}"
+
     payload = {
         "model": model,
         "max_tokens": 1500,
@@ -335,29 +419,40 @@ async def _call_ollama(
             {"role": "user", "content": user_prompt},
         ],
     }
-    timeout = httpx.Timeout(connect=10.0, read=OLLAMA_READ_TIMEOUT_SECONDS, write=10.0, pool=5.0)
+
+    read_timeout = OLLAMA_READ_TIMEOUT_SECONDS if provider == "ollama" else CLOUD_READ_TIMEOUT_SECONDS
+    timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0)
+
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(url, json=payload, headers={"Content-Type": "application/json"})
+            resp = await client.post(url, json=payload, headers=headers)
             resp.raise_for_status()
             body = resp.json()
     except httpx.ReadTimeout as exc:
         elapsed = time.monotonic() - started
         logger.warning(
-            "module_details.ollama_timeout",
-            base_url=base_url, model=model,
-            elapsed_s=round(elapsed, 1),
-            limit_s=OLLAMA_READ_TIMEOUT_SECONDS,
+            "module_details.llm_timeout",
+            provider=provider, model=model,
+            elapsed_s=round(elapsed, 1), limit_s=read_timeout,
         )
+        if provider == "ollama":
+            raise RuntimeError(
+                f"Ollama ({model}) não respondeu em {read_timeout}s. Modelo "
+                "pode estar carregando do disco (primeira chamada) ou rodando "
+                "em CPU lenta. Tente novamente — fica em memória após o primeiro uso."
+            ) from exc
         raise RuntimeError(
-            f"Ollama ({model}) não respondeu em {OLLAMA_READ_TIMEOUT_SECONDS}s. "
-            "Modelo pode estar carregando do disco (primeira chamada) "
-            "ou rodando em CPU lenta. Tente novamente — modelo já está "
-            "em memória após o primeiro carregamento."
+            f"{provider} ({model}) não respondeu em {read_timeout}s."
         ) from exc
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(
+            f"{provider} API retornou erro {exc.response.status_code}: "
+            f"{exc.response.text[:200]}"
+        ) from exc
+
     elapsed = time.monotonic() - started
-    logger.info("module_details.ollama_call_ok", model=model, elapsed_s=round(elapsed, 1))
+    logger.info("module_details.llm_call_ok", provider=provider, model=model, elapsed_s=round(elapsed, 1))
     choices = body.get("choices") or []
     if not choices:
         return ""
