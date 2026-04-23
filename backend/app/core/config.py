@@ -179,13 +179,13 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-opus-4-6"
     ANTHROPIC_TEMPERATURE: float = 0.3
-    # DT-069: 4096 era insuficiente pro schema completo do Arguidor
-    # (document_classification + gaps + show_stoppers + poor_definitions
-    # + improvement_suggestions + module_candidates + ocg_fields_to_update).
-    # Com doc rico (60+ RFs), Claude Haiku truncava no meio, o parse falhava
-    # silenciosamente e o Arguidor persistia arrays vazios. 8192 é o teto
-    # de output do Haiku 4.5 sem beta flag.
-    ANTHROPIC_MAX_TOKENS: int = 8192
+    # Histórico: DT-069 subiu 4096→8192 pra acomodar Arguidor com 60+ RFs.
+    # Sessão 30 (2026-04-23): 8192 ainda trunca em docs grandes (questionários
+    # detalhados + respostas técnicas extensas). Sobe pra 32768 — Haiku 4.5 e
+    # Sonnet 4.6 aceitam até 64K de output sem beta flag; Opus aceita 32K.
+    # 32768 é safe pra todos os modelos suportados no GCA e dá 4x de margem
+    # sobre o limite anterior. Operador pode override via .env se precisar.
+    ANTHROPIC_MAX_TOKENS: int = 32768
 
     # Onboarding
     ONBOARDING_INVITE_EXPIRES_DAYS: int = 7

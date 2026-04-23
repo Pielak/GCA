@@ -642,7 +642,7 @@ class OCGUpdaterService:
             client = AsyncAnthropic(api_key=api_key)
             response = await client.messages.create(
                 model=model,
-                max_tokens=8192,
+                max_tokens=settings.ANTHROPIC_MAX_TOKENS,
                 temperature=0.3,
                 system=system_prompt,
                 messages=[{"role": "user", "content": user_prompt}],
@@ -678,7 +678,7 @@ class OCGUpdaterService:
         async with httpx.AsyncClient(timeout=120.0) as client:
             resp = await client.post(url, headers=headers, json={
                 "model": model,
-                "max_tokens": 8192,
+                "max_tokens": settings.ANTHROPIC_MAX_TOKENS,
                 "temperature": 0.3,
                 "messages": [
                     {"role": "system", "content": system_prompt},
