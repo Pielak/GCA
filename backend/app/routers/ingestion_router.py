@@ -150,6 +150,11 @@ async def release_from_quarantine(
 
     doc.quarantine_status = "released"
     doc.arguider_status = "pending"
+    # MVP 29 Fase 29.1: reset canônico também zera started_at (caso o
+    # doc tenha sido quarentenado DEPOIS de uma tentativa parcial de
+    # análise — evita zombie no próximo retry).
+    doc.arguider_started_at = None
+    doc.arguider_error_message = None
     await db.commit()
 
     return {"message": "Documento liberado da quarentena. Análise será iniciada.", "document_id": str(document_id)}
@@ -276,10 +281,33 @@ async def get_document_content(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Serve o conteúdo original do documento (read-only, inline)."""
+    """Serve o conteúdo original do documento (read-only, inline).
+
+    Fix dogfood 2026-04-22: endpoint exige token válido + membership no
+    projeto (compartimentalização §2.2). Antes era acessível sem auth
+    porque `get_current_user_from_token` retorna None silenciosamente —
+    o link `<a target=_blank>` do frontend não manda Authorization
+    header e o endpoint prosseguia. Agora rejeita anônimo e valida role.
+    """
     from fastapi.responses import Response
     from app.models.base import IngestedDocument
     from app.utils.ingested_storage import read_ingested
+    from app.dependencies.require_action import resolve_user_role_in_project
+
+    if current_user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticação requerida",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Membership: usuário precisa ter papel no projeto (Admin global OU GP/dev/qa).
+    role = await resolve_user_role_in_project(current_user_id, project_id, db)
+    if role is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sem acesso a este projeto",
+        )
 
     doc = await db.get(IngestedDocument, document_id)
     if not doc or doc.project_id != project_id:

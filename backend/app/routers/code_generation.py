@@ -488,6 +488,13 @@ async def generate_scaffold(
     # MVP 23 Fase 23.3 — contratos RNF do OCG entram como contrato obrigatório
     # no prompt; stack-aware hints guiam implementação por linguagem/framework.
     rnf_contracts = ocg_data.get("RNF_CONTRACTS")
+    # MVP 25 Fase 25.4 — design tokens derivados da ingestão alimentam o
+    # prompt para frontend não inventar paleta/tipografia.
+    frontend_obj = (stack or {}).get("frontend") if isinstance(stack, dict) else None
+    design_tokens = (
+        frontend_obj.get("design_tokens")
+        if isinstance(frontend_obj, dict) else None
+    )
     prompt = build_scaffold_prompt(
         project_name=project.name,
         project_slug=project.slug,
@@ -503,6 +510,7 @@ async def generate_scaffold(
         compliance=compliance,
         ingested_docs_context=doc_context,
         rnf_contracts=rnf_contracts,
+        design_tokens=design_tokens,
     )
 
     # 5. Chamar LLM
@@ -621,6 +629,58 @@ async def generate_scaffold(
                 files=docstring_failures,
             )
 
+        # MVP 23 Fase 23.4 — validação estática contra RNF_CONTRACTS do OCG.
+        # Grep determinístico sobre os arquivos; violações blocker rebaixam
+        # o status pra "todo" (obriga Dev a regerar) e emitem audit canônico
+        # CODEGEN_RNF_VIOLATION. Sem contrato declarado → no-op zero-impact.
+        rnf_violations_payload: List[Dict[str, Any]] = []
+        try:
+            from app.services.rnf_contracts import from_ocg_dict
+            from app.services.rnf_validation_service import validate_files
+
+            ocg_row = (
+                await db.execute(
+                    select(OCG).where(OCG.project_id == project_id)
+                    .order_by(desc(OCG.version)).limit(1)
+                )
+            ).scalar_one_or_none()
+            ocg_data = {}
+            if ocg_row and ocg_row.ocg_data:
+                try:
+                    ocg_data = json.loads(ocg_row.ocg_data)
+                except (ValueError, TypeError):
+                    ocg_data = {}
+
+            rnf = from_ocg_dict(ocg_data.get("RNF_CONTRACTS"))
+            rnf_report = validate_files(rnf, files)
+
+            if rnf_report.violations:
+                blocker_paths = rnf_report.blocker_files
+                for f in files:
+                    if f.get("status") != "complete":
+                        continue
+                    if f.get("path") in blocker_paths:
+                        f["status"] = "todo"
+                        f["content"] = (
+                            "# [RNF_CONTRACT_VIOLATION] Regerar atendendo contrato do OCG.\n"
+                            "# Falhas detectadas na validação estática (grep canônico).\n\n"
+                            + (f.get("content") or "")
+                        )
+                rnf_violations_payload = rnf_report.to_dict()["violations"]
+                logger.warning(
+                    "scaffold.rnf_validation_failed",
+                    project_id=str(project_id),
+                    violations=len(rnf_report.violations),
+                    blocker_files=sorted(blocker_paths),
+                )
+        except Exception as exc:
+            # Validação estática não pode bloquear o happy path. Loga e segue.
+            logger.warning(
+                "scaffold.rnf_validation_error",
+                project_id=str(project_id),
+                error=str(exc)[:300],
+            )
+
         logger.info(
             "scaffold.generation_success",
             project_id=str(project_id),
@@ -632,13 +692,24 @@ async def generate_scaffold(
 
         # MVP 13 Fase 13.7 — audit canônico de scaffold gerado.
         from app.services.audit_service import AuditEvents, AuditService
-        await AuditService(db).log_codegen_event(
+        audit = AuditService(db)
+        await audit.log_codegen_event(
             event_type=AuditEvents.CODEGEN_SCAFFOLD_GENERATED,
             actor_id=user_id,
             project_id=project_id,
             action="generate_scaffold_dry_run" if request.dry_run else "generate_scaffold_commit",
             files_count=len(files),
         )
+        # MVP 23 Fase 23.4 — audit canônico de violação RNF, quando houve.
+        if rnf_violations_payload:
+            await audit.log_codegen_event(
+                event_type=AuditEvents.CODEGEN_RNF_VIOLATION,
+                actor_id=user_id,
+                project_id=project_id,
+                action="rnf_contract_violation",
+                files_count=len({v["file_path"] for v in rnf_violations_payload}),
+                extra={"violations": rnf_violations_payload},
+            )
         await db.commit()
 
         from fastapi.responses import JSONResponse
@@ -1210,6 +1281,12 @@ async def regenerate_single_file(
     # MVP 23 Fase 23.3 — RNF injetado também em regenerate-file
     # (refactor consciente preserva contratos quando arquivo é rescrito).
     rnf_contracts = ocg_data.get("RNF_CONTRACTS")
+    # MVP 25 Fase 25.4 — design tokens preservados no regenerate.
+    frontend_obj_rf = stack.get("frontend") if isinstance(stack, dict) else None
+    design_tokens = (
+        frontend_obj_rf.get("design_tokens")
+        if isinstance(frontend_obj_rf, dict) else None
+    )
 
     # MVP 12 Fase 12.9 — prompt consolidado via builder canônico.
     from app.services.codegen_prompt_builder import build_regenerate_file_prompt
@@ -1222,6 +1299,7 @@ async def regenerate_single_file(
         instruction=request.instructions,
         current_content=request.current_content,
         rnf_contracts=rnf_contracts,
+        design_tokens=design_tokens,
     )
 
     api_key = app_settings.ANTHROPIC_API_KEY

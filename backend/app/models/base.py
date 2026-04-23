@@ -796,6 +796,13 @@ class Questionnaire(Base):
     file_size_bytes = Column(Integer, nullable=True)
     answered_questions = Column(Integer, nullable=True)
 
+    # MVP 29 Fase 29.2 — flags de idempotência das tasks Celery canônicas.
+    # NOT NULL = "efeito já aplicado, skip silencioso". Cada uma protege
+    # uma task que tem efeito externo visível ao usuário (email) ou
+    # cria artefato único (OCG).
+    admins_notified_at = Column(DateTime(timezone=True), nullable=True)
+    analysis_email_sent_at = Column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     project = relationship("Project", foreign_keys=[project_id])
 

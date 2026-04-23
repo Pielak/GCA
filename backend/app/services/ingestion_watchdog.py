@@ -11,9 +11,12 @@ mesmo sem migrar para Celery/RQ, garantimos que docs zumbis não fiquem
 indefinidamente travados.
 
 Política:
-- Threshold padrão: 30 minutos sem atualização de stage. Análises reais
-  do Arguidor levam segundos a poucos minutos com Anthropic, até ~5 min
-  com Ollama local. 30 min é margem confortável.
+- Threshold padrão: 8 minutos sem atualização de stage. Análises típicas
+  do Arguidor com Anthropic ficam em 60–180s; Ollama local excepcional
+  chega a ~4min. 8 min dá margem ~2x sem deixar zombies por muito tempo.
+  (Ajustado de 30→8 em 2026-04-22 após dogfood do MVP 25: restarts
+  encadeados do backend durante desenvolvimento deixavam docs travados
+  por 30min inteiros, incomodando o fluxo.)
 - Recovery escreve `arguider_error_message` claro pra UI mostrar (DT-022).
 - Stage vai para 'failed' pra frontend parar o polling.
 - Idempotente: roda múltiplas vezes sem duplicar efeito.
@@ -24,14 +27,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import structlog
-from sqlalchemy import update, select
+from sqlalchemy import and_, or_, select, update
 
 from app.db.database import AsyncSessionLocal
 from app.models.base import IngestedDocument
 
 logger = structlog.get_logger(__name__)
 
-ZOMBIE_THRESHOLD_MINUTES = 30
+ZOMBIE_THRESHOLD_MINUTES = 8
 RECOVERY_MESSAGE = (
     "Análise interrompida por reinício do backend. "
     "Documento liberado para nova tentativa ou exclusão."
@@ -68,12 +71,32 @@ async def recover_zombie_documents(
 async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
 
-    rows = await db.execute(
-        select(IngestedDocument.id, IngestedDocument.project_id, IngestedDocument.original_filename)
-        .where(
+    # MVP 29 Fase 29.1: dois padrões de zombie são cobertos.
+    #
+    #  1. status='processing' + started_at velho — caso clássico pré-MVP 29.
+    #  2. status='pending' + started_at NOT NULL e velho — bug novo descoberto
+    #     no dogfood: fluxos de fallback (DT-064) e reanalyze resetavam
+    #     status→'pending' mas deixavam started_at preenchido. Se worker
+    #     morria entre o reset e o retry, o doc ficava num limbo que o
+    #     watchdog antigo não pegava porque filtrava só 'processing'.
+    zombie_predicate = and_(
+        or_(
             IngestedDocument.arguider_status == "processing",
-            IngestedDocument.arguider_started_at < cutoff,
-        )
+            and_(
+                IngestedDocument.arguider_status == "pending",
+                IngestedDocument.arguider_started_at.isnot(None),
+            ),
+        ),
+        IngestedDocument.arguider_started_at < cutoff,
+    )
+
+    rows = await db.execute(
+        select(
+            IngestedDocument.id,
+            IngestedDocument.project_id,
+            IngestedDocument.original_filename,
+            IngestedDocument.arguider_status,
+        ).where(zombie_predicate)
     )
     candidates = rows.all()
     checked = len(candidates)
@@ -83,10 +106,7 @@ async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
 
     result = await db.execute(
         update(IngestedDocument)
-        .where(
-            IngestedDocument.arguider_status == "processing",
-            IngestedDocument.arguider_started_at < cutoff,
-        )
+        .where(zombie_predicate)
         .values(
             arguider_status="error",
             arguider_error_message=RECOVERY_MESSAGE,
@@ -96,12 +116,13 @@ async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
     await db.commit()
     recovered = result.rowcount or 0
 
-    for cid, pid, fname in candidates:
+    for cid, pid, fname, prev_status in candidates:
         logger.warning(
             "ingestion.zombie_recovered",
             document_id=str(cid),
             project_id=str(pid),
             filename=fname,
+            previous_status=prev_status,
             threshold_minutes=threshold_minutes,
         )
 

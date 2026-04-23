@@ -1,10 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2 } from 'lucide-react'
+import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2, FileDown } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import {
+  SECTION_LABELS,
+  downloadQuestionnairePdf,
+  pillarToSection,
+} from '@/lib/arguiderQuestionnaire'
+import { getErrorMessage } from '@/lib/errors'
 
 interface PillarResult {
   pillar: string
@@ -231,8 +237,8 @@ export function GatekeeperPage() {
               </div>
             </div>
             {pillar.notes && <p className="text-slate-400 text-xs ml-7">{pillar.notes}</p>}
-            {pillar.status === 'blocker' && (
-              <div className="ml-7 mt-2 flex gap-2">
+            {(pillar.status === 'blocker' || pillar.status === 'warning') && (
+              <div className="ml-7 mt-2 flex gap-2 flex-wrap">
                 <button
                   type="button"
                   onClick={() => navigate(`/projects/${id}/arguider`)}
@@ -243,12 +249,30 @@ export function GatekeeperPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setExpandedPillar(expandedPillar === i ? -1 : i)}
-                  title="Expandir achados críticos deste pilar"
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors"
+                  onClick={async () => {
+                    if (!id) return
+                    const section = pillarToSection(pillar.pillar)
+                    try {
+                      await downloadQuestionnairePdf(id, section)
+                    } catch (err) {
+                      alert(`Falha ao gerar PDF: ${getErrorMessage(err)}`)
+                    }
+                  }}
+                  title={`Baixar questionário PDF da seção: ${SECTION_LABELS[pillarToSection(pillar.pillar)]}`}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-indigo-900/30 text-indigo-300 hover:bg-indigo-900/50 transition-colors"
                 >
-                  <Info className="w-3 h-3" /> {expandedPillar === i ? 'Ocultar detalhes' : 'Ver detalhes'}
+                  <FileDown className="w-3 h-3" /> Baixar questionário
                 </button>
+                {pillar.status === 'blocker' && (
+                  <button
+                    type="button"
+                    onClick={() => setExpandedPillar(expandedPillar === i ? -1 : i)}
+                    title="Expandir achados críticos deste pilar"
+                    className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-slate-800 text-slate-400 hover:bg-slate-700 transition-colors"
+                  >
+                    <Info className="w-3 h-3" /> {expandedPillar === i ? 'Ocultar detalhes' : 'Ver detalhes'}
+                  </button>
+                )}
               </div>
             )}
             {expandedPillar === i && (

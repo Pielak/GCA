@@ -1,38 +1,47 @@
 # GCA_MVP_PROGRESS.md
 
-Versão: 4.1  
+Versão: 4.7  
 Data-base: 2026-04-22  
-Status: **controle de avanço por fase** — MVPs 1-22 fechados. **MVP 23 ABERTO + EM EXECUÇÃO 2026-04-22** (RNF_CONTRACTS no OCG + CodeGen contract-aware). Detalhes históricos dos MVPs 1-15 em [`docs/mvp_archive/`](docs/mvp_archive/). Emendas antigas em [`docs/emendas_archive/`](docs/emendas_archive/).
+Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO 2026-04-22 madrugada tardia** (Hardening Celery — fila persistente + idempotência auditada). Detalhes históricos dos MVPs 1-15 em [`docs/mvp_archive/`](docs/mvp_archive/). Emendas antigas em [`docs/emendas_archive/`](docs/emendas_archive/).
 
 ---
 
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 23 — RNF_CONTRACTS no OCG + CodeGen contract-aware** — ABERTO + EM EXECUÇÃO 2026-04-22. Fecha o elo `requisito não-funcional → código que atende`: RNFs (P2 compliance + P4 performance + P7 segurança) viram contrato estruturado no OCG, consumidos no prompt do CodeGen, testados via specs e validados estaticamente pós-geração.
+**MVP 29 — Hardening Celery (fila persistente + idempotência auditada)** — ABERTO 2026-04-22 madrugada tardia. Solução estrutural da DT-075 que o fix do watchdog resolveu no sintoma. Ativa `acks_late=True` + `task_reject_on_worker_lost=True` (broker redistribui tasks de worker morto) e adiciona guards de idempotência em cada Celery task — task redistribuída não duplica efeito.
 
-**6 fases sequenciais (~6-7d nominais):**
-- ⏳ 23.1 Schema `RNF_CONTRACTS` no OCG + migration + testes (~1d)
-- ⏳ 23.2 Arguidor dirigido para RNF (~1d)
-- ⏳ 23.3 `codegen_prompt_builder` consome RNF stack-aware (~1.5d)
-- ⏳ 23.4 Test specs + validação estática pós-geração (~1.5d)
-- ⏳ 23.5 UI GP edita `RNF_CONTRACTS` (~1d)
-- ⏳ 23.6 Dogfood + Ajuda + release (~0.5d)
+**Inventário canônico:** 11 tasks (7 em `pipeline.py`, 4 em `questionnaire.py`). Pior caso = emails duplicados (spam visível ao stakeholder); emails têm prioridade no dedup.
 
-**Ganho esperado:** de ~65-70% pra ~75-78% de redução de trabalho humano no codegen.
+**Princípios duros canônicos:**
+1. Redistribuição > recuperação tardia — `acks_late=True` no lugar do watchdog agressivo.
+2. Idempotência por assinatura canônica — cada task tem chave natural (document_id, ocg_version, questionnaire_id).
+3. Guards no início, não no fim — check "já rodou?" antes de qualquer write.
+4. Emails são o pior caso — dedup deles é prioridade 1.
 
-### Próximos candidatos (renumerados pós-MVP 23)
-
-- **MVP 24 potencial — Design via Ingestão** (~3-5d) — substituto universal do Figma MCP.
-- **MVP 25 potencial — AI governance moat** (~2-3 sem) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado.
-- **MVP 26 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps.
-- **MVP 27 potencial — ChatOps bi-direcional** (~1.5-2 sem) — pré-requisitos: MVP 26 + cliente validando uso uni-direcional.
+**5 fases sequenciais (~3d nominais):**
+- ⏳ 29.1 Config Celery (`acks_late`, `task_reject_on_worker_lost`, `visibility_timeout`) + audit document canônico (~0.5d)
+- ⏳ 29.2 Idempotência nos efeitos externos críticos (pipeline_ingest + 3 tasks de questionnaire) (~1d)
+- ⏳ 29.3 Idempotência em propagação (propagate + backlog + gatekeeper + questionnaire_impact) (~0.5d)
+- ⏳ 29.4 Watchdog 8→15min + testes de idempotência unitários + smoke kill -9 no worker (~0.5d)
+- ⏳ 29.5 Seção Observabilidade + fechamento MVP (~0.5d)
 
 ### MVP anterior fechado
-**MVP 22 — Teams Notifier uni-direcional** — FECHADO 2026-04-22. `TeamsAdapter` via Incoming Webhook + Adaptive Card v1.4; registry builtin atualizado; 12 testes unit verdes; 52/52 regressão. Execução ~3h por reuso do pattern Adapter-Port do MVP 20.3. Figma MCP removido do roadmap canônico como MVP separado (fica sob demanda).
+**MVP 25 — Design via Ingestão** — FECHADO 2026-04-22 madrugada tardia. 6 fases canônicas: (25.1) `css_token_extractor_service` determinístico com normalização Unicode para paleta por frequência (top 12), role map via custom properties (16 roles), escalas typography/spacing/radii/shadows; (25.2) `design_tokens.py` paralelo a `rnf_contracts.py` com parser tolerante + validador + lifecycle canônico do `source` (`css_ingested`/`manual`/`mixed`) + `tokens_as_prompt_block`; (25.3) `EXTENSION_MAP` aceita `.css/.scss` → `file_type=stylesheet` + hook na Ingestão aplica síncrono (não dispara Celery) + `seed_design_tokens_gap_if_needed` cria `DT-DSGN001` quando mock visual chega sem tokens (idempotente); (25.4) `codegen_prompt_builder` com `_detect_frontend_stack_key` (7 stacks + generic) + `_FRONTEND_DESIGN_HINTS` × dimensão (Tailwind/styled-components/Emotion/MUI/vanilla-extract/CSS Modules/plain CSS/genérica) injetando blocos no scaffold + regenerate; (25.5) endpoints `GET/PUT /projects/:id/ocg/design-tokens` com idempotência ignorando `generated_at` + aba "Design Tokens (editável)" na OCGPage com badge de source; (25.6) cap 15 da Ajuda + toc.json v25.0. **129/129 testes** (91 MVP 25 + 38 help).
+
+**Fixes dogfood da sessão** (não contam como MVP): endpoint de conteúdo de doc na Ingestão protegido com auth obrigatória + membership check; frontend troca `<a target=_blank>` por fetch autenticado com blob URL (link direto perdia JWT); `ingestion_watchdog` threshold 30→8 min para eliminar docs zombie em ciclos rápidos de desenvolvimento.
+
+### Próximos candidatos (pós-MVP 29)
+
+- **MVP 26 potencial — AI governance moat** (~2-3 sem) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado.
+- **MVP 27 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps.
+- **MVP 28 potencial — ChatOps bi-direcional** (~1.5-2 sem) — pré-requisitos: MVP 27 + cliente validando uso uni-direcional.
 
 ### MVPs anteriores recentes (resumo)
 
+- **MVP 24** (2026-04-22 noite tardia) — Questionário Técnico Retroativo + Ciclo Ativo/Passivo. 6 fases: PDF AcroForm por seção canônica + parser/aplicador + info_debt + cascateamento Celery + UI. 96/96 testes. Pipeline ativo/passivo canônico.
+- **MVP 23** (2026-04-22 noite) — RNF_CONTRACTS no OCG + CodeGen contract-aware. 6 fases: schema + Arguidor dirigido + codegen stack-aware + validação estática grep + endpoints + UI. 112/112 testes.
+- **MVP 22** (2026-04-22) — Teams Notifier uni-direcional. `TeamsAdapter` via Incoming Webhook + Adaptive Card v1.4; 12 testes unit verdes; 52/52 regressão. Reuso do pattern Adapter-Port do MVP 20.3.
 - **MVP 21** (2026-04-22) — Ajuda refresh sincronizando conteúdo com MVPs 14-20. 3 fases. 38 testes de help verdes. toc.json v21.2 com 12 capítulos (novo: "Convites e primeiro acesso").
 - **MVP 20** (2026-04-22) — Integrações externas via Adapter-Port. 4 fases: Issue Tracker Bridge (Jira + Trello), Security Scanners (Sonar + Snyk + gitleaks), Slack Notifier uni-direcional, hooks + Ajuda + release. 245/245 testes verdes.
 - **MVP 19** (2026-04-21) — ERS Vivo IEEE 830. 4 fases: schema expansion + ERS generator + glossário vivo + matriz de rastreabilidade. 68/68 testes verdes. `docs/ERS.md` regenerado no Git do projeto.

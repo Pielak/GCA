@@ -36,6 +36,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.base import (
     IngestedDocument, ModuleCandidate, OCG, Questionnaire, TestSpec,
 )
+from app.services.rnf_contracts import (
+    RnfContracts, extract_test_scenarios, from_ocg_dict,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -279,10 +282,11 @@ async def generate_module_spec(
     ocg_ctx = await _load_ocg_context(db, project_id)
     neighbors = await _load_neighbors(db, project_id, exclude_id=module_id)
     details = _safe_load_details(module)
+    rnf = from_ocg_dict(ocg_ctx.get("data", {}).get("RNF_CONTRACTS"))
 
     prompt = _build_prompt(
         spec_type=spec_type, module=module, details=details,
-        ocg_ctx=ocg_ctx, neighbors=neighbors,
+        ocg_ctx=ocg_ctx, neighbors=neighbors, rnf=rnf,
     )
 
     content = await _call_ollama(
@@ -297,7 +301,7 @@ async def generate_module_spec(
 
     provenance = _build_provenance(
         module=module, ocg_ctx=ocg_ctx, neighbors=neighbors,
-        prompt=prompt, config=config,
+        prompt=prompt, config=config, rnf=rnf,
     )
 
     if spec is None:
@@ -489,6 +493,7 @@ def _safe_load_details(module: ModuleCandidate) -> dict[str, Any]:
 def _build_prompt(
     *, spec_type: str, module: ModuleCandidate, details: dict[str, Any],
     ocg_ctx: dict[str, Any], neighbors: list[dict[str, Any]],
+    rnf: Optional[RnfContracts] = None,
 ) -> str:
     template = TEMPLATE_BY_TYPE[spec_type]
 
@@ -552,12 +557,57 @@ def _build_prompt(
     if _detect_test_framework(stack) == "googletest":
         rendered = rendered + CPP_GOOGLETEST_GUIDANCE
 
+    # MVP 23 Fase 23.4 — quando o projeto declara RNF_CONTRACTS no OCG,
+    # injeta cenários canônicos (latency P95, rate_limit 429, regressão
+    # CWE, compliance) no fim do prompt. Sem contrato declarado o bloco
+    # é omitido (backcompat zero-impact com OCGs pré-23).
+    if rnf is not None and not rnf.is_empty:
+        rnf_block = _rnf_scenarios_block(rnf, spec_type=spec_type)
+        if rnf_block:
+            rendered = rendered + "\n\n" + rnf_block
+
     return rendered
+
+
+def _rnf_scenarios_block(rnf: RnfContracts, *, spec_type: str) -> str:
+    """Formata cenários RNF como bloco de instruções adicionais ao LLM.
+
+    Regra canônica (§4 MVP 23):
+      - unit: só regressão de segurança por CWE (isolado, sem I/O).
+      - integration: tudo (latency, rate_limit, security_regression, compliance).
+      - e2e: só latency P95 e rate_limit (comportamento end-to-end).
+    """
+    scenarios = extract_test_scenarios(rnf)
+    if not scenarios:
+        return ""
+
+    if spec_type == "unit":
+        filtered = [s for s in scenarios if s["kind"] == "security_regression"]
+    elif spec_type == "e2e":
+        filtered = [s for s in scenarios if s["kind"] in ("latency", "rate_limit")]
+    else:  # integration
+        filtered = scenarios
+
+    if not filtered:
+        return ""
+
+    lines = [
+        "## Cenários RNF obrigatórios (contrato do OCG)",
+        "",
+        "O OCG declara RNF_CONTRACTS — estes cenários DEVEM virar testes na "
+        "seção apropriada do plano acima. Não renomear; use os IDs canônicos.",
+        "",
+    ]
+    for s in filtered:
+        lines.append(f"- **{s['id']}** ({s['kind']}): {s['description']}")
+        lines.append(f"  - Asserção sugerida: `{s['assertion_template']}`")
+    return "\n".join(lines)
 
 
 def _build_provenance(
     *, module: ModuleCandidate, ocg_ctx: dict[str, Any],
     neighbors: list[dict[str, Any]], prompt: str, config: dict[str, Any],
+    rnf: Optional[RnfContracts] = None,
 ) -> dict[str, Any]:
     """Serializa contexto pro modal da Fase 10.5 explicar 'como foi criado'.
 
@@ -588,6 +638,13 @@ def _build_provenance(
     framework = _detect_test_framework(stack)
     if framework:
         prov["test_framework"] = framework
+    # MVP 23 Fase 23.4 — lista canônica de cenários RNF que o prompt
+    # exigiu que fossem cobertos. Permite auditar "este spec cobre
+    # contrato X" sem reparse do markdown.
+    if rnf is not None and not rnf.is_empty:
+        prov["rnf_scenarios_required"] = [
+            s["id"] for s in extract_test_scenarios(rnf)
+        ]
     return prov
 
 

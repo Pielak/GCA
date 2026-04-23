@@ -96,26 +96,62 @@ async def test_watchdog_preserva_processing_recente(db_session):
 
 
 @pytest.mark.asyncio
-async def test_watchdog_preserva_outros_status(db_session):
-    """Docs em completed, error, pending ou quarantined não são tocados."""
+async def test_watchdog_preserva_status_terminais(db_session):
+    """Docs em completed, error ou quarantined NUNCA viram zombie —
+    não importa o started_at. Pending limpo (started_at=None) também é preservado.
+    (MVP 29 Fase 29.1 — pending+started_at preenchido agora é zombie; ver
+    `test_watchdog_recupera_pending_com_started_at`.)
+    """
     user = await create_test_user(db_session, is_admin=True)
     org = await create_test_organization(db_session)
     p = await create_test_project(db_session, organization_id=org.id, slug=f"dtwatch-{uuid4().hex[:6]}")
-    docs = []
-    for status in ("completed", "error", "pending", "quarantined"):
-        # Mesmo com started_at antigo, status diferente de 'processing' não toca
+
+    # status terminais com started_at antigo — preservados
+    docs_terminal = []
+    for status in ("completed", "error", "quarantined"):
         d = await _seed_doc(
             db_session, project=p, user=user,
             status=status,
             started_minutes_ago=ZOMBIE_THRESHOLD_MINUTES + 60,
         )
-        docs.append(d)
+        docs_terminal.append(d)
+
+    # pending limpo (started_at=None) — preservado; só pending+started_at é zombie
+    clean_pending = await _seed_doc(
+        db_session, project=p, user=user,
+        status="pending",
+        started_minutes_ago=None,
+    )
 
     await recover_zombie_documents(db=db_session)
 
-    for d in docs:
+    for d in docs_terminal + [clean_pending]:
         await db_session.refresh(d)
-    assert [d.arguider_status for d in docs] == ["completed", "error", "pending", "quarantined"]
+    assert [d.arguider_status for d in docs_terminal] == ["completed", "error", "quarantined"]
+    assert clean_pending.arguider_status == "pending"
+
+
+@pytest.mark.asyncio
+async def test_watchdog_recupera_pending_com_started_at(db_session):
+    """MVP 29 Fase 29.1 — padrão zombie novo: status='pending' mas
+    started_at preenchido há mais que o threshold (ex: fallback de provider
+    DT-064 resetou status mas não started_at, depois worker morreu).
+    """
+    user = await create_test_user(db_session, is_admin=True)
+    org = await create_test_organization(db_session)
+    p = await create_test_project(db_session, organization_id=org.id, slug=f"dtwatch-{uuid4().hex[:6]}")
+
+    zombie = await _seed_doc(
+        db_session, project=p, user=user,
+        status="pending",
+        started_minutes_ago=ZOMBIE_THRESHOLD_MINUTES + 1,
+    )
+    summary = await recover_zombie_documents(db=db_session)
+    assert summary["recovered"] == 1
+
+    await db_session.refresh(zombie)
+    assert zombie.arguider_status == "error"
+    assert RECOVERY_MESSAGE in (zombie.arguider_error_message or "")
 
 
 @pytest.mark.asyncio

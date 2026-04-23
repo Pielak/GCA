@@ -15,15 +15,50 @@ Escopo:
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
 import structlog
+from sqlalchemy import select, update
 
 from app.celery_app import celery_app
 from app.tasks.pipeline import _run_coro_isolated
 
 logger = structlog.get_logger(__name__)
+
+
+# MVP 29 Fase 29.2 — Helper canônico de claim atômico. UPDATE condicional
+# funciona como uma "reserva" do slot: se o rowcount volta 1, esta execução
+# é a dona do efeito. Se volta 0, outra execução já claimou antes —
+# redistribuição de worker morto ou retry duplo. Skip silencioso canônico.
+
+
+async def _try_claim_questionnaire_flag(db, questionnaire_id: UUID, flag: str) -> bool:
+    """UPDATE atomic. True = slot reservado, prossiga. False = skip.
+
+    Compatível com qualquer coluna `TIMESTAMP WITH TIME ZONE NULL` do
+    `Questionnaire`. Faz commit próprio — chamador não precisa gerenciar.
+    """
+    from app.models.base import Questionnaire
+    if not hasattr(Questionnaire, flag):
+        raise ValueError(f"flag '{flag}' não existe no Questionnaire")
+    column = getattr(Questionnaire, flag)
+    now = datetime.now(timezone.utc)
+    r = await db.execute(
+        update(Questionnaire)
+        .where(Questionnaire.id == questionnaire_id, column.is_(None))
+        .values({flag: now})
+    )
+    await db.commit()
+    claimed = (r.rowcount or 0) > 0
+    if not claimed:
+        logger.info(
+            "questionnaire.flag_already_claimed",
+            questionnaire_id=str(questionnaire_id),
+            flag=flag,
+        )
+    return claimed
 
 
 @celery_app.task(
@@ -49,7 +84,15 @@ def notify_admins_submitted_task(
 
 
 async def _run_notify_admins(gp_email, project_name, questionnaire_id, project_id):
+    from app.db.database import AsyncSessionLocal
     from app.services.questionnaire_service import QuestionnaireService
+
+    qid = UUID(questionnaire_id) if isinstance(questionnaire_id, str) else questionnaire_id
+    async with AsyncSessionLocal() as db:
+        claimed = await _try_claim_questionnaire_flag(db, qid, "admins_notified_at")
+        if not claimed:
+            return  # skip silencioso: email já foi enviado
+
     pid: Any = UUID(project_id) if project_id else None
     await QuestionnaireService._notify_admins_questionnaire_submitted(
         gp_email=gp_email,
@@ -87,7 +130,15 @@ def send_analysis_email_task(
 
 
 async def _run_send_analysis_email(gp_email, project_id, questionnaire_id, notification_type, analysis_result):
+    from app.db.database import AsyncSessionLocal
     from app.services.questionnaire_service import QuestionnaireService
+
+    qid = UUID(questionnaire_id) if isinstance(questionnaire_id, str) else questionnaire_id
+    async with AsyncSessionLocal() as db:
+        claimed = await _try_claim_questionnaire_flag(db, qid, "analysis_email_sent_at")
+        if not claimed:
+            return  # skip silencioso
+
     await QuestionnaireService._send_analysis_email(
         gp_email=gp_email,
         project_id=project_id,
@@ -158,9 +209,28 @@ def generate_ocg_task(
 
 
 async def _run_generate_ocg(questionnaire_id, project_id, gp_email):
+    # MVP 29 Fase 29.2 — guard canônico: se já existe OCG para esse
+    # questionnaire_id, skip silencioso. Uma nova redistribuição de task
+    # não pode gerar v1 + v2 duplicado do mesmo OCG inicial.
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import OCG
     from app.services.questionnaire_service import QuestionnaireService
+
+    qid = UUID(questionnaire_id)
+    async with AsyncSessionLocal() as db:
+        existing = (await db.execute(
+            select(OCG.id).where(OCG.questionnaire_id == qid).limit(1)
+        )).scalar_one_or_none()
+        if existing is not None:
+            logger.info(
+                "generate_ocg_task.skip_already_exists",
+                questionnaire_id=str(qid),
+                ocg_id=str(existing),
+            )
+            return
+
     await QuestionnaireService._generate_ocg(
-        questionnaire_id=UUID(questionnaire_id),
+        questionnaire_id=qid,
         project_id=UUID(project_id),
         gp_email=gp_email,
     )

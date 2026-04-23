@@ -151,3 +151,48 @@ async def download_report(
         media_type="text/markdown",
         headers={"Content-Disposition": f"attachment; filename=gatekeeper_report_{project_id}.md"},
     )
+
+
+# ─── MVP 24 Fase 24.1 — Questionário técnico retroativo ───────────────
+# Gera PDF editável (AcroForm) com gaps pendentes agrupados por seção
+# canônica. GP baixa, responde offline, reingere via /ingestion — parser
+# da Fase 24.2 reconhece o PDF e aplica as respostas automaticamente.
+
+
+@router.get("/projects/{project_id}/arguider/questionnaire.pdf")
+async def download_arguider_questionnaire_pdf(
+    project_id: UUID,
+    section: str,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """PDF editável por seção canônica.
+
+    `section` é um de: governance, architecture, capacity, security, legal.
+    Seção vazia ainda retorna PDF válido (com o campo Complementos).
+    """
+    from app.services.arguider_questionnaire_service import (
+        CANONICAL_SECTIONS, generate_section_pdf,
+    )
+
+    if section not in CANONICAL_SECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": f"section inválida. Aceitas: {list(CANONICAL_SECTIONS)}",
+            },
+        )
+
+    pdf_bytes = await generate_section_pdf(db, project_id, section)  # type: ignore[arg-type]
+    if pdf_bytes is None:
+        raise HTTPException(status_code=404, detail="Projeto não encontrado")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'attachment; filename="questionario_{section}_{project_id}.pdf"'
+            ),
+        },
+    )

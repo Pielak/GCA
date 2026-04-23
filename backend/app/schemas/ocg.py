@@ -276,6 +276,36 @@ class OCGResponse(BaseModel):
     #   }
     RNF_CONTRACTS: Any = {}
 
+    # MVP 25 Fase 25.2 — Design tokens canônicos derivados da Ingestão
+    # (CSS/SCSS → extractor determinístico). Vivem tecnicamente dentro
+    # de STACK_RECOMMENDATION.frontend.design_tokens, mas como
+    # STACK_RECOMMENDATION é `Any = {}`, o shape é documentado aqui:
+    #
+    #   "STACK_RECOMMENDATION": {
+    #     "frontend": {
+    #       "design_tokens": {
+    #         "palette": {
+    #           "top": [str, ...],              # hex #rrggbb minúsculo
+    #           "by_role": {role: "#rrggbb"},   # role canônico (primary, secondary, ...)
+    #           "unique_count": int
+    #         },
+    #         "typography": {
+    #           "families": [str, ...],
+    #           "sizes_px": [int, ...],
+    #           "weights": [int, ...],          # múltiplos de 100 entre 100-1000
+    #           "line_heights": [float, ...]
+    #         },
+    #         "spacing_px": [int, ...],
+    #         "radii_px": [int, ...],
+    #         "shadows": [str, ...],
+    #         "source": "css_ingested"|"manual"|"mixed",
+    #         "generated_at": ISO-8601
+    #       }
+    #     }
+    #   }
+    #
+    # Validador canônico em `app/services/design_tokens.py::validate_tokens_dict`.
+
     class Config:
         from_attributes = True
         extra = "allow"

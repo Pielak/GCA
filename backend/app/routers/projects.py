@@ -4,7 +4,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 import structlog
 
 from app.db.database import get_db
@@ -1073,6 +1073,295 @@ async def force_propagation(
     propagator = PropagationService(db)
     result = await propagator.propagate(project_id, changes=[{"field": "MANUAL_PROPAGATION"}])
     return result
+
+
+# ─── MVP 23 Fase 23.5 — RNF_CONTRACTS editável pelo GP ───────────────
+# Contratos RNF canônicos do OCG (performance, security, compliance,
+# availability). Leitura para qualquer papel com acesso ao projeto;
+# escrita só com `project:manage_team` (GP/Admin). Validação
+# determinística via `validate_contract_dict` — nunca LLM.
+
+
+@router.get("/{project_id}/ocg/rnf-contracts")
+async def get_rnf_contracts(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna `RNF_CONTRACTS` atual do OCG (dict canônico ou `{}`)."""
+    from sqlalchemy import select
+    from app.models.base import OCG
+    import json
+
+    row = await db.execute(
+        select(OCG).where(OCG.project_id == project_id)
+        .order_by(OCG.created_at.desc()).limit(1)
+    )
+    ocg = row.scalar_one_or_none()
+    if not ocg:
+        raise HTTPException(
+            status_code=404,
+            detail="OCG do projeto não encontrado",
+        )
+    try:
+        ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+    except (TypeError, ValueError):
+        ocg_data = {}
+
+    rnf = ocg_data.get("RNF_CONTRACTS") or {}
+    if not isinstance(rnf, dict):
+        rnf = {}
+
+    return {
+        "project_id": str(project_id),
+        "ocg_version": ocg.version,
+        "rnf_contracts": rnf,
+    }
+
+
+class RnfContractsPutBody(BaseModel):
+    rnf_contracts: dict = Field(default_factory=dict)
+
+
+@router.put("/{project_id}/ocg/rnf-contracts")
+async def put_rnf_contracts(
+    project_id: UUID,
+    body: RnfContractsPutBody,
+    permissions: dict = Depends(require_action("project:manage_team")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Atualiza `RNF_CONTRACTS` do OCG. Valida contra schema canônico;
+    422 se inválido. Idempotente (mesmo payload → sem bump de versão)."""
+    from sqlalchemy import select
+    from app.models.base import OCG
+    from app.services.rnf_contracts import validate_contract_dict
+    from app.services.audit_service import AuditEvents, AuditService
+    from datetime import datetime, timezone
+    import json
+
+    errors = validate_contract_dict(body.rnf_contracts)
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail={"errors": [
+                {"path": e.path, "message": e.message} for e in errors
+            ]},
+        )
+
+    row = await db.execute(
+        select(OCG).where(OCG.project_id == project_id)
+        .order_by(OCG.created_at.desc()).limit(1)
+    )
+    ocg = row.scalar_one_or_none()
+    if not ocg:
+        raise HTTPException(
+            status_code=404,
+            detail="OCG do projeto não encontrado",
+        )
+
+    try:
+        ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+    except (TypeError, ValueError):
+        ocg_data = {}
+
+    current = ocg_data.get("RNF_CONTRACTS") or {}
+    if not isinstance(current, dict):
+        current = {}
+
+    if current == body.rnf_contracts:
+        return {
+            "applied": False,
+            "ocg_version": ocg.version,
+            "rnf_contracts": current,
+        }
+
+    ocg_data["RNF_CONTRACTS"] = body.rnf_contracts
+    new_version = (ocg.version or 0) + 1
+    ocg.ocg_data = json.dumps(ocg_data, ensure_ascii=False)
+    ocg.version = new_version
+    ocg.updated_at = datetime.now(timezone.utc)
+    db.add(ocg)
+
+    actor_id = permissions["user_id"]
+    await AuditService(db).log_event(
+        event_type=AuditEvents.OCG_UPDATED,
+        resource_type="ocg",
+        actor_id=actor_id,
+        resource_id=ocg.id,
+        details={
+            "project_id": str(project_id),
+            "version_from": new_version - 1,
+            "version_to": new_version,
+            "source": "rnf_contracts.put",
+        },
+    )
+    await db.commit()
+
+    return {
+        "applied": True,
+        "ocg_version": new_version,
+        "rnf_contracts": body.rnf_contracts,
+    }
+
+
+# ─── MVP 25 Fase 25.5 — Design tokens editáveis pelo GP ──────────────
+# Tokens canônicos em STACK_RECOMMENDATION.frontend.design_tokens.
+# Leitura para qualquer papel com acesso ao projeto; escrita só com
+# `project:manage_team` (GP/Admin). Validação determinística via
+# `validate_tokens_dict` — zero LLM no caminho crítico.
+
+
+@router.get("/{project_id}/ocg/design-tokens")
+async def get_design_tokens(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna `design_tokens` atual do OCG (dict canônico ou `{}`)."""
+    from sqlalchemy import select
+    from app.models.base import OCG
+    import json
+
+    row = await db.execute(
+        select(OCG).where(OCG.project_id == project_id)
+        .order_by(OCG.created_at.desc()).limit(1)
+    )
+    ocg = row.scalar_one_or_none()
+    if not ocg:
+        raise HTTPException(
+            status_code=404,
+            detail="OCG do projeto não encontrado",
+        )
+    try:
+        ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+    except (TypeError, ValueError):
+        ocg_data = {}
+
+    frontend = (
+        (ocg_data.get("STACK_RECOMMENDATION") or {}).get("frontend") or {}
+    )
+    tokens = frontend.get("design_tokens") or {}
+    if not isinstance(tokens, dict):
+        tokens = {}
+
+    return {
+        "project_id": str(project_id),
+        "ocg_version": ocg.version,
+        "design_tokens": tokens,
+    }
+
+
+class DesignTokensPutBody(BaseModel):
+    design_tokens: dict = Field(default_factory=dict)
+
+
+@router.put("/{project_id}/ocg/design-tokens")
+async def put_design_tokens(
+    project_id: UUID,
+    body: DesignTokensPutBody,
+    permissions: dict = Depends(require_action("project:manage_team")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Atualiza `design_tokens` do OCG. Valida contra schema canônico;
+    422 se inválido. Idempotente (payload idêntico ignorando
+    `generated_at` não bumpa versão).
+
+    Lifecycle do `source`:
+      - Payload anterior com source="css_ingested" + edição manual → "mixed"
+      - Sem payload anterior ou anterior "manual" → preserva "manual"
+      - Se o body não declarar source, assumimos "manual".
+    """
+    from sqlalchemy import select
+    from app.models.base import OCG
+    from app.services.design_tokens import validate_tokens_dict
+    from app.services.audit_service import AuditEvents, AuditService
+    from datetime import datetime, timezone
+    import json
+
+    errors = validate_tokens_dict(body.design_tokens)
+    if errors:
+        raise HTTPException(
+            status_code=422,
+            detail={"errors": [
+                {"path": e.path, "message": e.message} for e in errors
+            ]},
+        )
+
+    row = await db.execute(
+        select(OCG).where(OCG.project_id == project_id)
+        .order_by(OCG.created_at.desc()).limit(1)
+    )
+    ocg = row.scalar_one_or_none()
+    if not ocg:
+        raise HTTPException(
+            status_code=404,
+            detail="OCG do projeto não encontrado",
+        )
+
+    try:
+        ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+    except (TypeError, ValueError):
+        ocg_data = {}
+
+    stack = ocg_data.get("STACK_RECOMMENDATION")
+    if not isinstance(stack, dict):
+        stack = {}
+    frontend = stack.get("frontend")
+    if not isinstance(frontend, dict):
+        frontend = {}
+
+    current = frontend.get("design_tokens") if isinstance(frontend.get("design_tokens"), dict) else None
+
+    incoming = dict(body.design_tokens) if body.design_tokens else {}
+
+    # Idempotência: ignora generated_at (só carimbo do timestamp não bumpa)
+    def _strip_ts(d: dict) -> dict:
+        return {k: v for k, v in d.items() if k != "generated_at"}
+
+    if current is not None and _strip_ts(current) == _strip_ts(incoming):
+        return {
+            "applied": False,
+            "ocg_version": ocg.version,
+            "design_tokens": current,
+        }
+
+    # Source lifecycle canônico
+    prev_source = (current or {}).get("source")
+    if "source" not in incoming:
+        incoming["source"] = "mixed" if prev_source == "css_ingested" else "manual"
+    incoming["generated_at"] = datetime.now(timezone.utc).isoformat()
+
+    frontend["design_tokens"] = incoming
+    stack["frontend"] = frontend
+    ocg_data["STACK_RECOMMENDATION"] = stack
+
+    new_version = (ocg.version or 0) + 1
+    ocg.ocg_data = json.dumps(ocg_data, ensure_ascii=False)
+    ocg.version = new_version
+    ocg.updated_at = datetime.now(timezone.utc)
+    db.add(ocg)
+
+    actor_id = permissions["user_id"]
+    await AuditService(db).log_event(
+        event_type=AuditEvents.OCG_UPDATED,
+        resource_type="ocg",
+        actor_id=actor_id,
+        resource_id=ocg.id,
+        details={
+            "project_id": str(project_id),
+            "version_from": new_version - 1,
+            "version_to": new_version,
+            "source": "design_tokens.put",
+            "tokens_source": incoming["source"],
+        },
+    )
+    await db.commit()
+
+    return {
+        "applied": True,
+        "ocg_version": new_version,
+        "design_tokens": incoming,
+    }
 
 
 @router.get("/{project_id}/billing")

@@ -84,6 +84,17 @@ class AuditEvents:
     CODEGEN_SCAFFOLD_APPLIED = "codegen_scaffold_applied"
     CODEGEN_FILE_REGENERATED = "codegen_file_regenerated"
 
+    # MVP 23 Fase 23.4 — violação de contrato RNF detectada no scaffold
+    # pós-geração (validação estática grep). Payload em details inclui
+    # lista canônica de {check_id, file_path, severity, reason}.
+    CODEGEN_RNF_VIOLATION = "codegen_rnf_violation"
+
+    # MVP 24 Fase 24.4 — questionário técnico retroativo aplicado; dispara
+    # cascateamento ativo (backlog, gatekeeper, livedocs). Payload:
+    # {project_id, applied, skipped_blank, skipped_not_found,
+    # resolved_codes[], info_debt_promoted[], complements_document_id?}.
+    RNF_QUESTIONNAIRE_APPLIED = "rnf_questionnaire_applied"
+
     # MVP 20 Fase 20.1b — Eventos canônicos do Issue Tracker Bridge
     # Payload em details: {project_id, module_candidate_id?, provider,
     # external_id, url?, status_canonical?, status_raw?, event_type?}.
@@ -332,6 +343,7 @@ class AuditService:
             AuditEvents.CODEGEN_SCAFFOLD_GENERATED,
             AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
             AuditEvents.CODEGEN_FILE_REGENERATED,
+            AuditEvents.CODEGEN_RNF_VIOLATION,
         }
         if event_type not in allowed:
             raise ValueError(f"event_type inválido para log_codegen_event: {event_type!r}")

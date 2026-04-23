@@ -25,6 +25,9 @@ EXTENSION_MAP = {
     "xlsx": "spreadsheet", "xls": "spreadsheet", "csv": "spreadsheet",
     "py": "code", "ts": "code", "js": "code", "java": "code",
     "cs": "code", "go": "code", "rs": "code",
+    # MVP 25 Fase 25.3 — stylesheets alimentam o extractor determinístico
+    # de design tokens (Fase 25.1). Não vão pro pipeline LLM.
+    "css": "stylesheet", "scss": "stylesheet",
 }
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
@@ -381,6 +384,172 @@ class IngestionService:
                 "pii_fields": pii_fields,
                 "message": "Documento em quarentena — PII detectado. Requer decisão explícita.",
                 "status_code": 200,
+            }
+
+        # MVP 25 Fase 25.3 — Design tokens via Ingestão de stylesheet.
+        # CSS/SCSS vai pro extractor determinístico (zero LLM) e grava no
+        # OCG.STACK_RECOMMENDATION.frontend.design_tokens. Ignora pipeline
+        # Celery padrão — não há análise Arguidor pra stylesheet.
+        design_tokens_applied: Optional[dict] = None
+        if file_type == "stylesheet":
+            try:
+                from app.services.css_token_extractor_service import extract_tokens
+                from app.services.design_tokens import from_extractor_output
+                from app.services.design_tokens_applier_service import (
+                    apply_tokens_to_ocg,
+                )
+
+                css_text = file_bytes.decode("utf-8", errors="ignore")
+                extracted = extract_tokens(css_text)
+                if not extracted.is_empty:
+                    # Se já existe tokens no OCG, passa previous pra marcar "mixed"
+                    ocg_row = (await self.db.execute(
+                        select(OCG).where(OCG.project_id == project_id)
+                        .order_by(OCG.created_at.desc()).limit(1)
+                    )).scalar_one_or_none()
+                    previous = None
+                    if ocg_row and ocg_row.ocg_data:
+                        try:
+                            data = json.loads(ocg_row.ocg_data)
+                            previous = (
+                                (data.get("STACK_RECOMMENDATION") or {})
+                                .get("frontend") or {}
+                            ).get("design_tokens")
+                        except (TypeError, ValueError):
+                            previous = None
+
+                    payload = from_extractor_output(extracted, previous=previous)
+                    result = await apply_tokens_to_ocg(
+                        self.db, project_id, payload,
+                        actor_id=uploaded_by,
+                        source_document_id=doc_id,
+                    )
+                    document.document_category = "design_stylesheet"
+                    document.arguider_status = "completed"
+                    document.arguider_completed_at = datetime.now(timezone.utc)
+                    await self.db.commit()
+                    design_tokens_applied = {
+                        "applied": result["applied"],
+                        "ocg_version_to": result["ocg_version_to"],
+                        "tokens_preview": {
+                            "palette_top": list(extracted.palette_top[:6]),
+                            "families": list(extracted.font_families[:3]),
+                            "unique_colors": extracted.colors_unique_count,
+                        },
+                    }
+                    logger.info(
+                        "ingestion.design_tokens_extracted",
+                        document_id=str(doc_id),
+                        project_id=str(project_id),
+                        **design_tokens_applied,
+                    )
+                else:
+                    # CSS sem tokens detectáveis — marca como processado,
+                    # não reclama (pode ser reset.css ou similar).
+                    document.arguider_status = "completed"
+                    document.arguider_completed_at = datetime.now(timezone.utc)
+                    document.document_category = "design_stylesheet_empty"
+                    await self.db.commit()
+                    logger.info(
+                        "ingestion.stylesheet_no_tokens",
+                        document_id=str(doc_id),
+                    )
+            except Exception as exc:
+                # Não bloqueia upload; deixa doc disponível pra inspeção manual.
+                logger.warning(
+                    "ingestion.design_tokens_hook_failed",
+                    document_id=str(doc_id),
+                    error=str(exc)[:300],
+                )
+
+        # Stylesheet sempre pula o pipeline LLM — com ou sem tokens detectados.
+        if file_type == "stylesheet":
+            if design_tokens_applied is not None:
+                return {
+                    "document_id": str(doc_id),
+                    "status": "completed",
+                    "design_tokens_applied": design_tokens_applied,
+                    "message": (
+                        f"Design tokens extraídos. OCG "
+                        f"v{design_tokens_applied['ocg_version_to']}."
+                    ),
+                }
+            return {
+                "document_id": str(doc_id),
+                "status": "completed",
+                "message": "Stylesheet ingerido sem tokens detectáveis.",
+            }
+
+        # Para mocks visuais (PNG/PDF) ingeridos sem design tokens ainda no
+        # OCG, abre gap canônico no Arguidor pedindo paleta/tipografia.
+        # Best-effort — não bloqueia upload se o seed falhar.
+        if file_type in ("image", "pdf"):
+            try:
+                from app.services.design_tokens_applier_service import (
+                    seed_design_tokens_gap_if_needed,
+                )
+                await seed_design_tokens_gap_if_needed(
+                    self.db, project_id,
+                    triggered_by_document_id=doc_id,
+                )
+                await self.db.commit()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.design_tokens_seed_failed",
+                    document_id=str(doc_id),
+                    error=str(exc)[:300],
+                )
+
+        # MVP 24 Fase 24.2 — detector de PDF de questionário GCA.
+        # Se o PDF é resposta do questionário técnico retroativo, aplicamos
+        # as respostas **síncronamente** no GatekeeperItem em vez de mandar
+        # pro pipeline Arguidor/LLM — é um PDF nosso, tem parsing canônico
+        # determinístico, não precisa de LLM.
+        questionnaire_applied: Optional[dict] = None
+        if file_type == "pdf":
+            try:
+                from app.services.arguider_questionnaire_parser import (
+                    apply_parsed_responses,
+                    is_gca_questionnaire_pdf,
+                    parse_questionnaire_pdf,
+                )
+                if is_gca_questionnaire_pdf(file_bytes):
+                    parsed = parse_questionnaire_pdf(file_bytes)
+                    report = await apply_parsed_responses(
+                        self.db, project_id, uploaded_by, parsed,
+                    )
+                    # Marca o doc como questionário respondido — pipeline
+                    # Arguidor/LLM não precisa reprocessar.
+                    document.document_category = "arguider_questionnaire_response"
+                    document.arguider_status = "completed"
+                    document.arguider_completed_at = datetime.now(timezone.utc)
+                    await self.db.commit()
+                    questionnaire_applied = report.to_dict()
+                    logger.info(
+                        "ingestion.arguider_questionnaire_applied",
+                        document_id=str(doc_id),
+                        project_id=str(project_id),
+                        **questionnaire_applied,
+                    )
+            except Exception as exc:
+                # Não bloqueia upload se o detector/aplicador falhar —
+                # degrada pro pipeline Celery padrão (fluxo LLM).
+                logger.warning(
+                    "ingestion.arguider_questionnaire_hook_failed",
+                    document_id=str(doc_id),
+                    error=str(exc)[:300],
+                )
+
+        if questionnaire_applied is not None:
+            return {
+                "document_id": str(doc_id),
+                "status": "completed",
+                "questionnaire_applied": questionnaire_applied,
+                "message": (
+                    f"Questionário técnico aplicado: "
+                    f"{questionnaire_applied['applied']} itens resolvidos, "
+                    f"{questionnaire_applied['skipped_blank']} em branco."
+                ),
             }
 
         # MVP 13 Fase 13.3b: upload dispara via Celery. Bytes já foram
@@ -1176,11 +1345,17 @@ class IngestionService:
                             # Erro de parâmetro/schema — fallback não resolve.
                             # Aborta cascata e propaga.
                             raise
-                        # Reset do status do documento para próxima tentativa
+                        # Reset do status do documento para próxima tentativa.
+                        # MVP 29 Fase 29.1: zera `arguider_started_at` junto
+                        # pra não deixar o doc em estado zombie (pending com
+                        # started_at preenchido) se o worker morrer entre o
+                        # reset e o retry. O próximo provider/retry vai setar
+                        # started_at novamente via `_update_stage` canônico.
                         from app.models.base import IngestedDocument as _IngDoc
                         _doc = await db.get(_IngDoc, document_id)
                         if _doc:
                             _doc.arguider_status = "pending"
+                            _doc.arguider_started_at = None
                             _doc.arguider_error_message = None
                             await db.commit()
                         continue  # tenta próximo provider

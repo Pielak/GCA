@@ -8,6 +8,8 @@ import {
 import { apiClient } from '@/lib/api'
 import { pillarMeta, pillarKey, PILLAR_ORDER } from '@/data/pillarMeta'
 import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
+import RnfContractsEditor from '@/components/projects/RnfContractsEditor'
+import DesignTokensEditor from '@/components/projects/DesignTokensEditor'
 
 interface OCGData {
   ocg_id: string
@@ -41,6 +43,8 @@ const DIMENSIONS = [
   { key: 'stack', label: 'Stack Recomendada', icon: Settings, color: 'blue' },
   { key: 'architecture', label: 'Visão Arquitetural', icon: GitBranch, color: 'cyan' },
   { key: 'compliance', label: 'Conformidade e Regulatório', icon: Shield, color: 'amber' },
+  { key: 'rnf', label: 'Contratos RNF (editável)', icon: Edit2, color: 'violet' },
+  { key: 'design_tokens', label: 'Design Tokens (editável)', icon: Edit2, color: 'violet' },
   { key: 'testing', label: 'Estratégia de Testes', icon: TestTube2, color: 'emerald' },
   { key: 'deliverables', label: 'Entregáveis', icon: FileText, color: 'orange' },
   { key: 'risks', label: 'Análise de Riscos', icon: AlertTriangle, color: 'red' },
@@ -360,6 +364,10 @@ export function OCGPage() {
         return (ocg.ARCHITECTURE_OVERVIEW || ocg.ARCHITECTURE) ? renderObject(ocg.ARCHITECTURE_OVERVIEW || ocg.ARCHITECTURE) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'compliance':
         return (ocg.COMPLIANCE_CHECKLIST || ocg.COMPLIANCE_PROFILE) ? renderObject(ocg.COMPLIANCE_CHECKLIST || ocg.COMPLIANCE_PROFILE) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
+      case 'rnf':
+        return id ? <RnfContractsEditor projectId={id} /> : null
+      case 'design_tokens':
+        return id ? <DesignTokensEditor projectId={id} /> : null
       case 'testing':
         return (ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) ? renderObject(ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'deliverables':

@@ -22,6 +22,10 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
+from app.services.design_tokens import (
+    from_ocg_dict as _design_from_ocg_dict,
+    tokens_as_prompt_block,
+)
 from app.services.rnf_contracts import (
     RnfContracts,
     contract_as_prompt_block,
@@ -370,6 +374,206 @@ def _rnf_full_block(
     return main_block
 
 
+# ─── MVP 25 Fase 25.4 — Design tokens stack-aware ────────────────────
+
+
+def _detect_frontend_stack_key(stack: Mapping[str, Any] | None) -> str:
+    """Resolve qual stack de frontend → aplicar hints de design tokens.
+
+    Valores canônicos: 'tailwind', 'styled_components', 'emotion', 'mui',
+    'vanilla_extract', 'css_modules', 'plain_css', 'generic'.
+    Olha em `frontend.framework`, `frontend.stack`, `frontend.styling`.
+    """
+    if not stack or not isinstance(stack, Mapping):
+        return "generic"
+    frontend = stack.get("frontend") or {}
+    if not isinstance(frontend, Mapping):
+        return "generic"
+    haystack = " ".join(
+        str(frontend.get(k, "")).lower()
+        for k in ("framework", "stack", "styling", "language")
+    )
+    if "tailwind" in haystack:
+        return "tailwind"
+    if "styled-components" in haystack or "styled_components" in haystack:
+        return "styled_components"
+    if "emotion" in haystack:
+        return "emotion"
+    if "mui" in haystack or "material-ui" in haystack or "material ui" in haystack:
+        return "mui"
+    if "vanilla-extract" in haystack or "vanilla_extract" in haystack:
+        return "vanilla_extract"
+    if "css module" in haystack or "css-modules" in haystack:
+        return "css_modules"
+    # Default quando frontend existe mas sem lib de estilo identificada.
+    if haystack.strip():
+        return "plain_css"
+    return "generic"
+
+
+#: Hints canônicos por stack × dimensão de token. Cada valor é um
+#: snippet curto e concreto com a sintaxe idiomática.
+_FRONTEND_DESIGN_HINTS: dict[str, dict[str, str]] = {
+    "tailwind": {
+        "where": (
+            "Em `tailwind.config.ts` → `theme.extend`. Nunca hardcode cores "
+            "em classes utilitárias (`bg-[#hex]`). Use nomes semânticos."
+        ),
+        "palette": (
+            "theme.extend.colors: { primary: '#...', secondary: '#...' }. "
+            "Consuma via `bg-primary`, `text-primary`, etc."
+        ),
+        "typography": (
+            "theme.extend.fontFamily e fontSize. Ex: "
+            "fontFamily: { sans: ['Inter', 'system-ui'] }."
+        ),
+        "spacing": (
+            "theme.extend.spacing: { 1: '4px', 2: '8px', ... }. Não misturar "
+            "com Tailwind default scale sem necessidade."
+        ),
+    },
+    "styled_components": {
+        "where": (
+            "Crie `src/theme.ts` com objeto tipado + envolva o app em "
+            "`<ThemeProvider theme={theme}>`. Consuma via `props.theme.*`."
+        ),
+        "palette": (
+            "theme.colors = { primary: '#...' }. Ex: "
+            "`styled.button`\\` color: ${p => p.theme.colors.primary}; \\`."
+        ),
+        "typography": (
+            "theme.fonts.body / theme.fontSizes[2]. Garantir tipos via "
+            "declaration merging em styled.d.ts."
+        ),
+        "spacing": (
+            "theme.space = [0, 4, 8, 16, 24, ...]; consumir como "
+            "`padding: ${p => p.theme.space[2]}px`."
+        ),
+    },
+    "emotion": {
+        "where": (
+            "Mesma ideia de styled-components: `@emotion/react` ThemeProvider + "
+            "`src/theme.ts`. Consuma via `useTheme()` ou `(theme) => ...`."
+        ),
+        "palette": (
+            "theme.colors.primary etc. Usar `css\\`color: ${theme.colors.primary};\\``."
+        ),
+        "typography": "theme.fonts e theme.fontSizes como arrays/enum.",
+        "spacing": "theme.space como array + helper `space(2)`.",
+    },
+    "mui": {
+        "where": (
+            "`createTheme({ palette, typography })` em `src/theme.ts` + "
+            "`<ThemeProvider theme={theme}>`. NUNCA `sx={{ color: '#hex' }}`."
+        ),
+        "palette": (
+            "palette: { primary: { main: '#...' }, secondary: { main: '#...' } }. "
+            "Usar `color='primary'` nos componentes."
+        ),
+        "typography": (
+            "typography: { fontFamily, fontSize, h1: { fontSize } }. "
+            "Usar `<Typography variant='h1'>`."
+        ),
+        "spacing": (
+            "theme.spacing(1) = 8px por default. Customize via `spacing: 4`."
+        ),
+    },
+    "vanilla_extract": {
+        "where": (
+            "Use `createGlobalTheme` em `src/theme.css.ts`. Consuma via "
+            "classes geradas + `vars.colors.primary`."
+        ),
+        "palette": "`createGlobalTheme(':root', { colors: { primary: '#...' } })`.",
+        "typography": "vars.fonts.sans = 'Inter'; vars.fontSizes.md = '16px'.",
+        "spacing": "vars.space[2] = '8px' — use em `padding: vars.space[2]`.",
+    },
+    "css_modules": {
+        "where": (
+            "Declare CSS custom properties em `:root` em `src/styles/tokens.css` "
+            "e importe globalmente. Consuma em cada `.module.css` via var()."
+        ),
+        "palette": "`:root { --color-primary: #...; }` + `color: var(--color-primary)`.",
+        "typography": "`--font-sans`, `--font-size-base`, `--font-weight-bold`.",
+        "spacing": "`--space-1: 4px; --space-2: 8px;` e `padding: var(--space-2)`.",
+    },
+    "plain_css": {
+        "where": (
+            "Crie `src/styles/tokens.css` com CSS custom properties em `:root` "
+            "e importe no entrypoint. Todo CSS subsequente consome via `var()`."
+        ),
+        "palette": "`:root { --color-primary: #...; }` — referenciar com `var(--color-primary)`.",
+        "typography": "Custom properties `--font-family-sans`, `--font-size-base`, etc.",
+        "spacing": "`--space-1: 4px; --space-2: 8px;` e `padding: var(--space-2)`.",
+    },
+    "generic": {
+        "where": (
+            "Exponha tokens como CSS custom properties em `:root` (padrão W3C). "
+            "Consumidores leem via `var(--token-name)`."
+        ),
+        "palette": "`--color-primary`, `--color-secondary` etc.",
+        "typography": "`--font-family`, `--font-size-md`, `--font-weight-bold`.",
+        "spacing": "`--space-1` até `--space-8` conforme escala.",
+    },
+}
+
+
+def _design_tokens_stack_hints_block(
+    stack: Mapping[str, Any] | None,
+    view: Any,
+) -> str:
+    """Bloco canônico com dicas de implementação por frontend stack.
+
+    Emite dicas apenas para dimensões que realmente têm valor extraído
+    (ex: sem spacing, não emite dica de spacing).
+    """
+    stack_key = _detect_frontend_stack_key(stack)
+    hints = _FRONTEND_DESIGN_HINTS.get(stack_key, {})
+    if not hints or view.is_empty:
+        return ""
+
+    stack_label = {
+        "tailwind": "Tailwind CSS",
+        "styled_components": "styled-components",
+        "emotion": "Emotion",
+        "mui": "MUI / Material UI",
+        "vanilla_extract": "vanilla-extract",
+        "css_modules": "CSS Modules",
+        "plain_css": "CSS puro",
+        "generic": "stack genérica",
+    }.get(stack_key, stack_key)
+
+    lines = [f"## Implementação de tokens ({stack_label})"]
+    if "where" in hints:
+        lines.append(f"- **Onde declarar**: {hints['where']}")
+    if not view.palette.is_empty and "palette" in hints:
+        lines.append(f"- **Paleta**: {hints['palette']}")
+    if not view.typography.is_empty and "typography" in hints:
+        lines.append(f"- **Tipografia**: {hints['typography']}")
+    if view.spacing_px and "spacing" in hints:
+        lines.append(f"- **Spacing**: {hints['spacing']}")
+    return "\n".join(lines)
+
+
+def _design_tokens_full_block(
+    design_tokens_raw: Any,
+    stack: Mapping[str, Any] | None,
+) -> str:
+    """Bloco completo de design tokens + hints por frontend stack.
+
+    Retorna string vazia quando não há tokens declarados no OCG.
+    """
+    if design_tokens_raw is None or design_tokens_raw == {}:
+        return ""
+    view = _design_from_ocg_dict(design_tokens_raw)
+    if view.is_empty:
+        return ""
+    main = tokens_as_prompt_block(view)
+    stack_hints = _design_tokens_stack_hints_block(stack, view)
+    if stack_hints:
+        return f"{main}\n\n{stack_hints}"
+    return main
+
+
 # ─── Scaffold (multi-arquivo) ─────────────────────────────────────────
 
 
@@ -389,14 +593,17 @@ def build_scaffold_prompt(
     compliance: Sequence[Any] | None,
     ingested_docs_context: str = "",
     rnf_contracts: Any | None = None,
+    design_tokens: Any | None = None,
 ) -> str:
     """Prompt canônico para `POST /scaffold`.
 
     MVP 23 Fase 23.3: aceita `rnf_contracts` (dict vindo de
     `OCGResponse.RNF_CONTRACTS`). Quando presente, injeta bloco
     estruturado de contratos + dicas de implementação por stack.
-    Caller pode passar None quando OCG não tem RNF ou V1 ainda não
-    migrou — bloco é omitido silenciosamente.
+    MVP 25 Fase 25.4: aceita `design_tokens` (dict vindo de
+    `OCGResponse.STACK_RECOMMENDATION.frontend.design_tokens`). Quando
+    presente, injeta paleta/tipografia/escala + hints por frontend stack.
+    Caller pode passar None quando OCG não tem o campo — bloco é omitido.
     """
     modules_block = _fmt_json(modules, fallback="Nenhum módulo identificado no OCG")
     arguider_modules_block = _fmt_json(list(arguider_modules)[:10] if arguider_modules else None, fallback="")
@@ -406,6 +613,8 @@ def build_scaffold_prompt(
     compliance_block = _fmt_json(list(compliance)[:5] if compliance else None, fallback="Não definido")
     rnf_block = _rnf_full_block(rnf_contracts, stack)
     rnf_section = f"\n\n{rnf_block}\n" if rnf_block else ""
+    design_block = _design_tokens_full_block(design_tokens, stack)
+    design_section = f"\n\n{design_block}\n" if design_block else ""
 
     return f"""{_HEADER_SCAFFOLD}
 
@@ -430,7 +639,7 @@ def build_scaffold_prompt(
 
 ## Compliance
 {compliance_block}
-{rnf_section}
+{rnf_section}{design_section}
 ## Documentos Ingeridos
 {ingested_docs_context if ingested_docs_context else 'Nenhum documento ingerido'}
 
@@ -492,11 +701,14 @@ def build_regenerate_file_prompt(
     instruction: str | None,
     current_content: str | None,
     rnf_contracts: Any | None = None,
+    design_tokens: Any | None = None,
 ) -> str:
     """Prompt canônico para `POST /regenerate-file`.
 
     MVP 23 Fase 23.3: aceita `rnf_contracts` opcional. Quando presente,
     injeta bloco canônico + dicas de stack logo após o contexto do OCG.
+    MVP 25 Fase 25.4: aceita `design_tokens` opcional — mesma lógica
+    (bloco canônico de paleta/tipografia + hints por frontend stack).
     """
     extra = instruction or "Reescreva completamente o arquivo mantendo o propósito detectado pelo path."
     current_block = (
@@ -506,6 +718,8 @@ def build_regenerate_file_prompt(
     )
     rnf_block = _rnf_full_block(rnf_contracts, stack)
     rnf_section = f"\n\n{rnf_block}\n" if rnf_block else ""
+    design_block = _design_tokens_full_block(design_tokens, stack)
+    design_section = f"\n\n{design_block}\n" if design_block else ""
 
     return f"""{_HEADER_REGENERATE}
 
@@ -514,7 +728,7 @@ def build_regenerate_file_prompt(
 {_project_block(project_name, slug=None, description=project_description)}
 
 {_ocg_context_block(stack, architecture, compact=True)}
-{rnf_section}
+{rnf_section}{design_section}
 ## Arquivo a gerar
 Caminho: `{path}`
 

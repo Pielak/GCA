@@ -9,6 +9,39 @@ import { ExtractionReportCard } from '@/components/ingestion/ExtractionReportCar
 import { apiClient } from '@/lib/api';
 import { getErrorMessage } from '@/lib/errors'
 
+/**
+ * Fix dogfood 2026-04-22 — abrir doc ingerido via fetch autenticado.
+ * Link `<a target=_blank>` direto no endpoint falhava com HTTP 500 em
+ * produção porque browser não envia Authorization header em navegação
+ * direta. apiClient.get com responseType=blob carrega o doc usando o
+ * token do SPA, abre em nova aba via blob URL.
+ */
+async function openIngestedDocument(
+  projectId: string, docId: string, filename: string,
+): Promise<void> {
+  const res = await apiClient.get<Blob>(
+    `/projects/${projectId}/ingestion/${docId}/content`,
+    { responseType: 'blob' },
+  )
+  const blob = new Blob(
+    [res.data],
+    { type: res.headers?.['content-type'] || 'application/octet-stream' },
+  )
+  const url = URL.createObjectURL(blob)
+  const win = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!win) {
+    // Popup bloqueado: fallback pra download
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename || 'documento'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+  }
+  // Libera a blob URL depois de um tempo razoável pra aba abrir
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
+}
+
 type FilterStatus = 'all' | IngestedDocument['arguider_status'];
 
 const STATUS_MAP: Record<IngestedDocument['arguider_status'], { icon: string; label: string; color: string }> = {
@@ -340,15 +373,21 @@ export function IngestionPage() {
                         {doc.original_filename}
                       </span>
                     ) : (
-                      <a
-                        href={`/api/v1/projects/${projectId}/ingestion/${doc.id}/content`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-slate-200 text-sm font-medium truncate hover:text-violet-300 hover:underline"
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!projectId) return
+                          try {
+                            await openIngestedDocument(projectId, doc.id, doc.original_filename)
+                          } catch (err) {
+                            alert(`Falha ao abrir documento: ${getErrorMessage(err)}`)
+                          }
+                        }}
+                        className="text-slate-200 text-sm font-medium truncate hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
                         title="Abrir documento (read-only)"
                       >
                         {doc.original_filename}
-                      </a>
+                      </button>
                     )}
                     {doc.source_type === 'external_repo' && (
                       <span className="flex items-center gap-1 flex-shrink-0">

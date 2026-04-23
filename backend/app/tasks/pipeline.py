@@ -49,6 +49,46 @@ def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
         return loop.run_until_complete(coro)
 
 
+# MVP 29 Fase 29.3 — Lease helper canônico para idempotência de tasks
+# de propagação. `SET NX EX` no Redis: a primeira task que chega claima
+# a chave por `ttl_seconds` e corre; outra task com mesma chave dentro
+# do TTL encontra a chave existente e skipa silenciosamente.
+#
+# Uso: assinatura canônica = f"gca:task:{task_name}:{project_id}:{version}".
+# Quando OCG ainda não tem versão, usa "none" como sentinel — lease curto
+# garante que a task rode pelo menos uma vez por reboot.
+
+
+_LEASE_TTL_SECONDS = 600  # 10 min — janela conservadora pra tasks de propagação
+
+
+def _try_claim_task_lease(key: str, ttl_seconds: int = _LEASE_TTL_SECONDS) -> bool:
+    """Retorna True se esta execução claimou o slot; False se outra já
+    claimou nos últimos `ttl_seconds`. Nunca levanta — se o Redis estiver
+    inacessível, devolve True (fail-open: melhor rodar duas vezes que
+    travar o pipeline).
+    """
+    try:
+        import redis  # importado lazy pra manter a task leve em startup
+        from app.celery_app import _resolve_broker_url
+        client = redis.Redis.from_url(_resolve_broker_url(), decode_responses=True)
+        acquired = client.set(key, "1", nx=True, ex=ttl_seconds)
+        if not acquired:
+            logger.info("task.lease_already_claimed", key=key)
+            return False
+        return True
+    except Exception as exc:  # noqa: BLE001
+        # Fail-open: não travamos o pipeline por falha de lease.
+        logger.warning("task.lease_check_failed", key=key, error=str(exc)[:200])
+        return True
+
+
+def _lease_key(task_name: str, project_id: str, version: Any) -> str:
+    """Chave canônica. `version` pode ser int ou None."""
+    v = str(version) if version is not None else "none"
+    return f"gca:task:{task_name}:{project_id}:{v}"
+
+
 @celery_app.task(
     name="app.tasks.pipeline.pipeline_ingest_task",
     bind=True,
@@ -102,6 +142,11 @@ async def _run_analyze_async(document_id: str, project_id: str, file_type: str) 
     """Wrapper assíncrono: abre session, carrega bytes, chama service.
 
     Isolado pra permitir `asyncio.run()` limpo dentro da task Celery.
+
+    MVP 29 Fase 29.2 — guard de idempotência: se o doc já está
+    `arguider_status='completed'`, skip silencioso. Essencial quando
+    `acks_late=True` faz o broker redistribuir a task após worker morto
+    que havia concluído a análise mas não conseguiu ACKar.
     """
     from sqlalchemy import select
 
@@ -116,6 +161,13 @@ async def _run_analyze_async(document_id: str, project_id: str, file_type: str) 
         doc = res.scalar_one_or_none()
         if not doc:
             logger.warning("pipeline_ingest_task.doc_not_found", document_id=document_id)
+            return
+
+        if doc.arguider_status == "completed":
+            logger.info(
+                "pipeline_ingest_task.skip_already_completed",
+                document_id=document_id,
+            )
             return
 
         # Lê bytes do storage (upload_document persistiu via write_ingested).
@@ -284,3 +336,75 @@ def external_repo_fallback_task(self, project_id: str, repo_id: str) -> dict:
 async def _run_external_fallback(project_id: str, repo_id: str) -> None:
     from app.routers.external_repos_router import _run_analysis_fallback
     await _run_analysis_fallback(UUID(project_id), UUID(repo_id))
+
+
+# ─── MVP 24 Fase 24.4 — Cascateamento pós-questionário técnico ────────
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.propagate_questionnaire_impact_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+)
+def propagate_questionnaire_impact_task(
+    self, project_id: str, report: dict,
+) -> dict:
+    """Cascateamento ativo pós-aplicação de questionário técnico.
+
+    Gatilho: `apply_parsed_responses` ao fim. Uma vez disparado, encadeia
+    propagação → backlog → Gatekeeper de forma incondicional (ativo/passivo
+    canônico: passivo no gatilho, ativo na execução).
+
+    `report` é o dict retornado pelo aplicador:
+      {applied, skipped_blank, skipped_not_found, resolved_codes[],
+       info_debt_promoted[], complements_document_id?}
+    """
+    try:
+        _run_coro_isolated(_run_propagate_questionnaire(project_id, report))
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "propagate_questionnaire_impact.failed",
+            project_id=project_id, error=str(exc),
+        )
+        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+    return {"status": "ok", "project_id": project_id, "report": report}
+
+
+async def _run_propagate_questionnaire(project_id: str, report: dict) -> None:
+    """Encadeia propagação + backlog + gatekeeper.
+
+    Ordem canônica:
+      1. PropagationService.propagate — regenera backlog e emite BACKLOG_REGENERATED
+      2. _reevaluate_gatekeeper_async — recalcula aprovação/bloqueios
+
+    Não dispara LLM, não toca OCG diretamente — a mudança já foi feita
+    no GatekeeperItem.status=resolved pelo aplicador. Aqui só materializa
+    as consequências no backlog e na leitura do Gatekeeper.
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.services.propagation_service import PropagationService
+    from app.services.ingestion_service import _reevaluate_gatekeeper_async
+
+    pid = UUID(project_id)
+
+    async with AsyncSessionLocal() as session:
+        propagator = PropagationService(session)
+        # `changes` sinalizador canônico — campo `RNF_QUESTIONNAIRE` não
+        # existe no OCG; o PROPAGATION_MAP trata unknowns com fallback
+        # em `modules`, que é o que queremos.
+        await propagator.propagate(
+            pid,
+            changes=[{
+                "field": "RNF_QUESTIONNAIRE",
+                "source": "arguider_questionnaire_applied",
+                "resolved_codes": report.get("resolved_codes") or [],
+                "info_debt_promoted": report.get("info_debt_promoted") or [],
+            }],
+            ocg_version=None,
+        )
+
+    await _reevaluate_gatekeeper_async(
+        project_id=pid, ocg_version=None,
+        trigger="questionnaire_applied",
+    )

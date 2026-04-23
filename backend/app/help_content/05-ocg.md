@@ -4,7 +4,7 @@ O **OCG** é a fonte única de verdade de um projeto no GCA. Não é um document
 
 Princípio que governa o uso: **nenhum módulo do pipeline opera ignorando o OCG atual**. Se o OCG está incompleto, o módulo ou pede ao GP (via Arguidor), ou bloqueia.
 
-## As 13 seções do OCG
+## As 14 seções do OCG
 
 | Seção | Para que serve |
 |---|---|
@@ -21,6 +21,7 @@ Princípio que governa o uso: **nenhum módulo do pipeline opera ignorando o OCG
 | `RISK_ANALYSIS` | Riscos classificados como alto, médio ou baixo, com mitigação sugerida. |
 | `APPROVAL_STATUS` | Status consolidado: APPROVED / NEEDS_REVIEW / AT_RISK / BLOCKED. |
 | `DATA_MODEL` | Modelo de dados derivado: engine, tabelas, FKs, dados de seed, warnings. Alimenta o DDL generator. |
+| `RNF_CONTRACTS` (**MVP 23**) | Requisitos não-funcionais canônicos em 4 categorias: `performance`, `security`, `compliance`, `availability`. Editável pelo GP/Admin em `/projects/:id/ocg` → aba **Contratos RNF**. Vira instrução dura no CodeGen, cenários obrigatórios no Tester e grep estático pós-scaffold. Ver [capítulo dedicado](?section=13-contratos-rnf). |
 
 Junto vai o `context_health` — `{ depth, confidence, quality }` — que flui com as operações de expand e contract.
 
@@ -152,4 +153,6 @@ Cada chamada de IA durante operações do OCG registra em `ai_usage_log`: proved
 
 - [Pipeline canônico](?section=04-pipeline) — onde o OCG nasce.
 - [Codegen](?section=08-codegen) — principal consumidor do `STACK_RECOMMENDATION` e `DATA_MODEL`.
+- [Contratos RNF](?section=13-contratos-rnf) — como requisitos não-funcionais viram cláusulas duras.
+- [Design Tokens](?section=15-design-tokens) — paleta, tipografia e escalas governadas pelo OCG.
 - [Solução de problemas](?section=10-troubleshooting) — OCG travado, rollback sem snapshot, etc.

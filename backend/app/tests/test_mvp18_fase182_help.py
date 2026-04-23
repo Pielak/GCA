@@ -34,14 +34,16 @@ from app.services.help_service import (
 # load_toc
 # ===========================================================================
 
-def test_load_toc_retorna_10_capitulos_canonicos():
-    """toc.json canônico (criado em 18.2) tem 12 capítulos após MVP 21 + cap 12 de convites."""
+def test_load_toc_retorna_capitulos_canonicos():
+    """toc.json canônico evolui com MVPs: 12 em MVP 21, 13 em MVP 23, 14 em MVP 24, 15 em MVP 25."""
     chapters = load_toc()
-    assert len(chapters) == 12
+    assert len(chapters) == 15
     # Primeiro = visão geral (order=1).
     assert chapters[0].id == "01-visao-geral"
     assert chapters[0].title == "Visão geral & Glossário"
     assert chapters[0].order == 1
+    # Último canônico (MVP 25) = Design Tokens.
+    assert chapters[-1].id == "15-design-tokens"
 
 
 def test_load_toc_retorna_instancias_help_chapter():
@@ -203,8 +205,9 @@ async def test_endpoint_toc_retorna_capitulos():
     assert resp.status_code == 200
     body = resp.json()
     assert "chapters" in body
-    assert len(body["chapters"]) == 12
+    assert len(body["chapters"]) == 15
     assert body["chapters"][0]["id"] == "01-visao-geral"
+    assert body["chapters"][-1]["id"] == "15-design-tokens"
 
 
 @pytest.mark.asyncio

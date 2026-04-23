@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom';
 import { Zap, MessageSquare, Send, CheckCircle, Clock, AlertCircle, XCircle, Loader2, Eye, EyeOff } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useGatekeeperData, useResolveItem, useIgnoreItem, type GatekeeperItem } from '@/hooks/useArguider';
+import QuestionnaireDownloadPanel from '@/components/projects/QuestionnaireDownloadPanel';
 
 type ItemFilter = 'all' | 'pending' | 'resolved' | 'ignored';
 
@@ -182,6 +183,14 @@ export function ArguiderPage() {
           </div>
         )
       })()}
+
+      {/* MVP 24 — Painel de questionários por seção canônica */}
+      {projectId && (
+        <QuestionnaireDownloadPanel
+          projectId={projectId}
+          items={allItems}
+        />
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-3 gap-4">
