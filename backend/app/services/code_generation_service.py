@@ -15,6 +15,7 @@ from app.models.onboarding import ProjectRequest
 from app.models.base import OCG
 from app.services.llm_service import LLMServiceFactory, LLMProvider
 from app.services.piloter_service import PiloterService
+from app.core.config import settings as app_settings
 
 logger = structlog.get_logger(__name__)
 
@@ -247,7 +248,7 @@ class CodeGenerationService:
 
             generated_code = await llm_client.generate(
                 prompt=prompt,
-                max_tokens=8000,
+                max_tokens=app_settings.ANTHROPIC_MAX_TOKENS,
                 temperature=0.3  # Lower temperature for code generation
             )
 

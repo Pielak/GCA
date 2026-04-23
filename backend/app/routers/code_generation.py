@@ -527,7 +527,7 @@ async def generate_scaffold(
         client = AsyncAnthropic(api_key=api_key)
         response = await client.messages.create(
             model=app_settings.ANTHROPIC_MODEL,
-            max_tokens=8192,
+            max_tokens=app_settings.ANTHROPIC_MAX_TOKENS,
             temperature=0.3,
             messages=[{"role": "user", "content": prompt}],
         )
