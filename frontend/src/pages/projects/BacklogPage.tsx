@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { apiClient } from '@/lib/api'
 import { RoleAssumptionPrompt } from '@/components/projects/RoleAssumptionPrompt'
 import { BacklogIssuePanel } from '@/components/projects/BacklogIssuePanel'
+import { OCGChangesTimelineCard } from '@/components/project/OCGChangesTimelineCard'
 import { getErrorMessage, type ApiError } from '@/lib/errors'
 
 interface BacklogItem {
@@ -393,6 +394,9 @@ export function BacklogPage() {
       ) : (
         <p className="text-slate-500 text-sm text-center py-8">Nenhum item corresponde aos filtros selecionados.</p>
       )}
+
+      {/* MVP 27 Fase 2 — Timeline de eventos do OCG que afetam o Backlog */}
+      {projectId && <OCGChangesTimelineCard projectId={projectId} scope="backlog" />}
     </div>
   )
 }

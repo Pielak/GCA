@@ -5,6 +5,7 @@ import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
 import { ModuleDetailsModal } from '@/components/roadmap/ModuleDetailsModal'
 import { DeployPlanModal } from '@/components/roadmap/DeployPlanModal'
+import { OCGChangesTimelineCard } from '@/components/project/OCGChangesTimelineCard'
 
 // MVP 9 Fase 9.1 — categorias canônicas de módulos no Roadmap.
 // Mantido em sync com `backend/app/constants/module_categories.py`.
@@ -368,6 +369,9 @@ export function RoadmapPage() {
           onClose={() => setShowDeployPlan(false)}
         />
       )}
+
+      {/* MVP 27 Fase 3 — Timeline de eventos do OCG que afetam o Roadmap */}
+      {id && <OCGChangesTimelineCard projectId={id} scope="roadmap" />}
     </div>
   )
 }
