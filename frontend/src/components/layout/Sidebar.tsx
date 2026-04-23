@@ -197,24 +197,26 @@ export function Sidebar() {
                     {isInProject && !isAdmin && (
                       <div className="ml-5 mt-1 mb-2 space-y-0.5 border-l border-white/[0.06] pl-3">
                         <SubNavItem to={`/projects/${proj.id}`} label="Dashboard" icon={<Activity className="w-3 h-3" />} end />
-                        <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
+                        {/* Fluxo canônico do projeto (MVP 26 — ordem do contrato) */}
                         <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionário" icon={<ClipboardList className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/repository`} label="Repositório" icon={<Shield className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/external-repos`} label="Repos Externos" icon={<GitBranch className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ingestion`} label="Ingestão" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="Gatekeeper" icon={<Shield className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/arguider`} label="Arguidor" icon={<Zap className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/backlog`} label="Backlog" icon={<ClipboardList className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/roadmap`} label="Roadmap" icon={<Clock className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/codegen`} label="Geração de Código" icon={<Code2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/qa`} label="Testes" icon={<TestTube2 className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/tester-review`} label="Revisão de Testes" icon={<FileText className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/readiness`} label="Definition of Done" icon={<CheckCircle2 className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/docs`} label="Documentação Viva" icon={<BookOpen className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/backups`} label="Backups" icon={<Database className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/incidents`} label="Incidentes" icon={<Bug className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/metrics`} label="Métricas" icon={<BarChart3 className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/incidents`} label="Incidentes" icon={<Bug className="w-3 h-3" />} />
+                        {/* Administração do projeto */}
+                        <SubNavItem to={`/projects/${proj.id}/team`} label="Equipe" icon={<Users className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/repository`} label="Repositório" icon={<Shield className="w-3 h-3" />} />
+                        <SubNavItem to={`/projects/${proj.id}/external-repos`} label="Repos Externos" icon={<GitBranch className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/settings`} label="Configurações" icon={<Settings className="w-3 h-3" />} />
                       </div>
                     )}
