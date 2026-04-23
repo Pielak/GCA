@@ -105,3 +105,35 @@ INTEGRATION_COMPLETE.md
 GITHUB_INTEGRATION.md
 SETUP_COMPLETE_SUMMARY.md
 backend/QUICKSTART_DEV.md
+
+# --- Dogfood & rascunhos pessoais (sessão 30) ---
+# PDFs/docs de projetos reais usados como dogfood local, não entram no repo
+advocacia.pdf
+Automacao_Juridica_Assistida_*.pdf
+Automacao_Juridica_Assistida_*.md
+perguntas_abertura_projeto.txt
+
+# Planilhas de controle local
+GCA_MVPs_DTs.xlsx
+
+# Rascunhos ODT do stakeholder (fora do scope do repo)
+*.odt
+
+# Scripts experimentais locais
+grok-chat.py
+migrate-remaining-local.sh
+MIGRATION_SUMMARY_PT.txt
+
+# Aider chat history (ferramenta de IA, histórico local)
+.aider.chat.history.md
+
+# Propostas externas rejeitadas/descartadas (contexto de análise, não código)
+Proposta_Reordenacao_Menu_GCA_v1.md
+TASK_MELHORIAS_OCG_REALISTA_v1.1.md
+
+# Scripts shell locais (utilitários de manutenção do ambiente)
+monitor-disk-usage.sh
+otimizar-sistema.sh
+
+# Questionários baixados em dogfood local (contêm dados de projetos reais)
+questionario_governance_*.pdf
