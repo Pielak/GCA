@@ -718,6 +718,21 @@ async def reconsolidate_ocg(
     from sqlalchemy import select, text
     from app.models.base import ArguiderAnalysis, OCG
     from app.services.ocg_updater_service import OCGUpdaterService
+    from app.services.project_operation_lock import project_operation_lock
+    import json as _json
+
+    # DT-080: lock por project_id impede esta operação rodar em paralelo
+    # com /regenerate (que pode sobrescrever o resultado) ou outra
+    # /reconsolidate. Levanta 409 se outra operação está em curso.
+    async with project_operation_lock(project_id, "reconsolidate"):
+        return await _reconsolidate_ocg_impl(project_id, db)
+
+
+async def _reconsolidate_ocg_impl(project_id: UUID, db: AsyncSession):
+    """Implementação real — isolada pra ficar sob project_operation_lock."""
+    from sqlalchemy import select
+    from app.models.base import ArguiderAnalysis, OCG
+    from app.services.ocg_updater_service import OCGUpdaterService
     import json as _json
 
     # Verifica se tem OCG
@@ -800,6 +815,10 @@ async def regenerate_ocg(
     from sqlalchemy import select
     from app.models.base import Questionnaire, Project
     from app.services.questionnaire_service import QuestionnaireService
+    from app.services.project_operation_lock import (
+        project_operation_lock,
+        get_active_operation,
+    )
 
     if not confirm:
         raise HTTPException(
@@ -809,6 +828,25 @@ async def regenerate_ocg(
                 "(custo em tokens). Adicione ?confirm=true ao fazer a requisição "
                 "para confirmar."
             ),
+        )
+
+    # DT-080: fail-fast se já existe operação OCG em andamento.
+    # Ver `project_operation_lock` pra detalhes.
+    existing = get_active_operation(project_id)
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "operation_in_progress",
+                "blocked_by": existing["operation"],
+                "started_at": existing["started_at"],
+                "elapsed_seconds": existing["elapsed_seconds"],
+                "message": (
+                    f"Já existe uma operação '{existing['operation']}' em andamento "
+                    f"neste projeto (há {int(existing['elapsed_seconds'])}s). Aguarde "
+                    f"ela terminar antes de disparar um Regenerar."
+                ),
+            },
         )
 
     proj = await db.get(Project, project_id)
@@ -828,15 +866,30 @@ async def regenerate_ocg(
             detail="Projeto não tem questionário aprovado. Aprove um questionário primeiro.",
         )
 
-    # Dispara geração em background
+    # Dispara geração em background, sob o lock — previne 2ª operação OCG
+    # mutante (ex: /reconsolidate) rodar em paralelo.
     import asyncio
-    asyncio.create_task(
-        QuestionnaireService._generate_ocg(
-            questionnaire_id=q.id,
-            project_id=project_id,
-            gp_email=q.gp_email,
-        )
-    )
+
+    async def _regenerate_with_lock():
+        try:
+            async with project_operation_lock(project_id, "regenerate"):
+                await QuestionnaireService._generate_ocg(
+                    questionnaire_id=q.id,
+                    project_id=project_id,
+                    gp_email=q.gp_email,
+                )
+        except HTTPException:
+            # 409 de conflito — já logado pelo lock manager
+            raise
+        except Exception as exc:
+            logger.error(
+                "ocg.regenerate_background_failed",
+                project_id=str(project_id),
+                questionnaire_id=str(q.id),
+                error=str(exc),
+            )
+
+    asyncio.create_task(_regenerate_with_lock())
 
     logger.info(
         "ocg.regenerate_dispatched",
