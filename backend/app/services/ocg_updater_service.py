@@ -15,7 +15,7 @@ import asyncio
 import json
 import re
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import structlog
@@ -34,6 +34,71 @@ logger = structlog.get_logger(__name__)
 
 # Evento de auditoria dedicado ao updater
 OCG_UPDATED = "OCG_UPDATED"
+
+# Pesos canônicos dos 7 pilares (skill gca-ocg-engine; soma = 1.00).
+_PILLAR_WEIGHTS: Dict[int, float] = {
+    1: 0.10, 2: 0.15, 3: 0.20, 4: 0.20, 5: 0.15, 6: 0.10, 7: 0.10,
+}
+
+# Mapa pilar → coluna do model OCG.
+_PILLAR_COLUMNS: Dict[int, str] = {
+    1: "p1_business_score",
+    2: "p2_rules_score",
+    3: "p3_features_score",
+    4: "p4_nfr_score",
+    5: "p5_architecture_score",
+    6: "p6_data_score",
+    7: "p7_security_score",
+}
+
+
+def _extract_pillar_score(pillars: Dict[str, Any], pillar_num: int) -> Optional[float]:
+    """Lookup tolerante na estrutura canônica PILLAR_SCORES.
+
+    O JSON real do OCG usa chaves descritivas: ``P1_business_case``,
+    ``P2_compliance``, ``P3_scope``, ``P4_performance``, ``P5_architecture``,
+    ``P6_data``, ``P7_security``. O system prompt do updater também aceita
+    forma curta ``P1``, ``P2``, etc. Esta função aceita ambas (case-insensitive)
+    e retorna o ``score`` numérico do pilar, ou None se não localizar.
+    """
+    if not isinstance(pillars, dict):
+        return None
+    prefix = f"P{pillar_num}_".upper()
+    short = f"P{pillar_num}".upper()
+    for key, val in pillars.items():
+        if not isinstance(val, dict) or not isinstance(key, str):
+            continue
+        ku = key.upper()
+        if ku == short or ku.startswith(prefix):
+            score = val.get("score")
+            if score is None:
+                continue
+            try:
+                return float(score)
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _compute_status(pillar_scores: Dict[int, float], overall: Optional[float]) -> Tuple[str, bool]:
+    """Status canônico do OCG (skill gca-ocg-engine, contrato §6 / §10):
+
+      - P2 < 70 OR P7 < 70 → BLOCKED (is_blocking=True)
+      - overall >= 90       → READY
+      - overall >= 75       → NEEDS_REVIEW
+      - overall  < 75       → AT_RISK
+    """
+    p2 = pillar_scores.get(2)
+    p7 = pillar_scores.get(7)
+    if (p2 is not None and p2 < 70) or (p7 is not None and p7 < 70):
+        return "BLOCKED", True
+    if overall is None:
+        return "AT_RISK", False
+    if overall >= 90:
+        return "READY", False
+    if overall >= 75:
+        return "NEEDS_REVIEW", False
+    return "AT_RISK", False
 
 
 async def _auto_generate_in_background(project_id: UUID, ocg_data: Dict[str, Any]) -> None:
@@ -784,31 +849,62 @@ class OCGUpdaterService:
         context_health: Dict[str, Any],
         version_to: int,
     ) -> None:
-        """Atualiza o registro OCG existente (UNIQUE questionnaire_id)."""
-        # Atualizar scores dos pilares se presentes no updated_ocg
-        pillar_map = {
-            "p1_business_score": ["p1_score", "p1_business_score"],
-            "p2_rules_score": ["p2_score", "p2_rules_score"],
-            "p3_features_score": ["p3_score", "p3_features_score"],
-            "p4_nfr_score": ["p4_score", "p4_nfr_score"],
-            "p5_architecture_score": ["p5_score", "p5_architecture_score"],
-            "p6_data_score": ["p6_score", "p6_data_score"],
-            "p7_security_score": ["p7_score", "p7_security_score"],
-        }
+        """Atualiza o registro OCG após apply_deltas, garantindo coerência
+        entre o JSON canônico (``PILLAR_SCORES.Pn_*.score``) e a representação
+        colunar (``pN_*_score``, ``overall_score``, ``status``, ``is_blocking``).
 
-        for ocg_col, source_keys in pillar_map.items():
-            for key in source_keys:
-                val = updated_ocg.get(key)
-                if val is not None:
-                    setattr(ocg, ocg_col, float(val))
-                    break
+        Bug histórico (corrigido aqui): a versão anterior buscava chaves
+        top-level inexistentes (``updated_ocg.get("p3_score")`` /
+        ``updated_ocg.get("overall_score")``). A estrutura real do OCG aninha
+        scores em ``PILLAR_SCORES.P3_scope.score`` e o composite em
+        ``COMPOSITE_SCORE.value``. Resultado: colunas zeradas + overall
+        fossilizado no valor da geração inicial. UI lê das colunas → dogfood
+        via "nada muda" mesmo com Arguidor + apply_deltas funcionando.
+        """
+        # 1. Extrair score de cada pilar do JSON canônico, gravar nas colunas
+        pillars = updated_ocg.get("PILLAR_SCORES") or {}
+        pillar_scores: Dict[int, float] = {}
+        for n, col in _PILLAR_COLUMNS.items():
+            score = _extract_pillar_score(pillars, n)
+            if score is not None:
+                setattr(ocg, col, score)
+                pillar_scores[n] = score
 
-        # Overall score
-        overall = updated_ocg.get("overall_score")
-        if overall is not None:
-            ocg.overall_score = float(overall)
+        # 2. Recalcular overall: média ponderada normalizada pelos pesos dos
+        #    pilares EFETIVAMENTE presentes (defesa contra OCG parcial).
+        overall_new: Optional[float] = None
+        if pillar_scores:
+            total_weight = sum(_PILLAR_WEIGHTS[n] for n in pillar_scores)
+            if total_weight > 0:
+                weighted_sum = sum(
+                    pillar_scores[n] * _PILLAR_WEIGHTS[n] for n in pillar_scores
+                )
+                overall_new = round(weighted_sum / total_weight, 2)
+                ocg.overall_score = overall_new
+                # Espelha no JSON em COMPOSITE_SCORE.value (UI/CodeGen lêem de lá)
+                comp = updated_ocg.get("COMPOSITE_SCORE")
+                if isinstance(comp, dict):
+                    comp["value"] = overall_new
+                else:
+                    updated_ocg["COMPOSITE_SCORE"] = {"value": overall_new}
 
-        # Dados completos
+        # 3. Fallback: se o LLM emitiu overall_score top-level (raro, formato
+        #    legado) e não conseguimos derivar dos pilares, respeita.
+        if overall_new is None:
+            legacy_overall = updated_ocg.get("overall_score")
+            if legacy_overall is not None:
+                try:
+                    ocg.overall_score = float(legacy_overall)
+                except (TypeError, ValueError):
+                    pass
+
+        # 4. Status + is_blocking canônicos (P2<70 OR P7<70 → BLOCKED)
+        new_status, is_blocking = _compute_status(pillar_scores, ocg.overall_score)
+        ocg.status = new_status
+        ocg.is_blocking = is_blocking
+        updated_ocg["APPROVAL_STATUS"] = new_status
+
+        # 5. Persistir JSON, change_type, context_health, version
         ocg.ocg_data = json.dumps(updated_ocg, ensure_ascii=False)
         ocg.change_type = change_type
         ocg.context_health = json.dumps(context_health, ensure_ascii=False)
