@@ -346,7 +346,7 @@ export function GatekeeperPage() {
       {/* Override Modal */}
       {showOverride && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="bg-dark-100 border border-amber-700/40 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+          <div className="bg-dark-100 border border-amber-700/40 rounded-2xl p-6 w-full max-w-2xl shadow-2xl">
             <div className="flex items-center gap-3 mb-4">
               <div className="w-10 h-10 rounded-full bg-amber-900/40 flex items-center justify-center">
                 <Lock className="w-5 h-5 text-amber-400" />
@@ -362,9 +362,15 @@ export function GatekeeperPage() {
             </div>
             <textarea
               value={overrideReason} onChange={e => setOverrideReason(e.target.value)}
-              rows={4} placeholder="Justificativa técnica obrigatória..."
-              className="w-full bg-dark-200 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 resize-none focus:outline-none focus:border-amber-500"
+              rows={10} placeholder="Justificativa técnica obrigatória (mínimo 1000 caracteres recomendados — contexto detalhado, motivos técnicos, o que deve ser corrigido)..."
+              className="w-full bg-dark-200 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 resize-y min-h-[240px] focus:outline-none focus:border-amber-500"
             />
+            <div className="mt-1 text-right text-[11px] text-slate-500">
+              {overrideReason.length} caracteres
+              {overrideReason.length < 1000 && overrideReason.length > 0 && (
+                <span className="text-amber-500/70 ml-2">(recomendado ≥ 1000)</span>
+              )}
+            </div>
             <div className="flex gap-3 mt-4">
               <button onClick={() => setShowOverride(false)} className="flex-1 px-4 py-2 rounded-lg bg-slate-800 text-slate-300 text-sm hover:bg-slate-700 transition-colors">Cancelar</button>
               <button disabled={!overrideReason.trim()} onClick={() => setShowOverride(false)} className="flex-1 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm hover:bg-amber-500 disabled:opacity-50 transition-colors">
