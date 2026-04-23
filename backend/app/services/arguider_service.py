@@ -461,24 +461,53 @@ class ArguiderService:
             # Parsear JSON
             result_json = self._extract_json(response_text)
 
-            # Salvar análise
-            analysis = ArguiderAnalysis(
-                document_id=document_id,
-                project_id=project_id,
-                document_classification=json.dumps(result_json.get("document_classification", {}), ensure_ascii=False),
-                gaps=json.dumps(result_json.get("gaps", []), ensure_ascii=False),
-                show_stoppers=json.dumps(result_json.get("show_stoppers", []), ensure_ascii=False),
-                poor_definitions=json.dumps(result_json.get("poor_definitions", []), ensure_ascii=False),
-                improvement_suggestions=json.dumps(result_json.get("improvement_suggestions", []), ensure_ascii=False),
-                module_candidates=json.dumps(result_json.get("module_candidates", []), ensure_ascii=False),
-                ocg_fields_to_update=json.dumps(result_json.get("ocg_fields_to_update", []), ensure_ascii=False),
+            # Salvar análise (DT-087 sessão 30: idempotente contra retry).
+            # `arguider_analyses.document_id` tem UNIQUE constraint; se o
+            # primeiro try falhou DEPOIS de commitar o analysis (ex: crash
+            # no loop de module_candidates por bug de parsing), o retry
+            # bateria em duplicate key. Fix: checar se existe e atualizar
+            # in-place; caso contrário, criar.
+            existing_analysis = (await self.db.execute(
+                select(ArguiderAnalysis).where(ArguiderAnalysis.document_id == document_id)
+            )).scalar_one_or_none()
+
+            analysis_fields = {
+                "document_id": document_id,
+                "project_id": project_id,
+                "document_classification": json.dumps(result_json.get("document_classification", {}), ensure_ascii=False),
+                "gaps": json.dumps(result_json.get("gaps", []), ensure_ascii=False),
+                "show_stoppers": json.dumps(result_json.get("show_stoppers", []), ensure_ascii=False),
+                "poor_definitions": json.dumps(result_json.get("poor_definitions", []), ensure_ascii=False),
+                "improvement_suggestions": json.dumps(result_json.get("improvement_suggestions", []), ensure_ascii=False),
+                "module_candidates": json.dumps(result_json.get("module_candidates", []), ensure_ascii=False),
+                "ocg_fields_to_update": json.dumps(result_json.get("ocg_fields_to_update", []), ensure_ascii=False),
                 # DT-032: label reflete o modelo real usado, não mais hardcoded
                 # ANTHROPIC_MODEL. Ex: "deepseek-chat", "claude-haiku-4-5-*".
-                llm_model=f"{self.provider}:{self.model}",
-                tokens_used=tokens_used,
-                latency_ms=latency_ms,
-            )
-            self.db.add(analysis)
+                "llm_model": f"{self.provider}:{self.model}",
+                "tokens_used": tokens_used,
+                "latency_ms": latency_ms,
+            }
+
+            if existing_analysis:
+                for k, v in analysis_fields.items():
+                    setattr(existing_analysis, k, v)
+                analysis = existing_analysis
+                # Limpa candidatos/items antigos pra evitar duplicação
+                # quando o retry regenera tudo.
+                from app.models.base import GatekeeperItem as _GK
+                await self.db.execute(
+                    ModuleCandidate.__table__.delete().where(
+                        ModuleCandidate.arguider_analysis_id == analysis.id
+                    )
+                )
+                await self.db.execute(
+                    _GK.__table__.delete().where(
+                        _GK.arguider_analysis_id == analysis.id
+                    )
+                )
+            else:
+                analysis = ArguiderAnalysis(**analysis_fields)
+                self.db.add(analysis)
             await self.db.commit()
 
             # Promover module_candidates
@@ -491,9 +520,27 @@ class ArguiderService:
             from app.constants.module_categories import (
                 normalize_module_type, DEFAULT_MODULE_STATUS,
             )
-            for mc in result_json.get("module_candidates", []):
+            for mc in result_json.get("module_candidates", []) or []:
+                # DT-087 sessão 30: defensive contra LLM emitindo lista de
+                # strings em vez de lista de dicts. Haiku 4.5 e alguns
+                # modelos simplificam schema e retornam ["Nome X", "Nome Y"]
+                # quebrando `.get()`. Normaliza string → dict mínimo.
+                if isinstance(mc, str):
+                    mc = {"name": mc, "module_type": "feature"}
+                elif not isinstance(mc, dict):
+                    logger.warning(
+                        "arguider.module_candidate_skipped",
+                        document_id=str(document_id),
+                        reason="not_dict_or_str",
+                        got_type=type(mc).__name__,
+                    )
+                    continue
                 raw_type = mc.get("module_type", "feature")
                 canonical_type = normalize_module_type(raw_type)
+                # `pillar_impact` pode vir lista (["P1","P3"]) ou string;
+                # tratamos só lista — caso contrário, dict vazio.
+                pi_raw = mc.get("pillar_impact", [])
+                pi_list = pi_raw if isinstance(pi_raw, list) else []
                 candidate = ModuleCandidate(
                     project_id=project_id,
                     arguider_analysis_id=analysis.id,
@@ -505,7 +552,7 @@ class ArguiderService:
                     dependencies=json.dumps(mc.get("dependencies", []), ensure_ascii=False),
                     source_document_ids=json.dumps([str(document_id)], ensure_ascii=False),
                     pillar_impact=json.dumps(
-                        {f"p{i}": f"P{i}" in mc.get("pillar_impact", []) for i in range(1, 8)},
+                        {f"p{i}": f"P{i}" in pi_list for i in range(1, 8)},
                         ensure_ascii=False,
                     ),
                     ready_for_codegen=mc.get("ready_for_codegen", False),
@@ -573,7 +620,13 @@ class ArguiderService:
             return result_json
 
         except Exception as e:
-            logger.error("arguider.analysis_error", document_id=str(document_id), error=str(e))
+            logger.error(
+                "arguider.analysis_error",
+                document_id=str(document_id),
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,  # DT-087: stack trace visível no log pra próximo bug
+            )
             # Marcar como erro
             doc = await self.db.execute(
                 select(IngestedDocument).where(IngestedDocument.id == document_id)
