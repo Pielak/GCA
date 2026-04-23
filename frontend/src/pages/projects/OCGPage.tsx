@@ -11,6 +11,26 @@ import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 import RnfContractsEditor from '@/components/projects/RnfContractsEditor'
 import DesignTokensEditor from '@/components/projects/DesignTokensEditor'
 
+/**
+ * Formata erros de operações OCG-mutantes (regenerate/reconsolidate).
+ * Trata especificamente HTTP 409 com detail estruturado do
+ * `project_operation_lock` (backend DT-080 commit 7b45209), mostrando
+ * mensagem amigável em vez de erro genérico.
+ */
+function formatOCGOperationError(err: unknown, action: string): string {
+  const status = getErrorStatus(err)
+  if (status === 409) {
+    // Backend envia detail={error, blocked_by, started_at, elapsed_seconds, message}
+    const e = err as { response?: { data?: { detail?: unknown } } }
+    const detail = e?.response?.data?.detail
+    if (detail && typeof detail === 'object' && 'message' in detail) {
+      return String((detail as { message: string }).message)
+    }
+    return `Não é possível ${action} agora — outra operação OCG já está em andamento neste projeto. Aguarde terminar e tente de novo.`
+  }
+  return `Falha ao ${action.toLowerCase()}: ${getErrorMessage(err)}`
+}
+
 interface OCGData {
   ocg_id: string
   questionnaire_id: string
@@ -470,13 +490,13 @@ export function OCGPage() {
                 alert(res?.data?.message || 'Reconsolidação disparada')
                 await loadData()
               } catch (err: unknown) {
-                alert(`Falha: ${getErrorMessage(err)}`)
+                alert(formatOCGOperationError(err, 'Re-consolidar'))
               } finally {
                 setReconsolidating(false)
               }
             }}
             disabled={reconsolidating || regenerating}
-            title="Re-aplica deltas das análises Arguidor existentes (sem chamar Arguidor de novo)"
+            title="Re-aplica deltas das análises Arguidor existentes (sem chamar Arguidor de novo). Aguarda terminar se já houver outra operação OCG rodando."
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-600/30 text-indigo-300 text-sm hover:bg-indigo-600/30 disabled:opacity-40 transition-colors"
           >
             {reconsolidating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -485,20 +505,20 @@ export function OCGPage() {
           <button
             onClick={async () => {
               if (!id || regenerating) return
-              if (!confirm('REGENERAR o OCG do zero a partir do questionário aprovado? ATENÇÃO: chama os 8 agentes IA novamente (custo em tokens). O histórico de deltas é preservado. Continuar?')) return
+              if (!confirm('REGENERAR o OCG do zero a partir do questionário aprovado? ATENÇÃO: chama os 8 agentes IA novamente (custo em tokens, leva 3-5min). O histórico de deltas é preservado. Continuar?')) return
               setRegenerating(true)
               try {
                 const res: any = await apiClient.post(`/projects/${id}/ocg/regenerate?confirm=true`, {})
                 alert(res?.data?.message || 'Regeneração disparada em background. Verifique em alguns minutos.')
                 await loadData()
               } catch (err: unknown) {
-                alert(`Falha: ${getErrorMessage(err)}`)
+                alert(formatOCGOperationError(err, 'Regenerar'))
               } finally {
                 setRegenerating(false)
               }
             }}
             disabled={reconsolidating || regenerating}
-            title="Regenera OCG do zero a partir do questionário aprovado (custo em tokens — confirmação dupla)"
+            title="Regenera OCG do zero a partir do questionário aprovado (3-5min, custo em tokens). Bloqueia se outra operação OCG está rodando no mesmo projeto."
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-600/10 border border-red-600/30 text-red-300 text-sm hover:bg-red-600/20 disabled:opacity-40 transition-colors"
           >
             {regenerating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <AlertTriangle className="w-3.5 h-3.5" />}
