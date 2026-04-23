@@ -71,23 +71,33 @@ async def recover_zombie_documents(
 async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
 
-    # MVP 29 Fase 29.1: dois padrões de zombie são cobertos.
+    # MVP 29 Fase 29.1 + sessão 30: três padrões de zombie cobertos.
     #
     #  1. status='processing' + started_at velho — caso clássico pré-MVP 29.
     #  2. status='pending' + started_at NOT NULL e velho — bug novo descoberto
     #     no dogfood: fluxos de fallback (DT-064) e reanalyze resetavam
-    #     status→'pending' mas deixavam started_at preenchido. Se worker
-    #     morria entre o reset e o retry, o doc ficava num limbo que o
-    #     watchdog antigo não pegava porque filtrava só 'processing'.
-    zombie_predicate = and_(
-        or_(
-            IngestedDocument.arguider_status == "processing",
-            and_(
-                IngestedDocument.arguider_status == "pending",
-                IngestedDocument.arguider_started_at.isnot(None),
+    #     status→'pending' mas deixavam started_at preenchido.
+    #  3. stage='failed' + status IN ('pending','processing') — sessão 30:
+    #     worker crashou dentro do pipeline ANTES de atualizar o status.
+    #     `stage` virou 'failed' mas `status` ficou 'pending'/'processing'
+    #     (estado ilegal que esconde o doc da UI, sem botão retry visível).
+    #     Pegamos sem cutoff de tempo — stage=failed significa crash real,
+    #     não há razão pra esperar.
+    zombie_predicate = or_(
+        and_(
+            or_(
+                IngestedDocument.arguider_status == "processing",
+                and_(
+                    IngestedDocument.arguider_status == "pending",
+                    IngestedDocument.arguider_started_at.isnot(None),
+                ),
             ),
+            IngestedDocument.arguider_started_at < cutoff,
         ),
-        IngestedDocument.arguider_started_at < cutoff,
+        and_(
+            IngestedDocument.arguider_stage == "failed",
+            IngestedDocument.arguider_status.in_(("pending", "processing")),
+        ),
     )
 
     rows = await db.execute(

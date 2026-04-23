@@ -432,13 +432,24 @@ export function IngestionPage() {
                       />
                     )}
                   </div>
-                  {/* DT-039: botão re-analisar (só quando relevante e content_status!='lost') */}
-                  {(doc.arguider_status === 'error' || doc.arguider_status === 'completed') && doc.content_status !== 'lost' && (
+                  {/* DT-039 + sessão 30: botão re-analisar aparece também
+                      em docs com stage='failed' mesmo quando status ainda
+                      é 'pending' ou 'processing' (estado inconsistente por
+                      crash no worker — o usuário precisa ter como destravar
+                      sem apagar o doc). */}
+                  {((doc.arguider_status === 'error'
+                     || doc.arguider_status === 'completed'
+                     || doc.arguider_stage === 'failed')
+                    && doc.content_status !== 'lost') && (
                     <button
                       onClick={() => handleReanalyze(doc.id)}
                       disabled={reanalyzing[doc.id]}
                       className="p-1 rounded text-slate-600 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                      title={doc.arguider_status === 'error' ? 'Tentar analisar novamente' : 'Re-analisar com config atual (novo provider/prompt)'}
+                      title={
+                        doc.arguider_stage === 'failed' || doc.arguider_status === 'error'
+                          ? 'Tentar analisar novamente (dispara pipeline do zero)'
+                          : 'Re-analisar com config atual (novo provider/prompt)'
+                      }
                     >
                       {reanalyzing[doc.id]
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
