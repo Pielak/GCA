@@ -327,13 +327,25 @@ async def evaluate_convergence_after_ocg_update(
     row.ocg_version_after = ocg.version
     row.overall_after = Decimal(str(overall_after)) if overall_after is not None else None
 
+    # Convergência canônica (fix 2026-04-24 pós-dogfood):
+    # Antes: delta < threshold marcava como converged mesmo em score baixo.
+    # Problema: convergia precocemente em patamar AT_RISK (<75) e encerrava
+    # o loop sem atingir qualidade mínima.
+    # Agora: só converge quando (overall >= OVERALL_TARGET 90) OU
+    # (overall >= PILLAR_DEFICIT_THRESHOLD 75 E delta < threshold).
+    # Abaixo de 75 → nunca converge via delta; sempre segue iterando
+    # (answered) pra o user atacar mais gaps.
     if row.not_applicable_ratio is not None and float(row.not_applicable_ratio) >= INFEASIBLE_RATIO:
         row.status = "infeasible"
         row.converged = False
     elif overall_after is not None and overall_after >= OVERALL_TARGET:
         row.status = "converged"
         row.converged = True
-    elif delta < threshold:
+    elif (
+        overall_after is not None
+        and overall_after >= PILLAR_DEFICIT_THRESHOLD
+        and delta < threshold
+    ):
         row.status = "converged"
         row.converged = True
     else:
