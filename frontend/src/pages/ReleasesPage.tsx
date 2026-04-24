@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface ReleaseItemDetail {
   id: string
@@ -130,7 +131,7 @@ export function ReleasesPage() {
                       {r.applied_at && (
                         <>
                           <span>·</span>
-                          <span>{new Date(r.applied_at).toLocaleString('pt-BR')}</span>
+                          <span>{formatDateTimeBR(r.applied_at)}</span>
                         </>
                       )}
                     </div>

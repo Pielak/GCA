@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Loader2, X, AlertTriangle, Clock, Sparkles, FileText, Cpu, Info, CheckCircle2, XCircle } from 'lucide-react'
 import { useTestSpecDetail, useApproveTestSpec, useRejectTestSpec, type TestSpecType } from '@/hooks/useTestSpecs'
 import { useAuthStore } from '@/stores/authStore'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
  * MVP 10 Fase 10.5 — Modal de detalhe do TestSpec.
@@ -204,7 +205,7 @@ export function TestSpecModal({ projectId, specId, onClose }: Props) {
                       label="Geração"
                       value={
                         spec.generated_at
-                          ? new Date(spec.generated_at).toLocaleString('pt-BR')
+                          ? formatDateTimeBR(spec.generated_at)
                           : '—'
                       }
                     />

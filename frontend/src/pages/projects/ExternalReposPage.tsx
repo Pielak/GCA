@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { GitBranch, Plus, Trash2, Play, Loader2, CheckCircle, AlertTriangle, Clock, RefreshCw, Eye, EyeOff, BarChart3, X, ChevronDown, ChevronRight, FileText, Shield, Layers, FolderTree, BookOpen } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface AnalysisResult {
   stack: Record<string, any>
@@ -327,7 +328,7 @@ export function ExternalReposPage() {
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-slate-500 text-xs">
                       <span>Branch: {repo.branch}</span>
-                      {repo.last_read_at && <span>Última leitura: {new Date(repo.last_read_at).toLocaleString('pt-BR')}</span>}
+                      {repo.last_read_at && <span>Última leitura: {formatDateTimeBR(repo.last_read_at)}</span>}
                       {repo.files_total > 0 && !isReading && <span>{repo.files_processed}/{repo.files_total} arquivos</span>}
                     </div>
                     {repo.error_message && (
@@ -710,7 +711,7 @@ export function ExternalReposPage() {
                                   Abrir no repositório ↗
                                 </a>
                               )}
-                              <span>{new Date(doc.created_at).toLocaleString('pt-BR')}</span>
+                              <span>{formatDateTimeBR(doc.created_at)}</span>
                             </div>
                           </div>
                         </div>

@@ -5,6 +5,7 @@ import { apiClient } from '@/lib/api'
 import { OperationBar, PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
 import { getQuestionsForType } from '@/data/projectRequestQuestions'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface PendingProject {
   id: string
@@ -842,7 +843,7 @@ export function AdminProjectsPage() {
                 {/* Datas + status */}
                 <div className="text-xs text-slate-500 flex items-center gap-4 pt-2 border-t border-slate-800">
                   <span>
-                    Solicitado em {detailsModal.requested_at ? new Date(detailsModal.requested_at).toLocaleString('pt-BR') : '—'}
+                    Solicitado em {detailsModal.requested_at ? formatDateTimeBR(detailsModal.requested_at) : '—'}
                   </span>
                   <span>
                     Status: <span className="text-slate-300">{STATUS_LABELS[detailsModal.status]?.label || detailsModal.status}</span>

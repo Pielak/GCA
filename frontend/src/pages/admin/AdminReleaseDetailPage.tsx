@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface ReleaseItem {
   id: string
@@ -177,11 +178,11 @@ export function AdminReleaseDetailPage() {
         </div>
 
         <div className="flex items-center gap-3 text-[11px] text-slate-500 pt-2 border-t border-slate-800">
-          {release.declared_at && <span>Declarada {new Date(release.declared_at).toLocaleString('pt-BR')}</span>}
+          {release.declared_at && <span>Declarada {formatDateTimeBR(release.declared_at)}</span>}
           {release.applied_at && (
             <>
               <span>·</span>
-              <span>Aplicada {new Date(release.applied_at).toLocaleString('pt-BR')}</span>
+              <span>Aplicada {formatDateTimeBR(release.applied_at)}</span>
             </>
           )}
           {release.source_yaml && (
@@ -248,7 +249,7 @@ export function AdminReleaseDetailPage() {
             {log.map(e => (
               <li key={e.id} className="flex items-start gap-2 text-xs">
                 <span className="text-slate-500 flex-shrink-0 w-36">
-                  {e.created_at && new Date(e.created_at).toLocaleString('pt-BR')}
+                  {e.created_at && formatDateTimeBR(e.created_at)}
                 </span>
                 <span className="text-slate-300 flex-1">
                   <strong className="text-violet-300">{EVENT_LABELS[e.event_type] || e.event_type}</strong>

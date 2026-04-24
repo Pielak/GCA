@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useOCGDeltaForDocument, type OCGPillarDelta } from '@/hooks/useIngestion'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
  * MVP 27 Fase 1 — Impacto do documento no OCG (antes/depois por pilar).
@@ -158,7 +159,7 @@ export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
 
               {data.created_at && (
                 <div className="text-[10px] text-slate-600 text-right pt-1">
-                  Aplicado em {new Date(data.created_at).toLocaleString('pt-BR')}
+                  Aplicado em {formatDateTimeBR(data.created_at)}
                 </div>
               )}
             </div>

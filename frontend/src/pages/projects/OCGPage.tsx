@@ -10,6 +10,7 @@ import { pillarMeta, pillarKey, PILLAR_ORDER } from '@/data/pillarMeta'
 import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 import RnfContractsEditor from '@/components/projects/RnfContractsEditor'
 import DesignTokensEditor from '@/components/projects/DesignTokensEditor'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
  * Formata erros de operações OCG-mutantes (regenerate/reconsolidate).
@@ -418,7 +419,7 @@ export function OCGPage() {
                       </span>
                     )}
                     <span className="text-slate-500 text-xs">
-                      {h.created_at ? new Date(h.created_at).toLocaleString('pt-BR') : ''}
+                      {h.created_at ? formatDateTimeBR(h.created_at) : ''}
                     </span>
                   </div>
                   {h.change_summary && <p className="text-slate-400 text-xs mt-1">{h.change_summary}</p>}

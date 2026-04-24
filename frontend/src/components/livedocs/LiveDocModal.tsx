@@ -4,6 +4,7 @@ import {
   AlertTriangle, FileText, Layers, Network,
 } from 'lucide-react'
 import { useLiveDocDetail, type LiveDocType } from '@/hooks/useLiveDocs'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
  * MVP 10 Fase 10.7 — Modal de LiveDoc.
@@ -132,7 +133,7 @@ export function LiveDocModal({ projectId, docId, onClose }: Props) {
                     } />
                     <ProvRow
                       label="Gerado em"
-                      value={doc.generated_at ? new Date(doc.generated_at).toLocaleString('pt-BR') : '—'}
+                      value={doc.generated_at ? formatDateTimeBR(doc.generated_at) : '—'}
                     />
                     {doc.provenance?.questionnaire_id && (
                       <ProvRow label="Questionário" value={doc.provenance.questionnaire_id.slice(0, 8) + '…'} />

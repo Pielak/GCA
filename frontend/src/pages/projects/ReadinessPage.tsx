@@ -14,6 +14,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { PageTransition, SkeletonPulse } from '@/components/ui/PipelineProgress'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface Deliverable {
   id: string
@@ -349,7 +350,7 @@ export function ReadinessPage() {
                       )}
                       {d.last_verified_at && (
                         <div className="text-[10px] text-slate-600 mt-1">
-                          Verificado em {new Date(d.last_verified_at).toLocaleString('pt-BR')}
+                          Verificado em {formatDateTimeBR(d.last_verified_at)}
                         </div>
                       )}
                     </div>
@@ -426,7 +427,7 @@ export function ReadinessPage() {
                     </div>
                     {r.created_at && (
                       <div className="text-[10px] text-slate-600 mt-1">
-                        {new Date(r.created_at).toLocaleString('pt-BR')}
+                        {formatDateTimeBR(r.created_at)}
                         {r.sha256 && <span className="ml-3 font-mono">sha256: {r.sha256.slice(0, 12)}…</span>}
                       </div>
                     )}

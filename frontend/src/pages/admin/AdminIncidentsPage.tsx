@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface Ticket {
   id: string
@@ -200,7 +201,7 @@ export function AdminIncidentsPage() {
                       </span>
                     </td>
                     <td className="py-2 px-3 text-slate-500 text-xs">
-                      {new Date(t.created_at).toLocaleString('pt-BR')}
+                      {formatDateTimeBR(t.created_at)}
                     </td>
                     <td className="py-2 px-3 text-right">
                       <Link

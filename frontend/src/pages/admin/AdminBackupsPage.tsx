@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface BackupItem {
   id: string
@@ -210,7 +211,7 @@ export function AdminBackupsPage() {
                       <ExternalLink className="w-3 h-3 opacity-60" />
                     </Link>
                   </td>
-                  <td className="py-2 px-3 text-slate-400">{new Date(b.created_at).toLocaleString('pt-BR')}</td>
+                  <td className="py-2 px-3 text-slate-400">{formatDateTimeBR(b.created_at)}</td>
                   <td className="py-2 px-3 text-slate-400 text-xs">{TRIGGER_LABELS[b.trigger_source] || b.trigger_source}</td>
                   <td className="py-2 px-3 text-right text-slate-400 tabular-nums">
                     {b.status === 'completed' ? formatBytes(b.size_bytes) : '—'}

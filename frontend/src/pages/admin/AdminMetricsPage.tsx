@@ -12,6 +12,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 // Tipos espelham o retorno de GET /api/v1/metrics/dashboard (DT-060).
 interface AIUsageRow {
@@ -132,7 +133,7 @@ export function AdminMetricsPage() {
             Agregação de uso de IA, audit e atividade.{' '}
             {data && (
               <span className="text-slate-600 text-xs">
-                Atualizado em {new Date(data.generated_at).toLocaleString('pt-BR')}
+                Atualizado em {formatDateTimeBR(data.generated_at)}
               </span>
             )}
           </p>

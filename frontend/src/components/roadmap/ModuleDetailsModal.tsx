@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Loader2, RefreshCw, X, AlertTriangle, FileText, Download, Sparkles, Globe, ExternalLink } from 'lucide-react'
 import api, { apiClient } from '@/lib/api'
 import { getErrorMessage, getErrorStatus } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
  * MVP 9 Fase 9.2 — Modal de detalhamento on-demand de item do Roadmap.
@@ -476,7 +477,7 @@ function ExternalReferenceBlock({
           {isFetched && external?.chars && (
             <p className="text-[10px] text-emerald-300 mt-1">
               ✓ {external.chars.toLocaleString('pt-BR')} chars extraídos
-              {external.fetched_at && ` · ${new Date(external.fetched_at).toLocaleString('pt-BR')}`}
+              {external.fetched_at && ` · ${formatDateTimeBR(external.fetched_at)}`}
               {' · '}injetados no detalhamento
             </p>
           )}
@@ -585,7 +586,7 @@ function ReadinessBlock({
           </p>
           <p className="text-[10px] opacity-70 mt-1">
             avaliado por {readiness.provider}{readiness.model ? ` (${readiness.model})` : ''}
-            {readiness.evaluated_at ? ` · ${new Date(readiness.evaluated_at).toLocaleString('pt-BR')}` : ''}
+            {readiness.evaluated_at ? ` · ${formatDateTimeBR(readiness.evaluated_at)}` : ''}
           </p>
         </div>
         <button

@@ -4,6 +4,7 @@ import { Zap, MessageSquare, Send, CheckCircle, Clock, AlertCircle, XCircle, Loa
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useGatekeeperData, useResolveItem, useIgnoreItem, type GatekeeperItem } from '@/hooks/useArguider';
 import QuestionnaireDownloadPanel from '@/components/projects/QuestionnaireDownloadPanel';
+import { formatDateBR } from '@/lib/datetime'
 
 type ItemFilter = 'all' | 'pending' | 'resolved' | 'ignored';
 
@@ -304,7 +305,7 @@ export function ArguiderPage() {
                       <CheckCircle className="w-3.5 h-3.5 text-emerald-400" />
                       <span className="text-emerald-400 text-xs font-medium">Resolvido</span>
                       {selectedItem.resolved_at && (
-                        <span className="text-slate-500 text-xs ml-auto">{new Date(selectedItem.resolved_at).toLocaleDateString('pt-BR')}</span>
+                        <span className="text-slate-500 text-xs ml-auto">{formatDateBR(selectedItem.resolved_at)}</span>
                       )}
                     </div>
                     <p className="text-slate-300 text-sm leading-relaxed">{selectedItem.resolution_note}</p>

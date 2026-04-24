@@ -7,6 +7,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
 import { useToast } from '@/hooks/useToast'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 // MVP 19 Fase 19.2 — ERS (Especificação de Requisitos de Software)
 // vive como arquivo versionado em docs/ERS.md no repositório Git do
@@ -179,7 +180,7 @@ export function ERSCard({ projectId }: Props) {
           )}
           {freshness.last_generated_at && (
             <span>
-              · {new Date(freshness.last_generated_at).toLocaleString('pt-BR')}
+              · {formatDateTimeBR(freshness.last_generated_at)}
             </span>
           )}
           {lastCommitInfo && (

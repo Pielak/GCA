@@ -9,6 +9,7 @@ import { ExtractionReportCard } from '@/components/ingestion/ExtractionReportCar
 import { OCGDeltaCard } from '@/components/ingestion/OCGDeltaCard';
 import { apiClient } from '@/lib/api';
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateBR } from '@/lib/datetime'
 
 /**
  * Fix dogfood 2026-04-22 — abrir doc ingerido via fetch autenticado.
@@ -412,7 +413,7 @@ export function IngestionPage() {
                   </div>
                   <span className="text-slate-400 text-xs">{fileTypeLabel(doc.file_type)}</span>
                   <span className="text-slate-400 text-xs">{formatFileSize(doc.file_size_bytes)}</span>
-                  <span className="text-slate-500 text-xs">{new Date(doc.created_at).toLocaleDateString('pt-BR')}</span>
+                  <span className="text-slate-500 text-xs">{formatDateBR(doc.created_at)}</span>
                   <div className="flex flex-col gap-1 text-xs min-w-[180px]">
                     <div className="flex items-center gap-2">
                       {doc.arguider_status === 'processing' ? (

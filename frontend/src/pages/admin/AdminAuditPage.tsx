@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Search, AlertCircle, AlertTriangle, Info, Hash, Download, Loader2 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface AuditEvent {
   id: string
@@ -127,7 +128,7 @@ export function AdminAuditPage() {
                     <span className="text-slate-600">-</span>
                     <span className="text-slate-500 text-xs capitalize">{ev.actorRole}</span>
                     <span className="text-slate-600">-</span>
-                    <span className="text-slate-500 text-xs">{new Date(ev.timestamp).toLocaleString('pt-BR')}</span>
+                    <span className="text-slate-500 text-xs">{formatDateTimeBR(ev.timestamp)}</span>
                   </div>
                 </div>
                 <span className="text-slate-600 text-xs ml-4 flex-shrink-0 font-mono">{ev.id.slice(0, 8)}</span>

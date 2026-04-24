@@ -6,6 +6,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface ReleaseItem {
   id: string
@@ -137,7 +138,7 @@ function ReleaseRow({ release }: { release: ReleaseItem }) {
             {release.applied_at && (
               <>
                 <span>·</span>
-                <span>Aplicada em {new Date(release.applied_at).toLocaleString('pt-BR')}</span>
+                <span>Aplicada em {formatDateTimeBR(release.applied_at)}</span>
               </>
             )}
             {release.source_yaml && (

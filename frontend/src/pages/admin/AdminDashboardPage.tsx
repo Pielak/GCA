@@ -8,6 +8,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 import { apiClient } from '@/lib/api'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface DashboardMetrics {
   totalProjects: number
@@ -356,7 +357,7 @@ function AIProvidersTab() {
                       <p className="text-slate-500 text-xs">
                         Modelo: {p.selected_model}
                         {p.masked_key && <> &middot; Key: {p.masked_key}</>}
-                        {p.tested_at && <> &middot; Testado: {new Date(p.tested_at).toLocaleString('pt-BR')}</>}
+                        {p.tested_at && <> &middot; Testado: {formatDateTimeBR(p.tested_at)}</>}
                       </p>
                     </div>
                   </div>
@@ -645,7 +646,7 @@ export function AdminDashboardPage() {
                     }`} />
                     <div className="min-w-0">
                       <p className="text-slate-300 text-xs leading-snug">{ev.detail.slice(0, 80)}{ev.detail.length > 80 ? '...' : ''}</p>
-                      <p className="text-slate-600 text-xs mt-0.5">{ev.timestamp ? new Date(ev.timestamp).toLocaleString('pt-BR') : ''}</p>
+                      <p className="text-slate-600 text-xs mt-0.5">{ev.timestamp ? formatDateTimeBR(ev.timestamp) : ''}</p>
                     </div>
                   </div>
                 ))}

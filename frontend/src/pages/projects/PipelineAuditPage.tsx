@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Shield, Clock, Loader2, Download, Filter } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface AuditEntry {
   id: string
@@ -118,7 +119,7 @@ export function PipelineAuditPage() {
                 <div className="text-right shrink-0">
                   <div className="flex items-center gap-1 text-xs text-slate-500">
                     <Clock className="w-3 h-3" />
-                    {entry.timestamp ? new Date(entry.timestamp).toLocaleString('pt-BR') : '-'}
+                    {entry.timestamp ? formatDateTimeBR(entry.timestamp) : '-'}
                   </div>
                   {entry.duration_seconds && (
                     <span className="text-xs text-slate-600">{entry.duration_seconds}s</span>

@@ -8,6 +8,7 @@ import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface BackupItem {
   id: string
@@ -214,12 +215,12 @@ export function ProjectBackupPage() {
                     <div className="flex items-center gap-2 mb-1">
                       {statusIcon}
                       <span className="text-slate-200 text-sm font-medium">
-                        {new Date(b.created_at).toLocaleString('pt-BR')}
+                        {formatDateTimeBR(b.created_at)}
                       </span>
                       <span className={`text-xs ${trigger.color}`}>· {trigger.label}</span>
                       {b.restored_at && (
                         <span className="text-xs text-cyan-400">
-                          · ↺ usado em restore em {new Date(b.restored_at).toLocaleString('pt-BR')}
+                          · ↺ usado em restore em {formatDateTimeBR(b.restored_at)}
                         </span>
                       )}
                     </div>

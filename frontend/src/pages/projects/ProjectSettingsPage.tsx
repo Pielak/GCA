@@ -11,6 +11,7 @@ import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
 import { getErrorMessage } from '@/lib/errors'
 import { IssueTrackerPanel } from '@/components/settings/IssueTrackerPanel'
 import { NotifierPanel } from '@/components/settings/NotifierPanel'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations'
 const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario', 'integrations']
@@ -503,7 +504,7 @@ export function ProjectSettingsPage() {
                               <>
                                 <span>·</span>
                                 <span className={lastOk ? 'text-emerald-400' : lastOk === false ? 'text-red-400' : 'text-slate-500'}>
-                                  {lastOk ? '✓' : lastOk === false ? '✗' : '—'} última validação: {new Date(lastAt).toLocaleString('pt-BR')}
+                                  {lastOk ? '✓' : lastOk === false ? '✗' : '—'} última validação: {formatDateTimeBR(lastAt)}
                                 </span>
                               </>
                             )}

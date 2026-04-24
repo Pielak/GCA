@@ -9,6 +9,7 @@ import { apiClient } from '@/lib/api'
 import { questionLabel } from '@/data/questionLabels'
 import { QUESTION_SCHEMA, type QuestionDef } from '@/data/questionSchema'
 import { getErrorMessage, type ApiError } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -243,7 +244,7 @@ function StatusCard({ q }: { q: ExistingQuestionnaire }) {
             <p className="text-xs text-slate-400 mt-0.5">{description}</p>
             {q.submitted_at && (
               <p className="text-[11px] text-slate-500 mt-2">
-                Enviado em {new Date(q.submitted_at).toLocaleString('pt-BR')}
+                Enviado em {formatDateTimeBR(q.submitted_at)}
                 {q.adherence_score !== null && (
                   <>
                     {' · '}Aderência: <span className="font-semibold">{q.adherence_score}%</span>

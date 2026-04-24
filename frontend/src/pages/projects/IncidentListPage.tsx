@@ -7,6 +7,7 @@ import {
 import { apiClient } from '@/lib/api'
 import { NewIncidentModal } from '@/components/incidents/NewIncidentModal'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface Ticket {
   id: string
@@ -163,7 +164,7 @@ export function IncidentListPage() {
                     <div className="flex items-center gap-3 mt-1.5 text-[11px] text-slate-500">
                       <span>Por {t.author_name || 'autor desconhecido'}</span>
                       <span>·</span>
-                      <span>{new Date(t.created_at).toLocaleString('pt-BR')}</span>
+                      <span>{formatDateTimeBR(t.created_at)}</span>
                       <span>·</span>
                       <span className="uppercase tracking-wider">
                         {t.target_scope === 'admin' ? 'Escalado → Admin' : 'Para GP'}

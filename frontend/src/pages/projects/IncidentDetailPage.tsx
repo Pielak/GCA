@@ -9,6 +9,7 @@ import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface Ticket {
   id: string
@@ -281,12 +282,12 @@ export function IncidentDetailPage() {
           <Clock className="w-3 h-3" />
           <span>Aberto por {ticket.author_name || 'autor desconhecido'}</span>
           <span>·</span>
-          <span>{new Date(ticket.created_at).toLocaleString('pt-BR')}</span>
+          <span>{formatDateTimeBR(ticket.created_at)}</span>
           {ticket.resolved_at && (
             <>
               <span>·</span>
               <span className="text-emerald-400">
-                Resolvido em {new Date(ticket.resolved_at).toLocaleString('pt-BR')}
+                Resolvido em {formatDateTimeBR(ticket.resolved_at)}
               </span>
             </>
           )}
@@ -400,7 +401,7 @@ export function IncidentDetailPage() {
                 <div className="flex items-center gap-2 text-[11px] text-slate-500">
                   <strong className="text-slate-300">{c.author_name || 'Autor'}</strong>
                   <span>·</span>
-                  <span>{new Date(c.created_at).toLocaleString('pt-BR')}</span>
+                  <span>{formatDateTimeBR(c.created_at)}</span>
                 </div>
                 <p className="text-slate-300 text-sm mt-1 whitespace-pre-wrap">{c.body}</p>
               </div>

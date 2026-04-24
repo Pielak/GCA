@@ -4,6 +4,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 // MVP 25 Fase 25.5 — editor canônico de design tokens.
 // Shape espelha `STACK_RECOMMENDATION.frontend.design_tokens` no OCG
@@ -135,7 +136,7 @@ export default function DesignTokensEditor({ projectId }: Props) {
             </span>
             {tokens.generated_at && (
               <span className="text-slate-600 text-[10px]">
-                · {new Date(tokens.generated_at).toLocaleString('pt-BR')}
+                · {formatDateTimeBR(tokens.generated_at)}
               </span>
             )}
           </p>

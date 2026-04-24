@@ -7,6 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useAuth } from '@/hooks/useAuth'
 import { useNotificationsWS } from '@/hooks/useNotificationsWS'
 import { apiClient } from '@/lib/api'
+import { formatRelativeBR } from '@/lib/datetime'
 
 type Notification = {
   id: string
@@ -120,12 +121,7 @@ export function AppLayout() {
 
   const formatTime = (iso: string | null) => {
     if (!iso) return ''
-    const d = new Date(iso)
-    const diffMin = (Date.now() - d.getTime()) / 60_000
-    if (diffMin < 1) return 'agora'
-    if (diffMin < 60) return `${Math.floor(diffMin)}min atrás`
-    if (diffMin < 60 * 24) return `${Math.floor(diffMin / 60)}h atrás`
-    return d.toLocaleDateString('pt-BR')
+    return formatRelativeBR(iso)
   }
 
   const sevDot = (s: string) => {

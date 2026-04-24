@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { GitBranch, Check, AlertTriangle, Loader2, RefreshCw, Trash2, Eye, EyeOff, Shield } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { getErrorMessage } from '@/lib/errors'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface GitStatus {
   connected: boolean
@@ -229,11 +230,11 @@ export function RepositoryPage() {
             </div>
             <div>
               <span className="text-slate-500 text-xs">Última Verificação</span>
-              <p className="text-slate-200 text-sm">{status.last_verified ? new Date(status.last_verified).toLocaleString('pt-BR') : '—'}</p>
+              <p className="text-slate-200 text-sm">{status.last_verified ? formatDateTimeBR(status.last_verified) : '—'}</p>
             </div>
             <div>
               <span className="text-slate-500 text-xs">Último Commit</span>
-              <p className="text-slate-200 text-sm">{status.last_commit_at ? new Date(status.last_commit_at).toLocaleString('pt-BR') : '—'}</p>
+              <p className="text-slate-200 text-sm">{status.last_commit_at ? formatDateTimeBR(status.last_commit_at) : '—'}</p>
             </div>
           </div>
         </div>

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Loader2, Users, Calendar, FolderOpen, Mail, Activity, DollarSign } from 'lucide-react'
 import { apiClient } from '@/lib/api'
+import { formatDateBR } from '@/lib/datetime'
 
 // Papéis canônicos (GCA_CANONICAL_CONTRACT.md §4): Admin, GP, Dev, Tester, QA.
 const ROLE_LABELS: Record<string, string> = {
@@ -167,7 +168,7 @@ export function AdminProjectViewPage() {
             <div className="flex items-center justify-between">
               <span className="text-slate-500 text-xs">Criado em</span>
               <span className="text-slate-300 text-xs">
-                {project.created_at ? new Date(project.created_at).toLocaleDateString('pt-BR') : '—'}
+                {project.created_at ? formatDateBR(project.created_at) : '—'}
               </span>
             </div>
             {project.description && (

@@ -6,6 +6,7 @@ import { TestArtifactCard } from '@/components/qa/TestArtifactCard'
 import { TestSpecsSection } from '@/components/qa/TestSpecsSection'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import { formatDateTimeBR } from '@/lib/datetime'
 
 interface TestArtifact {
   id: string
@@ -296,7 +297,7 @@ export function TesterReviewPage() {
                               </td>
                               <td className="p-2 text-slate-400">{log.executed_by}</td>
                               <td className="p-2 text-slate-400">
-                                {new Date(log.executed_at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                                {formatDateTimeBR(log.executed_at)}
                               </td>
                               <td className="p-2 text-slate-400">{log.duration_ms ? `${log.duration_ms}ms` : '-'}</td>
                               <td className="p-2">
