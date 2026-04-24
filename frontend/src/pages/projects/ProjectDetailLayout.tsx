@@ -9,6 +9,7 @@ import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { ReadOnlyBanner } from '@/components/ui/ReadOnlyBanner'
 import { useAuthStore } from '@/stores/authStore'
+import { CodeGenProgressOverlay } from '@/components/global/CodeGenProgressOverlay'
 
 interface ProjectHeader {
   id: string
@@ -192,8 +193,11 @@ export function ProjectDetailLayout() {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto">
-        <Outlet context={{ repoConnected, can, role, roles, isReadOnly, projectStatus: project?.status }} />
+        <Outlet context={{ repoConnected, can, role, roles, isReadOnly, projectStatus: project?.status, projectName: project?.name }} />
       </div>
+
+      {/* MVP 30 — overlay global de progresso. Persistente através de navegação. */}
+      <CodeGenProgressOverlay />
     </div>
   )
 }

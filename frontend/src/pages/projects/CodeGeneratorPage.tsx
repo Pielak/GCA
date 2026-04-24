@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Editor, { type OnMount } from '@monaco-editor/react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useOutletContext } from 'react-router-dom'
 import {
   Code2, Play, Save, GitBranch, GitCommit, Loader2, CheckCircle2, AlertTriangle,
   FolderTree, ChevronRight, ChevronDown, FileCode, FileText, File,
@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
+import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
 import { OperationBar, PulseIndicator } from '@/components/ui/PipelineProgress'
 import { getErrorMessage, getErrorStatus } from '@/lib/errors'
 
@@ -287,98 +288,81 @@ export function CodeGeneratorPage() {
     }).catch(() => {})
   }, [projectId])
 
-  // ================================================================
-  // Gerar Scaffold do Projeto
-  // ================================================================
+  // MVP 30 — espelha state do store global no state local da Page.
+  // Se o scaffold rodar em outro projeto (usuário navegou), Page atual
+  // mantém seu próprio estado (tree do Git). Se for o projeto atual,
+  // reflete incrementalmente o que está no store — o Page re-hidrata
+  // sozinho quando usuário volta pro CodeGenerator durante geração.
+  const storeActive = useCodeGenProgressStore((s) => s.active)
+  const storeProjectId = useCodeGenProgressStore((s) => s.projectId)
+  const storePlanSummary = useCodeGenProgressStore((s) => s.planSummary)
+  const storeItemStatus = useCodeGenProgressStore((s) => s.itemStatus)
+  const storeFilesByPath = useCodeGenProgressStore((s) => s.filesByPath)
+  const storeFinishedAt = useCodeGenProgressStore((s) => s.finishedAt)
 
-  const handleGenerateScaffold = async () => {
-    if (!projectId || scaffoldGenerating) return
-    if (scaffoldFiles.size > 0 && !confirm('Isso substituirá o preview atual. Continuar?')) return
+  useEffect(() => {
+    if (!projectId || storeProjectId !== projectId) return
+    setScaffoldGenerating(storeActive)
+    setScaffoldPlanSummary(storePlanSummary)
+    setScaffoldItemStatus(new Map(storeItemStatus))
+    setScaffoldFiles(new Map(storeFilesByPath))
 
-    setScaffoldGenerating(true)
-    setScaffoldSummary(null)
-    setScaffoldFiles(new Map())
-    setScaffoldItemStatus(new Map())
-    setScaffoldPlanSummary(null)
+    if (storeFilesByPath.size > 0) {
+      const files = Array.from(storeFilesByPath.entries()).map(([path, v]) => ({
+        path, content: v.content, status: v.status,
+      }))
+      setFileTree(buildTreeWithStatus(files))
+    } else if (storeItemStatus.size > 0) {
+      const pending = Array.from(storeItemStatus.keys()).map(path => ({ path, content: '', status: 'pending' }))
+      setFileTree(buildTreeWithStatus(pending))
+    }
 
-    try {
-      // MVP 30 Fase PLAN — lista de arquivos sem conteúdo (~5s)
-      const planRes = await apiClient.post('/code-generation/scaffold/plan', { project_id: projectId })
-      const planItems: Array<{ path: string; file_type: string; purpose: string; est_lines: number }> =
-        planRes.data.items || []
-      setScaffoldPlanSummary(planRes.data.summary || null)
-
-      if (planItems.length === 0) {
-        alert('O LLM não retornou itens no plano. Tente novamente ou ajuste o OCG.')
-        return
-      }
-
-      // Todos marcados como pending; tree atualiza imediatamente
-      const initialStatus = new Map<string, 'pending' | 'generating' | 'complete' | 'error'>()
-      for (const it of planItems) initialStatus.set(it.path, 'pending')
-      setScaffoldItemStatus(initialStatus)
-
-      // Tree inicial com placeholders (pra usuário ver a árvore antes dos conteúdos chegarem)
-      const initialFiles = planItems.map(it => ({ path: it.path, content: '', status: 'pending' }))
-      setFileTree(buildTreeWithStatus(initialFiles))
-
-      // MVP 30 Fase ITEM — gera cada arquivo sequencialmente
-      const peerPathsCsv = planItems.map(it => it.path).join(',')
-      const accumulated = new Map<string, { content: string; status: string }>()
-
-      for (const item of planItems) {
-        setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'generating'))
-
-        try {
-          const itemRes = await apiClient.post(
-            `/code-generation/scaffold/item?peer_paths_csv=${encodeURIComponent(peerPathsCsv)}`,
-            {
-              project_id: projectId,
-              path: item.path,
-              file_type: item.file_type,
-              purpose: item.purpose,
-            },
-          )
-          const data = itemRes.data
-          if (data.status === 'error') {
-            setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'error'))
-          } else {
-            accumulated.set(item.path, { content: data.content || '', status: data.status || 'todo' })
-            setScaffoldFiles(new Map(accumulated))
-            setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'complete'))
-            setFileTree(
-              buildTreeWithStatus(
-                Array.from(accumulated.entries()).map(([path, v]) => ({ path, content: v.content, status: v.status })),
-              ),
-            )
-          }
-        } catch {
-          setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'error'))
-        }
-      }
-
-      const completeCount = Array.from(accumulated.values()).filter(v => v.status !== 'nmi').length
+    if (!storeActive && storeFinishedAt && storeFilesByPath.size > 0) {
+      const completeCount = Array.from(storeFilesByPath.values()).filter(v => v.status !== 'nmi').length
       setScaffoldSummary(
-        `${planRes.data.summary || `Scaffold com ${planItems.length} arquivos`} — ${completeCount} prontos pra commit. Revise e clique em "Aplicar no Git".`,
+        `${storePlanSummary || `Scaffold com ${storeItemStatus.size} arquivos`} — ${completeCount} prontos pra commit. Revise e clique em "Aplicar no Git".`,
       )
       setScaffoldPendingApply(completeCount > 0)
-
       loadTree()
 
-      if (planItems.length > 0) {
-        const firstFile = planItems[0].path
-        const got = accumulated.get(firstFile)
+      const firstPath = Array.from(storeFilesByPath.keys())[0]
+      if (firstPath && !selectedFile) {
+        const got = storeFilesByPath.get(firstPath)
         if (got) {
-          setSelectedFile(firstFile)
+          setSelectedFile(firstPath)
           setFileContent(got.content)
           setOriginalContent(got.content)
           setHasChanges(false)
         }
       }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, storeActive, storeProjectId, storePlanSummary, storeItemStatus, storeFilesByPath, storeFinishedAt])
+
+  // ================================================================
+  // Gerar Scaffold do Projeto
+  // ================================================================
+
+  // MVP 30 — for-loop vive no store (sobrevive à navegação). Page só
+  // dispara a ação e reflete state do store via useEffect abaixo.
+  const progressStore = useCodeGenProgressStore()
+  const outletCtx = useOutletContext<{ projectName?: string } | null>()
+
+  const handleGenerateScaffold = async () => {
+    if (!projectId || progressStore.active) return
+    if (scaffoldFiles.size > 0 && !confirm('Isso substituirá o preview atual. Continuar?')) return
+
+    setScaffoldSummary(null)
+    setScaffoldFiles(new Map())
+    setScaffoldItemStatus(new Map())
+    setScaffoldPlanSummary(null)
+    setScaffoldPendingApply(false)
+
+    const projectName = outletCtx?.projectName || 'Projeto'
+    try {
+      await progressStore.startScaffold(projectId, projectName)
     } catch (err: unknown) {
       alert(formatCodeGenError(err, 'gerar scaffold'))
-    } finally {
-      setScaffoldGenerating(false)
     }
   }
 

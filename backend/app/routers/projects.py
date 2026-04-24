@@ -190,8 +190,8 @@ async def get_project_detail(
     db: AsyncSession = Depends(get_db),
 ):
     """Detalhe de um projeto (usado pelo ProjectDetailLayout)."""
-    from app.models.base import Project, ProjectMember, User
-    from sqlalchemy import select
+    from app.models.base import Project, ProjectMember, User, OCG
+    from sqlalchemy import select, desc
 
     result = await db.execute(select(Project).where(Project.id == project_id))
     project = result.scalar_one_or_none()
@@ -214,6 +214,42 @@ async def get_project_detail(
         member = member_result.scalar_one_or_none()
         role = member.role if member else "viewer"
 
+    # GK score = OCG overall_score mais recente do projeto.
+    # OCG canônico agrega as 7 notas pilares (P1..P7) com pesos fixos (§6 contrato).
+    # Sem OCG ingerido ainda: 0 → UI exibe "—" (DT-054).
+    ocg_result = await db.execute(
+        select(OCG.overall_score, OCG.status)
+        .where(OCG.project_id == project_id)
+        .order_by(desc(OCG.version))
+        .limit(1)
+    )
+    ocg_row = ocg_result.first()
+    gk_score = int(round(float(ocg_row[0]))) if ocg_row and ocg_row[0] is not None else 0
+
+    # Inferir linguagem/banco do OCG stack pra enriquecer header
+    language, database = "", ""
+    if ocg_row:
+        ocg_data_result = await db.execute(
+            select(OCG.ocg_data)
+            .where(OCG.project_id == project_id)
+            .order_by(desc(OCG.version))
+            .limit(1)
+        )
+        ocg_data_row = ocg_data_result.first()
+        if ocg_data_row and ocg_data_row[0]:
+            import json as _json
+            try:
+                data = _json.loads(ocg_data_row[0]) if isinstance(ocg_data_row[0], str) else ocg_data_row[0]
+                stack = data.get("STACK_RECOMMENDATION", {}) if isinstance(data, dict) else {}
+                backend = stack.get("backend") if isinstance(stack, dict) else None
+                if isinstance(backend, dict):
+                    language = (backend.get("language") or "")[:60]
+                db_obj = stack.get("database") if isinstance(stack, dict) else None
+                if isinstance(db_obj, dict):
+                    database = (db_obj.get("primary") or "")[:60]
+            except (ValueError, TypeError):
+                pass
+
     return {
         "id": str(project.id),
         "name": project.name,
@@ -221,9 +257,9 @@ async def get_project_detail(
         "description": project.description or "",
         "status": project.status or "active",
         "phase": 1,
-        "language": "",
-        "database": "",
-        "gatekeeperScore": 0,
+        "language": language,
+        "database": database,
+        "gatekeeperScore": gk_score,
         "pendingIssues": 0,
         "role": role,
     }
