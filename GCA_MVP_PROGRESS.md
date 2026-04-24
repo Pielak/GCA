@@ -754,3 +754,26 @@ Regras persistentes:
 - Sem feature nova (§10); sem refactor vizinho; sem "melhoria óbvia".
 - SSO/Federation permanecem fora até pedido explícito com cliente real.
 - Data Federation exige emenda §3 do contrato canônico.
+
+---
+
+## MVP 30 Scaffold — CONGELADO (2026-04-24)
+
+**Status:** Pausa formal por decisão do Gatekeeper de auditoria GCA+AJA 2026-04-24.
+
+**Motivo:** Scaffold do AJA foi iniciado com OCG em AT_RISK (overall 67-68). 16 arquivos
+Rust/Tauri foram gerados parcialmente em iterações anteriores. Continuar o scaffold
+antes de OCG estabilizar em ≥75 (NEEDS_REVIEW) gera retrabalho garantido quando as
+decisões arquiteturais pendentes forem carimbadas (G039 local-first vs S3/GCS, stack
+Tauri vs Electron, tribunais SAJ, matriz SLA).
+
+**Gatilho de retomada:** OCG do AJA `overall_score >= 75.0` E decisões G039/stack
+carimbadas pelo stakeholder.
+
+**Ação:** nenhum novo arquivo do scaffold deve ser commitado ao repo do AJA até
+o gatilho. Endpoint `/code-generation/scaffold/plan` e `/scaffold/item` permanecem
+funcionais (não bloqueados por código) — a pausa é disciplinar, não técnica.
+
+**Arquivos atualmente no repo AJA (gerados em iterações anteriores):** 16 arquivos
+Rust em `src-tauri/*` — não devem ser deletados agora (podem ser reaproveitados
+após decisão de stack). Apenas não gerar novos.
