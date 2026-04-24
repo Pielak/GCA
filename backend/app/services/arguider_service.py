@@ -262,7 +262,29 @@ Para cada módulo candidato, decida se é:
 - 'feature': funcionalidade completa de negócio
 - 'component': componente técnico reutilizável
 
-IMPORTANTE:
+## Regra canônica — hardcode vs parametrização (M01 Fase A)
+
+Quando o documento declara que um item (token, chave, endpoint, URL externa,
+cert, quota, feature flag, etc) será **parametrizável** — env var, secret
+no vault, config por ambiente (dev/staging/prod) ou por cliente/tenant —
+NÃO gere gap técnico pedindo "spec de auth" ou "endpoint não definido".
+A declaração "será parametrizado via DATAJUD_API_KEY" é RESPOSTA VÁLIDA
+pro CodeGen: vai virar entry no `.env.example` + leitura em `settings.py`
+(ou equivalente da stack) + mapeamento no secret manager.
+
+Padrões canônicos que resolvem gaps de configuração:
+- "Parametrizável via env `<NOME>`" / "Variável de ambiente" / "Config por ambiente".
+- "Secret (vault)" / "HashiCorp Vault" / "AWS Secrets Manager" / "Infisical".
+- "Configurável por tenant/cliente".
+- "Hardcoded no código (vale pra todos)".
+
+Se o documento usa um desses padrões, registre o item como MELHORIA
+informacional (documentando o contrato de config), não como GAP. Só é gap
+se o item for mencionado sem definir qual das opções acima se aplica —
+nesse caso, o gap é "definir escopo de parametrização", não "spec técnica".
+
+## IMPORTANTE
+
 - Seja específico. Cada item com ID único (G001, SS001, PD001, IS001).
 - Módulo só é ready_for_codegen=true se o documento fornece TODAS as informações.
 - Ao atualizar OCG, sugira apenas campos diretamente impactados.
