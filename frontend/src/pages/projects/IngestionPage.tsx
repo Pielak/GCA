@@ -367,7 +367,7 @@ export function IngestionPage() {
               const piiFields = doc.pii_fields || [];
               return (
               <div key={doc.id}>
-                <div className="grid grid-cols-[1fr_80px_80px_120px_140px_40px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
+                <div className="grid grid-cols-[1fr_80px_80px_120px_140px_80px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-4 h-4 text-slate-400" />
@@ -438,46 +438,51 @@ export function IngestionPage() {
                       />
                     )}
                   </div>
-                  {/* DT-039 + sessão 30: botão re-analisar aparece também
-                      em docs com stage='failed' mesmo quando status ainda
-                      é 'pending' ou 'processing' (estado inconsistente por
-                      crash no worker — o usuário precisa ter como destravar
-                      sem apagar o doc). */}
-                  {((doc.arguider_status === 'error'
-                     || doc.arguider_status === 'completed'
-                     || doc.arguider_stage === 'failed')
-                    && doc.content_status !== 'lost') && (
+                  {/* Actions — wrapper único pra contar como 1 cell do grid
+                      (evita quebra de linha quando há 2+ botões; o bug do
+                      trash caindo em nova row). */}
+                  <div className="flex items-center gap-1 justify-end">
+                    {/* DT-039 + sessão 30: botão re-analisar aparece também
+                        em docs com stage='failed' mesmo quando status ainda
+                        é 'pending' ou 'processing' (estado inconsistente por
+                        crash no worker — o usuário precisa ter como destravar
+                        sem apagar o doc). */}
+                    {((doc.arguider_status === 'error'
+                       || doc.arguider_status === 'completed'
+                       || doc.arguider_stage === 'failed')
+                      && doc.content_status !== 'lost') && (
+                      <button
+                        onClick={() => handleReanalyze(doc.id)}
+                        disabled={reanalyzing[doc.id]}
+                        className="p-1 rounded text-slate-600 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title={
+                          doc.arguider_stage === 'failed' || doc.arguider_status === 'error'
+                            ? 'Tentar analisar novamente (dispara pipeline do zero)'
+                            : 'Re-analisar com config atual (novo provider/prompt)'
+                        }
+                      >
+                        {reanalyzing[doc.id]
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <RefreshCw className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleReanalyze(doc.id)}
-                      disabled={reanalyzing[doc.id]}
-                      className="p-1 rounded text-slate-600 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      onClick={() => handleDelete(doc.id, doc.original_filename)}
+                      disabled={deleteMutation.isPending}
+                      className="p-1 rounded text-slate-600 hover:text-red-400 disabled:opacity-50 disabled:cursor-wait transition-colors"
                       title={
-                        doc.arguider_stage === 'failed' || doc.arguider_status === 'error'
-                          ? 'Tentar analisar novamente (dispara pipeline do zero)'
-                          : 'Re-analisar com config atual (novo provider/prompt)'
+                        deleteMutation.isPending
+                          ? 'Removendo...'
+                          : doc.arguider_status === 'processing'
+                          ? 'Remover documento (cancela análise em curso)'
+                          : 'Remover documento'
                       }
                     >
-                      {reanalyzing[doc.id]
+                      {deleteMutation.isPending
                         ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        : <RefreshCw className="w-3.5 h-3.5" />}
+                        : <Trash2 className="w-3.5 h-3.5" />}
                     </button>
-                  )}
-                  <button
-                    onClick={() => handleDelete(doc.id, doc.original_filename)}
-                    disabled={deleteMutation.isPending}
-                    className="p-1 rounded text-slate-600 hover:text-red-400 disabled:opacity-50 disabled:cursor-wait transition-colors"
-                    title={
-                      deleteMutation.isPending
-                        ? 'Removendo...'
-                        : doc.arguider_status === 'processing'
-                        ? 'Remover documento (cancela análise em curso)'
-                        : 'Remover documento'
-                    }
-                  >
-                    {deleteMutation.isPending
-                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                      : <Trash2 className="w-3.5 h-3.5" />}
-                  </button>
+                  </div>
                 </div>
                 {hasError && (
                   <div
