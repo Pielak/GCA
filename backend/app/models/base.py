@@ -1840,3 +1840,35 @@ class CustomQuestionnaireIteration(Base):
     convergence_threshold = Column(Numeric(4, 2), nullable=False, default=1.00)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class AppliedDefault(Base):
+    """M02 — decisão automática aplicada ao OCG pelo domain_defaults_resolver.
+
+    Cada linha representa um default canônico (domínio público: LGPD, CC,
+    CPC, CLT, segurança básica, padrões técnicos) que o resolver aplicou
+    ao projeto em vez de perguntar ao user no M01. User contesta via UI —
+    `contested_value` substitui `decision_value` pro CodeGen.
+    """
+
+    __tablename__ = "applied_defaults"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    gap_id = Column(String(20), nullable=False)
+    category = Column(String(40), nullable=False)
+    decision_key = Column(String(160), nullable=False)
+    decision_value = Column(Text, nullable=False)
+    source_citation = Column(String(400), nullable=False)
+    rationale = Column(Text, nullable=True)
+    applied_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    contested_at = Column(DateTime(timezone=True), nullable=True)
+    contested_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    contested_value = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
