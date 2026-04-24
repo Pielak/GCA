@@ -37,6 +37,7 @@ from app.routers.release_router import (
     admin_router as release_admin_router,
     user_router as release_user_router,
 )
+from app.routers.iterative_questionnaire_router import router as iterative_questionnaire_router
 
 logger = structlog.get_logger(__name__)
 
@@ -249,6 +250,7 @@ app.include_router(incident_admin_router, prefix=f"{settings.API_PREFIX}", tags=
 app.include_router(incident_support_router, prefix=f"{settings.API_PREFIX}", tags=["admin-support"])
 app.include_router(release_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-releases"])
 app.include_router(release_user_router, prefix=f"{settings.API_PREFIX}", tags=["releases"])
+app.include_router(iterative_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["iterative-questionnaire"])
 
 
 @app.get("/health")
