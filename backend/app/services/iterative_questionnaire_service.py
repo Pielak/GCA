@@ -103,7 +103,7 @@ async def compute_status_snapshot(db: AsyncSession, project_id: UUID) -> dict[st
         overall is not None
         and overall < OVERALL_TARGET
         and len(deficit) > 0
-        and (latest is None or latest.status in ("converged", "infeasible", "answered"))
+        and (latest is None or latest.status in ("converged", "infeasible", "answered", "superseded"))
     )
     has_pending = latest is not None and latest.status == "pending"
     converged = latest is not None and latest.status == "converged"
