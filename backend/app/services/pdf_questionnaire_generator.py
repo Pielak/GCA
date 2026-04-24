@@ -110,15 +110,51 @@ class PDFQuestionnaireGenerator:
 
         field_idx = 0
         for q in questions:
-            y = self._draw_question(c, form, q, y, field_idx)
-            field_idx += 1
-            if y < MB + 40:  # nova página se faltando espaço
+            # Page break PREVENTIVO: mede altura total da questão + campo e,
+            # se não couber no resto da página, pula pra próxima ANTES de
+            # começar a desenhar. Evita campo cortado entre páginas.
+            needed = self._estimate_question_height(q)
+            if y - needed < MB:
                 c.showPage()
                 y = PAGE_H - MT
+            y = self._draw_question(c, form, q, y, field_idx)
+            field_idx += 1
 
         c.save()
         buf.seek(0)
         return buf.getvalue()
+
+    def _estimate_question_height(self, question: dict[str, Any]) -> float:
+        """Altura total necessária pra desenhar a questão completa.
+
+        Cálculo pessimista — é melhor sobrar espaço que cortar.
+        """
+        qtype = question.get("type", "text")
+        text = question.get("text", "") or question.get("question", "")
+        context = question.get("context", "")
+        options = question.get("options") or []
+
+        usable_w = PAGE_W - ML - MR - 0.5 * cm
+        h = LINE_H  # cabeçalho Q + pilar
+        h += LINE_H * max(1, len(self._wrap_text(text, max_width=usable_w))) + 4  # texto
+        if context:
+            h += LINE_H * min(2, max(1, len(self._wrap_text(context, max_width=usable_w)))) + 4
+        if qtype == "choice" and options:
+            h += LINE_H  # "Opções (responda com...)"
+            for opt in options:
+                h += LINE_H * max(1, len(self._wrap_text(f"  1. {opt}", max_width=usable_w - 0.3 * cm)))
+            h += 4
+        # Campo de resposta — muito maior agora (multi-line até 10k chars)
+        h += self._field_height(qtype) + 0.5 * cm
+        return h
+
+    def _field_height(self, qtype: str) -> float:
+        """Altura do textfield da resposta.
+
+        - `choice`: menor (~3cm), respostas costumam ser curtas.
+        - `text`: grande (~8cm, ~16 linhas visíveis) pra respostas longas.
+        """
+        return 3 * cm if qtype == "choice" else 8 * cm
 
     def _draw_question(
         self,
@@ -139,11 +175,11 @@ class PDFQuestionnaireGenerator:
         text = question.get("text", "") or question.get("question", "")
         context = question.get("context", "")
         pillar = question.get("pillar", "") or question.get("target_pillar", "")
+        qtype = question.get("type", "text")
 
         # Número + código do pilar (ex: P3)
         c.setFont("Helvetica-Bold", 10)
         c.setFillColor(VIOLET)
-        # pillar vem como "P3_scope" — extrai só o código "P3"
         pillar_code = "—"
         if pillar:
             try:
@@ -167,14 +203,12 @@ class PDFQuestionnaireGenerator:
             c.setFont("Helvetica-Oblique", 8)
             c.setFillColor(SLATE_MID)
             ctx_lines = self._wrap_text(context, max_width=PAGE_W - ML - MR - 0.5 * cm)
-            for line in ctx_lines[:2]:  # max 2 linhas de contexto
+            for line in ctx_lines[:2]:
                 c.drawString(ML + 0.3 * cm, y, line)
                 y -= LINE_H
         y -= 4
 
         # Opções (só pra type=choice) — listadas numeradas.
-        # Usuário responde digitando o número ou o texto da opção no campo.
-        qtype = question.get("type", "text")
         options = question.get("options") or []
         if qtype == "choice" and options:
             c.setFont("Helvetica", 8)
@@ -188,30 +222,34 @@ class PDFQuestionnaireGenerator:
                     y -= LINE_H
             y -= 4
 
-        # Campo de texto (multilinhas via múltiplos textfields)
+        # Campo de resposta — AcroForm multi-line com até 10k chars.
+        # `fieldFlags='multiline'` ativa word-wrap automático pela largura
+        # do campo no PDF reader. Quebra visual conforme o usuário digita.
         field_name = f"q_{qid}_{field_idx}"
-        field_height = 2 * cm if (qtype == "choice") else 3 * cm
+        field_height = self._field_height(qtype)
         field_width = PAGE_W - ML - MR - 0.2 * cm
 
-        # Desenha fundo claro para o campo
+        # Fundo claro
         c.setFillColor(colors.HexColor("#f9fafb"))
         c.setStrokeColor(SLATE_LIGHT)
         c.setLineWidth(0.5)
         c.rect(ML + 0.1 * cm, y - field_height, field_width, field_height, fill=1)
 
-        # Campo AcroForm — ReportLab não suporta multiline nativo,
-        # então usamos um textfield grande com maxlen aumentado.
-        # O usuário pode pular linhas digitando.
         form.textfield(
             name=field_name,
-            tooltip=f"Resposta para questão {field_idx + 1}. Digite sua resposta aqui.",
+            tooltip=(
+                f"Resposta para questão {field_idx + 1}. "
+                f"Digite sua resposta aqui — até 10 mil caracteres. "
+                f"O texto quebra automaticamente conforme a largura do campo."
+            ),
             x=int(ML + 0.15 * cm),
             y=int(y - field_height + 0.1 * cm),
             width=int(field_width - 0.2 * cm),
             height=int(field_height - 0.2 * cm),
             fontSize=9,
             fontName="Helvetica",
-            maxlen=2000,
+            maxlen=10000,
+            fieldFlags="multiline",
         )
 
         y -= field_height + 0.5 * cm
