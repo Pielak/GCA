@@ -1816,6 +1816,35 @@ class IngestionService:
         # ingestão ruim ou conflitante; aqui, com remoção explícita).
         contraction_info = await self._contract_ocg_for_deleted_document(project_id, document_id)
 
+        # Cascata manual: tabelas que referenciam este doc mas NÃO têm
+        # ON DELETE CASCADE/SET NULL na constraint. Ordem importa.
+        from sqlalchemy import delete as sa_delete, update as sa_update, text
+        # 1. module_candidates via arguider_analyses (analise → modules)
+        await self.db.execute(text(
+            "DELETE FROM module_candidates WHERE arguider_analysis_id IN "
+            "(SELECT id FROM arguider_analyses WHERE document_id = :doc_id)"
+        ), {"doc_id": document_id})
+        # 2. gatekeeper_items via arguider_analyses
+        await self.db.execute(text(
+            "DELETE FROM gatekeeper_items WHERE arguider_analysis_id IN "
+            "(SELECT id FROM arguider_analyses WHERE document_id = :doc_id)"
+        ), {"doc_id": document_id})
+        # 3. ocg_delta_log — preserva histórico, só zera document_id (auditoria
+        #    mantida; docs sumidos ficam como "trigger desconhecido" no delta).
+        await self.db.execute(text(
+            "UPDATE ocg_delta_log SET document_id = NULL WHERE document_id = :doc_id"
+        ), {"doc_id": document_id})
+        # 4. custom_questionnaire_iterations.answer_document_id — mesma lógica:
+        #    preserva a iteração, só desvincula o doc.
+        await self.db.execute(text(
+            "UPDATE custom_questionnaire_iterations SET answer_document_id = NULL "
+            "WHERE answer_document_id = :doc_id"
+        ), {"doc_id": document_id})
+        # 5. arguider_analyses — agora seguro pra apagar.
+        await self.db.execute(text(
+            "DELETE FROM arguider_analyses WHERE document_id = :doc_id"
+        ), {"doc_id": document_id})
+
         await self.db.delete(doc)
         await self.db.commit()
         logger.info(
