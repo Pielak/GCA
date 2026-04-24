@@ -207,6 +207,40 @@ async def generate_iteration(
                 previously_asked.append(f"[Iter {iter_num}] {q['text']}")
 
     gaps = await _collect_arguider_gaps(db, project_id, list(target_pillars_scores.keys()))
+    # M02 — remove gaps cuja decision_key já tem default aplicado
+    # (defesa em profundidade: o Arguidor já filtra na análise nova, mas
+    # iterações antigas podem ter module_candidates stale que referenciam
+    # gaps agora resolvidos).
+    try:
+        from app.services.domain_defaults_resolver import list_applied
+        applied = await list_applied(db, project_id, include_contested=False)
+        applied_kind_tokens = set()
+        for a in applied:
+            # Pega o sufixo após o ponto (ex: 'retention.civil_cases' → 'civil_cases')
+            # + versão normalizada com espaços
+            key = a.decision_key
+            tail = key.split(".", 1)[-1] if "." in key else key
+            applied_kind_tokens.add(tail.lower())
+            applied_kind_tokens.add(tail.replace("_", " ").lower())
+        if applied_kind_tokens:
+            for pillar, gap_list in list(gaps.items()):
+                filtered = []
+                for g in (gap_list or []):
+                    if not isinstance(g, dict):
+                        filtered.append(g)
+                        continue
+                    gap_text = (
+                        str(g.get("name", ""))
+                        + " "
+                        + str(g.get("description", ""))
+                    ).lower()
+                    if any(tok in gap_text for tok in applied_kind_tokens if tok):
+                        continue
+                    filtered.append(g)
+                gaps[pillar] = filtered
+    except Exception:  # noqa: BLE001
+        # Se a filtragem falhar, deixa gaps como está — Task 5 já filtrou na origem.
+        pass
     prev_feedback = None
     if last and last.status in ("answered", "infeasible") and last.overall_after is not None:
         prev_feedback = (
