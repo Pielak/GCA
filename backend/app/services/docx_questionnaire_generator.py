@@ -197,14 +197,7 @@ class DocxQuestionnaireGenerator:
         table.autofit = True
         cell = table.rows[0].cells[0]
         _set_cell_shading(cell, "F9FAFB")
-        placeholder = cell.paragraphs[0]
-        ph_run = placeholder.add_run(
-            "Escreva sua resposta aqui. Você pode apagar este texto e inserir "
-            "parágrafos, listas, imagens (Inserir → Imagem), tabelas ou diagramas."
-        )
-        ph_run.italic = True
-        ph_run.font.size = Pt(9)
-        ph_run.font.color.rgb = SLATE_MID
+        # Célula vazia — sem placeholder, sem formatação. Usuário digita livre.
 
         # Espaço depois da caixa
         doc.add_paragraph()
