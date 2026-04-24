@@ -238,14 +238,20 @@ async def project_login(
         )
 
     # 3. Verificar membership no projeto
+    # Nota: emenda RBAC 2026-04-19 permite múltiplas linhas ativas por
+    # (user, project) com roles distintos (gp + dev + qa = união de
+    # permissões). Usa `.first()` em vez de `.scalar_one_or_none()` pra
+    # não estourar MultipleResultsFound. RBAC efetivo é computado em
+    # `permissions.py` lendo TODAS as roles do user — este endpoint só
+    # precisa saber SE o user é membro, não QUAL single row.
     member_result = await db.execute(
         select(ProjectMember).where(
             ProjectMember.project_id == project.id,
             ProjectMember.user_id == user.id,
             ProjectMember.is_active == True,
-        )
+        ).order_by(ProjectMember.joined_at.asc().nullsfirst())
     )
-    member = member_result.scalar_one_or_none()
+    member = member_result.scalars().first()
 
     if not member:
         raise HTTPException(
