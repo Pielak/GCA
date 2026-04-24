@@ -919,6 +919,125 @@ async def generate_scaffold_plan(
     return ScaffoldPlanResponse(items=items, summary=summary)
 
 
+@router.post(
+    "/scaffold/item",
+    response_model=ScaffoldItemResponse,
+    summary="MVP 30 — Gerar conteúdo de 1 arquivo do scaffold",
+    description="Gera conteúdo completo de UM arquivo listado no /scaffold/plan. Latency ~15-30s por item.",
+)
+async def generate_scaffold_item(
+    request: ScaffoldItemRequest,
+    peer_paths_csv: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    """MVP 30 — Fase ITEM do scaffold item-a-item.
+
+    Gera conteúdo de 1 arquivo específico. Frontend passa o `path` do plano
+    e opcionalmente os paths dos peers (pra LLM não inventar dependências).
+    Output ~2-5k tokens → cabe no timeout Cloudflare com folga.
+
+    Em caso de falha no LLM ou parse do JSON, retorna
+    `status="error"` com `error_message` — frontend decide se retry.
+    """
+    project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
+    await assert_project_setup_complete(db, project_id)
+
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+    await _require_git_config(db, project_id)
+
+    ocg_data = await _load_ocg_context(db, project_id)
+    stack = ocg_data.get("STACK_RECOMMENDATION", {})
+    architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
+    rnf_contracts = ocg_data.get("RNF_CONTRACTS")
+    frontend_obj = (stack or {}).get("frontend") if isinstance(stack, dict) else None
+    design_tokens = frontend_obj.get("design_tokens") if isinstance(frontend_obj, dict) else None
+
+    peer_paths: List[str] = []
+    if peer_paths_csv:
+        peer_paths = [p.strip() for p in peer_paths_csv.split(",") if p.strip()]
+
+    from app.services.scaffold_planner import build_item_prompt
+
+    prompt = build_item_prompt(
+        project_name=project.name,
+        project_slug=project.slug,
+        stack=stack,
+        architecture=architecture,
+        item_path=request.path,
+        item_purpose=request.purpose,
+        item_file_type=request.file_type,
+        peer_paths=peer_paths,
+        rnf_contracts=rnf_contracts,
+        design_tokens=design_tokens,
+    )
+
+    api_key = app_settings.ANTHROPIC_API_KEY
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key do Anthropic não configurada.",
+        )
+
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=api_key)
+    try:
+        response = await client.messages.create(
+            model=app_settings.ANTHROPIC_MODEL,
+            max_tokens=8192,
+            temperature=0.3,
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "scaffold_item.llm_error",
+            project_id=str(project_id),
+            path=request.path,
+            error=str(exc),
+        )
+        return ScaffoldItemResponse(
+            path=request.path, content="",
+            status="error", tokens_used=0,
+            error_message=f"LLM falhou: {str(exc)[:200]}",
+        )
+
+    raw_text = response.content[0].text
+    tokens = response.usage.output_tokens
+
+    logger.info(
+        "scaffold_item.llm_response",
+        project_id=str(project_id),
+        path=request.path,
+        tokens_used=tokens,
+    )
+
+    stripped = raw_text.strip()
+    m = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", stripped, re.DOTALL)
+    if m:
+        stripped = m.group(1).strip()
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        return ScaffoldItemResponse(
+            path=request.path, content="",
+            status="error", tokens_used=tokens,
+            error_message=f"JSON inválido do LLM: {exc}",
+        )
+
+    content = data.get("content") or ""
+    status_value = data.get("status") or "todo"
+    if status_value not in ("complete", "todo"):
+        status_value = "todo"
+
+    return ScaffoldItemResponse(
+        path=request.path, content=content, status=status_value,
+        tokens_used=tokens, error_message=None,
+    )
+
+
 # Helpers para commit — usados por /scaffold (dry_run=False) e /scaffold/apply.
 
 
