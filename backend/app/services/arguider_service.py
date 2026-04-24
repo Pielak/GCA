@@ -505,6 +505,63 @@ class ArguiderService:
             # Parsear JSON
             result_json = self._extract_json(response_text)
 
+            # M02 — filtra gaps resolvíveis por default de domínio (LGPD, CC, CPC,
+            # CLT, defaults técnicos/segurança canônicos). Cada gap resolvido é
+            # movido de result_json["gaps"] pra applied_defaults (tabela) e NÃO
+            # é persistido como gap técnico — não aparece no M01 nem pune pilar.
+            try:
+                from app.models.base import OCG
+                from app.services.domain_defaults_resolver import (
+                    resolve_gap,
+                    infer_project_context_tags,
+                )
+                ocg_ctx_result = await self.db.execute(
+                    select(OCG)
+                    .where(OCG.project_id == project_id)
+                    .order_by(OCG.version.desc())
+                    .limit(1)
+                )
+                ocg_row = ocg_ctx_result.scalar_one_or_none()
+                ocg_data_raw = (
+                    json.loads(ocg_row.ocg_data)
+                    if (ocg_row and ocg_row.ocg_data and isinstance(ocg_row.ocg_data, str))
+                    else (ocg_row.ocg_data if ocg_row else {})
+                )
+                tags = infer_project_context_tags(ocg_data_raw or {})
+
+                original_gaps = list(result_json.get("gaps") or [])
+                kept_gaps = []
+                resolved_defaults = []
+                for g in original_gaps:
+                    if not isinstance(g, dict):
+                        kept_gaps.append(g)
+                        continue
+                    applied = await resolve_gap(self.db, project_id, g, tags)
+                    if applied is None:
+                        kept_gaps.append(g)
+                    else:
+                        resolved_defaults.append({
+                            "gap_id": g.get("id"),
+                            "decision_key": applied.decision_key,
+                            "applied_default_id": str(applied.id),
+                        })
+                result_json["gaps"] = kept_gaps
+                result_json["applied_defaults_resolved"] = resolved_defaults
+
+                if resolved_defaults:
+                    logger.info(
+                        "arguider.m02_defaults_applied",
+                        project_id=str(project_id),
+                        resolved_count=len(resolved_defaults),
+                        kept_gaps_count=len(kept_gaps),
+                    )
+            except Exception as m02_exc:  # noqa: BLE001
+                logger.warning(
+                    "arguider.m02_resolver_failed",
+                    project_id=str(project_id),
+                    error=str(m02_exc),
+                )
+
             # Salvar análise (DT-087 sessão 30: idempotente contra retry).
             # `arguider_analyses.document_id` tem UNIQUE constraint; se o
             # primeiro try falhou DEPOIS de commitar o analysis (ex: crash
