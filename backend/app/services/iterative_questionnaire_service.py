@@ -301,6 +301,37 @@ async def evaluate_convergence_after_ocg_update(
         },
     )
 
+    # Pipeline ativo (feedback canônico `feedback_ativo_passivo_pipeline`):
+    # se a iteração terminou como `answered` (não convergiu e não é inviável)
+    # e o projeto ainda está elegível (overall<90 AND min pilar<75),
+    # **gera automaticamente** a próxima iteração com os novos gaps revelados
+    # pelo Arguidor. Badge do sidebar volta a alertar e o usuário vê perguntas
+    # renovadas sem precisar clicar "Gerar". Falha silenciosa — usuário pode
+    # gerar manualmente como fallback se a auto-regeneração quebrar.
+    if row.status == "answered":
+        try:
+            snap = await compute_status_snapshot(db, project_id)
+            if snap.get("eligible_for_iteration"):
+                new_row = await generate_iteration(db, project_id)
+                logger.info(
+                    "m01.auto_regenerated_after_answer",
+                    extra={
+                        "project_id": str(project_id),
+                        "previous_iteration": row.iteration,
+                        "new_iteration": new_row.iteration,
+                        "new_iteration_id": str(new_row.id),
+                    },
+                )
+        except Exception as regen_exc:  # noqa: BLE001
+            logger.warning(
+                "m01.auto_regeneration_failed",
+                extra={
+                    "project_id": str(project_id),
+                    "previous_iteration": row.iteration,
+                    "error": str(regen_exc),
+                },
+            )
+
 
 def classify_not_applicable_ratio(canonical_text: str) -> float:
     """Heurística simples: contagem de 'não se aplica' / 'nsa' vs total de perguntas referenciadas."""

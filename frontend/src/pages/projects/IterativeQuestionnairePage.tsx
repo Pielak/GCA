@@ -109,6 +109,28 @@ export function IterativeQuestionnairePage() {
         <div className="mb-4 px-3 py-2 bg-red-950/30 border border-red-900/40 rounded text-xs text-red-400">{error}</div>
       )}
 
+      {/* Alerta proeminente quando há iteração pendente com gaps novos.
+          Pipeline regenera automaticamente após cada ingestão que revelou
+          gaps — usuário cai direto na próxima iteração sem precisar clicar. */}
+      {data.has_pending && data.latest_iteration && data.latest_iteration.iteration > 1 && (
+        <div className="mb-6 px-4 py-3 bg-amber-950/30 border border-amber-700/40 rounded-lg flex items-start gap-3">
+          <AlertCircle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="text-sm font-semibold text-amber-300 mb-1">
+              Nova iteração de perguntas disponível — Iteração {data.latest_iteration.iteration}
+            </div>
+            <p className="text-xs text-amber-200/80">
+              A análise da última ingestão identificou gaps novos nos pilares deficitários.
+              Foram geradas <strong>{data.latest_iteration.question_count}</strong> perguntas
+              {data.latest_iteration.target_pillars.length > 0 && (
+                <> em <strong>{data.latest_iteration.target_pillars.map(p => PILLAR_LABELS[p] || p).join(', ')}</strong></>
+              )}.
+              Baixe o formulário, responda e faça upload pela aba Ingestão.
+            </p>
+          </div>
+        </div>
+      )}
+
       {data.eligible_for_iteration && !data.has_pending && (
         <button
           onClick={handleGenerate}
