@@ -69,9 +69,32 @@ export function AdminAuditPage() {
           <h1 className="text-xl font-semibold text-slate-100">Auditoria Global</h1>
           <p className="text-slate-500 text-sm mt-0.5">Trilha encadeada append-only com prova de integridade</p>
         </div>
-        <button className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm hover:bg-slate-700 transition-colors">
+        <button
+          type="button"
+          onClick={() => {
+            // Export CSV dos eventos atualmente carregados.
+            const header = ['id','timestamp','level','action','actor','actorRole','target','projectName','detail']
+            const rows = events.map(e => header.map(k => {
+              const v = (e as unknown as Record<string, unknown>)[k]
+              if (v === null || v === undefined) return ''
+              const s = String(v).replace(/"/g, '""')
+              return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s
+            }).join(','))
+            const csv = [header.join(','), ...rows].join('\n')
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = `audit_events_${new Date().toISOString().slice(0,10)}.csv`
+            a.click()
+            URL.revokeObjectURL(url)
+          }}
+          disabled={events.length === 0}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800 border border-slate-700 text-slate-300 text-sm hover:bg-slate-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          title={events.length === 0 ? 'Nenhum evento carregado' : `Exportar ${events.length} eventos como CSV`}
+        >
           <Download className="w-4 h-4" />
-          Exportar
+          Exportar CSV ({events.length})
         </button>
       </div>
 

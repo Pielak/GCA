@@ -272,7 +272,24 @@ export function QAReadinessPage() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   {exec.evidence && (
-                    <button className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ev = exec.evidence || ''
+                        if (/^https?:\/\//i.test(ev)) {
+                          window.open(ev, '_blank', 'noopener,noreferrer')
+                        } else {
+                          // Não é URL — mostra o conteúdo numa nova janela pra o GP copiar/ler
+                          const w = window.open('', '_blank', 'width=700,height=500')
+                          if (w) {
+                            w.document.title = `Evidência — ${exec.name}`
+                            w.document.body.innerText = ev
+                          }
+                        }
+                      }}
+                      title="Abrir evidência da execução"
+                      className="flex items-center gap-1 text-xs text-violet-400 hover:text-violet-300 transition-colors"
+                    >
                       <Download className="w-3.5 h-3.5" /> Evidência
                     </button>
                   )}

@@ -193,10 +193,15 @@ export function IngestionPage() {
   }, [handleFiles]);
 
   const handleDelete = useCallback((docId: string, filename: string) => {
-    if (confirm(`Remover "${filename}"?`)) {
+    const doc = documents.find(d => d.id === docId)
+    const isProcessing = doc?.arguider_status === 'processing'
+    const msg = isProcessing
+      ? `Remover "${filename}"?\n\nA análise está em curso — remover cancela o processamento. Prossigo?`
+      : `Remover "${filename}"?`
+    if (confirm(msg)) {
       deleteMutation.mutate(docId);
     }
-  }, [deleteMutation]);
+  }, [deleteMutation, documents]);
 
   return (
     <PageTransition>
@@ -459,9 +464,13 @@ export function IngestionPage() {
                   )}
                   <button
                     onClick={() => handleDelete(doc.id, doc.original_filename)}
-                    disabled={doc.arguider_status === 'processing' || deleteMutation.isPending}
+                    disabled={deleteMutation.isPending}
                     className="p-1 rounded text-slate-600 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                    title="Remover documento"
+                    title={
+                      doc.arguider_status === 'processing'
+                        ? 'Remover documento (cancela análise em curso)'
+                        : 'Remover documento'
+                    }
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
