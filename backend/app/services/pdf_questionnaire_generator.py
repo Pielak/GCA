@@ -39,14 +39,20 @@ class PDFQuestionnaireGenerator:
         project_name: str,
         questions: list[dict[str, Any]],
         iteration: int,
+        iteration_id: str | None = None,
     ) -> bytes:
         """
         Gera PDF com as questões da iteração.
 
         Args:
             project_name: nome do projeto
-            questions: lista de questões (cada uma com id, question, context, target_pillar)
-            iteration: número da iteração
+            questions: lista de questões (cada uma com id, text, context, pillar)
+            iteration: número sequencial da iteração
+            iteration_id: UUID da iteração (CustomQuestionnaireIteration.id).
+                Gravado nos metadados do PDF (Keywords) como marker canônico
+                `gca_iteration_id=<uuid>`. Usado pela Ingestão pra linkar o
+                doc respondido à iteração correta automaticamente — sem
+                precisar de upload pela aba Questões em Aberto.
 
         Returns:
             bytes do PDF gerado
@@ -55,6 +61,11 @@ class PDFQuestionnaireGenerator:
         c = Canvas(buf, pagesize=A4)
         c.setTitle(f"Questões Abertas — Iteração {iteration}")
         c.setAuthor("GCA — Gerenciador Central de Arquiteturas")
+        c.setSubject("GCA M01 — resposta iterativa do questionário customizado")
+        # Marker canônico pra auto-linkagem ingestão → iteração (M01).
+        # Sobrevive a save/edit nos PDF readers comuns (Acrobat, Chrome, Foxit).
+        if iteration_id:
+            c.setKeywords(f"gca_iteration_id={iteration_id}")
         form = c.acroForm
 
         y = PAGE_H - MT

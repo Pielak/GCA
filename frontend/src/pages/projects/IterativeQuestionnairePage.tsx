@@ -18,7 +18,6 @@ export function IterativeQuestionnairePage() {
   const { id: projectId } = useParams<{ id: string }>()
   const { data, loading } = useIterativeQuestionnaireStatus(projectId)
   const [generating, setGenerating] = useState(false)
-  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   if (loading) {
@@ -59,27 +58,6 @@ export function IterativeQuestionnairePage() {
     a.download = `Questoes_Abertas_Iter${data.latest_iteration.iteration}.pdf`
     a.click()
     window.URL.revokeObjectURL(url)
-  }
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !projectId || !data.latest_iteration) return
-    setUploading(true); setError(null)
-    try {
-      const fd = new FormData()
-      fd.append('file', file)
-      await apiClient.post(
-        `/projects/${projectId}/iterative-questionnaire/${data.latest_iteration.id}/upload-answers`,
-        fd,
-        { headers: { 'Content-Type': 'multipart/form-data' } },
-      )
-      window.location.reload()
-    } catch (err: unknown) {
-      const errObj = err as { response?: { data?: { detail?: string } } }
-      setError(errObj.response?.data?.detail || 'Falha ao enviar resposta')
-    } finally {
-      setUploading(false)
-    }
   }
 
   return (
@@ -162,15 +140,29 @@ export function IterativeQuestionnairePage() {
               >
                 <Download className="w-3.5 h-3.5" /> Baixar PDF
               </button>
-              {data.latest_iteration.status === 'pending' && (
-                <label className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-emerald-700 hover:bg-emerald-600 text-xs text-white cursor-pointer">
-                  {uploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-                  Enviar resposta
-                  <input type="file" accept=".pdf" className="hidden" onChange={handleUpload} disabled={uploading} />
-                </label>
-              )}
             </div>
           </div>
+          {data.latest_iteration.status === 'pending' && (
+            <div className="px-4 py-3 text-xs text-slate-300 bg-slate-950/40 border-b border-slate-800 flex items-start gap-2">
+              <Upload className="w-3.5 h-3.5 text-violet-400 flex-shrink-0 mt-0.5" />
+              <div className="flex-1">
+                Preencha o PDF e envie pela aba <strong className="text-slate-100">Ingestão de Documentos</strong>.
+                O sistema identifica automaticamente que é resposta desta iteração (via marcador embutido no PDF) e
+                atualiza o OCG em seguida.
+                {projectId && (
+                  <>
+                    {' '}
+                    <a
+                      href={`/projects/${projectId}/ingestion`}
+                      className="text-violet-400 hover:text-violet-300 underline"
+                    >
+                      Ir para Ingestão →
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
           {data.latest_iteration.overall_after !== null && (
             <div className="px-4 py-2 text-xs text-slate-400 bg-slate-950/40 border-b border-slate-800">
               Overall antes: <strong>{data.latest_iteration.overall_before?.toFixed(1)}</strong> →

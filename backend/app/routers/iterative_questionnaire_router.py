@@ -99,6 +99,7 @@ async def download_pdf(
             project_name=proj.name if proj else "Projeto",
             questions=row.questions or [],
             iteration=row.iteration,
+            iteration_id=str(row.id),
         )
         row.pdf_blob = pdf_bytes
         await db.commit()
