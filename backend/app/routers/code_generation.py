@@ -308,6 +308,41 @@ class ScaffoldApplyResponse(BaseModel):
     results: List[Dict[str, Any]]
 
 
+class ScaffoldPlanItem(BaseModel):
+    """Item do plano de scaffold — metadata SEM conteúdo."""
+
+    path: str = Field(..., description="Path completo do arquivo no repo")
+    file_type: str = Field(..., description="Extensão/tipo (py, tsx, md, yaml, etc)")
+    purpose: str = Field(..., description="Descrição curta (<=120 chars) do que o arquivo faz")
+    est_lines: int = Field(default=0, description="Estimativa de linhas; 0 se desconhecido")
+
+
+class ScaffoldPlanResponse(BaseModel):
+    """Response do /scaffold/plan — lista dos arquivos a gerar."""
+
+    items: List[ScaffoldPlanItem]
+    summary: str = Field(..., description="Descrição curta do scaffold proposto")
+
+
+class ScaffoldItemRequest(BaseModel):
+    """Request do /scaffold/item — gera UM arquivo do plano."""
+
+    project_id: UUID = Field(..., description="ID do projeto")
+    path: str = Field(..., description="Path do arquivo a gerar (vindo do /plan)")
+    file_type: str = Field(..., description="Tipo do arquivo")
+    purpose: str = Field(..., description="Propósito (vindo do /plan)")
+
+
+class ScaffoldItemResponse(BaseModel):
+    """Response do /scaffold/item — 1 arquivo gerado."""
+
+    path: str
+    content: str
+    status: str
+    tokens_used: int = 0
+    error_message: Optional[str] = None
+
+
 class ValidateCodeRequest(BaseModel):
     """Payload para validar código antes de salvar."""
 
