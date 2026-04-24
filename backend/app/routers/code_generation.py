@@ -795,6 +795,130 @@ async def generate_scaffold(
         )
 
 
+@router.post(
+    "/scaffold/plan",
+    response_model=ScaffoldPlanResponse,
+    summary="MVP 30 — Planejar scaffold (só lista de arquivos)",
+    description="Gera a lista de arquivos do scaffold SEM conteúdo. Usar depois `/scaffold/item` pra cada item.",
+)
+async def generate_scaffold_plan(
+    request: ScaffoldRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    """MVP 30 — Fase PLAN do scaffold item-a-item.
+
+    Gera apenas a lista de arquivos com metadata (path, file_type, purpose,
+    est_lines). Output ~500 tokens → latency ~5s. Frontend chama este
+    endpoint primeiro, depois itera `/scaffold/item` pra cada item.
+
+    Resolve o timeout Cloudflare que estourava em scaffolds grandes (27+
+    arquivos consumindo ~90s num único LLM call).
+    """
+    project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
+    await assert_project_setup_complete(db, project_id)
+
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+    await _require_git_config(db, project_id)
+
+    ocg_data = await _load_ocg_context(db, project_id)
+    stack = ocg_data.get("STACK_RECOMMENDATION", {})
+    architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
+    modules = ocg_data.get("MODULE_CANDIDATES", [])
+
+    docs_result = await db.execute(
+        select(IngestedDocument)
+        .where(IngestedDocument.project_id == project_id)
+        .order_by(IngestedDocument.created_at.desc())
+        .limit(20)
+    )
+    ingested_docs = docs_result.scalars().all()
+    arguider_modules: List[Any] = []
+    if ingested_docs:
+        doc_ids = [d.id for d in ingested_docs]
+        analyses_result = await db.execute(
+            select(ArguiderAnalysis).where(ArguiderAnalysis.document_id.in_(doc_ids))
+        )
+        for a in analyses_result.scalars().all():
+            try:
+                mc = json.loads(a.module_candidates) if isinstance(a.module_candidates, str) else a.module_candidates
+                arguider_modules.extend(mc if isinstance(mc, list) else [])
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+    from app.services.scaffold_planner import build_plan_prompt
+
+    prompt = build_plan_prompt(
+        project_name=project.name,
+        project_slug=project.slug,
+        project_description=project.description,
+        stack=stack,
+        architecture=architecture,
+        modules=modules,
+        arguider_modules=arguider_modules,
+    )
+
+    api_key = app_settings.ANTHROPIC_API_KEY
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="API key do Anthropic não configurada. Configure em Admin > Configurações.",
+        )
+
+    from anthropic import AsyncAnthropic
+    client = AsyncAnthropic(api_key=api_key)
+    response = await client.messages.create(
+        model=app_settings.ANTHROPIC_MODEL,
+        max_tokens=4096,
+        temperature=0.2,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    raw_text = response.content[0].text
+
+    logger.info(
+        "scaffold_plan.llm_response",
+        project_id=str(project_id),
+        tokens_used=response.usage.output_tokens,
+        response_length=len(raw_text),
+    )
+
+    stripped = raw_text.strip()
+    m = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", stripped, re.DOTALL)
+    if m:
+        stripped = m.group(1).strip()
+    try:
+        data = json.loads(stripped)
+    except json.JSONDecodeError as exc:
+        logger.error(
+            "scaffold_plan.parse_failed",
+            project_id=str(project_id),
+            error=str(exc),
+            preview=stripped[:500],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"LLM retornou JSON inválido na fase PLAN: {exc}",
+        )
+
+    items_raw = data.get("items") or []
+    items = [
+        ScaffoldPlanItem(
+            path=it.get("path", ""),
+            file_type=it.get("file_type", ""),
+            purpose=(it.get("purpose") or "")[:120],
+            est_lines=int(it.get("est_lines") or 0),
+        )
+        for it in items_raw
+        if isinstance(it, dict) and it.get("path")
+    ]
+    summary = (data.get("summary") or f"Scaffold de {len(items)} arquivos")[:500]
+
+    return ScaffoldPlanResponse(items=items, summary=summary)
+
+
 # Helpers para commit — usados por /scaffold (dry_run=False) e /scaffold/apply.
 
 
