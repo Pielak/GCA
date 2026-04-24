@@ -46,6 +46,7 @@ def build_iterative_prompt(
     target_pillars_scores: dict[str, float],
     arguider_gaps_by_pillar: dict[str, list[dict[str, Any]]],
     previous_iteration_feedback: str | None = None,
+    previously_asked_questions: list[str] | None = None,
 ) -> str:
     """Monta prompt pra geração de 4-7 perguntas focadas.
 
@@ -73,6 +74,29 @@ def build_iterative_prompt(
             f"Priorize questões que o usuário consiga responder desta vez.\n"
         )
 
+    asked_block = ""
+    if previously_asked_questions:
+        # Limita a 80 pra não estourar contexto. A ordem é cronológica.
+        sample = previously_asked_questions[-80:]
+        joined = "\n".join(f"  - {q[:240]}" for q in sample)
+        asked_block = (
+            f"\n## PERGUNTAS JÁ FEITAS EM ITERAÇÕES ANTERIORES — NÃO REPITA\n"
+            f"{joined}\n"
+            f"Estas {len(previously_asked_questions)} perguntas JÁ FORAM APRESENTADAS ao stakeholder "
+            f"em iterações passadas. É PROIBIDO repetir o texto OU a semântica de qualquer uma "
+            f"delas. Se o gap que você ia explorar já tem pergunta feita:\n"
+            f"  (a) Se a resposta anterior foi insuficiente, REFORMULE pedindo detalhe técnico "
+            f"EXPLICITAMENTE diferente (ex: se perguntou 'quanto tempo retenção?' e veio resposta "
+            f"filosófica, agora pergunte 'qual NÚMERO exato em anos, por tipo de processo?' ou "
+            f"'qual o prazo prescricional aplicável a processos cíveis/trabalhistas/criminais?').\n"
+            f"  (b) Se a resposta anterior foi suficiente, PULE o tópico — não invente pergunta "
+            f"redundante. Priorize gaps ainda não cobertos.\n"
+            f"  (c) Se o gap persistente precisa reforço (ex: 'RIPD não elaborado — 7ª ingestão "
+            f"sem avanço'), FORMULE de ângulo diferente: em vez de 'tem RIPD?', peça os CAMPOS "
+            f"canônicos do RIPD (finalidade, base legal, categorias de dados, medidas de "
+            f"segurança, contato DPO).\n"
+        )
+
     return (
         f"Você é um analista de produto sênior de software, falante nativo de PT-BR. "
         f"O projeto `{project_name}` está em iteração {iteration} de questionário pra coletar "
@@ -84,7 +108,7 @@ def build_iterative_prompt(
         f"(volume, prazo, integração, regra de negócio, limite, política) — NUNCA análise "
         f"de processo ou maturidade organizacional.\n\n"
         f"## PILARES COM GAP (referência de onde o OCG está fraco — não é o foco da pergunta)\n"
-        f"{pillars_block}\n{prev_block}\n"
+        f"{pillars_block}\n{prev_block}{asked_block}\n"
         f"## O QUE PERGUNTAR (exemplos canônicos)\n"
         f"- Volumes e concorrência: 'Quantos usuários simultâneos no pico diário?', "
         f"'Volume esperado de processos/mês?'.\n"

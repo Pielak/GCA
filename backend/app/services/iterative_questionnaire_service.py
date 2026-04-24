@@ -191,6 +191,21 @@ async def generate_iteration(
     last = last_result.scalar_one_or_none()
     next_iteration = (last.iteration + 1) if last else 1
 
+    # Agrega TODAS as perguntas de iterações anteriores pra o LLM não repetir.
+    # Inclui todas, mesmo superseded, porque semântica idêntica é o que matamos.
+    prior_result = await db.execute(
+        select(CustomQuestionnaireIteration.iteration, CustomQuestionnaireIteration.questions)
+        .where(CustomQuestionnaireIteration.project_id == project_id)
+        .order_by(CustomQuestionnaireIteration.iteration.asc())
+    )
+    previously_asked: list[str] = []
+    for iter_num, questions_json in prior_result.all():
+        if not questions_json:
+            continue
+        for q in questions_json:
+            if isinstance(q, dict) and q.get("text"):
+                previously_asked.append(f"[Iter {iter_num}] {q['text']}")
+
     gaps = await _collect_arguider_gaps(db, project_id, list(target_pillars_scores.keys()))
     prev_feedback = None
     if last and last.status in ("answered", "infeasible") and last.overall_after is not None:
@@ -206,6 +221,7 @@ async def generate_iteration(
         target_pillars_scores=target_pillars_scores,
         arguider_gaps_by_pillar=gaps,
         previous_iteration_feedback=prev_feedback,
+        previously_asked_questions=previously_asked,
     )
 
     from app.services.llm_low_criticality import resolve_llm_config, call_llm
