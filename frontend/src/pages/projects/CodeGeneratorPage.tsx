@@ -236,6 +236,9 @@ export function CodeGeneratorPage() {
 
   // Scaffold state
   const [scaffoldFiles, setScaffoldFiles] = useState<Map<string, { content: string; status: string }>>(new Map())
+  // MVP 30 — status por item do scaffold (pending|generating|complete|error)
+  const [scaffoldItemStatus, setScaffoldItemStatus] = useState<Map<string, 'pending' | 'generating' | 'complete' | 'error'>>(new Map())
+  const [scaffoldPlanSummary, setScaffoldPlanSummary] = useState<string | null>(null)
   const [scaffoldGenerating, setScaffoldGenerating] = useState(false)
   const [scaffoldSummary, setScaffoldSummary] = useState<string | null>(null)
   // MVP 3: preview-apply. pendingApply=true quando há files gerados ainda
@@ -273,59 +276,88 @@ export function CodeGeneratorPage() {
   // ================================================================
 
   const handleGenerateScaffold = async () => {
-    if (!projectId) return
+    if (!projectId || scaffoldGenerating) return
     if (scaffoldFiles.size > 0 && !confirm('Isso substituirá o preview atual. Continuar?')) return
 
     setScaffoldGenerating(true)
     setScaffoldSummary(null)
+    setScaffoldFiles(new Map())
+    setScaffoldItemStatus(new Map())
+    setScaffoldPlanSummary(null)
+
     try {
-      // MVP 3: /scaffold default é preview (dry_run=true). Não commita.
-      // GP revisa e clica "Aplicar no Git" pra commitar.
-      const res = await apiClient.post('/code-generation/scaffold', { project_id: projectId })
-      const data = res.data
-      const files: { path: string; content: string; status: string }[] = data.files || []
+      // MVP 30 Fase PLAN — lista de arquivos sem conteúdo (~5s)
+      const planRes = await apiClient.post('/code-generation/scaffold/plan', { project_id: projectId })
+      const planItems: Array<{ path: string; file_type: string; purpose: string; est_lines: number }> =
+        planRes.data.items || []
+      setScaffoldPlanSummary(planRes.data.summary || null)
 
-      // Armazenar conteúdos no map
-      const newMap = new Map<string, { content: string; status: string }>()
-      const paths: string[] = []
-      for (const f of files) {
-        newMap.set(f.path, { content: f.content, status: f.status })
-        paths.push(f.path)
-      }
-      setScaffoldFiles(newMap)
-
-      // DT-043: captura warning de adequação do provider (se houver)
-      setProviderWarning(data.provider_warning || null)
-
-      const baseSummary = data.summary || `Gerados ${files.length} arquivos`
-      if (data.dry_run) {
-        const committable = files.filter(f => f.status !== 'nmi').length
-        setScaffoldSummary(`${baseSummary} — Preview: ${committable} arquivo(s) prontos para commit. Revise e clique em "Aplicar no Git".`)
-        setScaffoldPendingApply(committable > 0)
-      } else {
-        // Legacy path (dry_run=false) — mantido pra scripts, não esperado na UI.
-        const cs = data.commit_summary as { committed?: number; failed?: number } | undefined
-        const commitPart = cs
-          ? ` — Consolidados ${cs.committed || 0} no repositório${cs.failed ? `, ${cs.failed} falharam` : ''}`
-          : ''
-        setScaffoldSummary(baseSummary + commitPart)
-        setScaffoldPendingApply(false)
+      if (planItems.length === 0) {
+        alert('O LLM não retornou itens no plano. Tente novamente ou ajuste o OCG.')
+        return
       }
 
-      // Construir árvore a partir dos caminhos gerados, propagando status
-      const tree = buildTreeWithStatus(files)
-      setFileTree(tree)
+      // Todos marcados como pending; tree atualiza imediatamente
+      const initialStatus = new Map<string, 'pending' | 'generating' | 'complete' | 'error'>()
+      for (const it of planItems) initialStatus.set(it.path, 'pending')
+      setScaffoldItemStatus(initialStatus)
 
-      // Refetch árvore do Git (caso haja arquivos já commitados do scaffold inicial)
+      // Tree inicial com placeholders (pra usuário ver a árvore antes dos conteúdos chegarem)
+      const initialFiles = planItems.map(it => ({ path: it.path, content: '', status: 'pending' }))
+      setFileTree(buildTreeWithStatus(initialFiles))
+
+      // MVP 30 Fase ITEM — gera cada arquivo sequencialmente
+      const peerPathsCsv = planItems.map(it => it.path).join(',')
+      const accumulated = new Map<string, { content: string; status: string }>()
+
+      for (const item of planItems) {
+        setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'generating'))
+
+        try {
+          const itemRes = await apiClient.post(
+            `/code-generation/scaffold/item?peer_paths_csv=${encodeURIComponent(peerPathsCsv)}`,
+            {
+              project_id: projectId,
+              path: item.path,
+              file_type: item.file_type,
+              purpose: item.purpose,
+            },
+          )
+          const data = itemRes.data
+          if (data.status === 'error') {
+            setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'error'))
+          } else {
+            accumulated.set(item.path, { content: data.content || '', status: data.status || 'todo' })
+            setScaffoldFiles(new Map(accumulated))
+            setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'complete'))
+            setFileTree(
+              buildTreeWithStatus(
+                Array.from(accumulated.entries()).map(([path, v]) => ({ path, content: v.content, status: v.status })),
+              ),
+            )
+          }
+        } catch {
+          setScaffoldItemStatus(prev => new Map(prev).set(item.path, 'error'))
+        }
+      }
+
+      const completeCount = Array.from(accumulated.values()).filter(v => v.status !== 'nmi').length
+      setScaffoldSummary(
+        `${planRes.data.summary || `Scaffold com ${planItems.length} arquivos`} — ${completeCount} prontos pra commit. Revise e clique em "Aplicar no Git".`,
+      )
+      setScaffoldPendingApply(completeCount > 0)
+
       loadTree()
 
-      // Selecionar o primeiro arquivo
-      if (paths.length > 0) {
-        const firstFile = paths[0]
-        setSelectedFile(firstFile)
-        setFileContent(newMap.get(firstFile)?.content || '')
-        setOriginalContent(newMap.get(firstFile)?.content || '')
-        setHasChanges(false)
+      if (planItems.length > 0) {
+        const firstFile = planItems[0].path
+        const got = accumulated.get(firstFile)
+        if (got) {
+          setSelectedFile(firstFile)
+          setFileContent(got.content)
+          setOriginalContent(got.content)
+          setHasChanges(false)
+        }
       }
     } catch (err: unknown) {
       alert(formatCodeGenError(err, 'gerar scaffold'))
