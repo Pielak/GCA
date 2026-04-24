@@ -38,26 +38,35 @@ MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 _M01_MARKER_RE = re.compile(r"gca_iteration_id=([0-9a-fA-F-]{36})")
 
 
-def _extract_m01_iteration_marker(file_bytes: bytes) -> "UUID | None":
-    """M01 — extrai o UUID da iteração do metadado `Keywords` do PDF.
+def _extract_m01_iteration_marker(file_bytes: bytes, file_type: str) -> "UUID | None":
+    """M01 — extrai o UUID da iteração do metadado `Keywords` do documento.
 
-    O PDF gerado pelo `pdf_questionnaire_generator` carimba
-    `/Keywords (gca_iteration_id=<uuid>)` via `canvas.setKeywords(...)`.
-    Sobrevive a save/edit nos PDF readers comuns. Retorna None se o
-    marker não existe ou é inválido.
+    O gerador M01 carimba `keywords = gca_iteration_id=<uuid>` nos metadados
+    canônicos — PDF via `canvas.setKeywords(...)`, DOCX via
+    `core_properties.keywords`. Ambos sobrevivem a save/edit nos editores
+    comuns. Retorna None se o marker não existe ou é inválido.
     """
     try:
-        import pdfplumber
-        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-            meta = pdf.metadata or {}
-            keywords_raw = str(meta.get("Keywords") or "")
-            if not keywords_raw:
-                return None
-            m = _M01_MARKER_RE.search(keywords_raw)
-            if not m:
-                return None
-            from uuid import UUID as _UUID
-            return _UUID(m.group(1))
+        keywords_raw = ""
+        if file_type == "pdf":
+            import pdfplumber
+            with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                meta = pdf.metadata or {}
+                keywords_raw = str(meta.get("Keywords") or "")
+        elif file_type == "docx":
+            from docx import Document
+            doc = Document(io.BytesIO(file_bytes))
+            keywords_raw = str(doc.core_properties.keywords or "")
+        else:
+            return None
+
+        if not keywords_raw:
+            return None
+        m = _M01_MARKER_RE.search(keywords_raw)
+        if not m:
+            return None
+        from uuid import UUID as _UUID
+        return _UUID(m.group(1))
     except Exception:  # noqa: BLE001
         return None
 
@@ -402,14 +411,14 @@ class IngestionService:
         doc_id = document.id
 
         # M01 — auto-linkagem de resposta de iteração.
-        # Se o PDF carrega o marker `gca_iteration_id=<uuid>` nos metadados
-        # (gravado pelo `pdf_questionnaire_generator.generate_pdf`), linka
-        # o doc à iteração correspondente automaticamente. Ingestão vira
-        # ponto único de entrada — usuário não precisa mais subir pela
-        # aba Questões em Aberto.
-        if file_type == "pdf":
+        # Se o documento carrega o marker `gca_iteration_id=<uuid>` nos
+        # metadados (DOCX `core_properties.keywords` preferencial, PDF
+        # `Keywords` legado), linka o doc à iteração correspondente
+        # automaticamente. Ingestão vira ponto único de entrada — usuário
+        # não precisa mais subir pela aba Questões em Aberto.
+        if file_type in ("docx", "pdf"):
             try:
-                iteration_id_marker = _extract_m01_iteration_marker(file_bytes)
+                iteration_id_marker = _extract_m01_iteration_marker(file_bytes, file_type)
                 if iteration_id_marker is not None:
                     from app.models.base import CustomQuestionnaireIteration
                     iter_result = await self.db.execute(

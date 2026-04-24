@@ -49,13 +49,13 @@ export function IterativeQuestionnairePage() {
   const handleDownload = async () => {
     if (!projectId || !data.latest_iteration) return
     const res = await apiClient.get(
-      `/projects/${projectId}/iterative-questionnaire/${data.latest_iteration.id}/pdf`,
+      `/projects/${projectId}/iterative-questionnaire/${data.latest_iteration.id}/docx`,
       { responseType: 'blob' },
     )
     const url = window.URL.createObjectURL(res.data)
     const a = document.createElement('a')
     a.href = url
-    a.download = `Questoes_Abertas_Iter${data.latest_iteration.iteration}.pdf`
+    a.download = `Questoes_Abertas_Iter${data.latest_iteration.iteration}.docx`
     a.click()
     window.URL.revokeObjectURL(url)
   }
@@ -138,7 +138,7 @@ export function IterativeQuestionnairePage() {
                 onClick={handleDownload}
                 className="inline-flex items-center gap-1 px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 text-xs text-slate-200"
               >
-                <Download className="w-3.5 h-3.5" /> Baixar PDF
+                <Download className="w-3.5 h-3.5" /> Baixar formulário (.docx)
               </button>
             </div>
           </div>

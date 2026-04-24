@@ -18,7 +18,7 @@ from app.services.iterative_questionnaire_service import (
     compute_status_snapshot,
     generate_iteration,
 )
-from app.services.pdf_questionnaire_generator import pdf_generator
+from app.services.docx_questionnaire_generator import docx_generator
 
 logger = logging.getLogger(__name__)
 
@@ -74,14 +74,21 @@ async def generate(
     )
 
 
-@router.get("/{iteration_id}/pdf")
-async def download_pdf(
+@router.get("/{iteration_id}/docx")
+async def download_docx(
     project_id: UUID,
     iteration_id: UUID,
     ctx: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
-    """Gera PDF sob demanda (lazy — economiza storage de BLOB até primeiro download)."""
+    """Gera DOCX sob demanda (lazy — economiza storage do BLOB até primeiro download).
+
+    DOCX permite ao usuário inserir imagens, diagramas, tabelas e formatar
+    livremente no editor de texto favorito. O arquivo carrega nos metadados
+    o marker `gca_iteration_id=<uuid>` pra auto-linkagem via Ingestão.
+    Reutiliza a coluna `pdf_blob` (nome legado) como storage genérico do
+    formulário — aceita bytes arbitrários.
+    """
     result = await db.execute(
         select(CustomQuestionnaireIteration).where(
             (CustomQuestionnaireIteration.id == iteration_id)
@@ -92,22 +99,22 @@ async def download_pdf(
     if row is None:
         raise HTTPException(status_code=404, detail="Iteração não encontrada")
 
-    pdf_bytes = row.pdf_blob
-    if not pdf_bytes:
+    docx_bytes = row.pdf_blob
+    if not docx_bytes:
         proj = await db.get(Project, project_id)
-        pdf_bytes = pdf_generator.generate_pdf(
+        docx_bytes = docx_generator.generate_docx(
             project_name=proj.name if proj else "Projeto",
             questions=row.questions or [],
             iteration=row.iteration,
             iteration_id=str(row.id),
         )
-        row.pdf_blob = pdf_bytes
+        row.pdf_blob = docx_bytes
         await db.commit()
 
-    filename = f"Questoes_Abertas_Iter{row.iteration}.pdf"
+    filename = f"Questoes_Abertas_Iter{row.iteration}.docx"
     return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
