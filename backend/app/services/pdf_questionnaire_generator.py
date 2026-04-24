@@ -164,7 +164,7 @@ class PDFQuestionnaireGenerator:
                 y -= LINE_H
         y -= 6
 
-        # Campo de texto (multilinhas)
+        # Campo de texto (multilinhas via múltiplos textfields)
         field_name = f"q_{qid}_{field_idx}"
         field_height = 3 * cm
         field_width = PAGE_W - ML - MR - 0.2 * cm
@@ -175,17 +175,19 @@ class PDFQuestionnaireGenerator:
         c.setLineWidth(0.5)
         c.rect(ML + 0.1 * cm, y - field_height, field_width, field_height, fill=1)
 
-        # Campo AcroForm multilinhas
+        # Campo AcroForm — ReportLab não suporta multiline nativo,
+        # então usamos um textfield grande com maxlen aumentado.
+        # O usuário pode pular linhas digitando.
         form.textfield(
             name=field_name,
-            tooltip=f"Resposta para questão {field_idx + 1}",
-            x=ML + 0.15 * cm,
-            y=y - field_height + 0.1 * cm,
-            width=field_width - 0.2 * cm,
-            height=field_height - 0.2 * cm,
-            multiline=True,
+            tooltip=f"Resposta para questão {field_idx + 1}. Digite sua resposta aqui.",
+            x=int(ML + 0.15 * cm),
+            y=int(y - field_height + 0.1 * cm),
+            width=int(field_width - 0.2 * cm),
+            height=int(field_height - 0.2 * cm),
             fontSize=9,
             fontName="Helvetica",
+            maxlen=2000,
         )
 
         y -= field_height + 0.5 * cm
