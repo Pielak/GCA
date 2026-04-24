@@ -36,6 +36,7 @@ const MODULES = [
   { path: 'iterative-questionnaire', label: 'Questões em Aberto', icon: ListTodo },
   { path: 'gatekeeper', label: 'Gatekeeper', icon: Shield },
   { path: 'arguider', label: 'Arguidor', icon: Zap },
+  { path: 'applied-defaults', label: 'Decisões Automáticas', icon: BookOpen },
   { path: 'codegen', label: 'Geração de Código', icon: Code2 },
   { path: 'qa', label: 'Testes', icon: TestTube2 },
   { path: 'tester-review', label: 'Revisão de Testes', icon: FileText },

@@ -46,6 +46,7 @@ import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
 import { ProjectMetricsPage } from './pages/projects/ProjectMetricsPage';
 import { HelpPage } from './pages/HelpPage';
 import { IterativeQuestionnairePage } from './pages/projects/IterativeQuestionnairePage';
+import { AppliedDefaultsPage } from './pages/projects/AppliedDefaultsPage';
 
 export const router = createBrowserRouter([
   {
@@ -157,6 +158,7 @@ export const router = createBrowserRouter([
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
+          { path: 'applied-defaults', element: <RequireProjectSetup><AppliedDefaultsPage /></RequireProjectSetup> },
           { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },
           // Alias: URL antiga /code-generator redireciona pro path canônico /codegen.
           // Mantido para não quebrar bookmarks/emails que ainda apontam pra cá.
