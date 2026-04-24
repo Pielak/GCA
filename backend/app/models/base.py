@@ -1337,7 +1337,7 @@ class OCGDeltaLog(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id"), nullable=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="SET NULL"), nullable=True)
     ocg_version_from = Column(Integer, nullable=False)
     ocg_version_to = Column(Integer, nullable=False)
     fields_changed = Column(Text, nullable=False, default="{}")  # JSON {field: {old, new, reasoning}}
