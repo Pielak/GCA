@@ -27,6 +27,9 @@ from app.models.base import OCG, OCGDeltaLog
 from app.services.ai_billing_service import AIBillingService
 from app.services.ai_key_resolver import AIKeyResolver
 from app.services.audit_service import AuditService
+from app.services.iterative_questionnaire_service import (
+    evaluate_convergence_after_ocg_update,
+)
 from app.services.ocg_compactor import compact_ocg_for_prompt
 from app.services.ocg_delta_applier import apply_deltas
 
@@ -484,6 +487,23 @@ class OCGUpdaterService:
                 "ocg_updater.foundation_sync_failed",
                 project_id=str(project_id),
                 error=str(foundation_exc),
+            )
+
+        # M01 hook: se o documento-trigger é resposta de iteração do questionário
+        # customizado, avalia convergência (atualiza status da iteração e decide
+        # se próxima iteração é necessária). Não propaga exceções — falha no hook
+        # não deve derrubar o update canônico do OCG.
+        try:
+            if document_id is not None:
+                await evaluate_convergence_after_ocg_update(
+                    self.db, project_id, document_id
+                )
+        except Exception as hook_exc:  # noqa: BLE001
+            logger.warning(
+                "m01.convergence_hook_failed",
+                project_id=str(project_id),
+                document_id=str(document_id) if document_id else None,
+                error=str(hook_exc),
             )
 
         return {
