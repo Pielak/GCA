@@ -1,16 +1,10 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2, FileDown } from 'lucide-react'
+import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2 } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
-import {
-  SECTION_LABELS,
-  downloadQuestionnairePdf,
-  pillarToSection,
-} from '@/lib/arguiderQuestionnaire'
-import { getErrorMessage } from '@/lib/errors'
 
 interface PillarResult {
   pillar: string
@@ -246,22 +240,6 @@ export function GatekeeperPage() {
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-violet-900/30 text-violet-400 hover:bg-violet-900/50 transition-colors"
                 >
                   <Zap className="w-3 h-3" /> Acionar Arguidor
-                </button>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    if (!id) return
-                    const section = pillarToSection(pillar.pillar)
-                    try {
-                      await downloadQuestionnairePdf(id, section)
-                    } catch (err) {
-                      alert(`Falha ao gerar PDF: ${getErrorMessage(err)}`)
-                    }
-                  }}
-                  title={`Baixar questionário PDF da seção: ${SECTION_LABELS[pillarToSection(pillar.pillar)]}`}
-                  className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-indigo-900/30 text-indigo-300 hover:bg-indigo-900/50 transition-colors"
-                >
-                  <FileDown className="w-3 h-3" /> Baixar questionário
                 </button>
                 {pillar.status === 'blocker' && (
                   <button

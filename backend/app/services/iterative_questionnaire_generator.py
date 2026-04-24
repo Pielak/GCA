@@ -118,7 +118,15 @@ def build_iterative_prompt(
         f"comercial) — NÃO a consultor PMO certificado.\n"
         f"- Cada pergunta tem 1 resposta acionável que vira LINHA DE CÓDIGO, CONFIG ou "
         f"MIGRATION concreta.\n"
-        f"- 4 a 7 perguntas no total. Prefira menos e muito focadas.\n"
+        f"- **Perguntas INDIVIDUALIZADAS** — uma pergunta por item, atômica, objetiva. "
+        f"NÃO agrupe temas ('volumes e prazos') nem subdivida em a/b/c dentro de uma "
+        f"mesma pergunta. Prefira múltiplas perguntas curtas a uma pergunta composta.\n"
+        f"- **Ordem = prioridade**: a primeira pergunta (Q1) é a que MAIS destrava o "
+        f"CodeGen agora; a última é a menos crítica. Critério: peso do pilar × severidade "
+        f"do gap × bloqueio direto de geração. Show-stoppers primeiro, refinos no final.\n"
+        f"- **Sem limite superior**: gere quantas perguntas forem necessárias pra cobrir "
+        f"os gaps reais. Mínimo 4, máximo livre. Mas cada pergunta precisa ter valor "
+        f"próprio — não infle o número sem necessidade.\n"
         f"- `type=choice` com 3-5 opções + 'Não se aplica' quando enumerável (faixas, "
         f"sim/não, estados mutuamente exclusivos).\n"
         f"- `type=text` com `max_chars=2000` apenas quando NÃO dá pra enumerar (valor "
@@ -127,7 +135,8 @@ def build_iterative_prompt(
         f"(ex: 'define tamanho do pool de conexão' ou 'habilita retention policy no SQLite').\n"
         f"- `required=true` quando o CodeGen NÃO PROSSEGUE sem a resposta.\n\n"
         f"## FORMATO DE RESPOSTA (JSON ESTRITO)\n"
-        f"Retorne APENAS JSON válido, sem markdown fences, sem preâmbulo:\n"
+        f"Retorne APENAS JSON válido, sem markdown fences, sem preâmbulo. A ordem dos "
+        f"itens em `questions` DEVE refletir a prioridade (Q1 = mais crítica):\n"
         f'{{"questions": [{{"id": "Q1", "type": "choice|text", "text": "<até 220 chars>", '
         f'"context": "<até 80 chars>", "pillar": "P1_business_case|...|P7_security", '
         f'"required": true, "options": ["Opção 1", "Opção 2", "Não se aplica"]}}, ...]}}'

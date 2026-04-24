@@ -216,9 +216,9 @@ async def generate_iteration(
 
     raw_text = await call_llm(
         config=llm_cfg,
-        system_prompt="Você é um analista de governança de software sênior, falante nativo de PT-BR. Responda em JSON estrito quando solicitado.",
+        system_prompt="Você é um analista de produto sênior, falante nativo de PT-BR. Responda em JSON estrito quando solicitado.",
         user_prompt=prompt,
-        max_tokens=4096,
+        max_tokens=8192,  # perguntas individualizadas podem gerar N itens — cabe mais
         temperature=0.3,
         log_context="m01_iterative_questionnaire",
     )
