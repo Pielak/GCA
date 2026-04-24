@@ -45,6 +45,7 @@ import { IncidentListPage } from './pages/projects/IncidentListPage';
 import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
 import { ProjectMetricsPage } from './pages/projects/ProjectMetricsPage';
 import { HelpPage } from './pages/HelpPage';
+import { IterativeQuestionnairePage } from './pages/projects/IterativeQuestionnairePage';
 
 export const router = createBrowserRouter([
   {
@@ -153,6 +154,7 @@ export const router = createBrowserRouter([
           { path: 'repository', element: <Navigate to="../settings?tab=repo" replace /> },
           { path: 'external-repos', Component: ExternalReposPage },
           { path: 'ingestion', element: <RequireProjectSetup><IngestionPage /></RequireProjectSetup> },
+          { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
           { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },

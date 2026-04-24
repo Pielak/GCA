@@ -3,10 +3,11 @@ import { Outlet, NavLink, useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ChevronLeft, Activity, Settings, FileText, Shield, GitBranch, Zap,
   Code2, TestTube2, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2,
-  SlidersHorizontal, HelpCircle,
+  SlidersHorizontal, HelpCircle, ListTodo, CheckCircle2,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
+import { useIterativeQuestionnaireStatus } from '@/hooks/useIterativeQuestionnaireStatus'
 import { ReadOnlyBanner } from '@/components/ui/ReadOnlyBanner'
 import { useAuthStore } from '@/stores/authStore'
 import { CodeGenProgressOverlay } from '@/components/global/CodeGenProgressOverlay'
@@ -32,6 +33,7 @@ const MODULES = [
   { path: 'ocg', label: 'OCG', icon: Settings },
   { path: 'external-repos', label: 'Repos Externos', icon: GitBranch },
   { path: 'ingestion', label: 'Ingestão', icon: FileText },
+  { path: 'iterative-questionnaire', label: 'Questões em Aberto', icon: ListTodo },
   { path: 'gatekeeper', label: 'Gatekeeper', icon: Shield },
   { path: 'arguider', label: 'Arguidor', icon: Zap },
   { path: 'codegen', label: 'Geração de Código', icon: Code2 },
@@ -48,6 +50,7 @@ const MODULES = [
 const PIPELINE_PATHS = new Set([
   'ingestion', 'gatekeeper', 'arguider', 'codegen',
   'qa', 'tester-review', 'backlog', 'roadmap', 'docs',
+  'iterative-questionnaire',
 ])
 
 export function ProjectDetailLayout() {
@@ -58,6 +61,7 @@ export function ProjectDetailLayout() {
   const [loading, setLoading] = useState(true)
   const { can, role, roles, isReadOnly } = useProjectPermissions()
   const user = useAuthStore((s) => s.user)
+  const { data: iqStatus } = useIterativeQuestionnaireStatus(id)
 
   useEffect(() => {
     const load = async () => {
@@ -186,6 +190,12 @@ export function ProjectDetailLayout() {
             >
               <Icon className="w-3.5 h-3.5" />
               {mod.label}
+              {mod.path === 'iterative-questionnaire' && iqStatus?.has_pending && (
+                <span className="ml-auto w-1.5 h-1.5 rounded-full bg-amber-400" title="Questões pendentes" />
+              )}
+              {mod.path === 'iterative-questionnaire' && iqStatus?.converged && !iqStatus?.has_pending && (
+                <CheckCircle2 className="ml-auto w-3 h-3 text-emerald-400" />
+              )}
             </NavLink>
           )
         })}
