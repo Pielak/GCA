@@ -5,7 +5,7 @@ import {
   Code2, Play, Save, GitBranch, GitCommit, Loader2, CheckCircle2, AlertTriangle,
   FolderTree, ChevronRight, ChevronDown, FileCode, FileText, File,
   PanelRightOpen, PanelRightClose, Plus, FolderPlus, TestTube2,
-  Shield, RefreshCw, X, Eye
+  Shield, RefreshCw, X, Eye, Clock
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
@@ -86,9 +86,11 @@ function FileIcon({ name, type }: { name: string; type: string }) {
 // ============================================================================
 
 function TreeNode({
-  node, depth, onSelect, selectedPath
+  node, depth, onSelect, selectedPath, itemStatus
 }: {
-  node: GitFile; depth: number; onSelect: (path: string) => void; selectedPath: string
+  node: GitFile; depth: number; onSelect: (path: string) => void; selectedPath: string;
+  // MVP 30 — status de geração por path (scaffold item-a-item)
+  itemStatus?: Map<string, 'pending' | 'generating' | 'complete' | 'error'>
 }) {
   const [expanded, setExpanded] = useState(depth < 2)
 
@@ -105,13 +107,26 @@ function TreeNode({
           <span className="truncate">{node.name}</span>
         </button>
         {expanded && node.children?.map(child => (
-          <TreeNode key={child.path} node={child} depth={depth + 1} onSelect={onSelect} selectedPath={selectedPath} />
+          <TreeNode key={child.path} node={child} depth={depth + 1} onSelect={onSelect} selectedPath={selectedPath} itemStatus={itemStatus} />
         ))}
       </div>
     )
   }
 
   const isSelected = node.path === selectedPath
+  // MVP 30 — ícone derivado do status de geração (scaffold item-a-item)
+  const genStatus = itemStatus?.get(node.path)
+  let statusIcon: JSX.Element | null = null
+  if (genStatus === 'pending') {
+    statusIcon = <Clock className="w-3 h-3 text-slate-500 flex-shrink-0" />
+  } else if (genStatus === 'generating') {
+    statusIcon = <Loader2 className="w-3 h-3 text-violet-400 animate-spin flex-shrink-0" />
+  } else if (genStatus === 'complete') {
+    statusIcon = <CheckCircle2 className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+  } else if (genStatus === 'error') {
+    statusIcon = <AlertTriangle className="w-3 h-3 text-red-400 flex-shrink-0" />
+  }
+
   return (
     <button
       onClick={() => onSelect(node.path)}
@@ -122,6 +137,7 @@ function TreeNode({
     >
       <FileIcon name={node.name} type="file" />
       <span className="truncate">{node.name}</span>
+      {statusIcon}
       {node.status === 'nmi' && <span className="text-[10px] px-1 py-0.5 rounded bg-red-500/20 text-red-400 ml-1 flex-shrink-0">NMI</span>}
       {node.status === 'todo' && <span className="text-[10px] px-1 py-0.5 rounded bg-amber-500/20 text-amber-400 ml-1 flex-shrink-0">TODO</span>}
     </button>
@@ -768,15 +784,44 @@ export function CodeGeneratorPage() {
       )}
 
       {/* Banner scaffold em andamento */}
-      {scaffoldGenerating && (
+      {scaffoldGenerating && scaffoldItemStatus.size === 0 && (
         <div className="px-4 py-3 border-b border-emerald-700/40">
           <OperationBar
-            message="Gerando scaffold do projeto"
-            detail="Analisando OCG, documentos e regras de negócio para gerar código real..."
+            message="Planejando scaffold"
+            detail="Consultando OCG, stack e módulos pra listar arquivos..."
             status="running"
           />
         </div>
       )}
+
+      {/* MVP 30 — progress bar item-a-item */}
+      {scaffoldGenerating && scaffoldItemStatus.size > 0 && (() => {
+        const statuses = Array.from(scaffoldItemStatus.values())
+        const done = statuses.filter(s => s === 'complete').length
+        const errors = statuses.filter(s => s === 'error').length
+        const total = statuses.length
+        const pct = Math.max(0, Math.min(100, (done / Math.max(total, 1)) * 100))
+        return (
+          <div className="px-4 py-3 border-b border-violet-700/40 bg-slate-900/40">
+            <div className="flex items-center justify-between text-xs text-slate-300 mb-1.5">
+              <span className="flex items-center gap-2">
+                <Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                <span>Gerando arquivo-a-arquivo: <strong className="text-violet-300">{done} / {total}</strong></span>
+                {errors > 0 && <span className="text-red-400 ml-2">{errors} erro(s)</span>}
+              </span>
+              {scaffoldPlanSummary && (
+                <span className="text-[10px] text-slate-500 truncate ml-2 max-w-[50%]">{scaffoldPlanSummary}</span>
+              )}
+            </div>
+            <div className="h-1 bg-slate-800 rounded overflow-hidden">
+              <div
+                className="h-full bg-violet-500 transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        )
+      })()}
 
       {/* DT-043: banner de adequação do provider */}
       {providerWarning && !scaffoldGenerating && (
@@ -1163,6 +1208,7 @@ export function CodeGeneratorPage() {
                   depth={0}
                   onSelect={handleSelectFile}
                   selectedPath={selectedFile}
+                  itemStatus={scaffoldItemStatus}
                 />
               ))
             ) : (
