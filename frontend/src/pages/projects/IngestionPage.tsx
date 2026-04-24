@@ -465,14 +465,18 @@ export function IngestionPage() {
                   <button
                     onClick={() => handleDelete(doc.id, doc.original_filename)}
                     disabled={deleteMutation.isPending}
-                    className="p-1 rounded text-slate-600 hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    className="p-1 rounded text-slate-600 hover:text-red-400 disabled:opacity-50 disabled:cursor-wait transition-colors"
                     title={
-                      doc.arguider_status === 'processing'
+                      deleteMutation.isPending
+                        ? 'Removendo...'
+                        : doc.arguider_status === 'processing'
                         ? 'Remover documento (cancela análise em curso)'
                         : 'Remover documento'
                     }
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    {deleteMutation.isPending
+                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      : <Trash2 className="w-3.5 h-3.5" />}
                   </button>
                 </div>
                 {hasError && (

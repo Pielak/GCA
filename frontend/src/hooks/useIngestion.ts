@@ -236,7 +236,12 @@ export const useDeleteDocument = (projectId: string | undefined) => {
       toast.success('Documento removido com sucesso')
     },
     onError: (error: unknown) => {
-      toast.error(getErrorMessage(error))
+      const msg = getErrorMessage(error)
+      // Erros 500 com traceback viram mensagem inutil. Normaliza.
+      const friendly = msg.includes('Internal Server Error') || msg.includes('500')
+        ? 'Falha ao remover no servidor (veja logs do backend). Tente novamente em alguns segundos.'
+        : msg
+      toast.error(`Falha ao remover: ${friendly}`)
     },
   })
 }
