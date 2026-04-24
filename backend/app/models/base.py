@@ -1840,8 +1840,3 @@ class CustomQuestionnaireIteration(Base):
     convergence_threshold = Column(Numeric(4, 2), nullable=False, default=1.00)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
-
-    __table_args__ = (
-        Index("idx_custom_questionnaire_iterations_project_status", project_id, status),
-        Index("idx_custom_questionnaire_iterations_project_iteration", project_id, iteration),
-    )
