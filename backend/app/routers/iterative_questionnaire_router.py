@@ -160,23 +160,58 @@ async def upload_answers(
         target_module_id=None,
     )
     sc = upload_result.pop("status_code", 200)
-    if sc >= 400:
-        raise HTTPException(status_code=sc, detail=upload_result.get("error", "Falha ao ingerir resposta"))
+    is_duplicate = bool(upload_result.get("duplicate"))
 
-    doc_id = upload_result.get("document_id")
+    # Caso dedupe: arquivo idêntico já foi ingerido antes (provavelmente
+    # subido via aba Ingestão comum antes do usuário descobrir a aba
+    # correta). Em vez de falhar, reaproveita o doc existente — ele já
+    # passou pelo pipeline canônico (Arguidor + OCG Updater) e atualizou
+    # o OCG. Como o hook de convergência NÃO rodou naquele momento (o doc
+    # não estava linkado à iteração), disparamos manualmente abaixo.
+    if is_duplicate:
+        doc_id = upload_result.get("existing_document_id")
+        reused = True
+    elif sc >= 400:
+        raise HTTPException(status_code=sc, detail=upload_result.get("error", "Falha ao ingerir resposta"))
+    else:
+        doc_id = upload_result.get("document_id")
+        reused = False
+
     if not doc_id:
         raise HTTPException(status_code=500, detail="Ingestão retornou sem document_id")
 
     row.answer_document_id = UUID(doc_id)
-    # status só muda para 'answered' quando o hook de convergência rodar
-    # depois do pipeline terminar.
     await db.commit()
+
+    # Se o doc é reaproveitado (duplicate), o Arguidor já rodou E o OCG
+    # já foi atualizado antes — o hook de convergência no updater não
+    # será disparado de novo. Chamamos manualmente pra fechar o ciclo.
+    # Em upload novo (pipeline assíncrono), o hook dispara quando o
+    # Arguidor terminar e o updater rodar.
+    if reused:
+        from app.services.iterative_questionnaire_service import (
+            evaluate_convergence_after_ocg_update,
+        )
+        try:
+            await evaluate_convergence_after_ocg_update(db, project_id, UUID(doc_id))
+        except Exception as hook_exc:  # noqa: BLE001
+            logger.warning(
+                "m01.manual_convergence_hook_failed",
+                extra={
+                    "project_id": str(project_id),
+                    "iteration_id": str(iteration_id),
+                    "document_id": doc_id,
+                    "error": str(hook_exc),
+                },
+            )
 
     return {
         "document_id": doc_id,
         "iteration_id": str(iteration_id),
+        "reused_existing": reused,
         "message": (
-            "Resposta em processamento. O OCG será re-avaliado automaticamente "
-            "e o status de convergência aparecerá aqui."
+            "Resposta já estava ingerida — vinculada à iteração e convergência avaliada."
+            if reused
+            else "Resposta em processamento. O OCG será re-avaliado automaticamente e o status de convergência aparecerá aqui."
         ),
     }
