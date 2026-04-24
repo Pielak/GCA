@@ -47,7 +47,7 @@ class GenerateResponse(BaseModel):
 @router.get("/status", response_model=StatusResponse)
 async def get_status(
     project_id: UUID,
-    ctx: dict = Depends(require_action("project:read")),
+    ctx: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Usado pelo sidebar/badge + página."""
@@ -57,7 +57,7 @@ async def get_status(
 @router.post("/generate", response_model=GenerateResponse)
 async def generate(
     project_id: UUID,
-    ctx: dict = Depends(require_action("project:write")),
+    ctx: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """GP dispara geração de nova iteração (quando eligible)."""
@@ -78,7 +78,7 @@ async def generate(
 async def download_pdf(
     project_id: UUID,
     iteration_id: UUID,
-    ctx: dict = Depends(require_action("project:read")),
+    ctx: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
 ):
     """Gera PDF sob demanda (lazy — economiza storage de BLOB até primeiro download)."""
@@ -116,7 +116,7 @@ async def upload_answers(
     project_id: UUID,
     iteration_id: UUID,
     file: UploadFile = File(...),
-    ctx: dict = Depends(require_action("project:write")),
+    ctx: dict = Depends(require_action("project:edit")),
     db: AsyncSession = Depends(get_db),
 ):
     """Upload do PDF respondido.
