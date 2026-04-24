@@ -134,15 +134,23 @@ class PDFQuestionnaireGenerator:
             nova posição Y
         """
         qid = question.get("id", f"q_{field_idx}")
-        text = question.get("question", "")
+        # Campos canônicos produzidos por parse_iterative_response:
+        # id, type, text, context, pillar, required, options, max_chars.
+        text = question.get("text", "") or question.get("question", "")
         context = question.get("context", "")
-        pillar = question.get("target_pillar", "")
+        pillar = question.get("pillar", "") or question.get("target_pillar", "")
 
-        # Número + pilar
+        # Número + código do pilar (ex: P3)
         c.setFont("Helvetica-Bold", 10)
         c.setFillColor(VIOLET)
-        pillar_text = f"P{pillar[-1]}" if pillar and pillar.startswith("P") else "—"
-        c.drawString(ML, y, f"Q{field_idx + 1}  [{pillar_text}]")
+        # pillar vem como "P3_scope" — extrai só o código "P3"
+        pillar_code = "—"
+        if pillar:
+            try:
+                pillar_code = pillar.split("_", 1)[0] if pillar.startswith("P") else "—"
+            except Exception:  # noqa: BLE001
+                pillar_code = "—"
+        c.drawString(ML, y, f"Q{field_idx + 1}  [{pillar_code}]")
         y -= LINE_H
 
         # Texto da pergunta
@@ -162,11 +170,27 @@ class PDFQuestionnaireGenerator:
             for line in ctx_lines[:2]:  # max 2 linhas de contexto
                 c.drawString(ML + 0.3 * cm, y, line)
                 y -= LINE_H
-        y -= 6
+        y -= 4
+
+        # Opções (só pra type=choice) — listadas numeradas.
+        # Usuário responde digitando o número ou o texto da opção no campo.
+        qtype = question.get("type", "text")
+        options = question.get("options") or []
+        if qtype == "choice" and options:
+            c.setFont("Helvetica", 8)
+            c.setFillColor(SLATE_DARK)
+            c.drawString(ML + 0.3 * cm, y, "Opções (responda com o número ou texto):")
+            y -= LINE_H
+            for idx, opt in enumerate(options, start=1):
+                opt_lines = self._wrap_text(f"  {idx}. {opt}", max_width=PAGE_W - ML - MR - 0.8 * cm)
+                for line in opt_lines:
+                    c.drawString(ML + 0.6 * cm, y, line)
+                    y -= LINE_H
+            y -= 4
 
         # Campo de texto (multilinhas via múltiplos textfields)
         field_name = f"q_{qid}_{field_idx}"
-        field_height = 3 * cm
+        field_height = 2 * cm if (qtype == "choice") else 3 * cm
         field_width = PAGE_W - ML - MR - 0.2 * cm
 
         # Desenha fundo claro para o campo
