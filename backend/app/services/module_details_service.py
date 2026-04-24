@@ -64,12 +64,16 @@ DETAIL_PROMPT_USER_TEMPLATE = """Item do Roadmap:
 - Categoria: {module_type}
 - Descrição: {description}
 
-Contexto resumido do projeto (OCG):
-- Stack backend: {backend_stack}
-- Stack frontend: {frontend_stack}
-- Banco de dados: {database}
-- Modelo de execução: {execution_model}
-- Entregáveis: {deliverables}
+Contexto COMPLETO do projeto (OCG — fonte autoritativa do que já foi decidido):
+
+STACK DECLARADA:
+{stack_full}
+
+ARQUITETURA:
+{arch_full}
+
+PERFIL DO PROJETO:
+{profile_full}
 
 Gere um JSON com exatamente as chaves abaixo:
 
@@ -92,7 +96,14 @@ Regras:
 - Máximo 4 itens em prerequisites, missing_inputs, input_examples.
 - Máximo 3 sections em suggested_template_sections; cada section com até 5 fields.
 - Cada string até 150 chars.
-- Se algum dado já está no OCG (acima), preencha `from_ocg` com o valor; caso contrário null.
+- **CRÍTICO: `missing_inputs` NÃO pode listar nada que já aparece no OCG acima.**
+  Ex: se OCG menciona "Tauri 2.x" em STACK → NÃO listar "framework desktop não definido"
+  em missing_inputs. Em vez disso, reflita no `from_ocg` do campo correspondente em
+  `suggested_template_sections`.
+- Em `suggested_template_sections.fields[].from_ocg`: escreva o valor literal extraído
+  do OCG (ex: "Tauri 2.x (Rust core) + sidecar Python"). Se o valor realmente não
+  está no OCG em NENHUM lugar, use null.
+- `prerequisites` lista decisões arquiteturais ou módulos dos quais este item depende.
 - Não inclua texto fora do JSON. Não use code fences."""
 
 
@@ -235,32 +246,27 @@ def _build_user_prompt(module: ModuleCandidate, ocg_data: dict[str, Any]) -> str
     arch = ocg_data.get("ARCHITECTURE_OVERVIEW") or {}
     profile = ocg_data.get("PROJECT_PROFILE") or {}
 
-    backend = stack.get("backend") or {}
-    frontend = stack.get("frontend") or {}
-    database = stack.get("database") or {}
+    # Serializa sub-blocos completos pro LLM ver tudo que já foi decidido.
+    # Limita pra não estourar orçamento, mas cobre o necessário.
+    def _dump(obj: dict[str, Any], limit: int) -> str:
+        if not obj:
+            return "(vazio)"
+        try:
+            return json.dumps(obj, ensure_ascii=False, indent=2)[:limit]
+        except (TypeError, ValueError):
+            return str(obj)[:limit]
 
-    def _list_or_dash(value):
-        if isinstance(value, list) and value:
-            return ", ".join(str(v) for v in value)
-        if isinstance(value, str) and value:
-            return value
-        return "—"
-
-    backend_stack = _list_or_dash(backend.get("framework")) if backend.get("enabled") else "não habilitado"
-    frontend_stack = _list_or_dash(frontend.get("stack")) if frontend.get("enabled") else "não habilitado"
-    db_engine = database.get("engine") or "—"
-    exec_model = _list_or_dash(arch.get("execution_model"))
-    deliverables = _list_or_dash(profile.get("deliverables") or arch.get("deliverables") or [])
+    stack_full = _dump(stack, 3500)
+    arch_full = _dump(arch, 2000)
+    profile_full = _dump(profile, 1500)
 
     base = DETAIL_PROMPT_USER_TEMPLATE.format(
         name=module.name,
         module_type=module.module_type or "feature",
         description=module.description or "(sem descrição)",
-        backend_stack=backend_stack,
-        frontend_stack=frontend_stack,
-        database=db_engine,
-        execution_model=exec_model,
-        deliverables=deliverables,
+        stack_full=stack_full,
+        arch_full=arch_full,
+        profile_full=profile_full,
     )
 
     # MVP 9 Fase 9.2.ext — injeta doc externa quando fetched
