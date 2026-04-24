@@ -148,11 +148,16 @@ def infer_project_context_tags(ocg_data: dict[str, Any] | None) -> list[str]:
     # Infer domain
     profile = ocg_data.get("PROJECT_PROFILE") or {}
     profile_str = str(profile).lower()
-    if any(w in profile_str for w in ("jurídic", "juridic", "advogad", "processo", "tribunal")):
+    is_juridico = any(w in profile_str for w in (
+        "jurídic", "juridic", "advogad", "processo", "tribunal", "judicial", "oab",
+    ))
+    if is_juridico:
         tags.append("domain:juridico")
-        if any(w in profile_str for w in ("cível", "civel", "cpc", "processo civil")):
-            tags.append("project_type:processo_civil")
-        if any(w in profile_str for w in ("trabalhist", "clt")):
+        # Default: sistema jurídico assumimos processo civil como cobertura base
+        # a menos que esteja explicitamente limitado a outro ramo. Sempre ativar
+        # pra aproveitar defaults de retenção cível — advogado civil é a maioria.
+        tags.append("project_type:processo_civil")
+        if any(w in profile_str for w in ("trabalhist", "clt", "reclamação trabalhista")):
             tags.append("project_type:processo_trabalhista")
 
     # Infer stack
@@ -167,8 +172,16 @@ def infer_project_context_tags(ocg_data: dict[str, Any] | None) -> list[str]:
     if "jwt" in stack_str:
         tags.append("tech:jwt_auth")
 
-    # Compliance
-    if "lgpd" in profile_str or "lgpd" in stack_str:
+    # Compliance: LGPD é assumido sempre que há:
+    #  - menção explícita a LGPD, OU
+    #  - dados pessoais óbvios (domínio jurídico, domínio de saúde,
+    #    usuários cadastrados, PII em geral).
+    # Subnotificar LGPD gera gaps regulatórios persistentes — assumir
+    # aplicável é o safe default.
+    lgpd_indicators = any(w in profile_str for w in (
+        "lgpd", "dados pessoais", "cpf", "personal data", "pii",
+    )) or any(w in stack_str for w in ("lgpd", "dados pessoais"))
+    if lgpd_indicators or is_juridico:
         tags.append("compliance:lgpd")
 
     return tags
