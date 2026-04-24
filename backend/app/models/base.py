@@ -4,7 +4,7 @@ Global schema tables: users, organizations, projects, etc
 """
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, CheckConstraint, Integer, Float, Text, UniqueConstraint
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, CheckConstraint, Integer, Float, Text, UniqueConstraint, LargeBinary, Numeric
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -1809,4 +1809,39 @@ class ProjectDeliverable(Base):
         UniqueConstraint("project_id", "normalized_name", name="uq_deliverable_per_project"),
         Index("idx_deliverables_project_status", project_id, status),
         Index("idx_deliverables_kind", kind),
+    )
+
+
+class CustomQuestionnaireIteration(Base):
+    """M01 — iteração de questionário customizado.
+
+    Uma iteração é gerada quando overall_score < 90 E existe algum
+    pilar P1..P7 com score < 75. Respostas viram `ingested_documents`
+    normais (campo `answer_document_id` aponta). Convergência detectada
+    quando |overall_after - overall_before| < convergence_threshold.
+    """
+
+    __tablename__ = "custom_questionnaire_iterations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    iteration = Column(Integer, nullable=False)
+    status = Column(String(20), nullable=False, default="pending")
+    target_pillars = Column(JSONB, nullable=False, default=list)
+    questions = Column(JSONB, nullable=False, default=list)
+    pdf_blob = Column(LargeBinary, nullable=True)
+    answer_document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="SET NULL"), nullable=True)
+    ocg_version_before = Column(Integer, nullable=True)
+    ocg_version_after = Column(Integer, nullable=True)
+    overall_before = Column(Numeric(5, 2), nullable=True)
+    overall_after = Column(Numeric(5, 2), nullable=True)
+    converged = Column(Boolean, nullable=False, default=False)
+    not_applicable_ratio = Column(Numeric(4, 3), nullable=True)
+    convergence_threshold = Column(Numeric(4, 2), nullable=False, default=1.00)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+
+    __table_args__ = (
+        Index("idx_custom_questionnaire_iterations_project_status", project_id, status),
+        Index("idx_custom_questionnaire_iterations_project_iteration", project_id, iteration),
     )
