@@ -25,6 +25,7 @@ from app.models.base import (
     IngestedDocument,
     ArguiderAnalysis,
 )
+from app.services.ocg_reader import load_latest_ocg
 from app.services.iterative_questionnaire_generator import (
     build_iterative_prompt,
     parse_iterative_response,
@@ -44,10 +45,8 @@ _PILLAR_KEYS = [
 
 
 async def _load_latest_ocg(db: AsyncSession, project_id: UUID) -> OCG | None:
-    result = await db.execute(
-        select(OCG).where(OCG.project_id == project_id).order_by(desc(OCG.version)).limit(1)
-    )
-    return result.scalar_one_or_none()
+    """Thin wrapper sobre ocg_reader.load_latest_ocg — mantido para compatibilidade interna."""
+    return await load_latest_ocg(db, project_id)
 
 
 def _extract_pillar_scores(ocg_data: dict | None) -> dict[str, float]:

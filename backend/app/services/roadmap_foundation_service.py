@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.constants.module_categories import DEFAULT_MODULE_STATUS, normalize_module_type
 from app.models.base import ModuleCandidate, OCG
+from app.services.ocg_reader import load_latest_ocg
 
 logger = structlog.get_logger(__name__)
 
@@ -330,13 +331,8 @@ class RoadmapFoundationService:
     # ------------------------------------------------------------------
 
     async def _load_latest_ocg(self, project_id: UUID) -> dict[str, Any] | None:
-        row = await self.db.execute(
-            select(OCG)
-            .where(OCG.project_id == project_id)
-            .order_by(OCG.version.desc())
-            .limit(1)
-        )
-        ocg = row.scalar_one_or_none()
+        """Thin wrapper sobre ocg_reader.load_latest_ocg que parseia o JSON do campo ocg_data."""
+        ocg = await load_latest_ocg(self.db, project_id)
         if not ocg or not ocg.ocg_data:
             return None
         try:

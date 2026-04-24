@@ -48,6 +48,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.base import ModuleCandidate, OCG
+from app.services.ocg_reader import load_latest_ocg
 
 logger = structlog.get_logger(__name__)
 
@@ -220,13 +221,8 @@ def _build_external_reference_payload(module) -> dict[str, Any] | None:
 
 
 async def _load_latest_ocg(db: AsyncSession, project_id: UUID) -> dict[str, Any] | None:
-    row = await db.execute(
-        select(OCG)
-        .where(OCG.project_id == project_id)
-        .order_by(OCG.version.desc())
-        .limit(1)
-    )
-    ocg = row.scalar_one_or_none()
+    """Thin wrapper sobre ocg_reader.load_latest_ocg que parseia o JSON do campo ocg_data."""
+    ocg = await load_latest_ocg(db, project_id)
     if not ocg or not ocg.ocg_data:
         return None
     try:
