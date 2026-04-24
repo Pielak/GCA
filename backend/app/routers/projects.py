@@ -115,47 +115,28 @@ async def list_projects(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """List projects accessible to the current user (filtered by membership).
-
-    Nota: emenda RBAC 2026-04-19 permite múltiplas linhas ativas em
-    `project_members` por (user, project) com roles distintos (ex: gp +
-    dev + qa). Agregamos aqui pra devolver 1 card por projeto com
-    `userRole` = role de maior privilégio e `userRoles` = todas as roles
-    do user naquele projeto.
-    """
+    """List projects accessible to the current user (filtered by membership)."""
     from app.models.base import Project, ProjectMember, User
     from sqlalchemy import select
-
-    # Precedência canônica de privilégio (maior → menor).
-    # Fonte: GCA_RBAC_RULES.md + permissions.py.
-    _ROLE_PRECEDENCE = [
-        "admin", "gp", "tech_lead", "dev_sr", "dev_pl", "dev",
-        "qa", "tester", "compliance", "stakeholder", "admin_viewer",
-    ]
-
-    def _primary_role(roles: list[str]) -> str:
-        for r in _ROLE_PRECEDENCE:
-            if r in roles:
-                return r
-        return roles[0] if roles else "admin_viewer"
+    from sqlalchemy.orm import selectinload
 
     # Verificar se é admin
     user_result = await db.execute(select(User).where(User.id == current_user_id))
     user = user_result.scalar_one_or_none()
 
     if user and user.is_admin:
+        # Admin vê todos os projetos — com userRole indicando se é membro ou viewer
         all_projects = await db.execute(select(Project).order_by(Project.created_at.desc()))
         projects = all_projects.scalars().all()
 
+        # Buscar memberships do admin
         admin_members = await db.execute(
             select(ProjectMember.project_id, ProjectMember.role).where(
                 ProjectMember.user_id == current_user_id,
                 ProjectMember.is_active == True,
             )
         )
-        admin_roles_map: dict = {}
-        for row in admin_members.all():
-            admin_roles_map.setdefault(row.project_id, []).append(row.role)
+        admin_roles = {row.project_id: row.role for row in admin_members.all()}
 
         return {
             "projects": [
@@ -165,8 +146,7 @@ async def list_projects(
                     "slug": p.slug,
                     "description": p.description or "",
                     "status": p.status or "draft",
-                    "userRole": _primary_role(admin_roles_map.get(p.id, [])) or "admin_viewer",
-                    "userRoles": admin_roles_map.get(p.id, ["admin_viewer"]),
+                    "userRole": admin_roles.get(p.id, "admin_viewer"),
                     "phase": 1,
                     "gatekeeperScore": 0,
                 }
@@ -174,7 +154,7 @@ async def list_projects(
             ]
         }
 
-    # Usuário comum: agrega roles por projeto pra não duplicar cards
+    # Usuário comum: só projetos onde é membro ativo
     result = await db.execute(
         select(ProjectMember, Project)
         .join(Project, ProjectMember.project_id == Project.id)
@@ -186,29 +166,21 @@ async def list_projects(
     )
     rows = result.all()
 
-    by_project: dict = {}
-    for pm, proj in rows:
-        entry = by_project.setdefault(
-            proj.id,
+    return {
+        "projects": [
             {
                 "id": str(proj.id),
                 "name": proj.name,
                 "slug": proj.slug,
                 "description": proj.description or "",
                 "status": proj.status or "draft",
-                "userRoles": [],
+                "userRole": pm.role,
                 "phase": 1,
                 "gatekeeperScore": 0,
-            },
-        )
-        entry["userRoles"].append(pm.role)
-
-    projects_list = []
-    for entry in by_project.values():
-        entry["userRole"] = _primary_role(entry["userRoles"])
-        projects_list.append(entry)
-
-    return {"projects": projects_list}
+            }
+            for pm, proj in rows
+        ]
+    }
 
 
 @router.get("/{project_id}")
