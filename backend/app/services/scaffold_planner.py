@@ -71,14 +71,26 @@ def build_plan_prompt(
         f"Módulos sugeridos pelo Arguidor (amostra):\n{arguider_sample}\n\n"
         f"## TAREFA\n"
         f"Liste os arquivos que compõem o scaffold inicial. NÃO gere conteúdo — apenas "
-        f"a lista com metadata. Máximo de {_MAX_FILES_IN_PLAN} arquivos. Priorize:\n"
-        f"  - estrutura de pastas canônica pra stack escolhida,\n"
-        f"  - configs essenciais (pyproject.toml/package.json/Dockerfile/etc conforme stack),\n"
-        f"  - entry-points (main.py, App.tsx, index.ts),\n"
-        f"  - módulos core listados acima.\n\n"
+        f"a lista com metadata. Máximo de {_MAX_FILES_IN_PLAN} arquivos.\n\n"
+        f"## REGRA OBRIGATÓRIA DE COBERTURA\n"
+        f"Se a stack declarada inclui MÚLTIPLAS CAMADAS (ex: frontend + backend + sidecar + mobile + "
+        f"embedded + DB), o plano TEM QUE conter arquivos representativos de TODAS elas. É proibido "
+        f"focar só em uma camada — o resultado tem que ser um projeto FUNCIONAL end-to-end após o "
+        f"apply. Contemple, sempre que a stack exigir:\n"
+        f"  - BACKEND: entry-point, módulos domain/application/infra, Cargo.toml / pyproject.toml / "
+        f"go.mod / package.json conforme linguagem, configs (tauri.conf.json, .env.example).\n"
+        f"  - FRONTEND: package.json, tsconfig, vite.config (ou bundler equivalente), index.html, "
+        f"src/main.tsx OU src/App.tsx, ao menos 2-3 componentes ou páginas canônicas da UI.\n"
+        f"  - SIDECAR / WORKER: main.py (ou equivalente), requirements.txt / pyproject.toml, Dockerfile "
+        f"se necessário, módulos principais.\n"
+        f"  - CI/CD: .github/workflows/*.yml OU .gitlab-ci.yml cobrindo lint/test/build multi-plataforma.\n"
+        f"  - DB / MIGRATIONS: schema inicial, 1ª migration, seed de referência se aplicável.\n"
+        f"  - DOCS MÍNIMOS: README.md, .gitignore, CHANGELOG.md.\n"
+        f"  - TESTES: pelo menos 1 teste por camada (unit/integration) como placeholder.\n"
+        f"Evite `.gitkeep` puros — prefira arquivos com conteúdo real (README de pasta, índice, etc).\n\n"
         f"## FORMATO DE RESPOSTA (JSON ESTRITO)\n"
         f"Retorne APENAS JSON válido, sem markdown code fences, sem preâmbulo:\n"
-        f'{{"summary": "<breve descrição do scaffold, até 300 chars>", '
+        f'{{"summary": "<breve descrição do scaffold mostrando que TODAS as camadas foram contempladas, até 300 chars>", '
         f'"items": [{{"path": "<path>", "file_type": "<ext>", "purpose": "<até {_MAX_CHARS_PURPOSE} chars>", "est_lines": <int>}}, ...]}}'
     )
 
