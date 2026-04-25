@@ -517,8 +517,18 @@ export function CodeGeneratorPage() {
   const loadTree = useCallback(async () => {
     if (!projectId) return
 
-    // Se já temos scaffold gerado, usar ele
+    // Se já temos scaffold gerado (cache local), usar ele
     if (scaffoldFiles.size > 0) return
+
+    // Se há snapshot da run ativa com items, NÃO sobrescreve fileTree com
+    // git tree — o useEffect do snapshot é a fonte canônica nesse caso.
+    // Sem este guard, há race: git/tree (2 calls, mais lento) chega depois
+    // do snapshot (1 call) e sobrescreve a árvore de 164 paths do scaffold
+    // pelos ~20 paths antigos do remote, fazendo o user ver "menos arquivos".
+    const liveSnapshot = useCodeGenProgressStore.getState().snapshot
+    if (liveSnapshot && Array.isArray(liveSnapshot.items) && liveSnapshot.items.length > 0) {
+      return
+    }
 
     setTreeLoading(true)
     try {
