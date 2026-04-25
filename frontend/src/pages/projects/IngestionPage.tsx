@@ -1,6 +1,6 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Upload, FileText, Trash2, Play, Terminal, Loader2, RefreshCw } from 'lucide-react';
+import { Upload, FileText, Trash2, Play, Terminal, Loader2, RefreshCw, OctagonX } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useDocuments, useUploadDocument, useDeleteDocument, useEligibleModules, type IngestedDocument } from '@/hooks/useIngestion';
 import { PulseIndicator, OperationBar, PageTransition } from '@/components/ui/PipelineProgress';
@@ -125,6 +125,24 @@ export function IngestionPage() {
       alert(`Reanálise falhou: ${detail}`);
     } finally {
       setReanalyzing(prev => ({ ...prev, [docId]: false }));
+    }
+  }, [projectId, refetch]);
+
+  // 2026-04-25 — STOP/cancel manual em doc preso. Marca status='error'
+  // e libera UI pro owner clicar em Re-analisar ou Apagar.
+  const [canceling, setCanceling] = useState<Record<string, boolean>>({});
+  const handleCancel = useCallback(async (docId: string, filename: string) => {
+    if (!projectId) return;
+    if (!confirm(`Parar análise de "${filename}"?\n\nO documento será marcado como erro e a UI libera os botões de Re-analisar e Apagar.`)) return;
+    setCanceling(prev => ({ ...prev, [docId]: true }));
+    try {
+      await apiClient.post(`/projects/${projectId}/ingestion/${docId}/cancel`, {});
+      await refetch();
+    } catch (err: unknown) {
+      const detail = getErrorMessage(err);
+      alert(`Cancelar falhou: ${detail}`);
+    } finally {
+      setCanceling(prev => ({ ...prev, [docId]: false }));
     }
   }, [projectId, refetch]);
 
@@ -442,6 +460,21 @@ export function IngestionPage() {
                       (evita quebra de linha quando há 2+ botões; o bug do
                       trash caindo em nova row). */}
                   <div className="flex items-center gap-1 justify-end">
+                    {/* 2026-04-25 — STOP. Aparece quando doc está pending
+                        ou processing. Permite owner forçar erro sem
+                        precisar apagar (preserva o arquivo no storage). */}
+                    {(doc.arguider_status === 'pending' || doc.arguider_status === 'processing') && (
+                      <button
+                        onClick={() => handleCancel(doc.id, doc.original_filename)}
+                        disabled={canceling[doc.id]}
+                        className="p-1 rounded text-slate-600 hover:text-amber-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        title="Parar análise (marca como erro; preserva arquivo)"
+                      >
+                        {canceling[doc.id]
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <OctagonX className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
                     {/* DT-039 + sessão 30: botão re-analisar aparece também
                         em docs com stage='failed' mesmo quando status ainda
                         é 'pending' ou 'processing' (estado inconsistente por

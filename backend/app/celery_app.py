@@ -115,6 +115,17 @@ celery_app.conf.update(
     # Eager mode: configurável via env para testes.
     task_always_eager=os.environ.get("CELERY_TASK_ALWAYS_EAGER", "").lower() in ("1", "true", "yes"),
     task_eager_propagates=True,
+    # Beat schedule (2026-04-25): watchdog de docs zombie a cada 5 min.
+    # Sem isso, docs presos em 'processing' só eram limpos no restart do
+    # backend. Agora é independente — sobrevive a uptimes longos do
+    # backend e cobre falhas silenciosas do worker.
+    beat_schedule={
+        "watchdog-ingestion-zombies": {
+            "task": "app.tasks.pipeline.watchdog_ingestion_zombies",
+            "schedule": 300.0,  # 5 minutos
+            "args": (8,),  # threshold_minutes
+        },
+    },
 )
 
 

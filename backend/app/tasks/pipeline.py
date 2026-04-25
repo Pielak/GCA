@@ -90,6 +90,35 @@ def _lease_key(task_name: str, project_id: str, version: Any) -> str:
 
 
 @celery_app.task(
+    name="app.tasks.pipeline.watchdog_ingestion_zombies",
+    bind=True,
+)
+def watchdog_ingestion_zombies(self, threshold_minutes: int = 8) -> dict:
+    """Task periódica do Celery beat: marca docs zombie como 'error'.
+
+    Sem essa task o watchdog só rodava no startup do backend (lifespan),
+    e docs presos em status='processing' ficavam zombie até o próximo
+    restart. Agora é checado a cada 5 min independentemente.
+
+    Returns: {checked, recovered, threshold_minutes}
+    """
+    from app.services.ingestion_watchdog import recover_zombie_documents
+    try:
+        result = _run_coro_isolated(recover_zombie_documents(threshold_minutes=threshold_minutes))
+        if result.get("recovered"):
+            logger.warning(
+                "watchdog.recovered",
+                recovered=result["recovered"],
+                checked=result["checked"],
+                threshold_minutes=threshold_minutes,
+            )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.error("watchdog.failed", error=str(exc), exc_info=True)
+        return {"status": "error", "error": str(exc)[:500]}
+
+
+@celery_app.task(
     name="app.tasks.pipeline.pipeline_ingest_task",
     bind=True,
     max_retries=2,

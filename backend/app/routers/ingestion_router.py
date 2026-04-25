@@ -132,6 +132,47 @@ async def delete_document(
     return result
 
 
+@router.post("/projects/{project_id}/ingestion/{document_id}/cancel")
+async def cancel_document(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Cancela manualmente um doc preso em pending/processing.
+    Marca status='error' com mensagem 'Cancelado pelo owner'. UI mostra
+    botão 'Reanalisar' depois disso pra retomar.
+    """
+    from datetime import datetime, timezone
+    from app.models.base import IngestedDocument
+
+    doc = await db.get(IngestedDocument, document_id)
+    if not doc or doc.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    if doc.arguider_status not in ("pending", "processing"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Doc em status {doc.arguider_status!r} — só cancela pending/processing.",
+        )
+
+    doc.arguider_status = "error"
+    doc.arguider_stage = "failed"
+    doc.arguider_completed_at = datetime.now(timezone.utc)
+    doc.arguider_error_message = (
+        doc.arguider_error_message or "Cancelado pelo owner"
+    )
+    await db.commit()
+
+    logger.info(
+        "ingestion.canceled_by_owner",
+        document_id=str(document_id),
+        project_id=str(project_id),
+        canceled_by=str(current_user_id),
+    )
+    return {"message": "Documento cancelado.", "document_id": str(document_id)}
+
+
 @router.post("/projects/{project_id}/ingestion/{document_id}/release")
 async def release_from_quarantine(
     project_id: UUID,
