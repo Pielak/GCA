@@ -478,6 +478,15 @@ class BacklogItem(Base):
     fix_severity = Column(String(20), nullable=True)  # CRITICAL, MEDIUM, LOW (para items tipo fix)
     fix_remediation = Column(Text, nullable=True)  # Sugestao de correcao do LLM
 
+    # Cascata canônica Backlog→Roadmap→Scaffold (2026-04-24): FK para o
+    # ModuleCandidate de origem quando source=arguider. Roadmap e Scaffold
+    # leem readiness e pillar_impact do candidato via este JOIN.
+    module_candidate_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("module_candidates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
     # Rastreamento de pipeline
     generated_code_path = Column(String(500), nullable=True)  # Caminho do arquivo gerado
     generated_tests_path = Column(String(500), nullable=True)  # Caminho dos testes gerados

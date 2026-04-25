@@ -16,7 +16,7 @@ from app.db.database import get_db
 from app.services.code_generation_service import CodeGenerationService
 from app.services.llm_service import LLMProvider, LLMServiceFactory
 from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
-from app.models.base import Project, ProjectGitConfig
+from app.models.base import Project, ProjectGitConfig, BacklogItem, ModuleCandidate
 from app.core.config import settings as app_settings
 from app.dependencies.require_project_setup import assert_project_setup_complete
 from app.dependencies.require_action import resolve_user_roles_in_project
@@ -827,30 +827,62 @@ async def generate_scaffold_plan(
     ocg_data = await _load_ocg_context(db, project_id)
     stack = ocg_data.get("STACK_RECOMMENDATION", {})
     architecture = ocg_data.get("ARCHITECTURE_OVERVIEW", {})
-    modules = ocg_data.get("MODULE_CANDIDATES", [])
 
-    docs_result = await db.execute(
-        select(IngestedDocument)
-        .where(IngestedDocument.project_id == project_id)
-        .order_by(IngestedDocument.created_at.desc())
-        .limit(20)
-    )
-    ingested_docs = docs_result.scalars().all()
-    arguider_modules: List[Any] = []
-    if ingested_docs:
-        doc_ids = [d.id for d in ingested_docs]
-        analyses_result = await db.execute(
-            select(ArguiderAnalysis).where(ArguiderAnalysis.document_id.in_(doc_ids))
+    # Cascata canônica Backlog→Roadmap→Scaffold (2026-04-24): scaffold lê
+    # do backlog filtrado por items prontos pra CodeGen. governance é
+    # excluído sempre (PM corporativo nunca vira código). Items sem
+    # vínculo com candidato (source=ocg) entram igual; items vindos do
+    # Arguidor só entram se o candidato sinalizou ready_for_codegen=true.
+    backlog_rows = (await db.execute(
+        select(BacklogItem, ModuleCandidate)
+        .outerjoin(ModuleCandidate, ModuleCandidate.id == BacklogItem.module_candidate_id)
+        .where(
+            BacklogItem.project_id == project_id,
+            BacklogItem.parent_item_id.is_(None),
+            BacklogItem.category != "governance",
+            BacklogItem.status.notin_(("completed", "concluido", "rejected")),
         )
-        for a in analyses_result.scalars().all():
-            try:
-                mc = json.loads(a.module_candidates) if isinstance(a.module_candidates, str) else a.module_candidates
-                arguider_modules.extend(mc if isinstance(mc, list) else [])
-            except (json.JSONDecodeError, TypeError):
-                pass
+    )).all()
+
+    modules: List[Dict[str, Any]] = []
+    deferred = 0
+    for bl, mc in backlog_rows:
+        # Items do Arguidor: só entram se o candidato está ready_for_codegen.
+        # Items do OCG (sem candidato vinculado) entram sempre — eles vêm
+        # da regeneração canônica do OCG e já assumem que o stakeholder
+        # validou o escopo.
+        if mc is not None and not bool(mc.ready_for_codegen):
+            deferred += 1
+            continue
+        modules.append({
+            "name": bl.title,
+            "description": bl.description or "",
+            "module_type": bl.module_type or (mc.module_type if mc else "feature"),
+            "priority": bl.priority or "medium",
+            "category": bl.category,
+            "ready_for_codegen": bool(mc.ready_for_codegen) if mc else True,
+        })
+
+    logger.info(
+        "scaffold_plan.modules_from_backlog",
+        project_id=str(project_id),
+        included=len(modules),
+        deferred_not_ready=deferred,
+    )
+
+    if not modules:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Nenhum item do backlog está pronto pra CodeGen. "
+                "Responda Questões em Aberto ou ingira mais documentos pra liberar items."
+            ),
+        )
 
     from app.services.scaffold_planner import build_plan_prompt
 
+    # arguider_modules legado mantido pra retrocompat do prompt builder,
+    # mas a fonte canônica agora é `modules` vindo do backlog.
     prompt = build_plan_prompt(
         project_name=project.name,
         project_slug=project.slug,
@@ -858,7 +890,7 @@ async def generate_scaffold_plan(
         stack=stack,
         architecture=architecture,
         modules=modules,
-        arguider_modules=arguider_modules,
+        arguider_modules=[],
     )
 
     api_key = app_settings.ANTHROPIC_API_KEY

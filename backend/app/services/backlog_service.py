@@ -315,6 +315,7 @@ class BacklogService:
                 status="pending",
                 source="arguider",
                 dependencies=mc.dependencies,
+                module_candidate_id=mc.id,
             )
             self.db.add(item)
             created += 1
