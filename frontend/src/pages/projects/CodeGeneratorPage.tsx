@@ -605,7 +605,27 @@ export function CodeGeneratorPage() {
     if (runItem && runItem.has_content) {
       setFileLoading(true)
       try {
-        await loadItemContentOnDemand(path)
+        // Busca direta + setFileContent imediato. Antes, chamávamos
+        // loadItemContentOnDemand que faz `if (selectedFile === path)
+        // setFileContent`, mas selectedFile no closure do useCallback é
+        // o valor ANTERIOR (setSelectedFile foi enfileirado linhas acima
+        // mas ainda não rendeu). Resultado: conteúdo era escrito só no
+        // cache, mas o editor mostrava o placeholder vazio até o user
+        // sair e voltar.
+        const content = await storeFetchItemContent(runItem.id)
+        if (content !== null) {
+          setScaffoldFiles((prev) => {
+            const next = new Map(prev)
+            next.set(path, {
+              content,
+              status: runItem.status === 'done' ? 'complete' : runItem.status,
+            })
+            return next
+          })
+          setFileContent(content)
+          setOriginalContent(content)
+          setHasChanges(false)
+        }
       } finally {
         setFileLoading(false)
       }
