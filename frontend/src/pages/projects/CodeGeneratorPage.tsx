@@ -14,6 +14,31 @@ import { OperationBar, PulseIndicator } from '@/components/ui/PipelineProgress'
 import { getErrorMessage, getErrorStatus } from '@/lib/errors'
 
 /**
+ * Render seguro de campos do STACK_RECOMMENDATION do OCG. Versões mais novas
+ * do Arguidor podem retornar OBJETO rico (ex: `database.primary` virou
+ * {engine, profile, extensions_recommended, configuration, rationale}).
+ * Render direto de objeto explode com React error #31. Aqui extraímos
+ * heuristicamente o nome principal pra exibição compacta no header.
+ */
+function stackFieldText(value: unknown): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) return value.map(stackFieldText).filter(Boolean).join(', ')
+  if (typeof value === 'object') {
+    const obj = value as Record<string, unknown>
+    // Tenta nomes canônicos comuns na ordem de preferência
+    for (const key of ['engine', 'name', 'primary', 'framework', 'language', 'value', 'label']) {
+      const v = obj[key]
+      if (typeof v === 'string') return v
+      if (typeof v === 'number') return String(v)
+    }
+    return ''
+  }
+  return ''
+}
+
+/**
  * DT-089 — Formatter de erros do CodeGenerator com mensagens amigáveis
  * por contexto. Trata 403 de RBAC especificamente (causa mais comum
  * quando user não tem code:write) + fallback genérico pra outros erros.
@@ -741,13 +766,13 @@ export function CodeGeneratorPage() {
         <div className="flex items-center gap-4 px-4 py-1.5 bg-slate-900/80 border-b border-slate-800 text-xs">
           <span className="text-slate-500">OCG:</span>
           {ocgContext.stack?.backend && (
-            <span className="text-slate-400">Backend: <span className="text-blue-400">{ocgContext.stack.backend.language || ''} {ocgContext.stack.backend.framework || ''}</span></span>
+            <span className="text-slate-400">Backend: <span className="text-blue-400">{stackFieldText(ocgContext.stack.backend.language)} {stackFieldText(ocgContext.stack.backend.framework)}</span></span>
           )}
           {ocgContext.stack?.frontend && (
-            <span className="text-slate-400">Frontend: <span className="text-emerald-400">{ocgContext.stack.frontend.framework || ''} {ocgContext.stack.frontend.language || ''}</span></span>
+            <span className="text-slate-400">Frontend: <span className="text-emerald-400">{stackFieldText(ocgContext.stack.frontend.framework)} {stackFieldText(ocgContext.stack.frontend.language)}</span></span>
           )}
           {ocgContext.stack?.database && (
-            <span className="text-slate-400">DB: <span className="text-amber-400">{ocgContext.stack.database.primary || ''}</span></span>
+            <span className="text-slate-400">DB: <span className="text-amber-400">{stackFieldText(ocgContext.stack.database.primary)}</span></span>
           )}
           <span className={`ml-auto px-1.5 py-0.5 rounded text-xs ${
             ocgContext.status === 'READY' ? 'bg-emerald-500/20 text-emerald-300' :
