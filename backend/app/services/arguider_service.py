@@ -791,23 +791,39 @@ class ArguiderService:
             ocg_fields = result_json.get("ocg_fields_to_update", [])
             ocg_updated = bool(ocg_fields)
 
-            # Atualizar categoria do documento
-            classification = result_json.get("document_classification", {})
+            # Atualizar categoria do documento. Defensive: LLM pode emitir
+            # document_classification como string solta em vez de dict.
+            classification_raw = result_json.get("document_classification", {})
+            if isinstance(classification_raw, dict):
+                classification = classification_raw
+                doc_category = classification.get("category", "other")
+            elif isinstance(classification_raw, str):
+                classification = {"category": classification_raw[:120]}
+                doc_category = classification_raw[:120] or "other"
+            else:
+                classification = {}
+                doc_category = "other"
             if document:
-                document.document_category = classification.get("category", "other")
+                document.document_category = doc_category
                 document.arguider_status = "completed"
                 document.arguider_completed_at = datetime.now(timezone.utc)
                 document.ocg_updated = ocg_updated
 
             await self.db.commit()
 
+            def _safe_list_len(key: str) -> int:
+                v = result_json.get(key, [])
+                if isinstance(v, list):
+                    return len(v)
+                return 0
+
             logger.info(
                 "arguider.analysis_complete",
                 document_id=str(document_id),
                 category=classification.get("category"),
-                gaps=len(result_json.get("gaps", [])),
-                show_stoppers=len(result_json.get("show_stoppers", [])),
-                modules=len(result_json.get("module_candidates", [])),
+                gaps=_safe_list_len("gaps"),
+                show_stoppers=_safe_list_len("show_stoppers"),
+                modules=_safe_list_len("module_candidates"),
                 ocg_updated=ocg_updated,
                 tokens_used=tokens_used,
                 latency_ms=latency_ms,
@@ -1081,27 +1097,56 @@ Regras duras:
         e regex `\\{.*\\}` deu match mas parse falhou por conteúdo após
         o primeiro `{`), o operador não consegue diagnosticar.
         """
+        def _ensure_dict(value: Any) -> dict | None:
+            """Garante que `value` seja dict (ou None se não for).
+
+            Defesa crítica: json.loads pode retornar string/number/list/null
+            quando o LLM emite JSON válido mas no nível errado. Sem isso,
+            `result_json.get(...)` no caller quebra com AttributeError.
+            """
+            return value if isinstance(value, dict) else None
+
         if not text:
             logger.warning("arguider.json_parse_failed", reason="empty_text")
             return {}
 
         stripped = text.strip()
         try:
-            return json.loads(stripped)
+            parsed = json.loads(stripped)
+            obj = _ensure_dict(parsed)
+            if obj is not None:
+                return obj
+            logger.warning(
+                "arguider.json_parse_failed",
+                reason="parsed_not_dict",
+                got_type=type(parsed).__name__,
+                preview=stripped[:200],
+            )
         except json.JSONDecodeError:
             pass
 
         fenced = _strip_code_fence(stripped)
         if fenced != stripped:
             try:
-                return json.loads(fenced)
+                parsed = json.loads(fenced)
+                obj = _ensure_dict(parsed)
+                if obj is not None:
+                    return obj
             except json.JSONDecodeError:
                 stripped = fenced
 
         extracted = _extract_balanced_object(stripped)
         if extracted is not None:
             try:
-                return json.loads(extracted)
+                parsed = json.loads(extracted)
+                obj = _ensure_dict(parsed)
+                if obj is not None:
+                    return obj
+                logger.warning(
+                    "arguider.json_parse_failed",
+                    reason="balanced_not_dict",
+                    got_type=type(parsed).__name__,
+                )
             except json.JSONDecodeError as exc:
                 logger.warning(
                     "arguider.json_parse_failed",

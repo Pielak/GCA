@@ -889,13 +889,21 @@ class OCGUpdaterService:
         if not isinstance(deltas, list):
             logger.warning("ocg_updater.deltas_not_list", got_type=type(deltas).__name__)
             deltas = []
+        # Cada delta precisa ser dict — descarta items malformados
+        deltas = [d for d in deltas if isinstance(d, dict)]
 
-        change_type: str = parsed.get("change_type", "UPDATE")
-        context_health: Dict[str, Any] = parsed.get("context_health", {
+        change_type_raw = parsed.get("change_type", "UPDATE")
+        change_type: str = change_type_raw if isinstance(change_type_raw, str) else "UPDATE"
+
+        # Defensive: LLM pode emitir context_health como string ou null
+        ch_raw = parsed.get("context_health")
+        context_health: Dict[str, Any] = {
             "depth": 0.5,
             "confidence": 0.5,
             "quality": 0.5,
-        })
+        }
+        if isinstance(ch_raw, dict):
+            context_health.update(ch_raw)
 
         # Validação básica do change_type
         if change_type not in ("EXPAND", "CONTRACT", "UPDATE"):
