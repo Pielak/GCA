@@ -388,6 +388,17 @@ class IngestionService:
                         project_id=str(project_id),
                     )
 
+        # Reforma Arguidor #1 (2026-04-25): auto-detecção de doc canônico.
+        # Decisão soberana do owner — substitui valores antigos no OCG.
+        canonical_markers = (
+            "decisoes_canonicas", "canonical_decision", "ata_decisoes",
+            "decision_record", "rfc_canonica",
+        )
+        haystack = (
+            f"{(original_filename or '').lower()} {(category or '').lower()}"
+        )
+        is_canonical = any(m in haystack for m in canonical_markers)
+
         # Criar registro
         document = IngestedDocument(
             project_id=project_id,
@@ -404,6 +415,7 @@ class IngestionService:
             arguider_status="pending" if not pii_detected else "quarantined",
             git_file_path=f"docs/ingested/uncategorized/{filename}",
             target_module_id=target_module_id,
+            is_canonical_decision=is_canonical,
         )
         self.db.add(document)
         await self.db.commit()

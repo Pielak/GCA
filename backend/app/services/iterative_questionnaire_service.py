@@ -131,7 +131,15 @@ async def compute_status_snapshot(db: AsyncSession, project_id: UUID) -> dict[st
 async def _collect_arguider_gaps(
     db: AsyncSession, project_id: UUID, target_pillars: list[str]
 ) -> dict[str, list[dict[str, Any]]]:
-    """Agrega module_candidates/gatekeeper_items do Arguidor por pilar."""
+    """Agrega module_candidates/gatekeeper_items do Arguidor por pilar.
+
+    Reforma 2026-04-25: filtra signatures owner-deferred (gap_aging_service)
+    pra não voltar a perguntar sobre o que owner já decidiu não priorizar.
+    """
+    from app.services.gap_aging_service import gap_signature, get_deferred_signatures
+
+    deferred_sigs = await get_deferred_signatures(db, project_id)
+
     result = await db.execute(
         select(ArguiderAnalysis)
         .join(IngestedDocument, IngestedDocument.id == ArguiderAnalysis.document_id)
@@ -154,9 +162,14 @@ async def _collect_arguider_gaps(
             if not isinstance(item, dict):
                 continue
             pillar = item.get("pillar") or item.get("affected_pillar")
-            if pillar in gaps_by_pillar and len(gaps_by_pillar[pillar]) < 8:
+            if pillar not in gaps_by_pillar:
+                continue
+            text = item.get("name") or item.get("title") or item.get("description") or ""
+            if deferred_sigs and gap_signature(pillar, text) in deferred_sigs:
+                continue
+            if len(gaps_by_pillar[pillar]) < 8:
                 gaps_by_pillar[pillar].append({
-                    "name": str(item.get("name") or item.get("title") or "")[:120],
+                    "name": str(text)[:120],
                     "severity": item.get("severity") or "info",
                 })
     return gaps_by_pillar

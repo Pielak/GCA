@@ -55,6 +55,53 @@ _PILLAR_COLUMNS: Dict[int, str] = {
 }
 
 
+def _filter_negative_score_deltas(
+    deltas: List[Dict[str, Any]],
+    current_ocg: Dict[str, Any],
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Bloqueia deltas que tentem BAIXAR score de pilar.
+
+    Reforma 2026-04-25: GCA é construtor; OCG só cresce. Score só sobe via
+    Arguidor. Pra baixar é necessário owner explicitamente revogar (não
+    via pipeline automático).
+
+    Retorna (mantidos, bloqueados). Bloqueados ganham `_reason='negative_score_blocked'`.
+    """
+    kept: List[Dict[str, Any]] = []
+    blocked: List[Dict[str, Any]] = []
+    for d in deltas or []:
+        if not isinstance(d, dict):
+            kept.append(d)
+            continue
+        path = d.get("path") or ""
+        op = d.get("op") or "replace"
+        # Só nos importamos com replace em PILLAR_SCORES.*.score
+        if op != "replace" or not path.startswith("PILLAR_SCORES.") or not path.endswith(".score"):
+            kept.append(d)
+            continue
+        # Lê valor atual no OCG
+        try:
+            cursor = current_ocg
+            for seg in path.split("."):
+                if isinstance(cursor, dict):
+                    cursor = cursor.get(seg)
+                else:
+                    cursor = None
+                    break
+            old_val = float(cursor) if cursor is not None else None
+            new_val = float(d.get("value")) if d.get("value") is not None else None
+        except (TypeError, ValueError):
+            kept.append(d)
+            continue
+        if old_val is not None and new_val is not None and new_val < old_val:
+            entry = dict(d)
+            entry["_reason"] = "negative_score_blocked"
+            blocked.append(entry)
+        else:
+            kept.append(d)
+    return kept, blocked
+
+
 def _extract_pillar_score(pillars: Dict[str, Any], pillar_num: int) -> Optional[float]:
     """Lookup tolerante na estrutura canônica PILLAR_SCORES.
 
@@ -247,43 +294,50 @@ class OCGUpdaterService:
         # 3. Parse da resposta (formato delta)
         deltas, change_type, context_health = self._parse_llm_response(llm_result)
 
-        # DT-037: auto-CONTRACT — contrato §5 ("ingestão ruim/conflitante contrai confiança")
-        # não pode depender só do LLM honrar o prompt imperativo (DT-035). Aqui forçamos
-        # a classificação quando sinais objetivos da análise indicam problema.
-        show_stoppers = arguider_analysis.get("show_stoppers") or []
-        gaps = arguider_analysis.get("gaps") or []
-        poor = arguider_analysis.get("poor_definitions") or []
+        # Reforma do Arguidor (2026-04-25): GCA é construtor, não auditor.
+        # O auto-CONTRACT antigo punia score por gaps/show_stoppers/poor_definitions
+        # — exatamente o viés pessimista que o owner do AJA documentou no feedback
+        # `feedback_gca_construtor_nao_governanca`. Aqui mantemos apenas a métrica
+        # de quality muito baixa como sinal de CONTRACT, e ainda assim só em modo
+        # corporate. Em solo_owner/team, change_type vem do LLM sem pressão a baixar.
         ingestion_quality = (context_health or {}).get("quality", 0.5)
 
-        should_force_contract = False
-        contract_reasons = []
-        if len(show_stoppers) > 0:
-            should_force_contract = True
-            contract_reasons.append(f"{len(show_stoppers)} show_stopper(s)")
-        if isinstance(ingestion_quality, (int, float)) and ingestion_quality < 0.4:
-            should_force_contract = True
-            contract_reasons.append(f"context_health.quality={ingestion_quality:.2f} < 0.4")
-        # Se há muita lacuna (gaps) + muitas definições fracas, também é CONTRACT
-        if len(gaps) >= 3 and len(poor) >= 2:
-            should_force_contract = True
-            contract_reasons.append(f"{len(gaps)} gaps + {len(poor)} poor_definitions")
+        gov_mode = "solo_owner"
+        try:
+            gov_row = await self.db.execute(
+                select(Project.governance_mode).where(Project.id == project_id)
+            )
+            gov_mode = gov_row.scalar() or "solo_owner"
+        except Exception:  # noqa: BLE001
+            pass
 
-        if should_force_contract and change_type != "CONTRACT":
+        if gov_mode == "corporate" and isinstance(ingestion_quality, (int, float)) and ingestion_quality < 0.3:
             logger.warning(
                 "ocg_updater.change_type_forced",
                 project_id=str(project_id),
                 original_type=change_type,
                 forced_to="CONTRACT",
-                reasons=contract_reasons,
-                message=(
-                    "LLM retornou change_type inconsistente com sinais de baixa qualidade "
-                    "da análise. Forçando CONTRACT para aderir ao contrato §5."
-                ),
+                reason=f"corporate mode + quality {ingestion_quality:.2f} < 0.3",
             )
             change_type = "CONTRACT"
-            # Também força confidence a baixar se o LLM deixou acima de 0.5
             if context_health.get("confidence", 0.5) > 0.5:
                 context_health["confidence"] = max(0.3, context_health.get("confidence", 0.5) - 0.2)
+
+        # Filtro defensivo — bloqueia deltas que tentem BAIXAR score de pilar.
+        # Defesa em profundidade: o prompt já instrui o Arguidor a NUNCA propor
+        # score_delta negativo, mas o LLM ainda erra. Aqui rejeitamos deterministicamente
+        # qualquer replace em PILLAR_SCORES.*.score onde value < old_value.
+        deltas, blocked_negative = _filter_negative_score_deltas(deltas, current_ocg_data)
+        if blocked_negative:
+            logger.info(
+                "ocg_updater.negative_score_blocked",
+                project_id=str(project_id),
+                count=len(blocked_negative),
+                samples=[
+                    {"path": d.get("path"), "old": d.get("old_value"), "tried": d.get("value")}
+                    for d in blocked_negative[:5]
+                ],
+            )
 
         # 4. Aplicar deltas localmente (deterministic, sem LLM, com optimistic concurrency)
         updated_ocg, applied, rejected = apply_deltas(current_ocg_data, deltas)

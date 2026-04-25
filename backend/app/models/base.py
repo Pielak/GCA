@@ -1022,6 +1022,11 @@ class IngestedDocument(Base):
     arguider_started_at = Column(DateTime(timezone=True), nullable=True)
     arguider_completed_at = Column(DateTime(timezone=True), nullable=True)
     arguider_error_message = Column(Text, nullable=True)
+    # Reforma Arguidor #1 (2026-04-25): flag de decisão canônica do owner.
+    # Documentos com essa flag têm precedência sobre conteúdo antigo no OCG —
+    # substituem valores em vez de gerar gap punitivo. Auto-detectado por
+    # filename/category na ingestão; pode ser flipado manualmente pelo owner.
+    is_canonical_decision = Column(Boolean, nullable=False, default=False, server_default="false")
     # MVP 8 Fase 1 — feedback de progresso. Estágio textual canônico +
     # porcentagem bucket por estágio. Frontend renderiza barra real.
     arguider_stage = Column(String(40), nullable=False, default="queued")
@@ -1934,3 +1939,24 @@ class ScaffoldRunItem(Base):
     # Camada B: lista de paths (JSON-serializado) dos peers em que este
     # item depende. Vazio = sem dep. Toposort no execute_run.
     depends_on = Column(Text, nullable=False, default="[]", server_default="[]")
+
+
+class DeferredGap(Base):
+    """Aging de gaps recorrentes — reforma Arguidor #1 (2026-04-25).
+
+    Após 5 sightings sem ação, o gap vira owner-deferred e para de
+    impactar o score. Owner ressuscita manualmente se quiser.
+    """
+    __tablename__ = "deferred_gaps"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    gap_signature = Column(String(64), nullable=False)
+    pillar = Column(String(40), nullable=True)
+    sample_text = Column(Text, nullable=True)
+    sightings_count = Column(Integer, nullable=False, default=1)
+    first_seen_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    deferred_at = Column(DateTime(timezone=True), nullable=True)
+    revived_at = Column(DateTime(timezone=True), nullable=True)
+    revived_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)

@@ -249,46 +249,91 @@ class DocumentExtractor:  # noqa: E302
 
 ARGUIDER_SYSTEM_PROMPT = """
 Você é o Arguidor do GCA (Gestão de Codificação Assistida).
-Seu papel é analisar documentos ingeridos em projetos de software e:
+GCA é construtor de aplicações, não auditor. Seu papel é EXTRAIR INFORMAÇÃO
+ÚTIL dos documentos ingeridos pra alimentar a cascata canônica
+Backlog → Roadmap → Scaffold, e propor CRESCIMENTO do OCG.
 
-1. Classificar o tipo e categoria do documento
-2. Identificar GAPS em relação ao OCG (Objeto Contexto Global) do projeto
-3. Identificar SHOW-STOPPERS: contradições graves que impedem implementação
-4. Identificar MÁ DEFINIÇÃO: ambiguidades que precisam ser esclarecidas
-5. Sugerir MELHORIAS de forma objetiva e acionável
-6. Identificar MÓDULOS CANDIDATOS: funcionalidades implementáveis
+## SUAS DUAS RESPONSABILIDADES INSUBSTITUÍVEIS
 
-Para cada módulo candidato, decida se é:
-- 'feature': funcionalidade completa de negócio
-- 'component': componente técnico reutilizável
+1. **MÓDULOS CANDIDATOS** (`module_candidates`): extrair funcionalidades
+   implementáveis do documento. Cada módulo vira BacklogItem automaticamente
+   e alimenta o /scaffold/plan.
 
-## Regra canônica — hardcode vs parametrização (M01 Fase A)
+2. **DELTAS POSITIVOS DO OCG** (`ocg_fields_to_update`): propor crescimento
+   do OCG quando o documento traz informação nova substantiva. Score só
+   sobe — você NÃO baixa score por nada.
+
+## COISAS QUE VOCÊ TAMBÉM IDENTIFICA — MAS NÃO PUNEM SCORE
+
+Estas saídas existem APENAS pra alimentar o agente "Questões em Aberto"
+gerar perguntas pro owner:
+
+- `gaps`: informação faltante no documento (vira pergunta)
+- `show_stoppers`: contradição interna ao próprio documento (vira pergunta)
+- `poor_definitions`: ambiguidades (vira pergunta)
+- `improvement_suggestions`: opcional, descartável
+
+NUNCA proponha `ocg_fields_to_update` com score_delta negativo
+baseado em gap/show_stopper/poor_definition. Se há gap, é trabalho do
+"Questões em Aberto"; não é punição.
+
+## REGRA DURA — CONTRADIÇÃO ENTRE DOC NOVO E OCG ANTIGO
+
+Quando o documento ingerido **contradiz** valor já existente no OCG,
+NÃO gere gap punitivo nem score_delta negativo. O documento NOVO **substitui**
+o valor antigo (`ocg_fields_to_update` com novo valor; sem alterar score).
+
+Exemplo: OCG diz "DataJud é integração obrigatória"; documento ingerido
+diz "não há integração com API externa". Resposta correta:
+  - `ocg_fields_to_update`: substitui INTEGRATIONS pra remover DataJud
+  - `improvement_suggestions`: registra a substituição como nota
+  - NUNCA: gap "contradição DataJud" com score_delta negativo
+
+Se o documento for ambíguo sobre a substituição, gere `gap` (vai pro
+Questões em Aberto pro owner confirmar) — sem mexer score.
+
+## REGRA DE DELTA POSITIVO PROPORCIONAL
+
+Quando o documento traz informação nova substantiva, sugira score_delta
+proporcional à magnitude:
+  - 1 fato novo isolado: +1
+  - 5-10 regras/decisões formalizadas: +3 a +5
+  - 20+ items formalizados (regras de negócio, RNFs, estrutura completa): +5 a +10
+  - Decisão canônica do owner (Ata, RFC formal, charter): +5 a +15
+
+Você NUNCA propõe score_delta negativo. Período.
+
+## REGRA CANÔNICA — HARDCODE VS PARAMETRIZAÇÃO
 
 Quando o documento declara que um item (token, chave, endpoint, URL externa,
 cert, quota, feature flag, etc) será **parametrizável** — env var, secret
-no vault, config por ambiente (dev/staging/prod) ou por cliente/tenant —
-NÃO gere gap técnico pedindo "spec de auth" ou "endpoint não definido".
-A declaração "será parametrizado via DATAJUD_API_KEY" é RESPOSTA VÁLIDA
-pro CodeGen: vai virar entry no `.env.example` + leitura em `settings.py`
-(ou equivalente da stack) + mapeamento no secret manager.
+no vault, config por ambiente, por tenant — NÃO gere gap técnico pedindo
+"spec de auth" ou "endpoint não definido". É RESPOSTA VÁLIDA pro CodeGen.
 
-Padrões canônicos que resolvem gaps de configuração:
-- "Parametrizável via env `<NOME>`" / "Variável de ambiente" / "Config por ambiente".
-- "Secret (vault)" / "HashiCorp Vault" / "AWS Secrets Manager" / "Infisical".
-- "Configurável por tenant/cliente".
-- "Hardcoded no código (vale pra todos)".
+Padrões canônicos que resolvem configuração:
+- "Parametrizável via env `<NOME>`" / "Variável de ambiente"
+- "Secret (vault)" / "HashiCorp Vault" / "AWS Secrets Manager" / "Infisical"
+- "Configurável por tenant/cliente"
+- "Hardcoded no código"
 
-Se o documento usa um desses padrões, registre o item como MELHORIA
-informacional (documentando o contrato de config), não como GAP. Só é gap
-se o item for mencionado sem definir qual das opções acima se aplica —
-nesse caso, o gap é "definir escopo de parametrização", não "spec técnica".
+Se um desses padrões aparece, registre como `improvement_suggestion`
+(documentando o contrato de config), não como gap.
+
+## MÓDULOS CANDIDATOS
+
+Para cada `module_candidate`, decida `module_type` em UMA das 6 categorias
+canônicas: `infrastructure`, `observability`, `middleware`, `backend_service`,
+`feature`, `deploy_pipeline`.
+
+`ready_for_codegen=true` apenas quando o documento fornece TODAS as
+informações necessárias pra implementar.
 
 ## IMPORTANTE
 
 - Seja específico. Cada item com ID único (G001, SS001, PD001, IS001).
-- Módulo só é ready_for_codegen=true se o documento fornece TODAS as informações.
-- Ao atualizar OCG, sugira apenas campos diretamente impactados.
 - Responda SOMENTE com JSON válido.
+- Auditoria de código gerado é responsabilidade do Auditor pós-CodeGen
+  (Arguidor #2), não sua. Você só constrói.
 """
 
 
@@ -507,6 +552,23 @@ class ArguiderService:
             user_prompt = self._build_prompt(effective_doc_text, current_ocg, previous_analyses or [])
             if governance_mode == "solo_owner":
                 user_prompt += SOLO_OWNER_PROMPT_CLAUSE
+
+            # Reforma Arguidor #1 (2026-04-25) — documento canônico tem
+            # precedência soberana. Quando is_canonical_decision=TRUE, o
+            # documento substitui valores antigos no OCG; conflitos não
+            # geram gap punitivo.
+            if document is not None and getattr(document, "is_canonical_decision", False):
+                user_prompt += (
+                    "\n\n=== DOCUMENTO CANÔNICO (PRECEDÊNCIA SOBERANA) ===\n"
+                    "Este documento foi marcado como DECISÃO CANÔNICA do owner. "
+                    "Suas declarações SUBSTITUEM os valores antigos no OCG — não "
+                    "geram gap nem score_delta negativo. Use ocg_fields_to_update "
+                    "com `replace` pra atualizar PROJECT_PROFILE, STACK_RECOMMENDATION, "
+                    "ARCHITECTURE_OVERVIEW, INTEGRATIONS conforme o documento decide. "
+                    "Conflitos com OCG anterior são RESOLVIDOS PELO DOCUMENTO — não "
+                    "registrar como ambiguidade ou contradição. Score_delta dos pilares "
+                    "afetados deve ser POSITIVO (+5 a +15) por formalização canônica."
+                )
 
             # Chamar LLM do projeto (multi-provider, DT-032)
             start_time = datetime.now(timezone.utc)
@@ -750,6 +812,32 @@ class ArguiderService:
                 tokens_used=tokens_used,
                 latency_ms=latency_ms,
             )
+
+            # Reforma do Arguidor #1 — aging de gaps (2026-04-25): registra
+            # sightings de cada gap reportado e dispara defer automático
+            # quando atinge o threshold em modo solo_owner.
+            try:
+                from app.services.gap_aging_service import update_sightings_for_gaps
+                gaps_for_aging = (
+                    list(result_json.get("gaps") or [])
+                    + list(result_json.get("show_stoppers") or [])
+                    + list(result_json.get("poor_definitions") or [])
+                )
+                aging_stats = await update_sightings_for_gaps(self.db, project_id, gaps_for_aging)
+                await self.db.commit()
+                if aging_stats.get("defer_triggered"):
+                    logger.info(
+                        "arguider.gaps_deferred",
+                        project_id=str(project_id),
+                        defer_triggered=aging_stats["defer_triggered"],
+                        new_signatures=aging_stats["new_signatures"],
+                    )
+            except Exception as aging_err:  # noqa: BLE001
+                logger.warning(
+                    "arguider.gap_aging_failed",
+                    project_id=str(project_id),
+                    error=str(aging_err),
+                )
 
             # Cascata canônica Backlog→Roadmap→Scaffold (2026-04-24): após
             # cada análise, promove os module_candidates novos pro backlog
