@@ -23,7 +23,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.models.base import OCG, OCGDeltaLog
+from app.models.base import OCG, OCGDeltaLog, Project
 from app.services.ai_billing_service import AIBillingService
 from app.services.ai_key_resolver import AIKeyResolver
 from app.services.audit_service import AuditService
@@ -881,8 +881,21 @@ class OCGUpdaterService:
         fossilizado no valor da geração inicial. UI lê das colunas → dogfood
         via "nada muda" mesmo com Arguidor + apply_deltas funcionando.
         """
+        # MVP governance_mode (2026-04-24): em projeto solo_owner, P1
+        # (business case) é "owner-declared" — não-mensurável pelo Arguidor.
+        # Marcamos no JSON e EXCLUÍMOS do cálculo do composite, pra owner
+        # não ser punido por ausência de cronograma absoluto/orçamento formal.
+        gov_row = await self.db.execute(
+            select(Project.governance_mode).where(Project.id == ocg.project_id)
+        )
+        governance_mode = gov_row.scalar() or "solo_owner"
+        p1_owner_declared = governance_mode == "solo_owner"
+
         # 1. Extrair score de cada pilar do JSON canônico, gravar nas colunas
         pillars = updated_ocg.get("PILLAR_SCORES") or {}
+        if p1_owner_declared and isinstance(pillars.get("P1_business_case"), dict):
+            pillars["P1_business_case"]["mode"] = "owner-declared"
+
         pillar_scores: Dict[int, float] = {}
         for n, col in _PILLAR_COLUMNS.items():
             score = _extract_pillar_score(pillars, n)
@@ -892,12 +905,17 @@ class OCGUpdaterService:
 
         # 2. Recalcular overall: média ponderada normalizada pelos pesos dos
         #    pilares EFETIVAMENTE presentes (defesa contra OCG parcial).
+        # Em solo_owner, P1 sai do denominador do composite.
         overall_new: Optional[float] = None
-        if pillar_scores:
-            total_weight = sum(_PILLAR_WEIGHTS[n] for n in pillar_scores)
+        composite_pillars = {
+            n: s for n, s in pillar_scores.items()
+            if not (p1_owner_declared and n == 1)
+        }
+        if composite_pillars:
+            total_weight = sum(_PILLAR_WEIGHTS[n] for n in composite_pillars)
             if total_weight > 0:
                 weighted_sum = sum(
-                    pillar_scores[n] * _PILLAR_WEIGHTS[n] for n in pillar_scores
+                    composite_pillars[n] * _PILLAR_WEIGHTS[n] for n in composite_pillars
                 )
                 overall_new = round(weighted_sum / total_weight, 2)
                 ocg.overall_score = overall_new
@@ -905,8 +923,14 @@ class OCGUpdaterService:
                 comp = updated_ocg.get("COMPOSITE_SCORE")
                 if isinstance(comp, dict):
                     comp["value"] = overall_new
+                    if p1_owner_declared:
+                        comp["p1_excluded"] = True
+                        comp["p1_mode"] = "owner-declared"
                 else:
-                    updated_ocg["COMPOSITE_SCORE"] = {"value": overall_new}
+                    updated_ocg["COMPOSITE_SCORE"] = {
+                        "value": overall_new,
+                        **({"p1_excluded": True, "p1_mode": "owner-declared"} if p1_owner_declared else {}),
+                    }
 
         # 3. Fallback: se o LLM emitiu overall_score top-level (raro, formato
         #    legado) e não conseguimos derivar dos pilares, respeita.

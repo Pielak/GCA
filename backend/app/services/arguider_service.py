@@ -20,7 +20,7 @@ import structlog
 from app.core.config import settings
 from app.models.base import (
     IngestedDocument, ArguiderAnalysis, ModuleCandidate,
-    OCG,
+    OCG, Project,
 )
 
 logger = structlog.get_logger(__name__)
@@ -491,7 +491,22 @@ class ArguiderService:
                 )
             else:
                 effective_doc_text = document_text
+
+            # MVP governance_mode (2026-04-24): owner solo não recebe cobrança
+            # de PM corporativo. Carregamos o modo do projeto e injetamos
+            # cláusula extra no prompt + filtragem defensiva pós-LLM.
+            from app.services.governance_filter import (
+                SOLO_OWNER_PROMPT_CLAUSE,
+                filter_governance_items,
+            )
+            project_row = await self.db.execute(
+                select(Project.governance_mode).where(Project.id == project_id)
+            )
+            governance_mode = project_row.scalar() or "solo_owner"
+
             user_prompt = self._build_prompt(effective_doc_text, current_ocg, previous_analyses or [])
+            if governance_mode == "solo_owner":
+                user_prompt += SOLO_OWNER_PROMPT_CLAUSE
 
             # Chamar LLM do projeto (multi-provider, DT-032)
             start_time = datetime.now(timezone.utc)
@@ -504,6 +519,24 @@ class ArguiderService:
 
             # Parsear JSON
             result_json = self._extract_json(response_text)
+
+            # MVP governance_mode — defesa em profundidade: mesmo com a
+            # cláusula no prompt, LLM ocasionalmente devolve item de
+            # governança. Filtramos antes de persistir.
+            if governance_mode == "solo_owner":
+                for key in ("gaps", "module_candidates", "improvement_suggestions",
+                            "show_stoppers", "poor_definitions"):
+                    items = result_json.get(key) or []
+                    kept, dropped = filter_governance_items(items)
+                    if dropped:
+                        logger.info(
+                            "arguider.governance_filtered",
+                            project_id=str(project_id),
+                            key=key,
+                            kept=len(kept),
+                            dropped=len(dropped),
+                        )
+                    result_json[key] = kept
 
             # M02 — filtra gaps resolvíveis por default de domínio (LGPD, CC, CPC,
             # CLT, defaults técnicos/segurança canônicos). Cada gap resolvido é

@@ -292,13 +292,22 @@ class BacklogService:
         existing_titles = {r.title for r in existing.all()}
 
         created = 0
+        # MVP governance_mode (2026-04-24): items que cheirarem a governança
+        # corporativa (EAP, RACI, cronograma absoluto, orçamento) são marcados
+        # com category='governance' em vez de 'modules'. Owner em solo_owner
+        # não vê esses items na listagem default; troca pra team/corporate
+        # ou filtra explicitamente por categoria pra acessá-los.
+        from app.services.governance_filter import is_governance_topic
+
         for mc in all_candidates:
             if mc.name in existing_titles:
                 continue
 
+            haystack = f"{mc.name or ''} {mc.description or ''}"
+            category = "governance" if is_governance_topic(haystack) else "modules"
             item = BacklogItem(
                 project_id=project_id,
-                category="modules",
+                category=category,
                 module_type=mc.module_type or "service",
                 title=mc.name,
                 description=mc.description,
@@ -320,8 +329,14 @@ class BacklogService:
         return {"created": created, "skipped": len(all_candidates) - created}
 
     async def list_backlog(self, project_id: UUID, category: Optional[str] = None) -> list[dict]:
-        """Lista itens do backlog por projeto (exclui sub-items, mostra contagem)"""
+        """Lista itens do backlog por projeto (exclui sub-items, mostra contagem).
+
+        MVP governance_mode (2026-04-24): em projeto solo_owner, items com
+        `category='governance'` ficam ocultos por default. Owner consegue
+        ver passando `category='governance'` explicitamente.
+        """
         from sqlalchemy import func
+        from app.models.base import Project
 
         # Listar apenas itens raiz (sem parent_item_id)
         query = select(BacklogItem).where(
@@ -330,6 +345,14 @@ class BacklogService:
         )
         if category:
             query = query.where(BacklogItem.category == category)
+        else:
+            # Sem filtro explícito: aplica regra de governança por modo do projeto.
+            gov_row = await self.db.execute(
+                select(Project.governance_mode).where(Project.id == project_id)
+            )
+            governance_mode = gov_row.scalar() or "solo_owner"
+            if governance_mode == "solo_owner":
+                query = query.where(BacklogItem.category != "governance")
         query = query.order_by(
             BacklogItem.priority.asc(),
             BacklogItem.created_at.desc(),

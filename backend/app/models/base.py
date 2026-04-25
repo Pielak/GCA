@@ -133,6 +133,11 @@ class Project(Base):
     # pra evitar JOIN/aggregate em project_backups.
     last_backup_at = Column(DateTime(timezone=True), nullable=True)
 
+    # MVP governance_mode (2026-04-24): separa core (gerador de código) de
+    # módulos opt-in (PM corporativo). solo_owner suprime cobranças de
+    # governança no Arguidor/M01/Backlog. team/corporate desbloqueiam módulos.
+    governance_mode = Column(String(20), nullable=False, default="solo_owner", server_default="solo_owner")
+
     # Relationships
     organization = relationship("Organization", back_populates="projects")
     members = relationship("ProjectMember", back_populates="project")

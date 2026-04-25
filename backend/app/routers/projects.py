@@ -262,7 +262,62 @@ async def get_project_detail(
         "gatekeeperScore": gk_score,
         "pendingIssues": 0,
         "role": role,
+        "governanceMode": project.governance_mode,
     }
+
+
+@router.patch("/{project_id}/governance-mode")
+async def update_governance_mode(
+    project_id: UUID,
+    body: dict,
+    permissions: dict = Depends(require_action("project:edit")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Atualiza o modo de governança do projeto.
+
+    Modos canônicos: solo_owner (default — pipeline suprime gaps de PM
+    corporativo), team (intermediário, futuro), corporate (todos os
+    módulos opt-in disponíveis, futuro).
+    """
+    from app.models.base import Project
+    from app.services.audit_service import AuditService
+    from sqlalchemy import select
+
+    new_mode = (body or {}).get("governance_mode")
+    valid_modes = {"solo_owner", "team", "corporate"}
+    if new_mode not in valid_modes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"governance_mode deve ser um de: {sorted(valid_modes)}",
+        )
+
+    project = (await db.execute(
+        select(Project).where(Project.id == project_id)
+    )).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    previous_mode = project.governance_mode
+    if previous_mode == new_mode:
+        return {"changed": False, "governance_mode": new_mode}
+
+    project.governance_mode = new_mode
+    db.add(project)
+
+    await AuditService(db).log_event(
+        event_type="PROJECT_GOVERNANCE_MODE_CHANGED",
+        resource_type="project",
+        actor_id=permissions["user_id"],
+        resource_id=project.id,
+        details={
+            "project_id": str(project_id),
+            "from": previous_mode,
+            "to": new_mode,
+        },
+    )
+    await db.commit()
+
+    return {"changed": True, "governance_mode": new_mode, "previous_mode": previous_mode}
 
 
 @router.get("/{project_id}/members")

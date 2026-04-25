@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useSearchParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
-import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle, Plus, Trash2, Star, GitMerge } from 'lucide-react'
+import { Settings, Cpu, Mail, Loader2, Check, Eye, EyeOff, Zap, Wifi, WifiOff, AlertCircle, GitBranch, ClipboardList, Circle, CheckCircle2, AlertTriangle, Plus, Trash2, Star, GitMerge, ShieldCheck } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useAuthStore } from '@/stores/authStore'
@@ -13,8 +13,31 @@ import { IssueTrackerPanel } from '@/components/settings/IssueTrackerPanel'
 import { NotifierPanel } from '@/components/settings/NotifierPanel'
 import { formatDateTimeBR } from '@/lib/datetime'
 
-type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations'
-const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario', 'integrations']
+type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations' | 'governance'
+const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario', 'integrations', 'governance']
+
+type GovernanceMode = 'solo_owner' | 'team' | 'corporate'
+
+const GOVERNANCE_MODES: { value: GovernanceMode; label: string; description: string }[] = [
+  {
+    value: 'solo_owner',
+    label: 'Owner Solo',
+    description:
+      'Você decide, executa e financia sozinho. O pipeline (Arguidor/M01/Backlog) NÃO cobra cronograma absoluto, EAP, RACI, orçamento, KPIs corporativos, go/no-go formal nem status report. P1 (business case) fica como "owner-declared" — não baixa o score do projeto. Personas técnicas (gerente/arquiteto/dba/dev/tester) ficam disponíveis sob demanda via /revisar-*.',
+  },
+  {
+    value: 'team',
+    label: 'Time pequeno',
+    description:
+      'Comportamento intermediário. Core idêntico ao solo_owner, mas habilita módulos opt-in básicos (estimativa de esforço — quando o módulo for entregue). Modo reservado pra evolução futura.',
+  },
+  {
+    value: 'corporate',
+    label: 'Corporativo',
+    description:
+      'Pipeline completo com cobrança de governança (cronograma, orçamento, RACI, KPIs, go/no-go). Use quando há stakeholders externos pedindo prestação de contas. P1 entra no cálculo do composite normalmente.',
+  },
+]
 
 const PROVIDER_LABELS: Record<string, string> = {
   anthropic: 'Anthropic (Claude)',
@@ -99,6 +122,10 @@ export function ProjectSettingsPage() {
   const [testingSmtp, setTestingSmtp] = useState(false)
   const [smtpTestResult, setSmtpTestResult] = useState<TestResult>(null)
 
+  // MVP governance_mode: estado local sincronizado com /projects/{id} detail.
+  const [governanceMode, setGovernanceMode] = useState<GovernanceMode>('solo_owner')
+  const [savingGovernance, setSavingGovernance] = useState(false)
+
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 4000)
@@ -118,10 +145,33 @@ export function ProjectSettingsPage() {
         setSmtpFrom(data.smtp.from_email || '')
       }
     } catch { /* sem settings */ }
+    // Carrega governance_mode do detail do projeto
+    try {
+      const det = await apiClient.get(`/projects/${projectId}`)
+      const mode = det.data?.governanceMode
+      if (mode === 'solo_owner' || mode === 'team' || mode === 'corporate') {
+        setGovernanceMode(mode)
+      }
+    } catch { /* mantém default */ }
     setLoading(false)
   }, [projectId])
 
   useEffect(() => { loadSettings() }, [loadSettings])
+
+  const saveGovernanceMode = async (next: GovernanceMode) => {
+    if (!projectId || next === governanceMode) return
+    setSavingGovernance(true)
+    try {
+      await apiClient.patch(`/projects/${projectId}/governance-mode`, { governance_mode: next })
+      setGovernanceMode(next)
+      showToast('Modo de governança atualizado.', 'success')
+      queryClient.invalidateQueries({ queryKey: ['project-detail', projectId] })
+    } catch (err) {
+      showToast(getErrorMessage(err) || 'Falha ao atualizar modo de governança.', 'error')
+    } finally {
+      setSavingGovernance(false)
+    }
+  }
 
   const addLlmProvider = async () => {
     // DT-023: validações específicas por provider — Ollama exige base_url,
@@ -434,6 +484,10 @@ export function ProjectSettingsPage() {
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'integrations' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <GitMerge className="w-3.5 h-3.5" /> Integrações
           <span className="text-[10px] text-slate-500 uppercase tracking-wide">opcional</span>
+        </button>
+        <button onClick={() => setActiveTab('governance')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'governance' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <ShieldCheck className="w-3.5 h-3.5" /> Governança
         </button>
       </div>
 
@@ -769,6 +823,68 @@ export function ProjectSettingsPage() {
         <div className="space-y-6">
           <IssueTrackerPanel projectId={projectId} />
           <NotifierPanel projectId={projectId} />
+        </div>
+      )}
+
+      {/* MVP governance_mode — Tab: Governança. Owner escolhe o modo,
+          que dita se Arguidor/M01/Backlog cobram artefatos de PM. */}
+      {activeTab === 'governance' && projectId && (
+        <div className="space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div className="flex items-start gap-3">
+              <ShieldCheck className="w-5 h-5 text-violet-400 mt-0.5" />
+              <div>
+                <h3 className="text-slate-200 text-sm font-semibold">Modo de Governança</h3>
+                <p className="text-slate-400 text-xs leading-relaxed mt-1">
+                  GCA é construtor de aplicações, não controlador de projeto.
+                  Esse modo controla se o pipeline (Arguidor / Questões em Aberto / Backlog)
+                  cobra artefatos de gestão (cronograma, EAP, RACI, orçamento, KPIs corporativos).
+                  O core de geração de código (back/front/middleware/DB/segurança/compliance funcional)
+                  funciona igual nos três modos.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {GOVERNANCE_MODES.map((mode) => {
+              const isActive = governanceMode === mode.value
+              return (
+                <button
+                  key={mode.value}
+                  type="button"
+                  disabled={!canEdit || savingGovernance}
+                  onClick={() => saveGovernanceMode(mode.value)}
+                  title={!canEdit ? 'Sem permissão para alterar' : undefined}
+                  className={`w-full text-left bg-slate-900 border rounded-xl p-5 transition-colors ${
+                    isActive
+                      ? 'border-violet-500 ring-1 ring-violet-500/30'
+                      : 'border-slate-800 hover:border-slate-700'
+                  } ${!canEdit || savingGovernance ? 'opacity-60 cursor-not-allowed' : ''}`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-4 h-4 rounded-full border-2 mt-0.5 flex-shrink-0 ${
+                      isActive ? 'border-violet-500 bg-violet-500' : 'border-slate-600'
+                    }`}>
+                      {isActive && <div className="w-1.5 h-1.5 bg-white rounded-full m-auto mt-[3px]" />}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-slate-200 text-sm font-medium">{mode.label}</span>
+                        {isActive && (
+                          <span className="text-[10px] text-violet-400 uppercase tracking-wide font-semibold">ativo</span>
+                        )}
+                        {savingGovernance && isActive && (
+                          <Loader2 className="w-3.5 h-3.5 text-violet-400 animate-spin" />
+                        )}
+                      </div>
+                      <p className="text-slate-400 text-xs leading-relaxed mt-1">{mode.description}</p>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
         </div>
       )}
     </div>
