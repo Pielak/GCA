@@ -187,12 +187,23 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
       set({ ...initialState })
     },
 
+    /**
+     * Dispensa o overlay flutuante de progresso SEM apagar a run em si.
+     * Antes esta função fazia `set({ ...initialState })` + `clearRunId`,
+     * o que zerava snapshot/runId/projectId do store. Resultado colateral:
+     * a CodeGeneratorPage perdia a fonte de verdade dos items e ficava
+     * incapaz de carregar conteúdo dos arquivos (cai no placeholder).
+     *
+     * Agora dismiss só esconde o overlay (active=false + finishedAt=null
+     * faz `shouldShow` no overlay virar false). Snapshot, runId e
+     * projectId persistem em memória; localStorage também — assim refresh
+     * de página ou navegação re-hidratam normalmente. Reset total fica
+     * com `reset()` (caminho explícito do user).
+     */
     dismiss: () => {
-      const { active, projectId } = get()
-      if (active) return
-      if (projectId) clearRunId(projectId)
+      if (get().active) return
       clearPoll()
-      set({ ...initialState })
+      set({ active: false, finishedAt: null, errorMessage: null })
     },
 
     /**
