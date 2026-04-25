@@ -64,6 +64,7 @@ interface CodeGenProgressState {
 
   startScaffold: (projectId: string, projectName: string) => Promise<void>
   hydrateForProject: (projectId: string, projectName: string) => Promise<void>
+  refresh: () => Promise<void>
   apply: () => Promise<{ committed: number; failed: number } | null>
   retryFailed: () => Promise<{ items_reset: number; items_done_preserved: number } | null>
   fetchItemContent: (itemId: string) => Promise<string | null>
@@ -306,6 +307,15 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
         set({ errorMessage: msg })
         return null
       }
+    },
+
+    /**
+     * Força um refetch do snapshot atual (sem early-return de hydrateForProject).
+     * Usado quando uma view depende de snapshot fresco (ex: clicar em arquivo
+     * cujo `has_content` no snapshot local pode estar stale).
+     */
+    refresh: async () => {
+      await pollOnce()
     },
 
     retryFailed: async () => {

@@ -572,8 +572,21 @@ export function CodeGeneratorPage() {
 
     // Camada A — content lazy-load: se há item no snapshot e tem content,
     // busca do server. Evita carregar ~200 arquivos × ~5kB no payload do GET runs.
-    const snapshot = useCodeGenProgressStore.getState().snapshot
-    const runItem = snapshot?.items.find(i => i.path === path)
+    let snapshot = useCodeGenProgressStore.getState().snapshot
+    let runItem = snapshot?.items.find(i => i.path === path)
+
+    // Defesa contra snapshot stale (race entre hidratação inicial e mudanças
+    // server-side — ex: retry-failed terminou, mas o snapshot Zustand foi
+    // tirado durante a janela entre dois poll ticks). Se o item não foi
+    // achado OU has_content=false, força refresh do snapshot antes de desistir.
+    if (!runItem || !runItem.has_content) {
+      try {
+        await useCodeGenProgressStore.getState().refresh()
+      } catch { /* ignore — segue pro fallback Git */ }
+      snapshot = useCodeGenProgressStore.getState().snapshot
+      runItem = snapshot?.items.find(i => i.path === path)
+    }
+
     if (runItem && runItem.has_content) {
       setFileLoading(true)
       try {
