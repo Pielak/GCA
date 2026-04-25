@@ -33,6 +33,7 @@ import { ArguiderPage } from './pages/projects/ArguiderPage';
 import { CodeGeneratorPage } from './pages/projects/CodeGeneratorPage';
 import { QAReadinessPage } from './pages/projects/QAReadinessPage';
 import { RoadmapPage } from './pages/projects/RoadmapPage';
+import { RequirementConsistencyPage } from './pages/projects/RequirementConsistencyPage';
 import { LiveDocsPage } from './pages/projects/LiveDocsPage';
 import { ReadinessPage } from './pages/projects/ReadinessPage';
 import { AcceptInvitationPage } from './pages/AcceptInvitationPage';
@@ -167,6 +168,7 @@ export const router = createBrowserRouter([
           { path: 'tester-review', element: <RequireProjectSetup><TesterReviewPage /></RequireProjectSetup> },
           { path: 'backlog', element: <RequireProjectSetup><BacklogPage /></RequireProjectSetup> },
           { path: 'roadmap', element: <RequireProjectSetup><RoadmapPage /></RequireProjectSetup> },
+          { path: 'consistency', element: <RequireProjectSetup><RequirementConsistencyPage /></RequireProjectSetup> },
           { path: 'docs', element: <RequireProjectSetup><LiveDocsPage /></RequireProjectSetup> },
           { path: 'readiness', element: <RequireProjectSetup><ReadinessPage /></RequireProjectSetup> },
           { path: 'settings', Component: ProjectSettingsPage },

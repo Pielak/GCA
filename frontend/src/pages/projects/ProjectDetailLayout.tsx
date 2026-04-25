@@ -3,7 +3,7 @@ import { Outlet, NavLink, useParams, useNavigate, Link } from 'react-router-dom'
 import {
   ChevronLeft, Activity, Settings, FileText, Shield, GitBranch, Zap,
   Code2, TestTube2, Clock, BookOpen, AlertTriangle, ClipboardList, Loader2,
-  SlidersHorizontal, HelpCircle, ListTodo, CheckCircle2,
+  SlidersHorizontal, HelpCircle, ListTodo, CheckCircle2, ScanSearch,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useProjectPermissions } from '@/hooks/useProjectPermissions'
@@ -42,6 +42,7 @@ const MODULES = [
   { path: 'tester-review', label: 'Revisão de Testes', icon: FileText },
   { path: 'backlog', label: 'Backlog', icon: ClipboardList },
   { path: 'roadmap', label: 'Roadmap', icon: Clock },
+  { path: 'consistency', label: 'Validação de Requisitos', icon: ScanSearch },
   { path: 'docs', label: 'Documentação Viva', icon: BookOpen },
   { path: 'audit', label: 'Auditoria', icon: Shield },
   // MVP 18 Fase 18.1 — entrada Ajuda no nav do projeto.
@@ -50,7 +51,7 @@ const MODULES = [
 
 const PIPELINE_PATHS = new Set([
   'ingestion', 'gatekeeper', 'arguider', 'codegen',
-  'qa', 'tester-review', 'backlog', 'roadmap', 'docs',
+  'qa', 'tester-review', 'backlog', 'roadmap', 'consistency', 'docs',
   'iterative-questionnaire',
 ])
 

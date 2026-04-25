@@ -15,6 +15,7 @@ from app.routers.member_roles_router import router as member_roles_router
 from app.routers.pipeline_quality_router import router as pipeline_quality_router
 from app.routers.pipeline_audit_router import router as pipeline_audit_router
 from app.routers.code_audit_router import router as code_audit_router
+from app.routers.consistency_router import router as consistency_router
 from app.routers.pipeline_orchestration_router import router as pipeline_orchestration_router
 from app.routers.questionnaire_pdf_router import router as questionnaire_pdf_router
 from app.routers.metrics_router import router as metrics_router, project_router as metrics_project_router
@@ -235,6 +236,7 @@ app.include_router(member_roles_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_quality_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_audit_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(code_audit_router, prefix=f"{settings.API_PREFIX}")
+app.include_router(consistency_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_orchestration_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(questionnaire_pdf_router, prefix=f"{settings.API_PREFIX}", tags=["questionnaire-pdf"])
 app.include_router(metrics_router, prefix=f"{settings.API_PREFIX}", tags=["metrics"])
