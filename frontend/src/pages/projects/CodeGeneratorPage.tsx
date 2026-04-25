@@ -520,23 +520,26 @@ export function CodeGeneratorPage() {
     // Se já temos scaffold gerado (cache local), usar ele
     if (scaffoldFiles.size > 0) return
 
-    // Se há snapshot da run ativa com items, NÃO sobrescreve fileTree com
-    // git tree — o useEffect do snapshot é a fonte canônica nesse caso.
-    // Sem este guard, há race: git/tree (2 calls, mais lento) chega depois
-    // do snapshot (1 call) e sobrescreve a árvore de 164 paths do scaffold
-    // pelos ~20 paths antigos do remote, fazendo o user ver "menos arquivos".
-    const liveSnapshot = useCodeGenProgressStore.getState().snapshot
-    if (liveSnapshot && Array.isArray(liveSnapshot.items) && liveSnapshot.items.length > 0) {
-      return
+    // Helper: checa "tem snapshot do scaffold" no momento exato da decisão
+    // de setFileTree. Releitura via getState() pega o estado atual mesmo
+    // se hidratação assíncrona populou o snapshot enquanto loadTree estava
+    // bloqueado em I/O (git/status + git/tree, ~150-200ms).
+    const hasScaffoldSnapshot = () => {
+      const s = useCodeGenProgressStore.getState().snapshot
+      return !!(s && Array.isArray(s.items) && s.items.length > 0)
     }
+
+    // Guard inicial — se já tem snapshot, nem chama git tree.
+    if (hasScaffoldSnapshot()) return
 
     setTreeLoading(true)
     try {
       const res = await apiClient.get(`/projects/${projectId}/git/status`)
+      if (hasScaffoldSnapshot()) return  // snapshot chegou enquanto rodávamos git/status
       if (res.data?.connected) {
-        // Buscar árvore completa do repositório (arquivos + diretórios, recursivo)
         try {
           const treeRes = await apiClient.get(`/projects/${projectId}/git/tree`)
+          if (hasScaffoldSnapshot()) return  // idem após git/tree
           const entries = (treeRes.data?.tree || []) as Array<{ path: string; type: string }>
           const filePaths = entries.filter(e => e.type === 'file').map(e => e.path)
           if (filePaths.length > 0) {
@@ -545,12 +548,14 @@ export function CodeGeneratorPage() {
             setFileTree(getDefaultTree())
           }
         } catch {
+          if (hasScaffoldSnapshot()) return
           setFileTree(getDefaultTree())
         }
       } else {
         setFileTree(getDefaultTree())
       }
     } catch {
+      if (hasScaffoldSnapshot()) return
       setFileTree(getDefaultTree())
     } finally {
       setTreeLoading(false)
