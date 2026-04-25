@@ -301,12 +301,24 @@ class ScaffoldApplyRequest(BaseModel):
 
 
 class ScaffoldApplyResponse(BaseModel):
-    """Response do /scaffold/apply — resumo dos commits."""
+    """Response do /scaffold/apply (rota legacy, dry_run flow) — resumo dos commits."""
 
     committed: int
     failed: int
     skipped_nmi: int
     results: List[Dict[str, Any]]
+
+
+class ScaffoldApplyAcceptedResponse(BaseModel):
+    """Response do /scaffold/runs/{id}/apply (assíncrono, MVP-E).
+
+    Retornado em 202 Accepted assim que a task Celery é enfileirada.
+    Frontend acompanha via polling em /scaffold/runs/{id} — quando
+    `status='applied'` e `applied_at` setado, apply terminou."""
+
+    run_id: UUID
+    status: str  # 'applying'
+    message: str
 
 
 class ScaffoldRetryResponse(BaseModel):
@@ -948,24 +960,51 @@ async def get_scaffold_run_item_content(
 
 @router.post(
     "/scaffold/runs/{run_id}/apply",
-    response_model=ScaffoldApplyResponse,
-    summary="Commitar items done de uma run no Git",
-    description="Pega os items com status='done' e content preenchido e commita pelo helper canônico.",
+    response_model=ScaffoldApplyAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Enfileira apply assíncrono (MVP-E, 2026-04-25)",
+    description=(
+        "Enfileira `scaffold_apply_executor` no Celery e retorna 202 imediato. "
+        "Frontend acompanha via polling em GET /scaffold/runs/{id}: "
+        "`status` muda de 'completed' → 'applying' → 'applied'. Os contadores "
+        "`apply_committed`/`apply_failed` atualizam incrementalmente. "
+        "Antes do MVP-E o apply era síncrono e estourava timeout do Cloudflare "
+        "(~100s) com 164 commits do AJA, mostrando 'Falha' enganosa."
+    ),
 )
 async def apply_scaffold_run(
     run_id: UUID,
     db: AsyncSession = Depends(get_db),
     user_id: UUID = Depends(get_current_user_from_token),
 ):
-    from app.models.base import ScaffoldRun, ScaffoldRunItem, TestArtifact
+    from app.models.base import ScaffoldRun, ScaffoldRunItem
 
     run = await db.get(ScaffoldRun, run_id)
     if run is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
     await _require_code_action("git:commit", run.project_id, user_id, db)
     await assert_project_setup_complete(db, run.project_id)
-    project = await db.get(Project, run.project_id)
     await _require_git_config(db, run.project_id)
+
+    # Bloqueia chamadas concorrentes ou em estados terminais que não fazem
+    # sentido: applying (em curso), applied (já aplicado, owner deve usar
+    # retry-failed ou novo scaffold), pending/planning/generating/failed
+    # (run ainda não tem items prontos).
+    if run.status == "applying":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Apply já está em curso pra esta run — aguarde o término.",
+        )
+    if run.status == "applied":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Run já foi aplicada. Use retry-failed pra items que falharam ou nova run pra mudanças.",
+        )
+    if run.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run em status '{run.status}'. Aguarde a geração terminar (status=completed) antes de aplicar.",
+        )
 
     items_q = await db.execute(
         select(ScaffoldRunItem)
@@ -979,95 +1018,47 @@ async def apply_scaffold_run(
             detail="Nenhum item da run está com status='done' pra commitar.",
         )
 
-    files_dict = [
-        {"path": it.path, "content": it.content or "", "status": "ready"}
-        for it in done_items
-    ]
-    committed, failed, results = await _commit_scaffold_files(db, run.project_id, files_dict)
-    await _notify_scaffold_completion(db, run.project_id, project.name, committed, failed)
-
-    # QA review automático: arquivos de teste comitados viram TestArtifact pending
-    import re as _re
-    TEST_FILE_RE = _re.compile(
-        r"(^|/)(tests?/|test_[^/]+\.py$|[^/]+_test\.[a-z]+$|[^/]+\.test\.[a-z]+$|[^/]+\.spec\.[a-z]+$)",
-        _re.IGNORECASE,
-    )
-    qa_artifacts_created = 0
-    try:
-        for r in results or []:
-            if not isinstance(r, dict) or r.get("status") != "ok":
-                continue
-            file_path = r.get("path")
-            content_match = next(
-                (it.content for it in done_items if it.path == file_path),
-                None,
-            )
-            if not file_path or not content_match:
-                continue
-            if not TEST_FILE_RE.search(file_path):
-                continue
-            db.add(TestArtifact(
-                project_id=run.project_id,
-                module_id=None,
-                test_type="unit",
-                title=file_path.rsplit("/", 1)[-1][:255],
-                description=f"Teste gerado pelo scaffold run {run_id} em {file_path}",
-                file_path=file_path,
-                content=str(content_match),
-                status="pending_review",
-                created_by=user_id,
-            ))
-            qa_artifacts_created += 1
-    except Exception as qa_err:  # noqa: BLE001
-        logger.warning(
-            "scaffold_run.apply_qa_failed",
-            run_id=str(run_id),
-            error=str(qa_err),
-        )
-
-    run.status = "applied"
-    run.applied_at = datetime.now(timezone.utc)
-    run.apply_committed = committed
-    run.apply_failed = failed
-
-    from app.services.audit_service import AuditEvents, AuditService
-    await AuditService(db).log_codegen_event(
-        event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
-        actor_id=user_id,
-        project_id=run.project_id,
-        action="apply_scaffold_run",
-        files_count=committed,
-        extra={
-            "run_id": str(run_id),
-            "failed": failed,
-            "qa_artifacts_created": qa_artifacts_created,
-        },
-    )
+    # Marca run como 'applying' e zera contadores incrementais. Persiste
+    # `triggered_by` se ainda não setado, pra watchdog poder re-enfileirar
+    # via scaffold_apply_executor sem precisar inferir o user.
+    run.status = "applying"
+    run.apply_committed = 0
+    run.apply_failed = 0
+    run.last_progress_at = datetime.now(timezone.utc)
+    if run.triggered_by is None:
+        run.triggered_by = user_id
     await db.commit()
 
-    # Arguidor #2 (2026-04-25): dispara auditoria pós-CodeGen automaticamente
-    # quando houve commits. Falha do enqueue não invalida o apply.
-    if committed > 0:
-        try:
-            from app.tasks.scaffold import code_audit_executor
-            code_audit_executor.delay(str(run_id))
-            logger.info(
-                "scaffold_run.audit_triggered",
-                run_id=str(run_id),
-                project_id=str(run.project_id),
-            )
-        except Exception as audit_err:  # noqa: BLE001
-            logger.warning(
-                "scaffold_run.audit_trigger_failed",
-                run_id=str(run_id),
-                error=str(audit_err),
-            )
+    # Enfileira a task. Erros de enqueue revertem status pra 'completed'
+    # pra não deixar a run presa em 'applying'.
+    try:
+        from app.tasks.scaffold import scaffold_apply_executor
+        scaffold_apply_executor.delay(str(run_id), str(user_id))
+    except Exception as enq_err:  # noqa: BLE001
+        run.status = "completed"
+        await db.commit()
+        logger.error(
+            "scaffold_run.apply_enqueue_failed",
+            run_id=str(run_id),
+            error=str(enq_err),
+            exc_info=True,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Falha ao enfileirar apply: {str(enq_err)[:200]}",
+        )
 
-    return ScaffoldApplyResponse(
-        committed=committed,
-        failed=failed,
-        skipped_nmi=0,
-        results=results,
+    logger.info(
+        "scaffold_run.apply_enqueued",
+        run_id=str(run_id),
+        project_id=str(run.project_id),
+        items=len(done_items),
+    )
+
+    return ScaffoldApplyAcceptedResponse(
+        run_id=run_id,
+        status="applying",
+        message=f"Apply enfileirado pra {len(done_items)} arquivo(s). Acompanhe via polling em /scaffold/runs/{run_id}.",
     )
 
 

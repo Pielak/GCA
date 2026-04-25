@@ -39,12 +39,15 @@ def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
 def watchdog_scaffold_zombies(self, threshold_minutes: int = 10) -> dict:
     """Roda periodicamente (Celery beat) e re-enfileira ScaffoldRuns zombie.
 
-    Critério de zombie: status in (planning, generating) + last_progress_at
-    > threshold_minutes atrás. Indica worker que morreu/restartou e
-    abandonou a run no meio.
+    Critério de zombie: status in (planning, generating, applying) +
+    last_progress_at > threshold_minutes atrás. Indica worker que morreu/
+    restartou e abandonou a run no meio.
 
-    Estratégia: re-enfileira via scaffold_run_executor — execute_run agora
-    aceita 'generating' e processa só items pending (resume).
+    Estratégia: re-enfileira via executor apropriado:
+    - planning|generating → scaffold_run_executor (resume da fase de gen)
+    - applying → scaffold_apply_executor (resume do loop de commits;
+      items já commitados ficam OK porque GitHub Contents API dedup por
+      conteúdo idêntico em PUT, e items não-commitados continuam pendentes)
     """
     import asyncio
     from datetime import datetime, timedelta, timezone
@@ -52,27 +55,38 @@ def watchdog_scaffold_zombies(self, threshold_minutes: int = 10) -> dict:
     from app.db.database import AsyncSessionLocal
     from app.models.base import ScaffoldRun
 
-    async def _scan() -> dict:
+    async def _scan() -> list[tuple[str, str, str | None]]:
         async with AsyncSessionLocal() as db:
             cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
             rows = (await db.execute(
                 select(ScaffoldRun).where(
-                    ScaffoldRun.status.in_(("planning", "generating")),
+                    ScaffoldRun.status.in_(("planning", "generating", "applying")),
                     or_(
                         ScaffoldRun.last_progress_at.is_(None),
                         ScaffoldRun.last_progress_at < cutoff,
                     ),
                 )
             )).scalars().all()
-            zombies = [str(r.id) for r in rows]
-        return {"zombies": zombies, "count": len(zombies)}
+            return [
+                (str(r.id), r.status, str(r.triggered_by) if r.triggered_by else None)
+                for r in rows
+            ]
 
     try:
-        result = _run_coro_isolated(_scan())
-        zombies = result.get("zombies", [])
-        for run_id in zombies:
-            scaffold_run_executor.delay(run_id)
-            logger.info("watchdog_scaffold.requeued", run_id=run_id)
+        zombie_rows = _run_coro_isolated(_scan())
+        zombies = [r[0] for r in zombie_rows]
+        for run_id, run_status, triggered_by in zombie_rows:
+            if run_status == "applying":
+                if triggered_by is None:
+                    logger.warning(
+                        "watchdog_scaffold.applying_zombie_no_user",
+                        run_id=run_id,
+                    )
+                    continue
+                scaffold_apply_executor.delay(run_id, triggered_by)
+            else:
+                scaffold_run_executor.delay(run_id)
+            logger.info("watchdog_scaffold.requeued", run_id=run_id, status=run_status)
         if zombies:
             logger.warning(
                 "watchdog_scaffold.found_zombies",
@@ -110,6 +124,61 @@ def code_audit_executor(self, run_id: str) -> dict:
             error=str(exc),
             exc_info=True,
         )
+        return {"status": "error", "run_id": run_id, "error": str(exc)[:500]}
+
+
+@celery_app.task(
+    name="app.tasks.scaffold.scaffold_apply_executor",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def scaffold_apply_executor(self, run_id: str, user_id: str) -> dict:
+    """Executor canônico do apply assíncrono (MVP-E, 2026-04-25).
+
+    Antes do MVP-E, apply rodava no handler HTTP e estourava timeout do
+    Cloudflare (~100s) com 164 commits. Agora handler enfileira esta task
+    e retorna 202; cada commit faz heartbeat em apply_committed/failed +
+    last_progress_at, watchdog cobre se worker cair.
+
+    Args:
+        run_id: UUID str da ScaffoldRun em status='applying'.
+        user_id: UUID str do user que disparou (pra audit log + TestArtifact).
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import ScaffoldRun
+    from app.services.scaffold_run_service import execute_apply
+    from datetime import datetime, timezone
+
+    try:
+        result = _run_coro_isolated(execute_apply(UUID(run_id), UUID(user_id)))
+        logger.info(
+            "scaffold_apply_executor.ok",
+            run_id=run_id,
+            committed=result.get("committed"),
+            failed=result.get("failed"),
+        )
+        return {"status": "ok", "run_id": run_id, **{k: v for k, v in result.items() if k != "results"}}
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "scaffold_apply_executor.unhandled",
+            run_id=run_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        # Sinaliza falha terminal pra UI parar de polling otimista.
+        async def _mark_failed() -> None:
+            async with AsyncSessionLocal() as db:
+                run = await db.get(ScaffoldRun, UUID(run_id))
+                if run is not None and run.status == "applying":
+                    run.status = "failed"
+                    run.error = f"Apply falhou: {str(exc)[:300]}"
+                    run.finished_at = datetime.now(timezone.utc)
+                    await db.commit()
+        try:
+            _run_coro_isolated(_mark_failed())
+        except Exception:  # noqa: BLE001
+            pass
         return {"status": "error", "run_id": run_id, "error": str(exc)[:500]}
 
 

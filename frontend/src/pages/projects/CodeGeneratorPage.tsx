@@ -435,20 +435,22 @@ export function CodeGeneratorPage() {
 
     setScaffoldApplying(true)
     try {
+      // MVP-E: apply agora é assíncrono. Backend retorna 202 e a task
+      // Celery commita os 164 arquivos em background. UI reage ao status
+      // 'applying' via polling — apply_committed/apply_failed sobem
+      // incrementalmente; quando vira 'applied', summary final aparece.
       const result = await progressStore.apply()
       if (result === null) {
-        const msg = useCodeGenProgressStore.getState().errorMessage || 'Falha ao aplicar.'
+        const msg = useCodeGenProgressStore.getState().errorMessage || 'Falha ao enfileirar apply.'
         alert(msg)
         return
       }
-      const { committed, failed } = result
       setScaffoldSummary(
-        `Aplicado: ${committed} commitado(s)${failed ? `, ${failed} falharam` : ''}.`,
+        'Apply enfileirado — backend está commitando arquivos. Acompanhe o progresso na janela flutuante de geração.',
       )
       setScaffoldPendingApply(false)
-      loadTree()
     } catch (err: unknown) {
-      alert(formatCodeGenError(err, 'aplicar scaffold'))
+      alert(formatCodeGenError(err, 'enfileirar apply'))
     } finally {
       setScaffoldApplying(false)
     }

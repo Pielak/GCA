@@ -90,6 +90,14 @@ export function CodeGenProgressOverlay() {
     if (snapshot.status === 'generating') return 'Gerando código'
     if (snapshot.status === 'completed') return stats.errors === 0 ? 'Geração concluída' : `Concluída com ${stats.errors} erro(s)`
     if (snapshot.status === 'failed') return 'Falhou'
+    if (snapshot.status === 'applying') {
+      const committed = snapshot.apply_committed ?? 0
+      const failed = snapshot.apply_failed ?? 0
+      const total = snapshot.total_items
+      return failed > 0
+        ? `Aplicando no Git (${committed}/${total}, ${failed} falhas)`
+        : `Aplicando no Git (${committed}/${total})`
+    }
     if (snapshot.status === 'applied') return 'Aplicado no Git'
     return snapshot.status
   })()

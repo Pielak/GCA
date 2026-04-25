@@ -545,6 +545,194 @@ async def execute_run(run_id: UUID) -> None:
     )
 
 
+async def execute_apply(run_id: UUID, user_id: UUID) -> dict:
+    """Executor canônico do apply assíncrono (MVP-E, 2026-04-25).
+
+    Espelha o que o handler HTTP `apply_scaffold_run` fazia inline antes
+    da migração pra Celery. Disparado via `scaffold_apply_executor.delay`.
+    Pré-requisitos (perms, git_config, status check) já foram validados
+    pelo handler antes de enfileirar — esta função assume que está
+    autorizada a rodar.
+
+    Heartbeat: atualiza `apply_committed/apply_failed/last_progress_at`
+    a cada arquivo commitado, pra watchdog enxergar progresso e UI
+    mostrar contadores incrementais via polling existente.
+
+    Retorna o mesmo shape do antigo `ScaffoldApplyResponse` mais o
+    qa_artifacts_created. Em caso de erro fatal (sem ser falha de commit
+    de arquivo), marca a run como `failed` e levanta a exception pro
+    Celery registrar.
+    """
+    from app.models.base import (
+        Project,
+        ScaffoldRun,
+        ScaffoldRunItem,
+        TestArtifact,
+    )
+    from app.routers.code_generation import (
+        _missing_required_docstring,
+        _notify_scaffold_completion,
+    )
+    from app.services.audit_service import AuditEvents, AuditService
+    from app.services.git_service import GitService
+    import re as _re
+
+    TEST_FILE_RE = _re.compile(
+        r"(^|/)(tests?/|test_[^/]+\.py$|[^/]+_test\.[a-z]+$|[^/]+\.test\.[a-z]+$|[^/]+\.spec\.[a-z]+$)",
+        _re.IGNORECASE,
+    )
+
+    # Carrega contexto base + items done numa transação curta.
+    async with AsyncSessionLocal() as db:
+        run = await db.get(ScaffoldRun, run_id)
+        if run is None:
+            return {"committed": 0, "failed": 0, "results": [], "qa_artifacts_created": 0}
+        project = await db.get(Project, run.project_id)
+        items_q = await db.execute(
+            select(ScaffoldRunItem)
+            .where(ScaffoldRunItem.run_id == run_id, ScaffoldRunItem.status == "done")
+            .order_by(ScaffoldRunItem.ordinal.asc())
+        )
+        done_items_snap = [
+            {"id": it.id, "path": it.path, "content": it.content or ""}
+            for it in items_q.scalars().all()
+        ]
+        project_id = run.project_id
+        project_name = project.name
+
+    # Loop de commit com heartbeat. Cada arquivo: 1 commit + 1 update no
+    # DB. GitService.commit_file faz a chamada HTTP no GitHub/GitLab.
+    committed = 0
+    failed = 0
+    results: list[dict] = []
+    qa_files: list[dict] = []  # path + content pra criar TestArtifact depois
+
+    async with AsyncSessionLocal() as db:
+        git_service = GitService(db)
+        for snap_item in done_items_snap:
+            path = snap_item["path"]
+            content = snap_item["content"]
+            if not path or not content:
+                continue
+            if _missing_required_docstring(path, content):
+                failed += 1
+                results.append({
+                    "path": path,
+                    "status": "error",
+                    "error": "Docstring obrigatória ausente (re-validação no apply).",
+                })
+            else:
+                git_result = await git_service.commit_file(
+                    project_id=project_id,
+                    file_path=path,
+                    content=content,
+                    commit_message=f"feat(codegen): {path}",
+                )
+                if git_result.get("success"):
+                    committed += 1
+                    results.append({"path": path, "status": "ok"})
+                    if TEST_FILE_RE.search(path):
+                        qa_files.append({"path": path, "content": content})
+                else:
+                    failed += 1
+                    results.append({
+                        "path": path,
+                        "status": "error",
+                        "error": git_result.get("message"),
+                    })
+
+            # Heartbeat por arquivo: nova session, update curtinho, commit.
+            # Mantém apply_committed/failed/last_progress_at sempre frescos
+            # pro watchdog não considerar zombie e pra UI mostrar progresso.
+            async with AsyncSessionLocal() as db_hb:
+                run_hb = await db_hb.get(ScaffoldRun, run_id)
+                if run_hb is not None:
+                    run_hb.apply_committed = committed
+                    run_hb.apply_failed = failed
+                    run_hb.last_progress_at = datetime.now(timezone.utc)
+                    await db_hb.commit()
+
+    logger.info(
+        "scaffold.apply_commits_finished",
+        project_id=str(project_id),
+        run_id=str(run_id),
+        committed=committed,
+        failed=failed,
+    )
+
+    # Notificação + TestArtifacts + audit + transição de status.
+    async with AsyncSessionLocal() as db:
+        await _notify_scaffold_completion(db, project_id, project_name, committed, failed)
+
+        qa_artifacts_created = 0
+        try:
+            for qa in qa_files:
+                db.add(TestArtifact(
+                    project_id=project_id,
+                    module_id=None,
+                    test_type="unit",
+                    title=qa["path"].rsplit("/", 1)[-1][:255],
+                    description=f"Teste gerado pelo scaffold run {run_id} em {qa['path']}",
+                    file_path=qa["path"],
+                    content=str(qa["content"]),
+                    status="pending_review",
+                    created_by=user_id,
+                ))
+                qa_artifacts_created += 1
+        except Exception as qa_err:  # noqa: BLE001
+            logger.warning(
+                "scaffold_run.apply_qa_failed",
+                run_id=str(run_id),
+                error=str(qa_err),
+            )
+
+        run = await db.get(ScaffoldRun, run_id)
+        if run is not None:
+            run.status = "applied"
+            run.applied_at = datetime.now(timezone.utc)
+            run.apply_committed = committed
+            run.apply_failed = failed
+            run.last_progress_at = datetime.now(timezone.utc)
+
+            await AuditService(db).log_codegen_event(
+                event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
+                actor_id=user_id,
+                project_id=project_id,
+                action="apply_scaffold_run",
+                files_count=committed,
+                extra={
+                    "run_id": str(run_id),
+                    "failed": failed,
+                    "qa_artifacts_created": qa_artifacts_created,
+                },
+            )
+        await db.commit()
+
+    # Arguidor #2 — best-effort, falha não invalida o apply.
+    if committed > 0:
+        try:
+            from app.tasks.scaffold import code_audit_executor
+            code_audit_executor.delay(str(run_id))
+            logger.info(
+                "scaffold_run.audit_triggered",
+                run_id=str(run_id),
+                project_id=str(project_id),
+            )
+        except Exception as audit_err:  # noqa: BLE001
+            logger.warning(
+                "scaffold_run.audit_trigger_failed",
+                run_id=str(run_id),
+                error=str(audit_err),
+            )
+
+    return {
+        "committed": committed,
+        "failed": failed,
+        "results": results,
+        "qa_artifacts_created": qa_artifacts_created,
+    }
+
+
 async def snapshot_run(db: AsyncSession, run_id: UUID) -> Optional[dict]:
     """Snapshot serializável da run + items, pra GET endpoint."""
     run = await db.get(ScaffoldRun, run_id)

@@ -18,7 +18,7 @@ import { apiClient } from '@/lib/api'
  *   6. Dismiss limpa localStorage e estado.
  */
 
-export type RunStatus = 'pending' | 'planning' | 'generating' | 'completed' | 'failed' | 'applied'
+export type RunStatus = 'pending' | 'planning' | 'generating' | 'completed' | 'failed' | 'applied' | 'applying'
 export type ItemStatus = 'pending' | 'generating' | 'done' | 'failed' | 'skipped'
 
 export interface RunItem {
@@ -65,7 +65,7 @@ interface CodeGenProgressState {
   startScaffold: (projectId: string, projectName: string) => Promise<void>
   hydrateForProject: (projectId: string, projectName: string) => Promise<void>
   refresh: () => Promise<void>
-  apply: () => Promise<{ committed: number; failed: number } | null>
+  apply: () => Promise<{ enqueued: true } | null>
   retryFailed: () => Promise<{ items_reset: number; items_done_preserved: number } | null>
   fetchItemContent: (itemId: string) => Promise<string | null>
   dismiss: () => void
@@ -76,6 +76,9 @@ const LS_KEY = (projectId: string) => `gca:scaffold:active:${projectId}`
 
 const POLL_INTERVAL_MS = 3500
 const POLL_MAX_BACKOFF_MS = 30000
+// MVP-E: 'applying' NÃO é terminal — é fase em curso entre completed → applied.
+// Polling deve continuar ativo durante 'applying' pra UI ver apply_committed
+// e apply_failed subindo conforme cada commit termina.
 const TERMINAL_STATUSES: RunStatus[] = ['completed', 'failed', 'applied']
 
 const initialState = {
@@ -305,16 +308,16 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
         return null
       }
       try {
-        const res = await apiClient.post(`/code-generation/scaffold/runs/${runId}/apply`)
-        // Atualiza snapshot manualmente; o GET seguinte trará applied_at
+        // MVP-E: backend agora retorna 202 com { run_id, status: 'applying' }
+        // sem esperar os 164 commits terminarem. Reativa polling pra ver
+        // apply_committed/apply_failed subindo até status virar 'applied'.
+        await apiClient.post(`/code-generation/scaffold/runs/${runId}/apply`)
+        set({ active: true, finishedAt: null, errorMessage: null })
         await pollOnce()
-        return {
-          committed: res.data?.committed || 0,
-          failed: res.data?.failed || 0,
-        }
+        return { enqueued: true }
       } catch (err: any) {
         const detail = err?.response?.data?.detail
-        const msg = typeof detail === 'string' ? detail : 'Falha ao aplicar no Git.'
+        const msg = typeof detail === 'string' ? detail : 'Falha ao enfileirar apply.'
         set({ errorMessage: msg })
         return null
       }
