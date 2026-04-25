@@ -33,6 +33,59 @@ def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
 
 
 @celery_app.task(
+    name="app.tasks.scaffold.watchdog_scaffold_zombies",
+    bind=True,
+)
+def watchdog_scaffold_zombies(self, threshold_minutes: int = 10) -> dict:
+    """Roda periodicamente (Celery beat) e re-enfileira ScaffoldRuns zombie.
+
+    Critério de zombie: status in (planning, generating) + last_progress_at
+    > threshold_minutes atrás. Indica worker que morreu/restartou e
+    abandonou a run no meio.
+
+    Estratégia: re-enfileira via scaffold_run_executor — execute_run agora
+    aceita 'generating' e processa só items pending (resume).
+    """
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import select, or_, and_
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import ScaffoldRun
+
+    async def _scan() -> dict:
+        async with AsyncSessionLocal() as db:
+            cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+            rows = (await db.execute(
+                select(ScaffoldRun).where(
+                    ScaffoldRun.status.in_(("planning", "generating")),
+                    or_(
+                        ScaffoldRun.last_progress_at.is_(None),
+                        ScaffoldRun.last_progress_at < cutoff,
+                    ),
+                )
+            )).scalars().all()
+            zombies = [str(r.id) for r in rows]
+        return {"zombies": zombies, "count": len(zombies)}
+
+    try:
+        result = _run_coro_isolated(_scan())
+        zombies = result.get("zombies", [])
+        for run_id in zombies:
+            scaffold_run_executor.delay(run_id)
+            logger.info("watchdog_scaffold.requeued", run_id=run_id)
+        if zombies:
+            logger.warning(
+                "watchdog_scaffold.found_zombies",
+                count=len(zombies),
+                threshold_minutes=threshold_minutes,
+            )
+        return {"requeued": len(zombies), "run_ids": zombies}
+    except Exception as exc:  # noqa: BLE001
+        logger.error("watchdog_scaffold.failed", error=str(exc), exc_info=True)
+        return {"status": "error", "error": str(exc)[:500]}
+
+
+@celery_app.task(
     name="app.tasks.scaffold.code_audit_executor",
     bind=True,
     max_retries=0,

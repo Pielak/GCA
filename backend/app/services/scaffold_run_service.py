@@ -192,18 +192,25 @@ async def execute_run(run_id: UUID) -> None:
 
     client = AsyncAnthropic(api_key=api_key)
 
-    # Fase 1 — planning
+    # Fase 1 — planning. Aceita 'pending' (start) OU 'generating' (resume após
+    # restart do worker). Em resume, pula direto pra Fase 2 com items pending.
+    resume_mode = False
     async with AsyncSessionLocal() as db:
         run = await db.get(ScaffoldRun, run_id)
         if run is None:
             logger.warning("scaffold_run.not_found", run_id=str(run_id))
             return
-        if run.status != "pending":
+        if run.status == "generating":
+            # Resume: plan já existe, items já estão no DB. Pula planning.
+            resume_mode = True
+            logger.info("scaffold_run.resume", run_id=str(run_id))
+        elif run.status != "pending":
             logger.info("scaffold_run.skip_not_pending", run_id=str(run_id), status=run.status)
             return
-
-        run.status = "planning"
-        await db.commit()
+        else:
+            run.status = "planning"
+            run.last_progress_at = datetime.now(timezone.utc)
+            await db.commit()
 
         project = await db.get(Project, run.project_id)
         if project is None:
@@ -235,83 +242,84 @@ async def execute_run(run_id: UUID) -> None:
             arguider_modules=[],
         )
 
-    # LLM call (fora da session pra não segurar conexão)
-    try:
-        plan_response = await client.messages.create(
-            model=app_settings.ANTHROPIC_MODEL,
-            max_tokens=16384,
-            temperature=0.2,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        plan_raw = plan_response.content[0].text
-        plan_tokens = plan_response.usage.output_tokens
-    except Exception as exc:  # noqa: BLE001
-        async with AsyncSessionLocal() as db:
-            run = await db.get(ScaffoldRun, run_id)
-            if run:
-                run.status = "failed"
-                run.error = f"LLM erro na fase plan: {str(exc)[:300]}"
-                run.finished_at = datetime.now(timezone.utc)
-                await db.commit()
-        return
-
-    plan_data = _parse_llm_json(plan_raw)
-    if plan_data is None:
-        async with AsyncSessionLocal() as db:
-            run = await db.get(ScaffoldRun, run_id)
-            if run:
-                run.status = "failed"
-                run.error = f"LLM retornou plano inválido (tokens={plan_tokens}). Preview: {plan_raw[:200]}"
-                run.finished_at = datetime.now(timezone.utc)
-                await db.commit()
-        return
-
-    items_raw = plan_data.get("items") or []
-    valid_items = [
-        it for it in items_raw if isinstance(it, dict) and it.get("path")
-    ]
-    summary_text = (plan_data.get("summary") or f"Scaffold de {len(valid_items)} arquivos")[:1000]
-
-    # Camada B — sanitiza depends_on de cada item antes de persistir.
-    # Só aceita paths que existem na própria lista (LLM ocasionalmente
-    # cita peer fora do plano, isso seria orphan e quebraria toposort).
-    valid_paths = {str(it.get("path", "")).strip() for it in valid_items}
-    valid_paths.discard("")
-
-    def _clean_deps(raw_deps: Any) -> List[str]:
-        if not isinstance(raw_deps, list):
-            return []
-        out = []
-        for d in raw_deps:
-            if not isinstance(d, str):
-                continue
-            d = d.strip()
-            if d and d in valid_paths:
-                out.append(d)
-        return out
-
-    # Persiste plano + items pending
-    async with AsyncSessionLocal() as db:
-        run = await db.get(ScaffoldRun, run_id)
-        if run is None:
+    # Em resume mode, pula toda a fase planning — items + plan_summary
+    # já estão persistidos no DB. Vai direto pra Fase 2 (loop topológico).
+    if not resume_mode:
+        try:
+            plan_response = await client.messages.create(
+                model=app_settings.ANTHROPIC_MODEL,
+                max_tokens=16384,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            plan_raw = plan_response.content[0].text
+            plan_tokens = plan_response.usage.output_tokens
+        except Exception as exc:  # noqa: BLE001
+            async with AsyncSessionLocal() as db:
+                run = await db.get(ScaffoldRun, run_id)
+                if run:
+                    run.status = "failed"
+                    run.error = f"LLM erro na fase plan: {str(exc)[:300]}"
+                    run.finished_at = datetime.now(timezone.utc)
+                    await db.commit()
             return
-        run.status = "generating"
-        run.plan_summary = summary_text
-        run.plan_tokens_used = plan_tokens
-        run.total_items = len(valid_items)
-        for ordinal, it in enumerate(valid_items):
-            cleaned = _clean_deps(it.get("depends_on"))
-            db.add(ScaffoldRunItem(
-                run_id=run_id,
-                ordinal=ordinal,
-                path=str(it.get("path", ""))[:500],
-                file_type=str(it.get("file_type") or "")[:40] or None,
-                purpose=(str(it.get("purpose") or "")[:500]) or None,
-                est_lines=int(it.get("est_lines") or 0) or None,
-                status="pending",
-                depends_on=json.dumps(cleaned, ensure_ascii=False),
-            ))
-        await db.commit()
+
+        plan_data = _parse_llm_json(plan_raw)
+        if plan_data is None:
+            async with AsyncSessionLocal() as db:
+                run = await db.get(ScaffoldRun, run_id)
+                if run:
+                    run.status = "failed"
+                    run.error = f"LLM retornou plano inválido (tokens={plan_tokens}). Preview: {plan_raw[:200]}"
+                    run.finished_at = datetime.now(timezone.utc)
+                    await db.commit()
+            return
+
+        items_raw = plan_data.get("items") or []
+        valid_items = [
+            it for it in items_raw if isinstance(it, dict) and it.get("path")
+        ]
+        summary_text = (plan_data.get("summary") or f"Scaffold de {len(valid_items)} arquivos")[:1000]
+
+        # Camada B — sanitiza depends_on de cada item antes de persistir.
+        valid_paths = {str(it.get("path", "")).strip() for it in valid_items}
+        valid_paths.discard("")
+
+        def _clean_deps(raw_deps: Any) -> List[str]:
+            if not isinstance(raw_deps, list):
+                return []
+            out = []
+            for d in raw_deps:
+                if not isinstance(d, str):
+                    continue
+                d = d.strip()
+                if d and d in valid_paths:
+                    out.append(d)
+            return out
+
+        # Persiste plano + items pending
+        async with AsyncSessionLocal() as db:
+            run = await db.get(ScaffoldRun, run_id)
+            if run is None:
+                return
+            run.status = "generating"
+            run.plan_summary = summary_text
+            run.plan_tokens_used = plan_tokens
+            run.total_items = len(valid_items)
+            run.last_progress_at = datetime.now(timezone.utc)
+            for ordinal, it in enumerate(valid_items):
+                cleaned = _clean_deps(it.get("depends_on"))
+                db.add(ScaffoldRunItem(
+                    run_id=run_id,
+                    ordinal=ordinal,
+                    path=str(it.get("path", ""))[:500],
+                    file_type=str(it.get("file_type") or "")[:40] or None,
+                    purpose=(str(it.get("purpose") or "")[:500]) or None,
+                    est_lines=int(it.get("est_lines") or 0) or None,
+                    status="pending",
+                    depends_on=json.dumps(cleaned, ensure_ascii=False),
+                ))
+            await db.commit()
 
     # Fase 2 — gerar conteúdo item-a-item NA ORDEM TOPOLÓGICA (camada B).
     async with AsyncSessionLocal() as db:
@@ -401,14 +409,42 @@ async def execute_run(run_id: UUID) -> None:
         first_5=topo_order[:5],
     )
 
-    completed = 0
-    failed = 0
-    # Camada C — buffer de content já gerado, indexado por path. Como o
-    # loop respeita ordem topológica, quando chega num item os peers em
-    # depends_on JÁ FORAM gerados (estão neste buffer).
+    # Em resume, parte de onde estava: já conta done/failed pré-existentes,
+    # pula items já feitos. Em start novo, começa do zero.
+    completed = sum(1 for it in all_items_topo if it.status == "done")
+    failed = sum(1 for it in all_items_topo if it.status == "failed")
+
+    # Escreve contador imediatamente pra UI ver status real (resume mostra
+    # progresso prévio sem precisar esperar o próximo item completar).
+    if resume_mode and (completed + failed) > 0:
+        async with AsyncSessionLocal() as db:
+            run = await db.get(ScaffoldRun, run_id)
+            if run is not None:
+                run.completed_items = completed
+                run.failed_items = failed
+                run.last_progress_at = datetime.now(timezone.utc)
+                await db.commit()
+
+    # Camada C — buffer de content já gerado, indexado por path. Em resume
+    # mode, popula com content de items already done pra peers funcionarem.
     generated_content_by_path: Dict[str, str] = {}
+    if resume_mode:
+        async with AsyncSessionLocal() as db:
+            done_items = (await db.execute(
+                select(ScaffoldRunItem).where(
+                    ScaffoldRunItem.run_id == run_id,
+                    ScaffoldRunItem.status == "done",
+                )
+            )).scalars().all()
+            for d in done_items:
+                if d.content:
+                    generated_content_by_path[d.path] = d.content
 
     for it_snapshot in all_items_topo:
+        # Pula items já processados (resume): done, failed, skipped
+        if it_snapshot.status in ("done", "failed", "skipped"):
+            continue
+
         # Marca generating
         async with AsyncSessionLocal() as db:
             it = await db.get(ScaffoldRunItem, it_snapshot.id)
@@ -445,18 +481,23 @@ async def execute_run(run_id: UUID) -> None:
             item_raw = item_response.content[0].text
             item_tokens = item_response.usage.output_tokens
         except Exception as exc:  # noqa: BLE001
+            failed += 1
             async with AsyncSessionLocal() as db:
                 it = await db.get(ScaffoldRunItem, it_snapshot.id)
+                run = await db.get(ScaffoldRun, run_id)
                 it.status = "failed"
                 it.error = f"LLM erro: {str(exc)[:300]}"
                 it.finished_at = datetime.now(timezone.utc)
+                if run is not None:
+                    run.failed_items = failed
+                    run.last_progress_at = datetime.now(timezone.utc)
                 await db.commit()
-            failed += 1
             continue
 
         parsed_item = _parse_llm_json(item_raw)
         async with AsyncSessionLocal() as db:
             it = await db.get(ScaffoldRunItem, it_snapshot.id)
+            run = await db.get(ScaffoldRun, run_id)
             if parsed_item is None:
                 it.status = "failed"
                 it.error = f"JSON inválido (tokens={item_tokens})"
@@ -471,14 +512,19 @@ async def execute_run(run_id: UUID) -> None:
                 it.status = "done" if content.strip() else "failed"
                 if it.status == "done":
                     completed += 1
-                    # Camada C — alimenta buffer pro próximo item ler
-                    # via depends_on. Não persiste em memória além do
-                    # que cabe; o conteúdo já está no DB também.
                     generated_content_by_path[it_snapshot.path] = content
                 else:
                     it.error = "LLM devolveu content vazio"
                     failed += 1
             it.finished_at = datetime.now(timezone.utc)
+            # Atualização incremental dos contadores na run + heartbeat de
+            # progresso pro watchdog não considerar zombie. Sem isso, restart
+            # do worker no meio do loop deixava run em 'generating' com
+            # completed_items=0 mesmo havendo arquivos prontos no DB.
+            if run is not None:
+                run.completed_items = completed
+                run.failed_items = failed
+                run.last_progress_at = datetime.now(timezone.utc)
             await db.commit()
 
     # Encerra run

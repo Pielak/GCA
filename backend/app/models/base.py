@@ -1916,6 +1916,9 @@ class ScaffoldRun(Base):
     applied_at = Column(DateTime(timezone=True), nullable=True)
     apply_committed = Column(Integer, nullable=True)
     apply_failed = Column(Integer, nullable=True)
+    # Watchdog 2026-04-25: timestamp do último item completed/failed.
+    # status in (planning, generating) + last_progress_at > 10min = zombie.
+    last_progress_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class ScaffoldRunItem(Base):

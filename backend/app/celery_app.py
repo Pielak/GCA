@@ -125,6 +125,11 @@ celery_app.conf.update(
             "schedule": 300.0,  # 5 minutos
             "args": (8,),  # threshold_minutes
         },
+        "watchdog-scaffold-zombies": {
+            "task": "app.tasks.scaffold.watchdog_scaffold_zombies",
+            "schedule": 300.0,  # 5 minutos
+            "args": (10,),  # threshold_minutes — re-enfileira após 10 min sem progresso
+        },
     },
 )
 
