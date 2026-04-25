@@ -260,6 +260,8 @@ async def generate_iteration(
             f"razão de 'não se aplica' {float(last.not_applicable_ratio or 0):.0%}."
         )
 
+    governance_mode = project.governance_mode or "solo_owner"
+
     prompt = build_iterative_prompt(
         project_name=project.name,
         iteration=next_iteration,
@@ -268,6 +270,7 @@ async def generate_iteration(
         arguider_gaps_by_pillar=gaps,
         previous_iteration_feedback=prev_feedback,
         previously_asked_questions=previously_asked,
+        governance_mode=governance_mode,
     )
 
     from app.services.llm_low_criticality import resolve_llm_config, call_llm
@@ -280,7 +283,7 @@ async def generate_iteration(
         config=llm_cfg,
         system_prompt="Você é um analista de produto sênior, falante nativo de PT-BR. Responda em JSON estrito quando solicitado.",
         user_prompt=prompt,
-        max_tokens=8192,  # perguntas individualizadas podem gerar N itens — cabe mais
+        max_tokens=32000,  # alinhado com MVP-A — Opus 4.6 suporta até 32k sem header beta
         temperature=0.3,
         log_context="m01_iterative_questionnaire",
     )
@@ -290,6 +293,27 @@ async def generate_iteration(
     except Exception as exc:
         logger.error("m01.parse_failed", extra={"project_id": str(project_id), "error": str(exc)})
         raise ValueError(f"LLM retornou JSON inválido: {exc}")
+
+    # Defesa em profundidade — mesmo padrão do arguider_service.py:588-601.
+    # Se LLM ignorar a cláusula e gerar pergunta de governança, filtramos antes
+    # de persistir. Conservador: text + context são as colunas relevantes.
+    if governance_mode == "solo_owner":
+        from app.services.governance_filter import filter_governance_items
+        kept, dropped = filter_governance_items(
+            parsed.get("questions") or [],
+            text_keys=("text", "context"),
+        )
+        if dropped:
+            logger.info(
+                "m01.governance_filtered",
+                extra={
+                    "project_id": str(project_id),
+                    "iteration": next_iteration,
+                    "kept": len(kept),
+                    "dropped": len(dropped),
+                },
+            )
+        parsed["questions"] = kept
 
     ocg = await _load_latest_ocg(db, project_id)
     ocg_version_before = ocg.version if ocg else None

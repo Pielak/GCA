@@ -248,7 +248,7 @@ async def execute_run(run_id: UUID) -> None:
         try:
             plan_response = await client.messages.create(
                 model=app_settings.ANTHROPIC_MODEL,
-                max_tokens=16384,
+                max_tokens=32000,
                 temperature=0.2,
                 messages=[{"role": "user", "content": prompt}],
             )
@@ -474,7 +474,7 @@ async def execute_run(run_id: UUID) -> None:
         try:
             item_response = await client.messages.create(
                 model=app_settings.ANTHROPIC_MODEL,
-                max_tokens=8192,
+                max_tokens=32000,
                 temperature=0.3,
                 messages=[{"role": "user", "content": item_prompt}],
             )

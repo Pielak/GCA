@@ -65,6 +65,7 @@ interface CodeGenProgressState {
   startScaffold: (projectId: string, projectName: string) => Promise<void>
   hydrateForProject: (projectId: string, projectName: string) => Promise<void>
   apply: () => Promise<{ committed: number; failed: number } | null>
+  retryFailed: () => Promise<{ items_reset: number; items_done_preserved: number } | null>
   fetchItemContent: (itemId: string) => Promise<string | null>
   dismiss: () => void
   reset: () => void
@@ -202,33 +203,59 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
       const cur = get()
       if (cur.runId && cur.projectId === projectId) return
 
+      // Estratégia de hidratação:
+      //   1. localStorage tem run_id → busca direta
+      //   2. localStorage vazio → fallback API "última run do projeto"
+      // Sem o fallback, runs concluídas em outra sessão do browser ficam
+      // invisíveis (apply/retry/view dos arquivos somem do UI).
       const persistedId = readRunId(projectId)
-      if (!persistedId) return
+      let snap: RunSnapshot | null = null
+      let runIdLoaded: string | null = null
 
-      // Tenta carregar — se 404, descarta silenciosamente
-      try {
-        const res = await apiClient.get(`/code-generation/scaffold/runs/${persistedId}`)
-        const snap = res.data as RunSnapshot
-        const isTerminal = TERMINAL_STATUSES.includes(snap.status)
-        clearPoll()
-        set({
-          ...initialState,
-          runId: persistedId,
-          projectId,
-          projectName,
-          snapshot: snap,
-          active: !isTerminal,
-          startedAt: snap.started_at ? new Date(snap.started_at).getTime() : Date.now(),
-          finishedAt: isTerminal && snap.finished_at ? new Date(snap.finished_at).getTime() : null,
-          errorMessage: snap.status === 'failed' ? snap.error : null,
-        })
-        if (!isTerminal) {
-          schedulePoll(POLL_INTERVAL_MS)
+      if (persistedId) {
+        try {
+          const res = await apiClient.get(`/code-generation/scaffold/runs/${persistedId}`)
+          snap = res.data as RunSnapshot
+          runIdLoaded = persistedId
+        } catch (err: any) {
+          if (err?.response?.status === 404) {
+            clearRunId(projectId)
+          }
         }
-      } catch (err: any) {
-        if (err?.response?.status === 404) {
-          clearRunId(projectId)
+      }
+
+      if (snap === null) {
+        try {
+          const res = await apiClient.get(
+            `/code-generation/scaffold/runs/latest?project_id=${projectId}`,
+          )
+          snap = res.data as RunSnapshot & { id?: string }
+          runIdLoaded = (snap as any).id || null
+          if (runIdLoaded) {
+            persistRunId(projectId, runIdLoaded)
+          }
+        } catch {
+          return
         }
+      }
+
+      if (!snap || !runIdLoaded) return
+
+      const isTerminal = TERMINAL_STATUSES.includes(snap.status)
+      clearPoll()
+      set({
+        ...initialState,
+        runId: runIdLoaded,
+        projectId,
+        projectName,
+        snapshot: snap,
+        active: !isTerminal,
+        startedAt: snap.started_at ? new Date(snap.started_at).getTime() : Date.now(),
+        finishedAt: isTerminal && snap.finished_at ? new Date(snap.finished_at).getTime() : null,
+        errorMessage: snap.status === 'failed' ? snap.error : null,
+      })
+      if (!isTerminal) {
+        schedulePoll(POLL_INTERVAL_MS)
       }
     },
 
@@ -276,6 +303,34 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
       } catch (err: any) {
         const detail = err?.response?.data?.detail
         const msg = typeof detail === 'string' ? detail : 'Falha ao aplicar no Git.'
+        set({ errorMessage: msg })
+        return null
+      }
+    },
+
+    retryFailed: async () => {
+      const { runId, snapshot } = get()
+      if (!runId || !snapshot) return null
+      if (snapshot.status !== 'completed') {
+        set({ errorMessage: 'Retry só funciona em runs com status completed.' })
+        return null
+      }
+      if (snapshot.failed_items === 0) {
+        set({ errorMessage: 'Nenhum item failed pra re-tentar.' })
+        return null
+      }
+      try {
+        const res = await apiClient.post(`/code-generation/scaffold/runs/${runId}/retry-failed`)
+        // Run volta pra generating; reativa polling.
+        set({ active: true, finishedAt: null, errorMessage: null })
+        await pollOnce()
+        return {
+          items_reset: res.data?.items_reset || 0,
+          items_done_preserved: res.data?.items_done_preserved || 0,
+        }
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        const msg = typeof detail === 'string' ? detail : 'Falha ao re-tentar items.'
         set({ errorMessage: msg })
         return null
       }

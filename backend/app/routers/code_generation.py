@@ -309,6 +309,15 @@ class ScaffoldApplyResponse(BaseModel):
     results: List[Dict[str, Any]]
 
 
+class ScaffoldRetryResponse(BaseModel):
+    """Response do /scaffold/runs/{id}/retry-failed — resumo do retry."""
+
+    run_id: UUID
+    items_reset: int
+    items_done_preserved: int
+    new_run_status: str
+
+
 class ScaffoldPlanItem(BaseModel):
     """Item do plano de scaffold — metadata SEM conteúdo."""
 
@@ -849,6 +858,40 @@ async def start_scaffold_run(
 
 
 @router.get(
+    "/scaffold/runs/latest",
+    summary="Última run de scaffold do projeto (qualquer status)",
+    description=(
+        "Retorna o snapshot da última ScaffoldRun por started_at do projeto, "
+        "ou 404 se nunca houve run. Usado pelo frontend pra hidratar a página "
+        "quando o localStorage do browser não tem run_id (sessão nova, outro "
+        "device, storage limpo). Sem isso, runs já completas ficam invisíveis "
+        "na UI mesmo havendo work apliável/retentável no DB."
+    ),
+)
+async def get_latest_scaffold_run(
+    project_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun
+    from app.services.scaffold_run_service import snapshot_run
+
+    await _require_code_action("project:view", project_id, user_id, db)
+    res = await db.execute(
+        select(ScaffoldRun)
+        .where(ScaffoldRun.project_id == project_id)
+        .order_by(ScaffoldRun.started_at.desc())
+        .limit(1)
+    )
+    run = res.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhuma run de scaffold neste projeto.")
+
+    snap = await snapshot_run(db, run.id)
+    return snap
+
+
+@router.get(
     "/scaffold/runs/{run_id}",
     summary="Snapshot da run server-side",
     description="Status global + lista de items com flags de progresso.",
@@ -1025,6 +1068,129 @@ async def apply_scaffold_run(
         failed=failed,
         skipped_nmi=0,
         results=results,
+    )
+
+
+@router.post(
+    "/scaffold/runs/{run_id}/retry-failed",
+    response_model=ScaffoldRetryResponse,
+    summary="Re-tenta items que falharam numa scaffold_run completed",
+    description=(
+        "Reseta items com status='failed' pra 'pending', volta a run pra "
+        "'generating' e re-enfileira `scaffold_run_executor`. Items 'done' "
+        "são preservados — peer_contents reaproveita o conteúdo já gerado. "
+        "Útil quando falhas foram causadas por cap de tokens ou erro "
+        "transitório de rede; chamadas LLM custam tokens, então não regerar "
+        "os 'done' é economia obrigatória."
+    ),
+)
+async def retry_failed_scaffold_items(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun, ScaffoldRunItem
+    from sqlalchemy import update as sa_update
+
+    run = await db.get(ScaffoldRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
+    await _require_code_action("code:write", run.project_id, user_id, db)
+
+    # Só aceita retry em run completed. Outras status (planning/generating)
+    # significam worker rodando — retry concorrente corromperia counters.
+    # Status 'applied' já tem commit no Git; retry depois disso é fluxo diferente.
+    if run.status != "completed":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Run em status '{run.status}'. Retry só é permitido em runs 'completed'. "
+                "Aguarde a run terminar ou abra nova run."
+            ),
+        )
+
+    failed_items_q = await db.execute(
+        select(ScaffoldRunItem).where(
+            ScaffoldRunItem.run_id == run_id,
+            ScaffoldRunItem.status == "failed",
+        )
+    )
+    failed_items = failed_items_q.scalars().all()
+    if not failed_items:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Nenhum item failed pra re-tentar.",
+        )
+
+    done_count_q = await db.execute(
+        select(ScaffoldRunItem).where(
+            ScaffoldRunItem.run_id == run_id,
+            ScaffoldRunItem.status == "done",
+        )
+    )
+    done_preserved = len(done_count_q.scalars().all())
+
+    # Reset em massa via UPDATE — limpa todos os campos derivados da execução
+    # anterior pra worker tratar como item virgem.
+    items_reset = len(failed_items)
+    await db.execute(
+        sa_update(ScaffoldRunItem)
+        .where(
+            ScaffoldRunItem.run_id == run_id,
+            ScaffoldRunItem.status == "failed",
+        )
+        .values(
+            status="pending",
+            content=None,
+            error=None,
+            finished_at=None,
+            started_at=None,
+            tokens_used=None,
+            notes=None,
+        )
+    )
+
+    # Reset run pra estado que worker reconhece como "resume": status=generating
+    # já é aceito por execute_run (scaffold_run_service.py:203-206) — pula plan
+    # phase e vai direto pro loop topológico, processando só items pending.
+    run.status = "generating"
+    run.failed_items = 0
+    run.error = None
+    run.finished_at = None
+    run.last_progress_at = datetime.now(timezone.utc)
+
+    from app.services.audit_service import AuditEvents, AuditService
+    await AuditService(db).log_codegen_event(
+        event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,  # reusa evento canônico
+        actor_id=user_id,
+        project_id=run.project_id,
+        action="retry_failed_scaffold_items",
+        files_count=items_reset,
+        extra={
+            "run_id": str(run_id),
+            "items_reset": items_reset,
+            "items_done_preserved": done_preserved,
+        },
+    )
+    await db.commit()
+
+    # Re-enfileira worker. Falha do enqueue NÃO reverte o reset — operador
+    # pode chamar de novo (run já está em generating, retry idempotente após
+    # primeira chamada bem-sucedida).
+    from app.tasks.scaffold import scaffold_run_executor
+    scaffold_run_executor.delay(str(run_id))
+    logger.info(
+        "scaffold_run.retry_failed_enqueued",
+        run_id=str(run_id),
+        items_reset=items_reset,
+        items_done_preserved=done_preserved,
+    )
+
+    return ScaffoldRetryResponse(
+        run_id=run_id,
+        items_reset=items_reset,
+        items_done_preserved=done_preserved,
+        new_run_status="generating",
     )
 
 

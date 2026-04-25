@@ -47,6 +47,7 @@ def build_iterative_prompt(
     arguider_gaps_by_pillar: dict[str, list[dict[str, Any]]],
     previous_iteration_feedback: str | None = None,
     previously_asked_questions: list[str] | None = None,
+    governance_mode: str = "solo_owner",
 ) -> str:
     """Monta prompt pra geração de 4-7 perguntas focadas.
 
@@ -54,6 +55,10 @@ def build_iterative_prompt(
         target_pillars_scores: {"P3_scope": 55.0, "P4_quality": 68.0, ...}
         arguider_gaps_by_pillar: {"P3_scope": [{"name": "...", "severity": "..."}], ...}
         previous_iteration_feedback: resumo curto do que ficou incompleto na iter N-1.
+        governance_mode: modo de governança do projeto. Em "solo_owner" (default),
+            injeta cláusula que proíbe perguntas de PM corporativo (ROI, EAP,
+            cronograma absoluto, status report etc.). Reforça as proibições já
+            no prompt base com regra explícita de governance_filter.
     """
     pillars_block_parts = []
     for pillar, score in target_pillars_scores.items():
@@ -96,6 +101,11 @@ def build_iterative_prompt(
             f"canônicos do RIPD (finalidade, base legal, categorias de dados, medidas de "
             f"segurança, contato DPO).\n"
         )
+
+    governance_clause = ""
+    if governance_mode == "solo_owner":
+        from app.services.governance_filter import SOLO_OWNER_PROMPT_CLAUSE
+        governance_clause = SOLO_OWNER_PROMPT_CLAUSE
 
     return (
         f"Você é um analista de produto sênior de software, falante nativo de PT-BR. "
@@ -220,6 +230,7 @@ def build_iterative_prompt(
         f"(B) hardcode vs parametrizável (as 5 opções canônicas acima). Exemplo:\n"
         f"  Q_n: 'Qual o rate limit da API DataJud (requisições/segundo)?' (type=text)\n"
         f"  Q_n+1: 'A chave de autenticação DataJud será...?' (type=choice com as 5 opções)\n\n"
+        f"{governance_clause}\n"
         f"## FORMATO DE RESPOSTA (JSON ESTRITO)\n"
         f"Retorne APENAS JSON válido, sem markdown fences, sem preâmbulo. A ordem dos "
         f"itens em `questions` DEVE refletir a prioridade (Q1 = mais crítica):\n"

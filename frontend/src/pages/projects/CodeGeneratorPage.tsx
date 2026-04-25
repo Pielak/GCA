@@ -289,6 +289,7 @@ export function CodeGeneratorPage() {
   // não commitados (padrão novo desde backend /scaffold default=dry_run).
   const [scaffoldPendingApply, setScaffoldPendingApply] = useState(false)
   const [scaffoldApplying, setScaffoldApplying] = useState(false)
+  const [scaffoldRetrying, setScaffoldRetrying] = useState(false)
   // DT-043: warning de adequação do provider (contrato §7 + §6.2).
   // null = provider adequado; objeto = média/baixa criticidade.
   const [providerWarning, setProviderWarning] = useState<
@@ -450,6 +451,38 @@ export function CodeGeneratorPage() {
       alert(formatCodeGenError(err, 'aplicar scaffold'))
     } finally {
       setScaffoldApplying(false)
+    }
+  }
+
+  const handleRetryFailedScaffold = async () => {
+    if (!progressStore.runId || !progressStore.snapshot) return
+    const failed = progressStore.snapshot.failed_items
+    if (failed === 0) {
+      alert('Nenhum item failed pra re-tentar.')
+      return
+    }
+    if (!confirm(
+      `Re-tentar ${failed} item(s) que falharam? ` +
+      `Os ${progressStore.snapshot.completed_items} já gerados são preservados — ` +
+      `só os falhados são regerados.`,
+    )) return
+
+    setScaffoldRetrying(true)
+    try {
+      const result = await progressStore.retryFailed()
+      if (result === null) {
+        const msg = useCodeGenProgressStore.getState().errorMessage || 'Falha ao re-tentar items.'
+        alert(msg)
+        return
+      }
+      setScaffoldSummary(
+        `Re-tentando ${result.items_reset} item(s); ${result.items_done_preserved} preservados.`,
+      )
+      setScaffoldPendingApply(false)
+    } catch (err: unknown) {
+      alert(formatCodeGenError(err, 're-tentar items'))
+    } finally {
+      setScaffoldRetrying(false)
     }
   }
 
@@ -938,6 +971,23 @@ export function CodeGeneratorPage() {
                 <><Code2 className="w-3.5 h-3.5" />Gerar Preview</>
               )}
             </button>
+
+            {/* MVP-D: Re-tentar items failed — só aparece se a run completou com falhas */}
+            {progressStore.snapshot?.status === 'completed'
+              && (progressStore.snapshot?.failed_items ?? 0) > 0 && (
+              <button
+                onClick={handleRetryFailedScaffold}
+                disabled={scaffoldRetrying || scaffoldApplying || scaffoldGenerating}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                title={`Re-tentar os ${progressStore.snapshot.failed_items} arquivo(s) que falharam. Itens já gerados são preservados.`}
+              >
+                {scaffoldRetrying ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Re-tentando...</>
+                ) : (
+                  <><RefreshCw className="w-3.5 h-3.5" />Re-tentar Falhados ({progressStore.snapshot.failed_items})</>
+                )}
+              </button>
+            )}
 
             {/* MVP 3: Aplicar no Git — só aparece com preview pendente */}
             {scaffoldPendingApply && (
