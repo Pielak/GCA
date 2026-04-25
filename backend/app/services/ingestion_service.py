@@ -1672,11 +1672,22 @@ class IngestionService:
 
         except Exception as e:
             logger.error("ingestion.analysis_async_error", document_id=str(document_id), error=str(e))
-            # MVP 8 Fase 1 — marcar estágio "failed" para frontend parar o polling
+            # MVP 8 Fase 1 — marcar estágio "failed" para frontend parar o polling.
+            # Fix 2026-04-25: também marcar arguider_status='error' + mensagem,
+            # senão o doc fica preso em 'processing' eternamente (sem timeout).
             try:
                 from app.db.database import AsyncSessionLocal as _ASL
+                from app.models.base import IngestedDocument as _Doc
+                from datetime import datetime as _dt, timezone as _tz
                 async with _ASL() as _db:
-                    await IngestionService._update_stage(_db, document_id, "failed")
+                    _doc = await _db.get(_Doc, document_id)
+                    if _doc:
+                        _doc.arguider_status = "error"
+                        _doc.arguider_stage = "failed"
+                        _doc.arguider_completed_at = _dt.now(_tz.utc)
+                        if not _doc.arguider_error_message:
+                            _doc.arguider_error_message = (str(e) or repr(e))[:500]
+                        await _db.commit()
             except Exception:
                 pass
 
