@@ -1931,3 +1931,6 @@ class ScaffoldRunItem(Base):
     notes = Column(Text, nullable=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
+    # Camada B: lista de paths (JSON-serializado) dos peers em que este
+    # item depende. Vazio = sem dep. Toposort no execute_run.
+    depends_on = Column(Text, nullable=False, default="[]", server_default="[]")

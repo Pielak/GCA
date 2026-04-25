@@ -272,6 +272,24 @@ async def execute_run(run_id: UUID) -> None:
     ]
     summary_text = (plan_data.get("summary") or f"Scaffold de {len(valid_items)} arquivos")[:1000]
 
+    # Camada B — sanitiza depends_on de cada item antes de persistir.
+    # Só aceita paths que existem na própria lista (LLM ocasionalmente
+    # cita peer fora do plano, isso seria orphan e quebraria toposort).
+    valid_paths = {str(it.get("path", "")).strip() for it in valid_items}
+    valid_paths.discard("")
+
+    def _clean_deps(raw_deps: Any) -> List[str]:
+        if not isinstance(raw_deps, list):
+            return []
+        out = []
+        for d in raw_deps:
+            if not isinstance(d, str):
+                continue
+            d = d.strip()
+            if d and d in valid_paths:
+                out.append(d)
+        return out
+
     # Persiste plano + items pending
     async with AsyncSessionLocal() as db:
         run = await db.get(ScaffoldRun, run_id)
@@ -282,6 +300,7 @@ async def execute_run(run_id: UUID) -> None:
         run.plan_tokens_used = plan_tokens
         run.total_items = len(valid_items)
         for ordinal, it in enumerate(valid_items):
+            cleaned = _clean_deps(it.get("depends_on"))
             db.add(ScaffoldRunItem(
                 run_id=run_id,
                 ordinal=ordinal,
@@ -290,10 +309,11 @@ async def execute_run(run_id: UUID) -> None:
                 purpose=(str(it.get("purpose") or "")[:500]) or None,
                 est_lines=int(it.get("est_lines") or 0) or None,
                 status="pending",
+                depends_on=json.dumps(cleaned, ensure_ascii=False),
             ))
         await db.commit()
 
-    # Fase 2 — gerar conteúdo item-a-item
+    # Fase 2 — gerar conteúdo item-a-item NA ORDEM TOPOLÓGICA (camada B).
     async with AsyncSessionLocal() as db:
         run = await db.get(ScaffoldRun, run_id)
         project = await db.get(Project, run.project_id)
@@ -314,9 +334,81 @@ async def execute_run(run_id: UUID) -> None:
         all_items = items_q.scalars().all()
         all_paths = [it.path for it in all_items]
 
+    # Toposort de Kahn. Ordem resultante: items sem dep primeiro, depois
+    # quem depende deles, propagando. Empate desempata por ordinal (estável).
+    deps_by_path: Dict[str, List[str]] = {}
+    item_by_path: Dict[str, ScaffoldRunItem] = {}
+    for it in all_items:
+        try:
+            deps_by_path[it.path] = json.loads(it.depends_on or "[]") or []
+        except json.JSONDecodeError:
+            deps_by_path[it.path] = []
+        item_by_path[it.path] = it
+
+    in_degree: Dict[str, int] = {p: 0 for p in deps_by_path}
+    rdeps: Dict[str, List[str]] = {p: [] for p in deps_by_path}
+    for path, deps in deps_by_path.items():
+        for d in deps:
+            if d in in_degree:
+                in_degree[path] += 1
+                rdeps[d].append(path)
+
+    # ordinal map pra desempate estável
+    ordinal_by_path = {it.path: it.ordinal for it in all_items}
+    ready = sorted(
+        (p for p, deg in in_degree.items() if deg == 0),
+        key=lambda p: ordinal_by_path[p],
+    )
+    topo_order: List[str] = []
+    while ready:
+        current = ready.pop(0)
+        topo_order.append(current)
+        for nxt in rdeps[current]:
+            in_degree[nxt] -= 1
+            if in_degree[nxt] == 0:
+                # insert mantendo ordem por ordinal
+                inserted = False
+                for i, p in enumerate(ready):
+                    if ordinal_by_path[p] > ordinal_by_path[nxt]:
+                        ready.insert(i, nxt)
+                        inserted = True
+                        break
+                if not inserted:
+                    ready.append(nxt)
+
+    if len(topo_order) != len(all_items):
+        # ciclo detectado — Kahn não consome todos os nós
+        cyclic = [p for p, deg in in_degree.items() if deg > 0]
+        async with AsyncSessionLocal() as db:
+            run = await db.get(ScaffoldRun, run_id)
+            run.status = "failed"
+            run.error = (
+                f"Ciclo de dependências entre arquivos do plano: "
+                f"{', '.join(cyclic[:5])}{'...' if len(cyclic) > 5 else ''}. "
+                "Reexecute pra um novo plano sem ciclos."
+            )
+            run.finished_at = datetime.now(timezone.utc)
+            await db.commit()
+        logger.error("scaffold_run.cycle_detected", run_id=str(run_id), cyclic=cyclic[:10])
+        return
+
+    # Reordena all_items na ordem topológica calculada
+    all_items_topo = [item_by_path[p] for p in topo_order if p in item_by_path]
+    logger.info(
+        "scaffold_run.toposort_ok",
+        run_id=str(run_id),
+        items=len(all_items_topo),
+        first_5=topo_order[:5],
+    )
+
     completed = 0
     failed = 0
-    for it_snapshot in all_items:
+    # Camada C — buffer de content já gerado, indexado por path. Como o
+    # loop respeita ordem topológica, quando chega num item os peers em
+    # depends_on JÁ FORAM gerados (estão neste buffer).
+    generated_content_by_path: Dict[str, str] = {}
+
+    for it_snapshot in all_items_topo:
         # Marca generating
         async with AsyncSessionLocal() as db:
             it = await db.get(ScaffoldRunItem, it_snapshot.id)
@@ -324,7 +416,13 @@ async def execute_run(run_id: UUID) -> None:
             it.started_at = datetime.now(timezone.utc)
             await db.commit()
 
-        peer_paths = [p for p in all_paths if p != it_snapshot.path][:30]
+        # Camada C — peers diretos com conteúdo já gerado
+        deps_for_item = deps_by_path.get(it_snapshot.path, [])
+        peer_contents: Dict[str, str] = {
+            d: generated_content_by_path[d]
+            for d in deps_for_item
+            if d in generated_content_by_path
+        }
         item_prompt = build_item_prompt(
             project_name=project.name,
             project_slug=project.slug,
@@ -333,7 +431,7 @@ async def execute_run(run_id: UUID) -> None:
             item_path=it_snapshot.path,
             item_purpose=it_snapshot.purpose or "(sem propósito declarado)",
             item_file_type=it_snapshot.file_type or "txt",
-            peer_paths=peer_paths,
+            peer_contents=peer_contents,
             rnf_contracts=rnf_contracts,
             design_tokens=design_tokens,
         )
@@ -373,6 +471,10 @@ async def execute_run(run_id: UUID) -> None:
                 it.status = "done" if content.strip() else "failed"
                 if it.status == "done":
                     completed += 1
+                    # Camada C — alimenta buffer pro próximo item ler
+                    # via depends_on. Não persiste em memória além do
+                    # que cabe; o conteúdo já está no DB também.
+                    generated_content_by_path[it_snapshot.path] = content
                 else:
                     it.error = "LLM devolveu content vazio"
                     failed += 1

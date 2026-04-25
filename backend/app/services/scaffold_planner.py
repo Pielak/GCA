@@ -122,11 +122,26 @@ def build_plan_prompt(
         f"  - DB / MIGRATIONS: schema inicial, 1ª migration, seed de referência se aplicável.\n"
         f"  - DOCS MÍNIMOS: README.md, .gitignore, CHANGELOG.md.\n"
         f"Evite `.gitkeep` puros — prefira arquivos com conteúdo real (README de pasta, índice, etc).\n\n"
+        f"## DEPENDÊNCIAS ENTRE ARQUIVOS (OBRIGATÓRIO)\n"
+        f"Cada item DEVE declarar `depends_on`: array de paths dos OUTROS arquivos do plano\n"
+        f"em que ele depende DIRETAMENTE (importa, estende, instancia, configura, etc).\n"
+        f"Regras:\n"
+        f"  - paths em depends_on devem existir EXATAMENTE em outro item da mesma lista\n"
+        f"  - sem dependências transitivas — só direct imports/refs\n"
+        f"  - sem ciclos (A→B→A é proibido). Se houver loop natural, quebre por interface\n"
+        f"  - itens base (README, package.json, configs sem código) usam depends_on: []\n"
+        f"  - testes dependem do arquivo testado\n"
+        f"  - main/entry-points dependem dos módulos que orquestram\n"
+        f"  - controllers dependem dos services; services dependem dos models/repositories\n"
+        f"\n"
         f"## FORMATO DE RESPOSTA (JSON ESTRITO)\n"
         f"Retorne APENAS JSON válido, sem markdown code fences, sem preâmbulo:\n"
         f'{{"summary": "<breve descrição do scaffold confirmando que TODOS os {modules_count} módulos têm arquivo no plano e TODAS as camadas da stack foram contempladas, até 300 chars>", '
-        f'"items": [{{"path": "<path>", "file_type": "<ext>", "purpose": "<até {_MAX_CHARS_PURPOSE} chars>", "est_lines": <int>}}, ...]}}'
+        f'"items": [{{"path": "<path>", "file_type": "<ext>", "purpose": "<até {_MAX_CHARS_PURPOSE} chars>", "est_lines": <int>, "depends_on": ["<path do peer>", ...]}}, ...]}}'
     )
+
+
+_MAX_CHARS_PER_PEER_CONTENT = 600
 
 
 def build_item_prompt(
@@ -138,19 +153,41 @@ def build_item_prompt(
     item_path: str,
     item_purpose: str,
     item_file_type: str,
-    peer_paths: list[str],
+    peer_paths: list[str] | None = None,
+    peer_contents: dict[str, str] | None = None,
     rnf_contracts: Any = None,
     design_tokens: Any = None,
 ) -> str:
     """Monta prompt pra fase ITEM: LLM retorna conteúdo de 1 arquivo.
 
-    Recebe metadata do item (path, purpose, file_type), mais o OCG reduzido
-    e lista de peers (paths dos outros arquivos já planejados) pra não
-    inventar dependências que não existem.
+    Camada C (2026-04-25): aceita `peer_contents` (dict path→content) com
+    o conteúdo TRUNCADO dos peers que este arquivo declarou em depends_on.
+    O LLM gera assinaturas coerentes (imports reais, classes que existem).
+    `peer_paths` continua aceito pra retrocompat com chamadores antigos
+    (gera só lista de paths sem conteúdo).
     """
     stack_json = json.dumps(stack or {}, ensure_ascii=False, indent=2)[:_MAX_CHARS_CONTEXT_PER_ITEM]
     arch_json = json.dumps(architecture or {}, ensure_ascii=False, indent=2)[:1500]
-    peers_text = "\n".join(f"- {p}" for p in (peer_paths or [])[:40])
+
+    # Camada C — bloco de enlaces. Quando peer_contents está presente,
+    # injeta amostras truncadas. Caso contrário, cai no modo legado.
+    if peer_contents:
+        blocks = []
+        for path, content in list(peer_contents.items())[:30]:
+            snippet = (content or "").strip()[:_MAX_CHARS_PER_PEER_CONTENT]
+            if not snippet:
+                continue
+            blocks.append(f"### {path}\n```\n{snippet}\n```")
+        peers_text = (
+            "Peers (arquivos em que este DEPENDE — use APIs/símbolos exatos abaixo, "
+            "não invente nomes):\n\n" + "\n\n".join(blocks)
+            if blocks
+            else "Peers: (nenhum conteúdo de peer disponível ainda)"
+        )
+    else:
+        peers_text = "Peers (paths apenas — referências entre si são legítimas):\n" + "\n".join(
+            f"- {p}" for p in (peer_paths or [])[:40]
+        )
     rnf_text = ""
     if rnf_contracts:
         rnf_text = f"\n\nContratos RNF (do OCG — OBRIGATÓRIO cumprir):\n{json.dumps(rnf_contracts, ensure_ascii=False)[:2000]}\n"
@@ -165,7 +202,6 @@ def build_item_prompt(
         f"Arquitetura:\n{arch_json}\n"
         f"{rnf_text}"
         f"{tokens_text}\n"
-        f"Peers (outros arquivos que COEXISTEM no mesmo scaffold — referências entre si são legítimas):\n"
         f"{peers_text}\n\n"
         f"## ARQUIVO A GERAR\n"
         f"  Path: `{item_path}`\n"
