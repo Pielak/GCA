@@ -751,6 +751,30 @@ class ArguiderService:
                 latency_ms=latency_ms,
             )
 
+            # Cascata canônica Backlog→Roadmap→Scaffold (2026-04-24): após
+            # cada análise, promove os module_candidates novos pro backlog
+            # automaticamente. Antes era só via endpoint manual
+            # POST /backlog/ingest-arguider, o que fazia o backlog ficar
+            # eternamente atrás do Arguidor. Falha aqui não invalida a
+            # análise — log + segue.
+            try:
+                from app.services.backlog_service import BacklogService
+                ingest_result = await BacklogService(self.db).ingest_module_candidates(project_id)
+                logger.info(
+                    "arguider.backlog_auto_ingested",
+                    document_id=str(document_id),
+                    project_id=str(project_id),
+                    created=ingest_result.get("created", 0),
+                    skipped=ingest_result.get("skipped", 0),
+                )
+            except Exception as ingest_err:  # noqa: BLE001
+                logger.warning(
+                    "arguider.backlog_auto_ingest_failed",
+                    document_id=str(document_id),
+                    project_id=str(project_id),
+                    error=str(ingest_err),
+                )
+
             return result_json
 
         except Exception as e:
