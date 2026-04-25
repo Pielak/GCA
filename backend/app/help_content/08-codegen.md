@@ -133,6 +133,27 @@ Quando o OCG identifica que o projeto é C++, o gerador de specs de teste usa id
 - **Permissão `code:write`** — Dev ou GP (Admin pode via override).
 - **Validação pós-geração** conforme a linguagem: pyflakes (Python), esprima (JS/TS), ast.parse (Python), cmake+gcc (C++).
 
+## Posso fechar o navegador durante o scaffold?
+
+O scaffold roda no servidor (Celery worker), **não** no seu navegador. Você pode:
+
+- **Fechar a aba ou o navegador** — geração continua. Quando reabrir a tela de Geração de Código, ela retoma de onde parou.
+- **Fazer logout** — geração continua. A tarefa no servidor não depende da sua sessão.
+- **Desligar seu computador** — geração continua no servidor do GCA.
+
+### E se o servidor do GCA for reiniciado no meio?
+
+Se o servidor reiniciar (manutenção, queda de energia):
+
+- O arquivo que estava sendo gerado naquele instante específico pode falhar — vira `failed`.
+- Um watchdog detecta automaticamente em até **10 minutos** e retoma a run.
+- Arquivos já gerados são **preservados** — o worker continua de onde parou, sem regenerar o que já estava pronto.
+- Quando a run terminar, se sobraram arquivos com `failed` (por queda OU por outros motivos como cap de tokens), use o botão **"Re-tentar Falhados (N)"** na tela de Geração de Código pra regerar só os que falharam, reaproveitando os que já estavam OK.
+
+### Como acompanhar progresso
+
+A tela de Geração de Código mostra status em tempo real (poll a cada 3,5s): `total_items`, `completed_items`, `failed_items` e o status global da run (`planning` → `generating` → `completed` → `applied`). Não precisa ficar olhando — pode fechar e voltar quando quiser.
+
 ## Ver também
 
 - [OCG — STACK_RECOMMENDATION e DATA_MODEL](?section=05-ocg)
