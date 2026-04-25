@@ -971,10 +971,37 @@ class ArguiderService:
 
     def _build_prompt(self, doc_text: str, ocg: dict, prev: list) -> str:
         prev_summary = "Nenhuma análise anterior."
+
+        def _category_of(a: Any) -> str:
+            """Extrai categoria de uma análise anterior tolerando shapes
+            diferentes que o LLM já produziu: dict ({category: ...}),
+            string solta, ou null. Isso é histórico — DB tem análises
+            antigas com shape inconsistente.
+            """
+            cls = a.get("document_classification") if isinstance(a, dict) else None
+            if isinstance(cls, dict):
+                return str(cls.get("category", "?"))
+            if isinstance(cls, str):
+                return cls[:60] or "?"
+            return "?"
+
+        def _safe_len(a: Any, key: str) -> int:
+            val = a.get(key) if isinstance(a, dict) else None
+            if isinstance(val, list):
+                return len(val)
+            if isinstance(val, str):
+                # string JSON serializada — tenta parsear, senão conta como 0
+                try:
+                    parsed = json.loads(val)
+                    return len(parsed) if isinstance(parsed, list) else 0
+                except (json.JSONDecodeError, ValueError):
+                    return 0
+            return 0
+
         if prev:
             prev_summary = "\n".join(
-                f"- Doc {i+1}: {a.get('document_classification', {}).get('category', '?')} "
-                f"({len(a.get('gaps', []))} gaps, {len(a.get('module_candidates', []))} módulos)"
+                f"- Doc {i+1}: {_category_of(a)} "
+                f"({_safe_len(a, 'gaps')} gaps, {_safe_len(a, 'module_candidates')} módulos)"
                 for i, a in enumerate(prev)
             )
 
