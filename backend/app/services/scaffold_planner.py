@@ -22,9 +22,25 @@ from __future__ import annotations
 import json
 from typing import Any
 
-_MAX_FILES_IN_PLAN = 40
+_MAX_FILES_IN_PLAN = 600
 _MAX_CHARS_PURPOSE = 120
 _MAX_CHARS_CONTEXT_PER_ITEM = 3000
+
+
+def _compact_module(m: dict[str, Any]) -> dict[str, Any]:
+    """Reduz módulo do backlog ao essencial pro prompt: nome, tipo, propósito.
+
+    Mantém o prompt enxuto mesmo quando a lista tem 100+ items. Trunca purpose
+    em 200 chars pra forçar densidade.
+    """
+    purpose = (m.get("description") or "").strip().replace("\n", " ")
+    return {
+        "name": (m.get("name") or "").strip()[:120],
+        "type": m.get("module_type") or "feature",
+        "priority": m.get("priority") or "medium",
+        "phase": m.get("phase"),
+        "purpose": purpose[:200],
+    }
 
 
 def build_plan_prompt(
@@ -39,6 +55,12 @@ def build_plan_prompt(
 ) -> str:
     """Monta prompt pra fase PLAN: LLM retorna apenas lista de arquivos.
 
+    Cascata canônica (2026-04-24): a lista `modules` vem do backlog filtrado
+    por ready_for_codegen=true e ordenada pela cascata do roadmap (fase 1 →
+    2 → 3, ready primeiro). O prompt CONFIA na ordem recebida — não
+    reorganiza nem corta. Cada módulo da lista DEVE produzir ao menos 1
+    arquivo dedicado no plano.
+
     Output esperado (JSON):
     ```
     {
@@ -52,26 +74,39 @@ def build_plan_prompt(
     """
     stack_json = json.dumps(stack or {}, ensure_ascii=False, indent=2)[:2000]
     arch_json = json.dumps(architecture or {}, ensure_ascii=False, indent=2)[:1500]
-    modules_sample = json.dumps(
-        [m for m in (modules or []) if isinstance(m, dict)][:15],
-        ensure_ascii=False,
-    )[:2000]
-    arguider_sample = json.dumps(
-        [m for m in (arguider_modules or []) if isinstance(m, dict)][:15],
-        ensure_ascii=False,
-    )[:2000]
+
+    # Compacta TODOS os módulos prontos — sem slice. A ordem recebida é a
+    # ordem canônica do roadmap (priority_rank + ready_rank + created_at)
+    # e o prompt preserva pra o LLM gerar arquivos na mesma sequência.
+    compact = [
+        _compact_module(m)
+        for m in (modules or [])
+        if isinstance(m, dict)
+    ]
+    modules_block = json.dumps(compact, ensure_ascii=False, indent=1)
+    modules_count = len(compact)
 
     return (
-        f"Você é um arquiteto de software sênior. Planeje o scaffold INICIAL do projeto "
+        f"Você é um arquiteto de software sênior. Planeje o scaffold completo do projeto "
         f"`{project_name}` (slug: {project_slug}).\n\n"
         f"Descrição: {project_description or '(não fornecida)'}\n\n"
         f"Stack recomendada:\n{stack_json}\n\n"
         f"Arquitetura:\n{arch_json}\n\n"
-        f"Módulos do Roadmap (amostra):\n{modules_sample}\n\n"
-        f"Módulos sugeridos pelo Arguidor (amostra):\n{arguider_sample}\n\n"
+        f"## MÓDULOS DO BACKLOG ORDENADOS PELO ROADMAP ({modules_count} prontos pra CodeGen)\n"
+        f"Ordem canônica: critical/high (Fase 1) → medium (Fase 2) → low (Fase 3),\n"
+        f"e dentro de cada prioridade, ready_for_codegen primeiro. Preserve essa\n"
+        f"ordem na geração do plano — o item N do backlog deve aparecer antes do N+1.\n\n"
+        f"{modules_block}\n\n"
         f"## TAREFA\n"
-        f"Liste os arquivos que compõem o scaffold inicial. NÃO gere conteúdo — apenas "
-        f"a lista com metadata. Máximo de {_MAX_FILES_IN_PLAN} arquivos.\n\n"
+        f"Liste os arquivos que compõem o scaffold COMPLETO. NÃO gere conteúdo — apenas "
+        f"a lista com metadata. Limite superior técnico: {_MAX_FILES_IN_PLAN} arquivos.\n\n"
+        f"## REGRA DURA — 1 ARQUIVO POR MÓDULO NO MÍNIMO\n"
+        f"Cada módulo do backlog acima TEM QUE produzir pelo menos 1 arquivo dedicado de\n"
+        f"implementação no plano. Nada de 'agrupar 5 módulos em 1 arquivo genérico'.\n"
+        f"Adicione também o arquivo de teste correspondente (unit por default; integration\n"
+        f"quando o tipo for backend_service ou middleware). Você pode adicionar arquivos\n"
+        f"comuns de scaffold (README, configs, entry-points) ALÉM dos módulos — mas\n"
+        f"nunca em substituição.\n\n"
         f"## REGRA OBRIGATÓRIA DE COBERTURA\n"
         f"Se a stack declarada inclui MÚLTIPLAS CAMADAS (ex: frontend + backend + sidecar + mobile + "
         f"embedded + DB), o plano TEM QUE conter arquivos representativos de TODAS elas. É proibido "
@@ -86,11 +121,10 @@ def build_plan_prompt(
         f"  - CI/CD: .github/workflows/*.yml OU .gitlab-ci.yml cobrindo lint/test/build multi-plataforma.\n"
         f"  - DB / MIGRATIONS: schema inicial, 1ª migration, seed de referência se aplicável.\n"
         f"  - DOCS MÍNIMOS: README.md, .gitignore, CHANGELOG.md.\n"
-        f"  - TESTES: pelo menos 1 teste por camada (unit/integration) como placeholder.\n"
         f"Evite `.gitkeep` puros — prefira arquivos com conteúdo real (README de pasta, índice, etc).\n\n"
         f"## FORMATO DE RESPOSTA (JSON ESTRITO)\n"
         f"Retorne APENAS JSON válido, sem markdown code fences, sem preâmbulo:\n"
-        f'{{"summary": "<breve descrição do scaffold mostrando que TODAS as camadas foram contempladas, até 300 chars>", '
+        f'{{"summary": "<breve descrição do scaffold confirmando que TODOS os {modules_count} módulos têm arquivo no plano e TODAS as camadas da stack foram contempladas, até 300 chars>", '
         f'"items": [{{"path": "<path>", "file_type": "<ext>", "purpose": "<até {_MAX_CHARS_PURPOSE} chars>", "est_lines": <int>}}, ...]}}'
     )
 
