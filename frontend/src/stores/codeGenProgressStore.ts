@@ -1,160 +1,295 @@
 import { create } from 'zustand'
 import { apiClient } from '@/lib/api'
 
-export type ItemStatus = 'pending' | 'generating' | 'complete' | 'error'
+/**
+ * Camada A — scaffold server-side persistido (2026-04-25).
+ *
+ * Antes este store chamava `/scaffold/plan` síncrono (LLM ~180s) e estourava
+ * Cloudflare timeout (~100s) → Network Error e perda de progresso. Agora:
+ *
+ *   1. POST /scaffold/start  → retorna run_id em milissegundos (Celery enfileirado)
+ *   2. Poll GET /scaffold/runs/{run_id} com backoff exponencial em erro de rede
+ *   3. run_id persistido em localStorage por projeto — sobrevive a refresh/F5,
+ *      queda de rede, queda de eletricidade. Ao montar, hidrata e retoma poll.
+ *   4. Status canônicos do servidor:
+ *        run.status: pending → planning → generating → completed | failed | applied
+ *        item.status: pending → generating → done | failed | skipped
+ *   5. Apply pelo próprio store (POST /scaffold/runs/{id}/apply).
+ *   6. Dismiss limpa localStorage e estado.
+ */
 
-export interface PlanItem {
+export type RunStatus = 'pending' | 'planning' | 'generating' | 'completed' | 'failed' | 'applied'
+export type ItemStatus = 'pending' | 'generating' | 'done' | 'failed' | 'skipped'
+
+export interface RunItem {
+  id: string
+  ordinal: number
   path: string
-  file_type: string
-  purpose: string
-  est_lines: number
+  file_type: string | null
+  purpose: string | null
+  status: ItemStatus
+  tokens_used: number | null
+  error: string | null
+  notes: string | null
+  has_content: boolean
 }
 
-export interface GeneratedFile {
-  content: string
-  status: string
+export interface RunSnapshot {
+  id: string
+  project_id: string
+  status: RunStatus
+  plan_summary: string | null
+  total_items: number
+  completed_items: number
+  failed_items: number
+  error: string | null
+  started_at: string | null
+  finished_at: string | null
+  applied_at: string | null
+  apply_committed: number | null
+  apply_failed: number | null
+  items: RunItem[]
 }
 
 interface CodeGenProgressState {
-  active: boolean
+  runId: string | null
   projectId: string | null
   projectName: string | null
-  planSummary: string | null
-  planItems: PlanItem[]
-  itemStatus: Map<string, ItemStatus>
-  filesByPath: Map<string, GeneratedFile>
+  snapshot: RunSnapshot | null
+  active: boolean
   errorMessage: string | null
+  pollErrorCount: number
   startedAt: number | null
   finishedAt: number | null
 
   startScaffold: (projectId: string, projectName: string) => Promise<void>
-  reset: () => void
+  hydrateForProject: (projectId: string, projectName: string) => Promise<void>
+  apply: () => Promise<{ committed: number; failed: number } | null>
+  fetchItemContent: (itemId: string) => Promise<string | null>
   dismiss: () => void
+  reset: () => void
 }
 
+const LS_KEY = (projectId: string) => `gca:scaffold:active:${projectId}`
+
+const POLL_INTERVAL_MS = 3500
+const POLL_MAX_BACKOFF_MS = 30000
+const TERMINAL_STATUSES: RunStatus[] = ['completed', 'failed', 'applied']
+
 const initialState = {
-  active: false,
+  runId: null,
   projectId: null,
   projectName: null,
-  planSummary: null,
-  planItems: [],
-  itemStatus: new Map<string, ItemStatus>(),
-  filesByPath: new Map<string, GeneratedFile>(),
+  snapshot: null,
+  active: false,
   errorMessage: null,
+  pollErrorCount: 0,
   startedAt: null,
   finishedAt: null,
 }
 
-/**
- * MVP 30 — store global pra progresso de geração de scaffold.
- *
- * O for-loop que chama `/scaffold/item` sequencialmente vive AQUI, fora
- * do ciclo de vida do componente CodeGeneratorPage. Isso garante que
- * navegar pra outra página NÃO interrompe a geração — o loop continua
- * rodando no store e o overlay global (ver CodeGenProgressOverlay)
- * exibe o progresso em qualquer tela do projeto.
- *
- * DT-091 futura: persistir no servidor pra sobreviver a refresh/F5.
- */
-export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) => ({
-  ...initialState,
+let pollTimer: ReturnType<typeof setTimeout> | null = null
 
-  reset: () => set({ ...initialState, itemStatus: new Map(), filesByPath: new Map() }),
+function clearPoll() {
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
+}
 
-  dismiss: () => {
-    if (get().active) return
-    set({ ...initialState, itemStatus: new Map(), filesByPath: new Map() })
-  },
+function persistRunId(projectId: string, runId: string) {
+  try {
+    localStorage.setItem(LS_KEY(projectId), runId)
+  } catch { /* ignora */ }
+}
 
-  startScaffold: async (projectId: string, projectName: string) => {
-    if (get().active) return
+function readRunId(projectId: string): string | null {
+  try {
+    return localStorage.getItem(LS_KEY(projectId))
+  } catch {
+    return null
+  }
+}
 
-    set({
-      ...initialState,
-      active: true,
-      projectId,
-      projectName,
-      startedAt: Date.now(),
-      itemStatus: new Map(),
-      filesByPath: new Map(),
-    })
+function clearRunId(projectId: string) {
+  try {
+    localStorage.removeItem(LS_KEY(projectId))
+  } catch { /* ignora */ }
+}
 
+export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) => {
+  /**
+   * Loop de poll. Backoff exponencial em erros de rede; reset ao 1º sucesso.
+   * Para automaticamente quando run entra em status terminal.
+   */
+  const schedulePoll = (delayMs: number) => {
+    clearPoll()
+    pollTimer = setTimeout(() => {
+      void pollOnce()
+    }, delayMs)
+  }
+
+  const pollOnce = async () => {
+    const { runId, projectId } = get()
+    if (!runId || !projectId) return
     try {
-      const planRes = await apiClient.post('/code-generation/scaffold/plan', { project_id: projectId })
-      const planItems: PlanItem[] = planRes.data.items || []
-      const planSummary: string = planRes.data.summary || ''
-
-      if (planItems.length === 0) {
-        set({
-          active: false,
-          errorMessage: 'O LLM não retornou itens no plano. Ajuste o OCG e tente novamente.',
-          finishedAt: Date.now(),
-        })
+      const res = await apiClient.get(`/code-generation/scaffold/runs/${runId}`)
+      const snap = res.data as RunSnapshot
+      const isTerminal = TERMINAL_STATUSES.includes(snap.status)
+      set({
+        snapshot: snap,
+        active: !isTerminal,
+        pollErrorCount: 0,
+        finishedAt: isTerminal && !get().finishedAt ? Date.now() : get().finishedAt,
+        errorMessage: snap.status === 'failed' ? snap.error : null,
+      })
+      if (isTerminal) {
+        clearPoll()
+        if (snap.status === 'applied' || snap.status === 'failed') {
+          // applied: scope encerrado; failed: deixa run_id pra owner ver erro,
+          // mas saímos do polling. Owner pode dar dismiss manual.
+        }
+      } else {
+        schedulePoll(POLL_INTERVAL_MS)
+      }
+    } catch (err: any) {
+      const errStatus = err?.response?.status
+      // 404 → run sumiu (deletada externamente). Limpa.
+      if (errStatus === 404) {
+        const pid = get().projectId
+        if (pid) clearRunId(pid)
+        set({ ...initialState, errorMessage: 'Run não encontrada — pode ter sido removida.' })
+        clearPoll()
         return
       }
-
-      const initialStatus = new Map<string, ItemStatus>()
-      for (const it of planItems) initialStatus.set(it.path, 'pending')
-
+      const next = get().pollErrorCount + 1
+      // Backoff exponencial 3s, 6s, 12s, 24s, 30s (cap)
+      const backoff = Math.min(POLL_INTERVAL_MS * Math.pow(2, next - 1), POLL_MAX_BACKOFF_MS)
       set({
-        planItems,
-        planSummary,
-        itemStatus: initialStatus,
+        pollErrorCount: next,
+        errorMessage: next >= 5
+          ? 'Conexão instável — retomamos automaticamente quando voltar.'
+          : null,
       })
+      schedulePoll(backoff)
+    }
+  }
 
-      const peerPathsCsv = planItems.map(it => it.path).join(',')
-      const accumulated = new Map<string, GeneratedFile>()
+  return {
+    ...initialState,
 
-      for (const item of planItems) {
-        set((s) => {
-          const next = new Map(s.itemStatus)
-          next.set(item.path, 'generating')
-          return { itemStatus: next }
+    reset: () => {
+      clearPoll()
+      const pid = get().projectId
+      if (pid) clearRunId(pid)
+      set({ ...initialState })
+    },
+
+    dismiss: () => {
+      const { active, projectId } = get()
+      if (active) return
+      if (projectId) clearRunId(projectId)
+      clearPoll()
+      set({ ...initialState })
+    },
+
+    /**
+     * Hidratação ao montar: se há run_id no localStorage do projeto, retoma.
+     * Chamado pelo CodeGeneratorPage no useEffect inicial.
+     */
+    hydrateForProject: async (projectId: string, projectName: string) => {
+      // Se já há run no store ativa pra este projeto, não hidrata de novo
+      const cur = get()
+      if (cur.runId && cur.projectId === projectId) return
+
+      const persistedId = readRunId(projectId)
+      if (!persistedId) return
+
+      // Tenta carregar — se 404, descarta silenciosamente
+      try {
+        const res = await apiClient.get(`/code-generation/scaffold/runs/${persistedId}`)
+        const snap = res.data as RunSnapshot
+        const isTerminal = TERMINAL_STATUSES.includes(snap.status)
+        clearPoll()
+        set({
+          ...initialState,
+          runId: persistedId,
+          projectId,
+          projectName,
+          snapshot: snap,
+          active: !isTerminal,
+          startedAt: snap.started_at ? new Date(snap.started_at).getTime() : Date.now(),
+          finishedAt: isTerminal && snap.finished_at ? new Date(snap.finished_at).getTime() : null,
+          errorMessage: snap.status === 'failed' ? snap.error : null,
         })
-
-        try {
-          const itemRes = await apiClient.post(
-            `/code-generation/scaffold/item?peer_paths_csv=${encodeURIComponent(peerPathsCsv)}`,
-            {
-              project_id: projectId,
-              path: item.path,
-              file_type: item.file_type,
-              purpose: item.purpose,
-            },
-          )
-          const data = itemRes.data
-          if (data.status === 'error') {
-            set((s) => {
-              const next = new Map(s.itemStatus)
-              next.set(item.path, 'error')
-              return { itemStatus: next }
-            })
-          } else {
-            accumulated.set(item.path, { content: data.content || '', status: data.status || 'todo' })
-            set((s) => {
-              const nextStatus = new Map(s.itemStatus)
-              nextStatus.set(item.path, 'complete')
-              return {
-                itemStatus: nextStatus,
-                filesByPath: new Map(accumulated),
-              }
-            })
-          }
-        } catch {
-          set((s) => {
-            const next = new Map(s.itemStatus)
-            next.set(item.path, 'error')
-            return { itemStatus: next }
-          })
+        if (!isTerminal) {
+          schedulePoll(POLL_INTERVAL_MS)
+        }
+      } catch (err: any) {
+        if (err?.response?.status === 404) {
+          clearRunId(projectId)
         }
       }
+    },
 
-      set({ active: false, finishedAt: Date.now() })
-    } catch (err: unknown) {
-      const msg = err && typeof err === 'object' && 'message' in err
-        ? String((err as { message: unknown }).message)
-        : 'Erro inesperado ao gerar scaffold'
-      set({ active: false, errorMessage: msg, finishedAt: Date.now() })
-    }
-  },
-}))
+    startScaffold: async (projectId: string, projectName: string) => {
+      if (get().active) return
+      clearPoll()
+
+      set({
+        ...initialState,
+        active: true,
+        projectId,
+        projectName,
+        startedAt: Date.now(),
+      })
+
+      try {
+        const res = await apiClient.post('/code-generation/scaffold/start', { project_id: projectId })
+        const runId = res.data.run_id as string
+        persistRunId(projectId, runId)
+        set({ runId })
+        // Primeiro poll já — backend pode estar em planning ainda
+        schedulePoll(POLL_INTERVAL_MS)
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        const msg = typeof detail === 'string' ? detail : 'Falha ao iniciar scaffold.'
+        set({ active: false, errorMessage: msg, finishedAt: Date.now() })
+      }
+    },
+
+    apply: async () => {
+      const { runId, snapshot } = get()
+      if (!runId || !snapshot) return null
+      if (snapshot.status !== 'completed') {
+        set({ errorMessage: 'Scaffold ainda não terminou — aguarde o status completed.' })
+        return null
+      }
+      try {
+        const res = await apiClient.post(`/code-generation/scaffold/runs/${runId}/apply`)
+        // Atualiza snapshot manualmente; o GET seguinte trará applied_at
+        await pollOnce()
+        return {
+          committed: res.data?.committed || 0,
+          failed: res.data?.failed || 0,
+        }
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        const msg = typeof detail === 'string' ? detail : 'Falha ao aplicar no Git.'
+        set({ errorMessage: msg })
+        return null
+      }
+    },
+
+    fetchItemContent: async (itemId: string) => {
+      const { runId } = get()
+      if (!runId) return null
+      try {
+        const res = await apiClient.get(`/code-generation/scaffold/runs/${runId}/items/${itemId}/content`)
+        return res.data?.content || ''
+      } catch {
+        return null
+      }
+    },
+  }
+})

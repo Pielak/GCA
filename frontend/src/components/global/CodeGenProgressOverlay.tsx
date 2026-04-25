@@ -20,23 +20,35 @@ export function CodeGenProgressOverlay() {
   const active = useCodeGenProgressStore((s) => s.active)
   const projectId = useCodeGenProgressStore((s) => s.projectId)
   const projectName = useCodeGenProgressStore((s) => s.projectName)
-  const itemStatus = useCodeGenProgressStore((s) => s.itemStatus)
-  const planSummary = useCodeGenProgressStore((s) => s.planSummary)
+  const snapshot = useCodeGenProgressStore((s) => s.snapshot)
   const errorMessage = useCodeGenProgressStore((s) => s.errorMessage)
   const finishedAt = useCodeGenProgressStore((s) => s.finishedAt)
   const startedAt = useCodeGenProgressStore((s) => s.startedAt)
   const dismiss = useCodeGenProgressStore((s) => s.dismiss)
 
+  const planSummary = snapshot?.plan_summary || null
+
   const stats = useMemo(() => {
-    const values = Array.from(itemStatus.values())
-    const total = values.length
-    const done = values.filter(v => v === 'complete').length
-    const generating = values.filter(v => v === 'generating').length
-    const errors = values.filter(v => v === 'error').length
-    const pending = values.filter(v => v === 'pending').length
+    const items = snapshot?.items || []
+    const total = items.length
+    const done = items.filter(i => i.status === 'done').length
+    const generating = items.filter(i => i.status === 'generating').length
+    const errors = items.filter(i => i.status === 'failed').length
+    const pending = items.filter(i => i.status === 'pending').length
     const pct = total > 0 ? Math.round((done / total) * 100) : 0
     return { total, done, generating, errors, pending, pct }
-  }, [itemStatus])
+  }, [snapshot])
+
+  const phaseLabel = (() => {
+    if (!snapshot) return 'Iniciando'
+    if (snapshot.status === 'pending') return 'Na fila'
+    if (snapshot.status === 'planning') return 'Planejando arquivos'
+    if (snapshot.status === 'generating') return 'Gerando código'
+    if (snapshot.status === 'completed') return stats.errors === 0 ? 'Geração concluída' : `Concluída com ${stats.errors} erro(s)`
+    if (snapshot.status === 'failed') return 'Falhou'
+    if (snapshot.status === 'applied') return 'Aplicado no Git'
+    return snapshot.status
+  })()
 
   const shouldShow = active || (finishedAt && !active)
   if (!shouldShow) return null
@@ -66,9 +78,7 @@ export function CodeGenProgressOverlay() {
           {isDone && stats.errors === 0 && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
           {isDone && stats.errors > 0 && <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />}
           <div className="flex flex-col min-w-0">
-            <span className="text-xs font-semibold text-slate-200 truncate">
-              {active ? 'Gerando código' : isDone ? 'Geração concluída' : 'Preparando'}
-            </span>
+            <span className="text-xs font-semibold text-slate-200 truncate">{phaseLabel}</span>
             <span className="text-[10px] text-slate-500 truncate">{projectName}</span>
           </div>
         </div>

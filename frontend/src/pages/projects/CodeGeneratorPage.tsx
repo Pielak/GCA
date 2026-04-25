@@ -230,6 +230,8 @@ function AIReviewPanel({ review, onDismiss }: { review: AIReviewResult; onDismis
 export function CodeGeneratorPage() {
   const { id: projectId } = useParams<{ id: string }>()
   const { user } = useAuthStore()
+  const outletProjectCtx = useOutletContext<{ projectName?: string } | null>()
+  const projectName = outletProjectCtx?.projectName || 'Projeto'
 
   // Sidebar state
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -313,65 +315,92 @@ export function CodeGeneratorPage() {
     }).catch(() => {})
   }, [projectId])
 
-  // MVP 30 — espelha state do store global no state local da Page.
-  // Se o scaffold rodar em outro projeto (usuário navegou), Page atual
-  // mantém seu próprio estado (tree do Git). Se for o projeto atual,
-  // reflete incrementalmente o que está no store — o Page re-hidrata
-  // sozinho quando usuário volta pro CodeGenerator durante geração.
+  // Camada A do scaffold (2026-04-25) — espelha snapshot do store global.
+  // O store agora pollá `/scaffold/runs/{run_id}` e mantém `snapshot` com
+  // os items + content já gerados. Sobrevive a refresh/F5/queda de rede via
+  // localStorage. Mapeamos o snapshot canônico pros states locais da Page.
   const storeActive = useCodeGenProgressStore((s) => s.active)
   const storeProjectId = useCodeGenProgressStore((s) => s.projectId)
-  const storePlanSummary = useCodeGenProgressStore((s) => s.planSummary)
-  const storeItemStatus = useCodeGenProgressStore((s) => s.itemStatus)
-  const storeFilesByPath = useCodeGenProgressStore((s) => s.filesByPath)
+  const storeSnapshot = useCodeGenProgressStore((s) => s.snapshot)
   const storeFinishedAt = useCodeGenProgressStore((s) => s.finishedAt)
+  const storeFetchItemContent = useCodeGenProgressStore((s) => s.fetchItemContent)
+  const storeHydrate = useCodeGenProgressStore((s) => s.hydrateForProject)
+
+  // Hidratação: ao montar, se há run persistida no localStorage, retoma poll
+  useEffect(() => {
+    if (!projectId) return
+    storeHydrate(projectId, projectName || projectId)
+  }, [projectId, projectName, storeHydrate])
 
   useEffect(() => {
-    if (!projectId || storeProjectId !== projectId) return
-    setScaffoldGenerating(storeActive)
-    setScaffoldPlanSummary(storePlanSummary)
-    setScaffoldItemStatus(new Map(storeItemStatus))
-    setScaffoldFiles(new Map(storeFilesByPath))
+    if (!projectId || storeProjectId !== projectId || !storeSnapshot) return
 
-    if (storeFilesByPath.size > 0) {
-      const files = Array.from(storeFilesByPath.entries()).map(([path, v]) => ({
-        path, content: v.content, status: v.status,
-      }))
-      setFileTree(buildTreeWithStatus(files))
-    } else if (storeItemStatus.size > 0) {
-      const pending = Array.from(storeItemStatus.keys()).map(path => ({ path, content: '', status: 'pending' }))
-      setFileTree(buildTreeWithStatus(pending))
+    setScaffoldGenerating(storeActive)
+    setScaffoldPlanSummary(storeSnapshot.plan_summary || '')
+
+    // Status canônico do server: pending/generating/done/failed/skipped
+    // Mapeia pro tipo legado da Page: pending/generating/complete/error
+    const mapStatus = (s: string): 'pending' | 'generating' | 'complete' | 'error' => {
+      if (s === 'done') return 'complete'
+      if (s === 'failed' || s === 'skipped') return 'error'
+      if (s === 'generating') return 'generating'
+      return 'pending'
     }
 
-    if (!storeActive && storeFinishedAt && storeFilesByPath.size > 0) {
-      const completeCount = Array.from(storeFilesByPath.values()).filter(v => v.status !== 'nmi').length
-      setScaffoldSummary(
-        `${storePlanSummary || `Scaffold com ${storeItemStatus.size} arquivos`} — ${completeCount} prontos pra commit. Revise e clique em "Aplicar no Git".`,
-      )
-      setScaffoldPendingApply(completeCount > 0)
-      loadTree()
+    const itemStatusMap = new Map<string, 'pending' | 'generating' | 'complete' | 'error'>()
+    for (const it of storeSnapshot.items) {
+      itemStatusMap.set(it.path, mapStatus(it.status))
+    }
+    setScaffoldItemStatus(itemStatusMap)
 
-      const firstPath = Array.from(storeFilesByPath.keys())[0]
-      if (firstPath && !selectedFile) {
-        const got = storeFilesByPath.get(firstPath)
-        if (got) {
-          setSelectedFile(firstPath)
-          setFileContent(got.content)
-          setOriginalContent(got.content)
-          setHasChanges(false)
-        }
-      }
+    // Tree: usa items do snapshot (com flag has_content); content é lazy-loaded
+    const treeItems = storeSnapshot.items.map(it => ({
+      path: it.path,
+      content: '',
+      status: mapStatus(it.status),
+    }))
+    setFileTree(buildTreeWithStatus(treeItems))
+
+    // Quando termina, summary + libera apply
+    const isCompleted = storeSnapshot.status === 'completed'
+    if (!storeActive && storeFinishedAt && isCompleted) {
+      const doneCount = storeSnapshot.completed_items
+      setScaffoldSummary(
+        `${storeSnapshot.plan_summary || `Scaffold com ${storeSnapshot.total_items} arquivos`} — ${doneCount} prontos pra commit. Clique em "Aplicar no Git".`,
+      )
+      setScaffoldPendingApply(doneCount > 0)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, storeActive, storeProjectId, storePlanSummary, storeItemStatus, storeFilesByPath, storeFinishedAt])
+  }, [projectId, storeActive, storeProjectId, storeSnapshot, storeFinishedAt])
+
+  // Quando user clica em arquivo no tree, carrega content sob demanda do server
+  const loadItemContentOnDemand = useCallback(async (path: string) => {
+    if (!storeSnapshot) return
+    const item = storeSnapshot.items.find(i => i.path === path)
+    if (!item || !item.has_content) return
+    const content = await storeFetchItemContent(item.id)
+    if (content !== null) {
+      setScaffoldFiles((prev) => {
+        const next = new Map(prev)
+        next.set(path, { content, status: item.status === 'done' ? 'complete' : item.status })
+        return next
+      })
+      if (selectedFile === path) {
+        setFileContent(content)
+        setOriginalContent(content)
+        setHasChanges(false)
+      }
+    }
+  }, [storeSnapshot, storeFetchItemContent, selectedFile])
 
   // ================================================================
   // Gerar Scaffold do Projeto
   // ================================================================
 
-  // MVP 30 — for-loop vive no store (sobrevive à navegação). Page só
-  // dispara a ação e reflete state do store via useEffect abaixo.
+  // Camada A — pipeline persistido via Celery + poll (sobrevive a refresh,
+  // queda de rede, queda de eletricidade). Page só dispara start; o resto
+  // do ciclo (planning, generating, completed) é gerenciado pelo store.
   const progressStore = useCodeGenProgressStore()
-  const outletCtx = useOutletContext<{ projectName?: string } | null>()
 
   const handleGenerateScaffold = async () => {
     if (!projectId || progressStore.active) return
@@ -383,7 +412,6 @@ export function CodeGeneratorPage() {
     setScaffoldPlanSummary(null)
     setScaffoldPendingApply(false)
 
-    const projectName = outletCtx?.projectName || 'Projeto'
     try {
       await progressStore.startScaffold(projectId, projectName)
     } catch (err: unknown) {
@@ -391,30 +419,30 @@ export function CodeGeneratorPage() {
     }
   }
 
-  // MVP 3: aplicar preview — manda files pré-gerados/editados para /scaffold/apply,
-  // que re-valida docstrings e commita cada um no Git.
+  // Camada A — apply server-side: o conteúdo dos arquivos JÁ está em
+  // scaffold_run_items.content. POST /scaffold/runs/{id}/apply pega só
+  // os items done e commita. Sem payload, sem dependência do estado da
+  // page. Sobrevive a refresh entre completed e applied.
   const handleApplyScaffold = async () => {
-    if (!projectId || scaffoldFiles.size === 0) return
-    const committable = Array.from(scaffoldFiles.values()).filter(v => v.status !== 'nmi').length
+    if (!projectId || !progressStore.runId || !progressStore.snapshot) return
+    if (progressStore.snapshot.status !== 'completed') {
+      alert('Aguarde a geração terminar antes de aplicar.')
+      return
+    }
+    const committable = progressStore.snapshot.completed_items
     if (!confirm(`Aplicar ${committable} arquivo(s) no Git? Cada um vira um commit individual.`)) return
 
     setScaffoldApplying(true)
     try {
-      const filesPayload = Array.from(scaffoldFiles.entries()).map(([path, v]) => ({
-        path,
-        content: v.content,
-        status: v.status,
-      }))
-      const res = await apiClient.post('/code-generation/scaffold/apply', {
-        project_id: projectId,
-        files: filesPayload,
-      })
-      const data = res.data
-      const committed = data.committed ?? 0
-      const failed = data.failed ?? 0
-      const skipped = data.skipped_nmi ?? 0
+      const result = await progressStore.apply()
+      if (result === null) {
+        const msg = useCodeGenProgressStore.getState().errorMessage || 'Falha ao aplicar.'
+        alert(msg)
+        return
+      }
+      const { committed, failed } = result
       setScaffoldSummary(
-        `Aplicado: ${committed} commitado(s)${failed ? `, ${failed} falharam` : ''}${skipped ? `, ${skipped} NMI pulado(s)` : ''}.`
+        `Aplicado: ${committed} commitado(s)${failed ? `, ${failed} falharam` : ''}.`,
       )
       setScaffoldPendingApply(false)
       loadTree()
@@ -501,11 +529,25 @@ export function CodeGeneratorPage() {
     setAiReview(null)
     setSaveSuccess(false)
 
-    // Verificar se o arquivo está no scaffold gerado
+    // Verificar se o arquivo está no scaffold gerado (cache local)
     const scaffoldFile = scaffoldFiles.get(path)
     if (scaffoldFile) {
       setFileContent(scaffoldFile.content)
       setOriginalContent(scaffoldFile.content)
+      return
+    }
+
+    // Camada A — content lazy-load: se há item no snapshot e tem content,
+    // busca do server. Evita carregar ~200 arquivos × ~5kB no payload do GET runs.
+    const snapshot = useCodeGenProgressStore.getState().snapshot
+    const runItem = snapshot?.items.find(i => i.path === path)
+    if (runItem && runItem.has_content) {
+      setFileLoading(true)
+      try {
+        await loadItemContentOnDemand(path)
+      } finally {
+        setFileLoading(false)
+      }
       return
     }
 
