@@ -87,6 +87,8 @@ celery_app = Celery(
         "app.tasks.pipeline",
         # MVP 14 Fase 14.1 — tasks do pipeline de questionário.
         "app.tasks.questionnaire",
+        # 2026-04-25 — scaffold server-side persistido (camada A).
+        "app.tasks.scaffold",
     ],
 )
 

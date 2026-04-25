@@ -5,6 +5,7 @@ REST endpoints for code generation workflows
 import json
 import re
 import structlog
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc, case
@@ -341,6 +342,19 @@ class ScaffoldItemResponse(BaseModel):
     status: str
     tokens_used: int = 0
     error_message: Optional[str] = None
+
+
+class ScaffoldStartRequest(BaseModel):
+    """Request do POST /scaffold/start — dispara run server-side persistida."""
+
+    project_id: UUID = Field(..., description="ID do projeto")
+
+
+class ScaffoldStartResponse(BaseModel):
+    """Response do /scaffold/start — run criada e enfileirada."""
+
+    run_id: UUID
+    status: str
 
 
 class ValidateCodeRequest(BaseModel):
@@ -793,6 +807,207 @@ async def generate_scaffold(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Falha na geração do scaffold: {str(e)}"
         )
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Scaffold server-side persistido (camada A, 2026-04-25)
+# ──────────────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/scaffold/start",
+    response_model=ScaffoldStartResponse,
+    summary="Iniciar scaffold em background (Celery, persistido)",
+    description=(
+        "Cria uma ScaffoldRun pendente e enfileira a execução server-side. "
+        "Retorna run_id imediatamente. Frontend acompanha via "
+        "GET /scaffold/runs/{run_id}. Sobrevive a desconexão de rede."
+    ),
+)
+async def start_scaffold_run(
+    request: ScaffoldStartRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    project_id = request.project_id
+    await _require_code_action("code:write", project_id, user_id, db)
+    await assert_project_setup_complete(db, project_id)
+    project = await db.get(Project, project_id)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+    await _require_git_config(db, project_id)
+
+    from app.services.scaffold_run_service import create_run
+
+    run = await create_run(db, project_id, triggered_by=user_id)
+
+    # Enfileira no Celery (idempotente: o execute_run guarda contra status != pending)
+    from app.tasks.scaffold import scaffold_run_executor
+    scaffold_run_executor.delay(str(run.id))
+
+    return ScaffoldStartResponse(run_id=run.id, status=run.status)
+
+
+@router.get(
+    "/scaffold/runs/{run_id}",
+    summary="Snapshot da run server-side",
+    description="Status global + lista de items com flags de progresso.",
+)
+async def get_scaffold_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun
+    from app.services.scaffold_run_service import snapshot_run
+
+    run = await db.get(ScaffoldRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
+    await _require_code_action("project:view", run.project_id, user_id, db)
+
+    snap = await snapshot_run(db, run_id)
+    return snap
+
+
+@router.get(
+    "/scaffold/runs/{run_id}/items/{item_id}/content",
+    summary="Conteúdo gerado de um item específico",
+    description="Útil pro frontend exibir editor sob demanda sem trazer todo o content na listagem.",
+)
+async def get_scaffold_run_item_content(
+    run_id: UUID,
+    item_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun, ScaffoldRunItem
+
+    run = await db.get(ScaffoldRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
+    await _require_code_action("project:view", run.project_id, user_id, db)
+
+    item = await db.get(ScaffoldRunItem, item_id)
+    if item is None or item.run_id != run_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item não encontrado nesta run")
+
+    return {
+        "id": str(item.id),
+        "path": item.path,
+        "status": item.status,
+        "content": item.content or "",
+        "notes": item.notes,
+        "error": item.error,
+        "tokens_used": item.tokens_used,
+    }
+
+
+@router.post(
+    "/scaffold/runs/{run_id}/apply",
+    response_model=ScaffoldApplyResponse,
+    summary="Commitar items done de uma run no Git",
+    description="Pega os items com status='done' e content preenchido e commita pelo helper canônico.",
+)
+async def apply_scaffold_run(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun, ScaffoldRunItem, TestArtifact
+
+    run = await db.get(ScaffoldRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
+    await _require_code_action("git:commit", run.project_id, user_id, db)
+    await assert_project_setup_complete(db, run.project_id)
+    project = await db.get(Project, run.project_id)
+    await _require_git_config(db, run.project_id)
+
+    items_q = await db.execute(
+        select(ScaffoldRunItem)
+        .where(ScaffoldRunItem.run_id == run_id, ScaffoldRunItem.status == "done")
+        .order_by(ScaffoldRunItem.ordinal.asc())
+    )
+    done_items = items_q.scalars().all()
+    if not done_items:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Nenhum item da run está com status='done' pra commitar.",
+        )
+
+    files_dict = [
+        {"path": it.path, "content": it.content or "", "status": "ready"}
+        for it in done_items
+    ]
+    committed, failed, results = await _commit_scaffold_files(db, run.project_id, files_dict)
+    await _notify_scaffold_completion(db, run.project_id, project.name, committed, failed)
+
+    # QA review automático: arquivos de teste comitados viram TestArtifact pending
+    import re as _re
+    TEST_FILE_RE = _re.compile(
+        r"(^|/)(tests?/|test_[^/]+\.py$|[^/]+_test\.[a-z]+$|[^/]+\.test\.[a-z]+$|[^/]+\.spec\.[a-z]+$)",
+        _re.IGNORECASE,
+    )
+    qa_artifacts_created = 0
+    try:
+        for r in results or []:
+            if not isinstance(r, dict) or r.get("status") != "ok":
+                continue
+            file_path = r.get("path")
+            content_match = next(
+                (it.content for it in done_items if it.path == file_path),
+                None,
+            )
+            if not file_path or not content_match:
+                continue
+            if not TEST_FILE_RE.search(file_path):
+                continue
+            db.add(TestArtifact(
+                project_id=run.project_id,
+                module_id=None,
+                test_type="unit",
+                title=file_path.rsplit("/", 1)[-1][:255],
+                description=f"Teste gerado pelo scaffold run {run_id} em {file_path}",
+                file_path=file_path,
+                content=str(content_match),
+                status="pending_review",
+                created_by=user_id,
+            ))
+            qa_artifacts_created += 1
+    except Exception as qa_err:  # noqa: BLE001
+        logger.warning(
+            "scaffold_run.apply_qa_failed",
+            run_id=str(run_id),
+            error=str(qa_err),
+        )
+
+    run.status = "applied"
+    run.applied_at = datetime.now(timezone.utc)
+    run.apply_committed = committed
+    run.apply_failed = failed
+
+    from app.services.audit_service import AuditEvents, AuditService
+    await AuditService(db).log_codegen_event(
+        event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
+        actor_id=user_id,
+        project_id=run.project_id,
+        action="apply_scaffold_run",
+        files_count=committed,
+        extra={
+            "run_id": str(run_id),
+            "failed": failed,
+            "qa_artifacts_created": qa_artifacts_created,
+        },
+    )
+    await db.commit()
+
+    return ScaffoldApplyResponse(
+        committed=committed,
+        failed=failed,
+        skipped_nmi=0,
+        results=results,
+    )
 
 
 @router.post(

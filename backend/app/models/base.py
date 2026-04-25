@@ -1886,3 +1886,48 @@ class AppliedDefault(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class ScaffoldRun(Base):
+    """Run server-side de scaffold MVP 30. Sobrevive a desconexão do frontend.
+
+    Statuses: pending → planning → generating → completed (ou failed).
+    Após o usuário aprovar via apply, status vira applied (commit no Git).
+    """
+    __tablename__ = "scaffold_runs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    triggered_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    plan_summary = Column(Text, nullable=True)
+    plan_tokens_used = Column(Integer, nullable=True)
+    total_items = Column(Integer, nullable=False, default=0)
+    completed_items = Column(Integer, nullable=False, default=0)
+    failed_items = Column(Integer, nullable=False, default=0)
+    error = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime(timezone=True), nullable=True)
+    applied_at = Column(DateTime(timezone=True), nullable=True)
+    apply_committed = Column(Integer, nullable=True)
+    apply_failed = Column(Integer, nullable=True)
+
+
+class ScaffoldRunItem(Base):
+    """Cada arquivo do plano vira uma row. content é preenchido pelo Celery."""
+    __tablename__ = "scaffold_run_items"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    run_id = Column(UUID(as_uuid=True), ForeignKey("scaffold_runs.id", ondelete="CASCADE"), nullable=False)
+    ordinal = Column(Integer, nullable=False)
+    path = Column(String(500), nullable=False)
+    file_type = Column(String(40), nullable=True)
+    purpose = Column(String(500), nullable=True)
+    est_lines = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, default="pending")
+    content = Column(Text, nullable=True)
+    error = Column(Text, nullable=True)
+    tokens_used = Column(Integer, nullable=True)
+    notes = Column(Text, nullable=True)
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    finished_at = Column(DateTime(timezone=True), nullable=True)
