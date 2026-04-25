@@ -33,6 +33,34 @@ def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
 
 
 @celery_app.task(
+    name="app.tasks.scaffold.code_audit_executor",
+    bind=True,
+    max_retries=0,
+    acks_late=True,
+)
+def code_audit_executor(self, run_id: str) -> dict:
+    """Roda o auditor pós-CodeGen (Arguidor #2) em uma scaffold_run aplicada.
+
+    Disparado automaticamente após apply_scaffold_run finalizar com committed > 0.
+    Pode também ser invocado manualmente via POST /scaffold/runs/{id}/audit/start.
+    """
+    from app.services.code_audit_service import audit_run
+
+    try:
+        result = _run_coro_isolated(audit_run(UUID(run_id)))
+        logger.info("code_audit_executor.ok", run_id=run_id, result=result)
+        return {"status": "ok", "run_id": run_id, **(result or {})}
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "code_audit_executor.unhandled",
+            run_id=run_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        return {"status": "error", "run_id": run_id, "error": str(exc)[:500]}
+
+
+@celery_app.task(
     name="app.tasks.scaffold.scaffold_run_executor",
     bind=True,
     max_retries=0,  # falhas dentro da run são gravadas no DB, não retry

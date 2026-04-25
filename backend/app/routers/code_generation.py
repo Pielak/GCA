@@ -1002,6 +1002,24 @@ async def apply_scaffold_run(
     )
     await db.commit()
 
+    # Arguidor #2 (2026-04-25): dispara auditoria pós-CodeGen automaticamente
+    # quando houve commits. Falha do enqueue não invalida o apply.
+    if committed > 0:
+        try:
+            from app.tasks.scaffold import code_audit_executor
+            code_audit_executor.delay(str(run_id))
+            logger.info(
+                "scaffold_run.audit_triggered",
+                run_id=str(run_id),
+                project_id=str(run.project_id),
+            )
+        except Exception as audit_err:  # noqa: BLE001
+            logger.warning(
+                "scaffold_run.audit_trigger_failed",
+                run_id=str(run_id),
+                error=str(audit_err),
+            )
+
     return ScaffoldApplyResponse(
         committed=committed,
         failed=failed,

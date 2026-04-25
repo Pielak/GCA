@@ -1941,6 +1941,33 @@ class ScaffoldRunItem(Base):
     depends_on = Column(Text, nullable=False, default="[]", server_default="[]")
 
 
+class CodeAuditFinding(Base):
+    """Finding do Arguidor #2 (auditor ativo pós-CodeGen, 2026-04-25).
+
+    1 row por divergência detectada num arquivo gerado vs OCG/RNFs/stack/
+    PT-BR/security. Owner decide dismiss/accept; accept pode gerar
+    BacklogItem fix.
+    """
+    __tablename__ = "code_audit_findings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    run_id = Column(UUID(as_uuid=True), ForeignKey("scaffold_runs.id", ondelete="CASCADE"), nullable=False)
+    run_item_id = Column(UUID(as_uuid=True), ForeignKey("scaffold_run_items.id", ondelete="SET NULL"), nullable=True)
+    file_path = Column(String(500), nullable=False)
+    severity = Column(String(10), nullable=False)  # info, warn, critical
+    category = Column(String(20), nullable=False)  # rnf, stack, security, ptbr, scope, doc
+    finding = Column(Text, nullable=False)
+    suggested_fix = Column(Text, nullable=True)
+    owner_action = Column(String(20), nullable=True)  # null, dismissed, accepted, fix_created
+    owner_note = Column(Text, nullable=True)
+    owner_acted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    owner_acted_at = Column(DateTime(timezone=True), nullable=True)
+    backlog_fix_item_id = Column(UUID(as_uuid=True), ForeignKey("backlog_items.id", ondelete="SET NULL"), nullable=True)
+    tokens_used = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class DeferredGap(Base):
     """Aging de gaps recorrentes — reforma Arguidor #1 (2026-04-25).
 
