@@ -48,9 +48,11 @@ from app.services.llm_low_criticality import (
 logger = structlog.get_logger(__name__)
 
 
-#: Tipos de spec que este service aceita. `security` e `compliance` ficam
-#: pra Fase 10.3 (Premium obrigatório).
-SUPPORTED_TYPES_LOCAL = ("unit", "integration", "e2e")
+#: Tipos de spec que este service aceita. Matriz canônica completa
+#: (alinhada à visão do owner — 2026-04-24): unit + integration + e2e
+#: + regression + load + security. `compliance` continua pra Fase 10.3
+#: por ser global ao projeto, não por módulo.
+SUPPORTED_TYPES_LOCAL = ("unit", "integration", "e2e", "regression", "load", "security")
 
 
 SYSTEM_PROMPT = """Você é um engenheiro de teste sênior. Sempre responde
@@ -175,10 +177,133 @@ Seeds/fixtures necessários.
 Máximo 1 fluxo principal + 2 variações de exceção."""
 
 
+REGRESSION_TEMPLATE = """Gere um plano de testes de REGRESSÃO pro módulo abaixo.
+
+Módulo: **{name}** (categoria: {module_type})
+Descrição: {description}
+
+Detalhamento técnico:
+{details_block}
+
+Estrutura obrigatória da saída (markdown):
+
+## Objetivo
+Uma frase: quais bugs históricos / comportamentos críticos este plano protege contra reincidência.
+
+## Bugs e regressões a cobrir
+Lista numerada. Quando não houver histórico ainda, derive de:
+- Caminhos de erro críticos do módulo.
+- Edge cases descobertos no detalhamento técnico.
+- Pontos onde uma mudança de stack/framework geralmente quebra (ex: serialização de datas, encoding, timezone).
+
+## Casos de teste de regressão
+Lista numerada. Cada caso:
+- Bug/comportamento que está sendo protegido (1 frase).
+- Cenário exato que reproduz.
+- Resultado esperado pós-correção.
+
+Máximo 10 casos.
+
+## Critério de execução
+Quando esses testes devem rodar (ex: pre-commit, CI em PR, nightly).
+
+## Sinal de falha
+Como o time identifica que é regressão (vs. mudança intencional)."""
+
+
+LOAD_TEMPLATE = """Gere um plano de testes de CARGA pro módulo abaixo.
+
+Módulo: **{name}** (categoria: {module_type})
+Descrição: {description}
+
+Detalhamento técnico:
+{details_block}
+
+Stack do projeto:
+- Backend: {backend_stack}
+- Banco: {database}
+
+Estrutura obrigatória da saída (markdown):
+
+## Objetivo
+Uma frase: que dimensões de performance este plano valida.
+
+## Métricas alvo
+Lista derivada dos contratos RNF do OCG quando disponíveis. Inclua:
+- Latência (p50, p95, p99) por endpoint/operação.
+- Throughput (req/s ou ops/s) sustentável.
+- Concorrência máxima sem degradação.
+- Uso de recursos (CPU, memória, conexões DB).
+
+Quando o RNF não declarar valor, use placeholders explícitos `<a definir com GP>`.
+
+## Cenários de carga
+Lista numerada. Cada cenário:
+- Tipo (smoke, load, stress, soak, spike).
+- Perfil de tráfego (constante, ramp-up, etc).
+- Duração esperada.
+- Critério de pass/fail.
+
+Máximo 5 cenários — priorize smoke + load + 1 stress.
+
+## Ferramentas
+Sugestões compatíveis com a stack (k6, Locust, JMeter, wrk, etc).
+
+## Cleanup
+Como restaurar estado do sistema/dados após o teste."""
+
+
+SECURITY_TEMPLATE = """Gere um plano de testes de SEGURANÇA pro módulo abaixo.
+
+Módulo: **{name}** (categoria: {module_type})
+Descrição: {description}
+
+Detalhamento técnico:
+{details_block}
+
+Stack do projeto:
+- Backend: {backend_stack}
+- Banco: {database}
+
+Estrutura obrigatória da saída (markdown):
+
+## Objetivo
+Uma frase: que ameaças concretas este plano valida proteção contra.
+
+## Superfícies de ataque
+Lista do módulo: endpoints expostos, parâmetros de entrada, dados sensíveis manipulados, integrações externas.
+
+## Casos de teste de segurança
+Lista numerada. Cobertura mínima OWASP-relevante para o módulo:
+- Injeção (SQL, NoSQL, command, LDAP) quando aplicável.
+- Quebra de autenticação / sessão.
+- Exposição de dados sensíveis (PII, credenciais, tokens).
+- Controle de acesso quebrado (vertical / horizontal).
+- Misconfigurations da stack.
+- Componentes vulneráveis (libs com CVE).
+- Logging insuficiente / excessivo (PII em log).
+
+Cada caso:
+- Vetor (ex: 'payload SQL no campo X').
+- Pré-condição (autenticado? que role?).
+- Comportamento esperado (rejeição, audit log, etc).
+
+Máximo 12 casos.
+
+## Aderência LGPD (quando o módulo manipula dado pessoal)
+Verificações de retenção, finalidade, base legal, direitos do titular.
+
+## Ferramentas sugeridas
+SAST/DAST/SCA compatíveis com a stack (Bandit, Semgrep, OWASP ZAP, Snyk, Trivy, etc)."""
+
+
 TEMPLATE_BY_TYPE = {
     "unit": UNIT_TEMPLATE,
     "integration": INTEGRATION_TEMPLATE,
     "e2e": E2E_TEMPLATE,
+    "regression": REGRESSION_TEMPLATE,
+    "load": LOAD_TEMPLATE,
+    "security": SECURITY_TEMPLATE,
 }
 
 

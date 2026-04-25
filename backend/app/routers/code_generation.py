@@ -7,7 +7,7 @@ import re
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, case
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from uuid import UUID
@@ -833,6 +833,23 @@ async def generate_scaffold_plan(
     # excluído sempre (PM corporativo nunca vira código). Items sem
     # vínculo com candidato (source=ocg) entram igual; items vindos do
     # Arguidor só entram se o candidato sinalizou ready_for_codegen=true.
+    #
+    # Ordenação canônica do roadmap (estável e determinística):
+    #   1) prioridade: critical → high → medium → low → outros
+    #   2) dentro da prioridade, ready_for_codegen=true primeiro
+    #   3) desempate FIFO por created_at ASC
+    priority_rank = case(
+        (BacklogItem.priority == "critical", 0),
+        (BacklogItem.priority == "high", 1),
+        (BacklogItem.priority == "medium", 2),
+        (BacklogItem.priority == "low", 3),
+        else_=4,
+    )
+    ready_rank = case(
+        (ModuleCandidate.ready_for_codegen.is_(True), 0),
+        (ModuleCandidate.id.is_(None), 0),  # OCG direto = ready
+        else_=1,
+    )
     backlog_rows = (await db.execute(
         select(BacklogItem, ModuleCandidate)
         .outerjoin(ModuleCandidate, ModuleCandidate.id == BacklogItem.module_candidate_id)
@@ -842,7 +859,11 @@ async def generate_scaffold_plan(
             BacklogItem.category != "governance",
             BacklogItem.status.notin_(("completed", "concluido", "rejected")),
         )
+        .order_by(priority_rank, ready_rank, BacklogItem.created_at.asc())
     )).all()
+
+    # Mapa prioridade → fase do roadmap (canônico, espelha RoadmapService)
+    PHASE_MAP = {"critical": 1, "high": 1, "medium": 2, "low": 3}
 
     modules: List[Dict[str, Any]] = []
     deferred = 0
@@ -859,6 +880,7 @@ async def generate_scaffold_plan(
             "description": bl.description or "",
             "module_type": bl.module_type or (mc.module_type if mc else "feature"),
             "priority": bl.priority or "medium",
+            "phase": PHASE_MAP.get((bl.priority or "medium").lower(), 2),
             "category": bl.category,
             "ready_for_codegen": bool(mc.ready_for_codegen) if mc else True,
         })
@@ -1218,6 +1240,57 @@ async def apply_scaffold(
         skipped_nmi=skipped_nmi,
     )
 
+    # Cascata canônica CodeGen → QA (2026-04-24): pra cada arquivo de teste
+    # comitado, cria TestArtifact pending_review. O tester recebe na fila
+    # automaticamente — sem ação manual. Heurística de detecção de teste:
+    # path contém /test/ ou /tests/, ou nome bate test_*.py / *_test.* /
+    # *.test.* / *.spec.*. Falha graciosa: não invalida o commit do
+    # scaffold se a criação do artifact quebrar.
+    from app.models.base import TestArtifact
+    import re as _re
+    TEST_FILE_RE = _re.compile(
+        r"(^|/)(tests?/|test_[^/]+\.py$|[^/]+_test\.[a-z]+$|[^/]+\.test\.[a-z]+$|[^/]+\.spec\.[a-z]+$)",
+        _re.IGNORECASE,
+    )
+    qa_artifacts_created = 0
+    try:
+        for r in results or []:
+            if not isinstance(r, dict):
+                continue
+            if r.get("status") != "committed":
+                continue
+            file_path = r.get("path") or r.get("file_path")
+            content = r.get("content")
+            if not file_path or not content:
+                continue
+            if not TEST_FILE_RE.search(file_path):
+                continue
+            artifact = TestArtifact(
+                project_id=project_id,
+                module_id=None,  # mapeamento test→módulo é incremental, ainda sem FK
+                test_type="unit",  # default conservador; o tester reclassifica se for outro tipo
+                title=file_path.rsplit("/", 1)[-1][:255],
+                description=f"Teste gerado automaticamente pelo scaffold em {file_path}",
+                file_path=file_path,
+                content=str(content),
+                status="pending_review",
+                created_by=user_id,
+            )
+            db.add(artifact)
+            qa_artifacts_created += 1
+        if qa_artifacts_created:
+            logger.info(
+                "scaffold.qa_artifacts_created",
+                project_id=str(project_id),
+                count=qa_artifacts_created,
+            )
+    except Exception as qa_err:  # noqa: BLE001
+        logger.warning(
+            "scaffold.qa_artifacts_failed",
+            project_id=str(project_id),
+            error=str(qa_err),
+        )
+
     # MVP 13 Fase 13.7 — audit canônico de scaffold aplicado.
     from app.services.audit_service import AuditEvents, AuditService
     await AuditService(db).log_codegen_event(
@@ -1226,7 +1299,11 @@ async def apply_scaffold(
         project_id=project_id,
         action="apply_scaffold",
         files_count=committed,
-        extra={"failed": failed, "skipped_nmi": skipped_nmi},
+        extra={
+            "failed": failed,
+            "skipped_nmi": skipped_nmi,
+            "qa_artifacts_created": qa_artifacts_created,
+        },
     )
     await db.commit()
 

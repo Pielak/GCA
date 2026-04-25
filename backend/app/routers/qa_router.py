@@ -235,7 +235,7 @@ async def get_test_logs(
 @router.get("/projects/{project_id}/test-specs")
 async def list_test_specs(
     project_id: UUID,
-    spec_type: Optional[str] = Query(None, description="unit|integration|security|compliance|e2e"),
+    spec_type: Optional[str] = Query(None, description="unit|integration|e2e|regression|load|security|compliance"),
     module_id: Optional[UUID] = Query(None, description="filtra por módulo"),
     _perm: dict = Depends(require_action("project:view")),
     db: AsyncSession = Depends(get_db),
@@ -351,7 +351,7 @@ async def get_test_spec(
 async def generate_single_test_spec(
     project_id: UUID,
     module_id: UUID,
-    spec_type: str = Query(..., description="unit|integration|e2e"),
+    spec_type: str = Query(..., description="unit|integration|e2e|regression|load|security"),
     _perm: dict = Depends(require_action("backlog:manage")),
     db: AsyncSession = Depends(get_db),
 ):
