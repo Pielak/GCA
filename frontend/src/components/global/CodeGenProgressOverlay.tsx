@@ -1,7 +1,51 @@
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Loader2, CheckCircle2, AlertTriangle, X, ArrowRight } from 'lucide-react'
+import { Loader2, CheckCircle2, AlertTriangle, X, ArrowRight, GripVertical } from 'lucide-react'
 import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
+
+const POS_STORAGE_KEY = 'gca:codegen-overlay-pos'
+const OVERLAY_W = 360
+const OVERLAY_H_APPROX = 180  // altura típica — usado só pra clamp inicial; flex layout determina o real
+
+interface OverlayPosition {
+  x: number  // distância da borda esquerda
+  y: number  // distância do topo
+}
+
+function loadPersistedPos(): OverlayPosition | null {
+  try {
+    const raw = localStorage.getItem(POS_STORAGE_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+      return { x: parsed.x, y: parsed.y }
+    }
+  } catch { /* ignore */ }
+  return null
+}
+
+function persistPos(pos: OverlayPosition) {
+  try {
+    localStorage.setItem(POS_STORAGE_KEY, JSON.stringify(pos))
+  } catch { /* ignore */ }
+}
+
+function defaultPos(): OverlayPosition {
+  // Mesma posição visual do antigo `fixed bottom-4 right-4`.
+  return {
+    x: Math.max(16, window.innerWidth - OVERLAY_W - 16),
+    y: Math.max(16, window.innerHeight - OVERLAY_H_APPROX - 16),
+  }
+}
+
+function clampToViewport(pos: OverlayPosition, height: number): OverlayPosition {
+  const maxX = Math.max(0, window.innerWidth - OVERLAY_W)
+  const maxY = Math.max(0, window.innerHeight - height)
+  return {
+    x: Math.min(Math.max(0, pos.x), maxX),
+    y: Math.min(Math.max(0, pos.y), maxY),
+  }
+}
 
 /**
  * MVP 30 — overlay global de progresso de geração de scaffold.
@@ -50,6 +94,56 @@ export function CodeGenProgressOverlay() {
     return snapshot.status
   })()
 
+  // Posição arrastável persistida em localStorage. Default = bottom-right
+  // (mesma posição visual do antigo `fixed bottom-4 right-4`).
+  const [pos, setPos] = useState<OverlayPosition>(() => loadPersistedPos() ?? defaultPos())
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  const dragState = useRef<{ offsetX: number; offsetY: number } | null>(null)
+
+  // Mantém dentro da viewport ao redimensionar a janela.
+  useEffect(() => {
+    const onResize = () => {
+      const h = overlayRef.current?.offsetHeight || OVERLAY_H_APPROX
+      setPos(prev => clampToViewport(prev, h))
+    }
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
+
+  const onPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    // Só arrasta com botão primário do mouse / touch.
+    if (e.button !== 0) return
+    const rect = overlayRef.current?.getBoundingClientRect()
+    if (!rect) return
+    dragState.current = {
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+    }
+    // Captura o ponteiro pra arrastar mesmo se sair do elemento.
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    e.preventDefault()
+  }, [])
+
+  const onPointerMove = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragState.current) return
+    const h = overlayRef.current?.offsetHeight || OVERLAY_H_APPROX
+    const next = clampToViewport(
+      {
+        x: e.clientX - dragState.current.offsetX,
+        y: e.clientY - dragState.current.offsetY,
+      },
+      h,
+    )
+    setPos(next)
+  }, [])
+
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragState.current) return
+    dragState.current = null
+    ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    persistPos(pos)
+  }, [pos])
+
   const shouldShow = active || (finishedAt && !active)
   if (!shouldShow) return null
   if (!projectId || !projectName) return null
@@ -68,12 +162,22 @@ export function CodeGenProgressOverlay() {
 
   return (
     <div
-      className="fixed bottom-4 right-4 z-50 w-[360px] bg-slate-900 border border-violet-700/50 rounded-xl shadow-2xl shadow-violet-900/30 overflow-hidden"
+      ref={overlayRef}
+      className="fixed z-50 w-[360px] bg-slate-900 border border-violet-700/50 rounded-xl shadow-2xl shadow-violet-900/30 overflow-hidden select-none"
+      style={{ left: pos.x, top: pos.y }}
       role="status"
       aria-live="polite"
     >
-      <div className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2">
+      <div
+        className="px-4 py-3 border-b border-slate-800 flex items-center justify-between gap-2 cursor-move touch-none"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
+        title="Arraste para reposicionar"
+      >
         <div className="flex items-center gap-2 min-w-0">
+          <GripVertical className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
           {active && <Loader2 className="w-4 h-4 text-violet-400 animate-spin flex-shrink-0" />}
           {isDone && stats.errors === 0 && <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />}
           {isDone && stats.errors > 0 && <AlertTriangle className="w-4 h-4 text-amber-400 flex-shrink-0" />}
@@ -85,8 +189,9 @@ export function CodeGenProgressOverlay() {
         {isDone && (
           <button
             type="button"
-            onClick={dismiss}
-            className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+            onClick={(e) => { e.stopPropagation(); dismiss() }}
+            onPointerDown={(e) => e.stopPropagation()}
+            className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0 cursor-pointer"
             title="Dispensar"
           >
             <X className="w-3.5 h-3.5" />
