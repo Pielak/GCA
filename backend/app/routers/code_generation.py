@@ -924,9 +924,13 @@ async def generate_scaffold_plan(
 
     from anthropic import AsyncAnthropic
     client = AsyncAnthropic(api_key=api_key)
+    # max_tokens 16384: 4096 estourava com >50 arquivos no plano (cada item
+    # JSON ~80 tokens). 16384 cobre ~200 itens com folga. LLM nunca cuspe
+    # mais que isso pra um plan; se chegar perto do teto, é sinal de prompt
+    # quebrado, não de falta de espaço.
     response = await client.messages.create(
         model=app_settings.ANTHROPIC_MODEL,
-        max_tokens=4096,
+        max_tokens=16384,
         temperature=0.2,
         messages=[{"role": "user", "content": prompt}],
     )
@@ -939,22 +943,49 @@ async def generate_scaffold_plan(
         response_length=len(raw_text),
     )
 
+    # Parser robusto: o LLM ocasionalmente envolve a resposta em
+    # ```json ... ``` apesar da instrução. Tentamos:
+    #  1. json.loads direto
+    #  2. extrair conteúdo de bloco ```json ... ``` (fechado)
+    #  3. extrair tudo após ```json sem fechamento (truncate parcial)
+    #  4. fallback: primeiro `{` até o último `}` balanceado
     stripped = raw_text.strip()
-    m = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", stripped, re.DOTALL)
-    if m:
-        stripped = m.group(1).strip()
-    try:
-        data = json.loads(stripped)
-    except json.JSONDecodeError as exc:
+
+    def _try_parse(s: str) -> Optional[dict]:
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError:
+            return None
+
+    data = _try_parse(stripped)
+    if data is None:
+        m = re.match(r"^```(?:json)?\s*\n?(.*?)\n?```\s*$", stripped, re.DOTALL)
+        if m:
+            data = _try_parse(m.group(1).strip())
+    if data is None:
+        m = re.match(r"^```(?:json)?\s*\n?([\s\S]*)$", stripped)
+        if m:
+            data = _try_parse(m.group(1).strip())
+    if data is None:
+        first_brace = stripped.find("{")
+        last_brace = stripped.rfind("}")
+        if 0 <= first_brace < last_brace:
+            data = _try_parse(stripped[first_brace : last_brace + 1])
+    if data is None:
         logger.error(
             "scaffold_plan.parse_failed",
             project_id=str(project_id),
-            error=str(exc),
+            tokens_used=response.usage.output_tokens,
+            response_length=len(raw_text),
             preview=stripped[:500],
         )
         raise HTTPException(
             status_code=502,
-            detail=f"LLM retornou JSON inválido na fase PLAN: {exc}",
+            detail=(
+                "LLM retornou plano inválido. Tokens usados: "
+                f"{response.usage.output_tokens}/16384. "
+                "Se bateu o teto, reduzimos o escopo do prompt; tente novamente."
+            ),
         )
 
     items_raw = data.get("items") or []
