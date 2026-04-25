@@ -1062,6 +1062,147 @@ async def apply_scaffold_run(
     )
 
 
+class ScaffoldRegenerateInvalidResponse(BaseModel):
+    """Response do /scaffold/runs/{id}/regenerate-invalid (MVP-F, 2026-04-25)."""
+
+    run_id: UUID
+    items_marked_invalid: int
+    items_done_preserved: int
+    new_run_status: str
+    enqueued: bool
+
+
+@router.post(
+    "/scaffold/runs/{run_id}/regenerate-invalid",
+    response_model=ScaffoldRegenerateInvalidResponse,
+    summary="Detecta items que falharão na validação do commit, marca como failed e re-enfileira (MVP-F)",
+    description=(
+        "Itera items 'done' da run e roda o validador `_missing_required_docstring` "
+        "(mesma regra que o handler de apply usa antes de commitar). Items que "
+        "falham na validação são marcados status='failed' + error explicativo, e "
+        "a run volta a status='generating' com `scaffold_run_executor` enfileirado "
+        "pra regerá-los com o prompt reforçado de docstring. Items 'done' válidos "
+        "ficam intactos e são reaproveitados via peer_contents. Cobre o caso AJA "
+        "(24/164 falharam por docstring missing após apply parcial)."
+    ),
+)
+async def regenerate_invalid_scaffold_items(
+    run_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun, ScaffoldRunItem
+    from sqlalchemy import update as sa_update
+
+    run = await db.get(ScaffoldRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
+    await _require_code_action("code:write", run.project_id, user_id, db)
+
+    # Aceita run em terminal state seguro: completed (não aplicado ainda) ou
+    # applied (apply parcial — quer regerar os que faltaram). Bloqueia em
+    # estados em curso pra não corromper run.status.
+    if run.status not in ("completed", "applied"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run em status '{run.status}'. Operação requer 'completed' ou 'applied'.",
+        )
+
+    items_q = await db.execute(
+        select(ScaffoldRunItem).where(
+            ScaffoldRunItem.run_id == run_id,
+            ScaffoldRunItem.status == "done",
+        )
+    )
+    done_items = items_q.scalars().all()
+
+    invalid_ids: list[UUID] = []
+    for it in done_items:
+        if _missing_required_docstring(it.path, it.content or ""):
+            invalid_ids.append(it.id)
+
+    if not invalid_ids:
+        return ScaffoldRegenerateInvalidResponse(
+            run_id=run_id,
+            items_marked_invalid=0,
+            items_done_preserved=len(done_items),
+            new_run_status=run.status,
+            enqueued=False,
+        )
+
+    # Reset em massa via UPDATE: items invalid passam done → pending,
+    # limpando content/notes/tokens pra regeração fresca.
+    await db.execute(
+        sa_update(ScaffoldRunItem)
+        .where(ScaffoldRunItem.id.in_(invalid_ids))
+        .values(
+            status="pending",
+            content=None,
+            error="Marcado como inválido por docstring missing — re-geração agendada (MVP-F).",
+            finished_at=None,
+            started_at=None,
+            tokens_used=None,
+            notes=None,
+        )
+    )
+
+    # Run volta pra 'generating' (resume mode em scaffold_run_executor):
+    # plan já existe, items done preservados, só os invalid em pending
+    # serão regerados com o prompt reforçado de docstring.
+    run.status = "generating"
+    run.failed_items = 0
+    run.completed_items = max(0, len(done_items) - len(invalid_ids))
+    run.error = None
+    run.finished_at = None
+    run.applied_at = None  # vai precisar de novo apply após regerar
+    run.last_progress_at = datetime.now(timezone.utc)
+
+    from app.services.audit_service import AuditEvents, AuditService
+    await AuditService(db).log_codegen_event(
+        event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,  # reusa evento canônico
+        actor_id=user_id,
+        project_id=run.project_id,
+        action="regenerate_invalid_scaffold_items",
+        files_count=len(invalid_ids),
+        extra={
+            "run_id": str(run_id),
+            "items_marked_invalid": len(invalid_ids),
+            "items_done_preserved": len(done_items) - len(invalid_ids),
+            "previous_status": run.status,
+        },
+    )
+    await db.commit()
+
+    enqueued = False
+    try:
+        from app.tasks.scaffold import scaffold_run_executor
+        scaffold_run_executor.delay(str(run_id))
+        enqueued = True
+    except Exception as enq_err:  # noqa: BLE001
+        logger.error(
+            "scaffold_run.regenerate_invalid_enqueue_failed",
+            run_id=str(run_id),
+            error=str(enq_err),
+            exc_info=True,
+        )
+
+    logger.info(
+        "scaffold_run.regenerate_invalid_dispatched",
+        run_id=str(run_id),
+        items_marked_invalid=len(invalid_ids),
+        items_done_preserved=len(done_items) - len(invalid_ids),
+        enqueued=enqueued,
+    )
+
+    return ScaffoldRegenerateInvalidResponse(
+        run_id=run_id,
+        items_marked_invalid=len(invalid_ids),
+        items_done_preserved=len(done_items) - len(invalid_ids),
+        new_run_status="generating",
+        enqueued=enqueued,
+    )
+
+
 @router.post(
     "/scaffold/runs/{run_id}/retry-failed",
     response_model=ScaffoldRetryResponse,

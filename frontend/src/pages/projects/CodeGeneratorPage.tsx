@@ -290,6 +290,7 @@ export function CodeGeneratorPage() {
   const [scaffoldPendingApply, setScaffoldPendingApply] = useState(false)
   const [scaffoldApplying, setScaffoldApplying] = useState(false)
   const [scaffoldRetrying, setScaffoldRetrying] = useState(false)
+  const [scaffoldRegenInvalid, setScaffoldRegenInvalid] = useState(false)
   // DT-043: warning de adequação do provider (contrato §7 + §6.2).
   // null = provider adequado; objeto = média/baixa criticidade.
   const [providerWarning, setProviderWarning] = useState<
@@ -453,6 +454,39 @@ export function CodeGeneratorPage() {
       alert(formatCodeGenError(err, 'enfileirar apply'))
     } finally {
       setScaffoldApplying(false)
+    }
+  }
+
+  const handleRegenerateInvalid = async () => {
+    if (!progressStore.runId || !progressStore.snapshot) return
+    if (!confirm(
+      'Validar e regenerar arquivos com docstring missing?\n\n' +
+      'Vai detectar arquivos que falhariam no commit e regerar apenas esses, ' +
+      'preservando os já válidos. Pode demorar alguns minutos.',
+    )) return
+
+    setScaffoldRegenInvalid(true)
+    try {
+      const result = await progressStore.regenerateInvalid()
+      if (result === null) {
+        const msg = useCodeGenProgressStore.getState().errorMessage || 'Falha ao regenerar.'
+        alert(msg)
+        return
+      }
+      if (result.items_marked_invalid === 0) {
+        setScaffoldSummary(
+          `Nenhum arquivo inválido detectado — ${result.items_done_preserved} arquivos OK.`,
+        )
+      } else {
+        setScaffoldSummary(
+          `Regenerando ${result.items_marked_invalid} arquivo(s) inválido(s); ${result.items_done_preserved} preservados.`,
+        )
+        setScaffoldPendingApply(false)
+      }
+    } catch (err: unknown) {
+      alert(formatCodeGenError(err, 'regenerar inválidos'))
+    } finally {
+      setScaffoldRegenInvalid(false)
     }
   }
 
@@ -1021,6 +1055,25 @@ export function CodeGeneratorPage() {
                 <><Code2 className="w-3.5 h-3.5" />Gerar Preview</>
               )}
             </button>
+
+            {/* MVP-F: Regenerar items inválidos (docstring missing) — aparece em
+                 runs completed/applied com items done. Detecta + marca + regera. */}
+            {(progressStore.snapshot?.status === 'completed'
+              || progressStore.snapshot?.status === 'applied')
+              && (progressStore.snapshot?.completed_items ?? 0) > 0 && (
+              <button
+                onClick={handleRegenerateInvalid}
+                disabled={scaffoldRegenInvalid || scaffoldRetrying || scaffoldApplying || scaffoldGenerating}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-orange-600 hover:bg-orange-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                title="Detecta arquivos com docstring missing e regera apenas esses, preservando os válidos."
+              >
+                {scaffoldRegenInvalid ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Validando...</>
+                ) : (
+                  <><RefreshCw className="w-3.5 h-3.5" />Regenerar Inválidos</>
+                )}
+              </button>
+            )}
 
             {/* MVP-D: Re-tentar items failed — só aparece se a run completou com falhas */}
             {progressStore.snapshot?.status === 'completed'

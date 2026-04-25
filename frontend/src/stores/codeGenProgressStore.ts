@@ -67,6 +67,7 @@ interface CodeGenProgressState {
   refresh: () => Promise<void>
   apply: () => Promise<{ enqueued: true } | null>
   retryFailed: () => Promise<{ items_reset: number; items_done_preserved: number } | null>
+  regenerateInvalid: () => Promise<{ items_marked_invalid: number; items_done_preserved: number } | null>
   fetchItemContent: (itemId: string) => Promise<string | null>
   dismiss: () => void
   reset: () => void
@@ -330,6 +331,38 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
      */
     refresh: async () => {
       await pollOnce()
+    },
+
+    /**
+     * MVP-F (2026-04-25): regenera items 'done' que falham na validação
+     * pré-commit (docstring missing). Marca afetados como failed + reseta
+     * run pra generating + enfileira scaffold_run_executor.
+     */
+    regenerateInvalid: async () => {
+      const { runId, snapshot } = get()
+      if (!runId || !snapshot) return null
+      if (snapshot.status !== 'completed' && snapshot.status !== 'applied') {
+        set({ errorMessage: 'Operação requer status completed ou applied.' })
+        return null
+      }
+      try {
+        const res = await apiClient.post(`/code-generation/scaffold/runs/${runId}/regenerate-invalid`)
+        const marked = res.data?.items_marked_invalid || 0
+        if (marked > 0) {
+          // Reativa polling — run volta pra 'generating'.
+          set({ active: true, finishedAt: null, errorMessage: null })
+        }
+        await pollOnce()
+        return {
+          items_marked_invalid: marked,
+          items_done_preserved: res.data?.items_done_preserved || 0,
+        }
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        const msg = typeof detail === 'string' ? detail : 'Falha ao regenerar items inválidos.'
+        set({ errorMessage: msg })
+        return null
+      }
     },
 
     retryFailed: async () => {
