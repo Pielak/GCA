@@ -1080,6 +1080,225 @@ class ScaffoldRegenerateInvalidResponse(BaseModel):
     enqueued: bool
 
 
+class FixBuildErrorsRequest(BaseModel):
+    """Payload do POST /scaffold/runs/{id}/fix-build-errors (MVP-K).
+
+    `errors_text` é o output bruto do compilador/build (tsc, docker compose,
+    npm, alembic). Backend parseia heuristicamente os paths afetados via
+    regex e injeta o erro completo no prompt do item correspondente."""
+
+    errors_text: str = Field(..., min_length=1, description="Output bruto do build (tsc/docker/npm/alembic)")
+
+
+class FixBuildErrorsResponse(BaseModel):
+    run_id: UUID
+    items_marked: int
+    items_done_preserved: int
+    affected_paths: List[str]
+    new_run_status: str
+    enqueued: bool
+
+
+_BUILD_ERROR_PATH_PATTERNS: List[Any] = []  # populado lazy abaixo
+
+
+def _compile_build_error_patterns() -> list:
+    """Patterns regex pra extrair paths de output de tsc/docker/npm/alembic.
+    Devolve lista de tuplas (regex, group_index_do_path)."""
+    import re as _re
+    return [
+        # TypeScript: src/foo.ts(45,12): error TS2304: Cannot find name 'X'.
+        (_re.compile(r"^([\w./@\-]+\.tsx?)\(\d+,\d+\):", _re.MULTILINE), 1),
+        # Vite/esbuild: ERROR in ./src/foo.tsx
+        (_re.compile(r"ERROR in (\.?[\w./@\-]+\.[a-z]+)", _re.MULTILINE), 1),
+        # Python: File "/work/backend/src/foo.py", line 12
+        (_re.compile(r'File "([^"]+\.py)", line \d+', _re.MULTILINE), 1),
+        # Generic: pathlike followed by 'error' (catch-all, conservative)
+        (_re.compile(r"^([\w./@\-]+\.[a-z]+):\s*error", _re.MULTILINE | _re.IGNORECASE), 1),
+        # Dockerfile error com path: COPY ... no such file: "/foo.conf"
+        (_re.compile(r'"([\w./@\-]+\.[a-z]+)":\s*not found', _re.MULTILINE), 1),
+        # Module not found: Can't resolve './foo'
+        (_re.compile(r"Module not found.*['\"]([\w./@\-]+)['\"]", _re.MULTILINE), 1),
+    ]
+
+
+def _extract_error_paths(text: str) -> set[str]:
+    """Extrai paths candidatos do texto de erro. Heurística conservadora —
+    se nada bater, set vazio (caller responde 200 com items_marked=0)."""
+    if not text:
+        return set()
+    global _BUILD_ERROR_PATH_PATTERNS
+    if not _BUILD_ERROR_PATH_PATTERNS:
+        _BUILD_ERROR_PATH_PATTERNS = _compile_build_error_patterns()
+    found: set[str] = set()
+    for pattern, group_idx in _BUILD_ERROR_PATH_PATTERNS:
+        for m in pattern.finditer(text):
+            p = m.group(group_idx)
+            if p and not p.startswith("/"):
+                # Normaliza relativos
+                p = p.lstrip("./")
+            if p:
+                found.add(p)
+    return found
+
+
+def _match_item_paths(error_paths: set[str], all_run_paths: list[str]) -> set[str]:
+    """Resolve paths de erro pra paths reais dos items da run.
+    Heurística: match por sufixo (erro 'src/foo.tsx' bate com run path
+    'frontend/src/foo.tsx'). Conservador — retorna só matches únicos."""
+    matches: set[str] = set()
+    for err_path in error_paths:
+        candidates = [p for p in all_run_paths if p.endswith(err_path) or err_path.endswith(p)]
+        # Match único OU exato preferido
+        exact = [c for c in candidates if c == err_path or c.endswith("/" + err_path)]
+        if exact:
+            matches.add(exact[0])
+        elif len(candidates) == 1:
+            matches.add(candidates[0])
+        # Múltiplos candidatos ambíguos: pula (owner cola path mais específico)
+    return matches
+
+
+@router.post(
+    "/scaffold/runs/{run_id}/fix-build-errors",
+    response_model=FixBuildErrorsResponse,
+    summary="MVP-K — regenerar items afetados por erros de build reportados pelo owner",
+    description=(
+        "Owner cola output bruto do build local (tsc, docker compose, npm, "
+        "alembic). Backend extrai paths via regex heurístico, marca items "
+        "afetados como pending, persiste o erro em scaffold_run_items.build_errors, "
+        "reseta run pra generating e re-enfileira scaffold_run_executor. "
+        "Worker regera APENAS os items afetados, com prompt enriquecido pelo "
+        "erro específico — LLM corrige consciente do problema real (import "
+        "errado, aridade, type mismatch, etc). Items done não-afetados são "
+        "preservados via peer_contents."
+    ),
+)
+async def fix_build_errors(
+    run_id: UUID,
+    payload: FixBuildErrorsRequest,
+    db: AsyncSession = Depends(get_db),
+    user_id: UUID = Depends(get_current_user_from_token),
+):
+    from app.models.base import ScaffoldRun, ScaffoldRunItem
+    from sqlalchemy import update as sa_update
+
+    run = await db.get(ScaffoldRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Run não encontrada")
+    await _require_code_action("code:write", run.project_id, user_id, db)
+
+    if run.status not in ("completed", "applied"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Run em status '{run.status}'. Operação requer 'completed' ou 'applied'.",
+        )
+
+    # Extrai paths e mapeia pros items reais
+    error_paths = _extract_error_paths(payload.errors_text)
+    if not error_paths:
+        return FixBuildErrorsResponse(
+            run_id=run_id,
+            items_marked=0,
+            items_done_preserved=0,
+            affected_paths=[],
+            new_run_status=run.status,
+            enqueued=False,
+        )
+
+    items_q = await db.execute(
+        select(ScaffoldRunItem).where(ScaffoldRunItem.run_id == run_id)
+    )
+    all_items = items_q.scalars().all()
+    all_paths = [it.path for it in all_items]
+    matched = _match_item_paths(error_paths, all_paths)
+
+    if not matched:
+        return FixBuildErrorsResponse(
+            run_id=run_id,
+            items_marked=0,
+            items_done_preserved=len([i for i in all_items if i.status == "done"]),
+            affected_paths=sorted(error_paths),  # paths que extraímos mas não bateram
+            new_run_status=run.status,
+            enqueued=False,
+        )
+
+    # Marca items afetados como pending + persiste erro
+    affected_items = [it for it in all_items if it.path in matched]
+    affected_ids = [it.id for it in affected_items]
+    await db.execute(
+        sa_update(ScaffoldRunItem)
+        .where(ScaffoldRunItem.id.in_(affected_ids))
+        .values(
+            status="pending",
+            content=None,
+            error="Marcado pra regeneração via fix-build-errors (MVP-K).",
+            finished_at=None,
+            started_at=None,
+            tokens_used=None,
+            notes=None,
+            build_errors=payload.errors_text[:8000],  # cap pra não estourar prompt
+        )
+    )
+
+    # Reseta run
+    done_preserved = len([i for i in all_items if i.status == "done" and i.path not in matched])
+    run.status = "generating"
+    run.failed_items = 0
+    run.completed_items = done_preserved
+    run.error = None
+    run.finished_at = None
+    run.applied_at = None  # vai precisar de novo apply após regerar
+    run.last_progress_at = datetime.now(timezone.utc)
+
+    from app.services.audit_service import AuditEvents, AuditService
+    await AuditService(db).log_codegen_event(
+        event_type=AuditEvents.CODEGEN_SCAFFOLD_APPLIED,
+        actor_id=user_id,
+        project_id=run.project_id,
+        action="fix_build_errors",
+        files_count=len(matched),
+        extra={
+            "run_id": str(run_id),
+            "items_marked": len(matched),
+            "items_done_preserved": done_preserved,
+            "affected_paths": sorted(matched),
+        },
+    )
+    await db.commit()
+
+    enqueued = False
+    try:
+        from app.tasks.scaffold import scaffold_run_executor
+        scaffold_run_executor.delay(str(run_id))
+        enqueued = True
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "scaffold_run.fix_build_errors_enqueue_failed",
+            run_id=str(run_id),
+            error=str(exc),
+            exc_info=True,
+        )
+
+    logger.info(
+        "scaffold_run.fix_build_errors_dispatched",
+        run_id=str(run_id),
+        items_marked=len(matched),
+        affected_paths=sorted(matched),
+        done_preserved=done_preserved,
+        enqueued=enqueued,
+    )
+
+    return FixBuildErrorsResponse(
+        run_id=run_id,
+        items_marked=len(matched),
+        items_done_preserved=done_preserved,
+        affected_paths=sorted(matched),
+        new_run_status="generating",
+        enqueued=enqueued,
+    )
+
+
 @router.post(
     "/scaffold/runs/{run_id}/regenerate-invalid",
     response_model=ScaffoldRegenerateInvalidResponse,

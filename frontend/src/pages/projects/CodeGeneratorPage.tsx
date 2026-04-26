@@ -291,6 +291,9 @@ export function CodeGeneratorPage() {
   const [scaffoldApplying, setScaffoldApplying] = useState(false)
   const [scaffoldRetrying, setScaffoldRetrying] = useState(false)
   const [scaffoldRegenInvalid, setScaffoldRegenInvalid] = useState(false)
+  const [showFixBuildModal, setShowFixBuildModal] = useState(false)
+  const [fixBuildText, setFixBuildText] = useState('')
+  const [scaffoldFixingBuild, setScaffoldFixingBuild] = useState(false)
   // DT-043: warning de adequação do provider (contrato §7 + §6.2).
   // null = provider adequado; objeto = média/baixa criticidade.
   const [providerWarning, setProviderWarning] = useState<
@@ -461,6 +464,47 @@ export function CodeGeneratorPage() {
       alert(formatCodeGenError(err, 'enfileirar apply'))
     } finally {
       setScaffoldApplying(false)
+    }
+  }
+
+  const handleFixBuildErrors = async () => {
+    if (!progressStore.runId || !progressStore.snapshot) return
+    if (!fixBuildText.trim()) {
+      alert('Cole o output do build (tsc/docker/npm/alembic) na área de texto.')
+      return
+    }
+    setScaffoldFixingBuild(true)
+    try {
+      const result = await progressStore.fixBuildErrors(fixBuildText.trim())
+      if (result === null) {
+        const msg = useCodeGenProgressStore.getState().errorMessage || 'Falha ao processar erros.'
+        alert(msg)
+        return
+      }
+      if (result.items_marked === 0) {
+        alert(
+          `Nenhum arquivo foi identificado nos erros colados.\n\n` +
+          `Paths extraídos (${result.affected_paths.length}): ` +
+          (result.affected_paths.slice(0, 5).join(', ') || '(nenhum)') +
+          `\n\nVerifique se o output tem paths reconhecíveis (ex: 'src/foo.ts(45,12): error', ` +
+          `'/work/backend/main.py", line 12'). Cole a saída completa do compilador/build.`,
+        )
+        return
+      }
+      alert(
+        `Regeneração agendada:\n\n` +
+        `${result.items_marked} arquivo(s) marcado(s) pra regerar.\n` +
+        `${result.items_done_preserved} arquivo(s) preservado(s).\n\n` +
+        `Paths afetados:\n${result.affected_paths.slice(0, 10).join('\n')}` +
+        (result.affected_paths.length > 10 ? `\n…+${result.affected_paths.length - 10}` : ''),
+      )
+      setShowFixBuildModal(false)
+      setFixBuildText('')
+      setScaffoldPendingApply(false)
+    } catch (err: unknown) {
+      alert(formatCodeGenError(err, 'corrigir erros de build'))
+    } finally {
+      setScaffoldFixingBuild(false)
     }
   }
 
@@ -1063,6 +1107,21 @@ export function CodeGeneratorPage() {
               )}
             </button>
 
+            {/* MVP-K: Corrigir Erros de Build — owner cola output do build local
+                 e backend regera só os arquivos afetados com prompt enriquecido. */}
+            {(progressStore.snapshot?.status === 'completed'
+              || progressStore.snapshot?.status === 'applied')
+              && (progressStore.snapshot?.completed_items ?? 0) > 0 && (
+              <button
+                onClick={() => setShowFixBuildModal(true)}
+                disabled={scaffoldFixingBuild || scaffoldRegenInvalid || scaffoldRetrying || scaffoldApplying || scaffoldGenerating}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-rose-600 hover:bg-rose-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+                title="Cole erros do build local (tsc/docker/npm) — backend regera apenas os arquivos afetados com prompt corrigindo o erro específico."
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />Corrigir Erros de Build
+              </button>
+            )}
+
             {/* MVP-F: Regenerar items inválidos (docstring missing) — aparece em
                  runs completed/applied com items done. Detecta + marca + regera. */}
             {(progressStore.snapshot?.status === 'completed'
@@ -1483,6 +1542,71 @@ export function CodeGeneratorPage() {
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-500 text-white rounded-lg transition-colors"
               >
                 <span>🔁</span> Regenerar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MVP-K: Modal Corrigir Erros de Build */}
+      {showFixBuildModal && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+          onClick={() => !scaffoldFixingBuild && setShowFixBuildModal(false)}
+        >
+          <div
+            className="bg-slate-900 border border-slate-700 rounded-xl max-w-3xl w-full max-h-[80vh] flex flex-col shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 py-4 border-b border-slate-800">
+              <h3 className="text-slate-200 font-semibold flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400" /> Corrigir Erros de Build (MVP-K)
+              </h3>
+              <p className="text-slate-400 text-xs mt-1">
+                Cole o output bruto do compilador/build local: <code className="text-violet-400">tsc</code>,{' '}
+                <code className="text-violet-400">docker compose build</code>,{' '}
+                <code className="text-violet-400">npm run build</code>,{' '}
+                <code className="text-violet-400">alembic upgrade</code>. Backend extrai os paths
+                via regex, marca os arquivos afetados pra regerar e injeta o erro no prompt do LLM.
+              </p>
+            </div>
+            <div className="px-5 py-4 flex-1 overflow-auto">
+              <textarea
+                value={fixBuildText}
+                onChange={(e) => setFixBuildText(e.target.value)}
+                disabled={scaffoldFixingBuild}
+                rows={12}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-3 text-xs text-slate-200 font-mono placeholder-slate-600 focus:outline-none focus:border-violet-600 disabled:opacity-50"
+                placeholder={`Cole aqui o output do build com erros. Exemplo:
+
+src/App.tsx(5,10): error TS2724: '"@/routes/index"' has no exported member named 'router'.
+src/hooks/useAnalysis.ts(3,10): error TS2614: Module has no exported member 'apiClient'.
+
+ERROR [frontend builder 4/6]: COPY failed: file not found in build context: nginx.conf
+
+File "/work/backend/main.py", line 12, in <module>
+    from app.routes.users import router
+ImportError: cannot import name 'router'`}
+              />
+            </div>
+            <div className="px-5 py-4 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                onClick={() => { setShowFixBuildModal(false); setFixBuildText('') }}
+                disabled={scaffoldFixingBuild}
+                className="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleFixBuildErrors}
+                disabled={scaffoldFixingBuild || !fixBuildText.trim()}
+                className="flex items-center gap-1 px-3 py-1.5 text-xs bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white rounded-lg transition-colors font-medium"
+              >
+                {scaffoldFixingBuild ? (
+                  <><Loader2 className="w-3.5 h-3.5 animate-spin" />Processando...</>
+                ) : (
+                  <><AlertTriangle className="w-3.5 h-3.5" />Regenerar Arquivos Afetados</>
+                )}
               </button>
             </div>
           </div>

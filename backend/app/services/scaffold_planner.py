@@ -157,6 +157,7 @@ def build_item_prompt(
     peer_contents: dict[str, str] | None = None,
     rnf_contracts: Any = None,
     design_tokens: Any = None,
+    build_errors: str | None = None,
 ) -> str:
     """Monta prompt pra fase ITEM: LLM retorna conteúdo de 1 arquivo.
 
@@ -195,6 +196,28 @@ def build_item_prompt(
     if design_tokens:
         tokens_text = f"\n\nDesign tokens canônicos (frontend — use estes, NÃO invente):\n{json.dumps(design_tokens, ensure_ascii=False)[:2000]}\n"
 
+    # MVP-K (2026-04-26) — quando este arquivo falhou na build local do
+    # owner, ele reportou erros via fix-build-errors. Injetamos como seção
+    # PRIORITÁRIA pro LLM consertar conscientemente. Se não veio nada,
+    # bloco fica vazio e prompt é idêntico ao original.
+    build_errors_text = ""
+    if build_errors and build_errors.strip():
+        build_errors_text = (
+            f"\n\n## ⚠️ ERROS DE BUILD A CORRIGIR (PRIORITÁRIO)\n"
+            f"Este arquivo já foi gerado antes mas FALHOU no build local do owner.\n"
+            f"Os erros abaixo foram capturados do compilador/runtime real.\n"
+            f"REGENERE o arquivo CORRIGINDO esses erros específicos. Mantenha o\n"
+            f"propósito, peers e estrutura geral; só ajuste o que está quebrado:\n"
+            f"```\n{build_errors[:3000]}\n```\n"
+            f"Se o erro indica:\n"
+            f"  - Import name errado: ajuste o nome real do export do peer.\n"
+            f"  - Aridade errada: olhe a função real do peer e corrija a chamada.\n"
+            f"  - Type mismatch: alinhe os tipos sem quebrar contratos do peer.\n"
+            f"  - Path/module not found: use path correto baseado nos peers listados.\n"
+            f"  - Dependency missing: declare em comentário no topo `# DEP_NEEDED: <pkg>`\n"
+            f"    pra owner adicionar manualmente; NÃO inventa import quebrado.\n"
+        )
+
     return (
         f"Você é um engenheiro sênior implementando 1 arquivo do scaffold do projeto "
         f"`{project_name}` (slug: {project_slug}).\n\n"
@@ -202,7 +225,8 @@ def build_item_prompt(
         f"Arquitetura:\n{arch_json}\n"
         f"{rnf_text}"
         f"{tokens_text}\n"
-        f"{peers_text}\n\n"
+        f"{peers_text}"
+        f"{build_errors_text}\n\n"
         f"## ARQUIVO A GERAR\n"
         f"  Path: `{item_path}`\n"
         f"  Tipo: `{item_file_type}`\n"

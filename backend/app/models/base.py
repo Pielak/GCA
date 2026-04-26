@@ -1968,6 +1968,11 @@ class ScaffoldRunItem(Base):
     # Camada B: lista de paths (JSON-serializado) dos peers em que este
     # item depende. Vazio = sem dep. Toposort no execute_run.
     depends_on = Column(Text, nullable=False, default="[]", server_default="[]")
+    # MVP-K (2026-04-26): erros de build reportados pelo owner via
+    # /scaffold/runs/{id}/fix-build-errors. Vazio quando item está OK.
+    # JSON list[str] ou texto bruto. Lido pelo executor pra injetar no
+    # prompt de regeração.
+    build_errors = Column(Text, nullable=True)
 
 
 class CodeAuditFinding(Base):

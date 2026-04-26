@@ -542,6 +542,7 @@ async def execute_run(run_id: UUID) -> None:
             peer_contents=peer_contents,
             rnf_contracts=rnf_contracts,
             design_tokens=design_tokens,
+            build_errors=getattr(it_snapshot, "build_errors", None),  # MVP-K
         )
 
         item_max_tokens = clamp_max_tokens(llm_cfg["model"], 32000)

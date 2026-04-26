@@ -68,6 +68,7 @@ interface CodeGenProgressState {
   apply: () => Promise<{ enqueued: true } | null>
   retryFailed: () => Promise<{ items_reset: number; items_done_preserved: number } | null>
   regenerateInvalid: () => Promise<{ items_marked_invalid: number; items_done_preserved: number } | null>
+  fixBuildErrors: (errorsText: string) => Promise<{ items_marked: number; items_done_preserved: number; affected_paths: string[] } | null>
   fetchItemContent: (itemId: string) => Promise<string | null>
   dismiss: () => void
   reset: () => void
@@ -337,6 +338,38 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
      */
     refresh: async () => {
       await pollOnce()
+    },
+
+    /**
+     * MVP-K (2026-04-26): owner cola erros de build (tsc/docker/npm).
+     * Backend extrai paths via regex, marca items afetados como pending
+     * + persiste erro em build_errors, reseta run pra generating.
+     * Worker regera items afetados com prompt enriquecido pelo erro.
+     */
+    fixBuildErrors: async (errorsText: string) => {
+      const { runId, snapshot } = get()
+      if (!runId || !snapshot) return null
+      try {
+        const res = await apiClient.post(
+          `/code-generation/scaffold/runs/${runId}/fix-build-errors`,
+          { errors_text: errorsText },
+        )
+        const marked = res.data?.items_marked || 0
+        if (marked > 0) {
+          set({ active: true, finishedAt: null, errorMessage: null })
+        }
+        await pollOnce()
+        return {
+          items_marked: marked,
+          items_done_preserved: res.data?.items_done_preserved || 0,
+          affected_paths: res.data?.affected_paths || [],
+        }
+      } catch (err: any) {
+        const detail = err?.response?.data?.detail
+        const msg = typeof detail === 'string' ? detail : 'Falha ao processar erros de build.'
+        set({ errorMessage: msg })
+        return null
+      }
     },
 
     /**
