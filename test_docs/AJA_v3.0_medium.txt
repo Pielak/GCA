@@ -1,0 +1,53 @@
+SISTEMA DE AUTOMAÇÃO JURÍDICA ASSISTIDA (AJA) v3.0
+
+Objetivo Principal:
+Plataforma web para auxiliar advogados a gerar documentos jurídicos com IA,
+começando com direito civil (contratos, testamentos, petições iniciais).
+
+Requisitos Funcionais Principais:
+1. Login seguro com email + 2FA via TOTP
+2. Geração automática de contrato civil baseado em template + IA
+3. Integração com DataJud API para consulta de processos
+4. Versioning e histórico de documentos
+5. Compartilhamento de documentos com outras partes (permissionado)
+6. Auditoria completa de alterações (quem fez, quando, o quê)
+7. Exportação para PDF/Word assinado digitalmente
+8. Sugestões de cláusulas baseadas em jurisprudência
+
+Requisitos Não-Funcionais:
+- Performance: respostas < 2 segundos (99 percentil)
+- Disponibilidade: 99.5% uptime (< 3.6 horas/mês de downtime)
+- Escalabilidade: até 10.000 usuários simultâneos no MVP
+- LGPD compliance: criptografia E2E de documentos, direito ao esquecimento
+- Conformidade: assinatura digital (padrão ICP-Brasil)
+- Backup: daily incremental, retenção 90 dias
+- Disaster recovery: RTO 2h, RPO 15 min
+
+Stack Técnico:
+- Backend: Python FastAPI
+- Frontend: React 18 + TypeScript + Tailwind
+- Database: PostgreSQL 16 (ACID compliance crítico)
+- Cache: Redis (sessões, drafts)
+- Queue: Celery/RabbitMQ (async tasks)
+- Storage: S3-compatible (MinIO local)
+- IA: Claude (análise de cláusulas) + Ollama local
+- Infrastructure: Docker + K8s
+
+Timeline MVP: 6 meses
+Fase 2: 4 meses
+Fase 3: 3 meses
+
+Casos de Uso Principais:
+1. Advogado cria novo contrato: template → IA preenche → revisa → assina
+2. Consulta jurisprudência: cláusula → IA busca precedentes → sugere
+3. Cliente recebe contrato: acessa link seguro → revisa → assina digitalmente
+4. Audit trail: órgão regulador acessa histórico completo
+
+Riscos:
+- Responsabilidade legal: disclaimer claro obrigatório
+- Vazamento: cliente sensível precisa Ollama (não cloud)
+- LGPD: dados de clientes = direito exclusão crítico
+- DataJud: API pode cair → fallback manual necessário
+
+Orçamento: R$ 500k
+Cliente Piloto: 5 advogados em família

@@ -1,0 +1,17 @@
+SISTEMA DE AUTOMAÇÃO JURÍDICA ASSISTIDA (AJA) v3.0
+
+Objetivo:
+Gerar documentos jurídicos com IA.
+
+Requisitos:
+1. Login seguro
+2. Geração de contratos
+3. Exportação PDF
+
+Stack:
+- Backend: Python FastAPI
+- Frontend: React
+- Database: PostgreSQL
+
+Timeline: 6 meses
+Orçamento: R$ 500k
