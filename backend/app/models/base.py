@@ -1364,12 +1364,18 @@ class OCGDeltaLog(Base):
     changed_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     trigger_source = Column(String(50), nullable=False, default="document_ingestion")
     ocg_snapshot = Column(Text, nullable=True)  # JSON completo do OCG na versão_to — fonte do rollback
+    source = Column(String(50), default="document_ingestion")  # questionnaire_response, persona_validation, etc
+    persona_id = Column(String(20), nullable=True)  # gp, arquiteto, dba, dev_sr, qa
+    decision = Column(String(30), nullable=True)  # approved, needs_clarification, rejected
+    hash_chain = Column(String(64), nullable=True)  # SHA256 para integridade
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("idx_ocg_delta_project", project_id),
         Index("idx_ocg_delta_trigger", project_id, trigger_source),
         Index("idx_ocg_delta_version", project_id, ocg_version_to),
+        Index("idx_ocg_delta_source", project_id, source),
+        Index("idx_ocg_delta_persona", project_id, persona_id),
     )
 
 
