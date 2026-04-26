@@ -1104,21 +1104,33 @@ _BUILD_ERROR_PATH_PATTERNS: List[Any] = []  # populado lazy abaixo
 
 def _compile_build_error_patterns() -> list:
     """Patterns regex pra extrair paths de output de tsc/docker/npm/alembic.
-    Devolve lista de tuplas (regex, group_index_do_path)."""
+    Devolve lista de tuplas (regex, group_index_do_path).
+
+    Patterns toleram prefixos comuns (`#NN N.NNN `, `>`, `[stage]`, etc.)
+    do docker buildkit, npm, vite — não usam ^ rígido. Path deve ter
+    extensão de código conhecida pra reduzir falsos positivos.
+    """
     import re as _re
+    # Path pattern reusável: alfanum + / . _ - @ + extensão de código
+    PATH = r"([\w@][\w./@\-]*\.(?:tsx?|jsx?|py|go|rs|java|kt|cs|rb|php|cpp|h|md|json|yaml|yml|toml|conf|ini|env|sql|sh))"
     return [
-        # TypeScript: src/foo.ts(45,12): error TS2304: Cannot find name 'X'.
-        (_re.compile(r"^([\w./@\-]+\.tsx?)\(\d+,\d+\):", _re.MULTILINE), 1),
+        # TypeScript: src/foo.ts(45,12): error TS2304: ...
+        # Tolera prefixo docker buildkit `#23 2.676 ` antes do path.
+        (_re.compile(rf"\b{PATH}\(\d+,\d+\):\s*error", _re.IGNORECASE), 1),
+        # TypeScript style alternativo: src/foo.ts:45:12 - error TS2304
+        (_re.compile(rf"\b{PATH}:\d+:\d+\s*-?\s*error", _re.IGNORECASE), 1),
         # Vite/esbuild: ERROR in ./src/foo.tsx
-        (_re.compile(r"ERROR in (\.?[\w./@\-]+\.[a-z]+)", _re.MULTILINE), 1),
-        # Python: File "/work/backend/src/foo.py", line 12
-        (_re.compile(r'File "([^"]+\.py)", line \d+', _re.MULTILINE), 1),
-        # Generic: pathlike followed by 'error' (catch-all, conservative)
-        (_re.compile(r"^([\w./@\-]+\.[a-z]+):\s*error", _re.MULTILINE | _re.IGNORECASE), 1),
-        # Dockerfile error com path: COPY ... no such file: "/foo.conf"
-        (_re.compile(r'"([\w./@\-]+\.[a-z]+)":\s*not found', _re.MULTILINE), 1),
-        # Module not found: Can't resolve './foo'
-        (_re.compile(r"Module not found.*['\"]([\w./@\-]+)['\"]", _re.MULTILINE), 1),
+        (_re.compile(rf"ERROR in \.?/?{PATH}", _re.IGNORECASE), 1),
+        # Python traceback: File "/work/backend/main.py", line 12
+        (_re.compile(rf'File "([^"]+\.py)", line \d+'), 1),
+        # Generic: <path>: error
+        (_re.compile(rf"\b{PATH}:\s*error", _re.IGNORECASE), 1),
+        # Dockerfile error: "/nginx.conf": not found
+        (_re.compile(rf'"{PATH}":\s*not found', _re.IGNORECASE), 1),
+        # Module not found: ... 'foo/bar.tsx'
+        (_re.compile(rf"Module not found.*['\"]{PATH}['\"]", _re.IGNORECASE), 1),
+        # Fallback: arquivo seguido de erro TS sem coordenadas
+        (_re.compile(rf"\b{PATH}\s+error TS\d+", _re.IGNORECASE), 1),
     ]
 
 
