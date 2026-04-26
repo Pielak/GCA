@@ -3,13 +3,14 @@ import { useParams } from 'react-router-dom'
 import {
   Settings, Brain, GitBranch, Plug, Layers, Shield, FileText, TestTube2,
   Users, Activity, History, Check, ChevronDown, ChevronRight, Edit2, Info,
-  Loader2, AlertTriangle, RefreshCw
+  Loader2, AlertTriangle, RefreshCw, ExternalLink
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { pillarMeta, pillarKey, PILLAR_ORDER } from '@/data/pillarMeta'
 import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 import RnfContractsEditor from '@/components/projects/RnfContractsEditor'
 import DesignTokensEditor from '@/components/projects/DesignTokensEditor'
+import { FigmaImportPanel } from '@/components/projects/FigmaImportPanel'
 import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
@@ -66,6 +67,7 @@ const DIMENSIONS = [
   { key: 'compliance', label: 'Conformidade e Regulatório', icon: Shield, color: 'amber' },
   { key: 'rnf', label: 'Contratos RNF (editável)', icon: Edit2, color: 'violet' },
   { key: 'design_tokens', label: 'Design Tokens (editável)', icon: Edit2, color: 'violet' },
+  { key: 'figma', label: 'Figma (import)', icon: ExternalLink, color: 'violet' },
   { key: 'testing', label: 'Estratégia de Testes', icon: TestTube2, color: 'emerald' },
   { key: 'deliverables', label: 'Entregáveis', icon: FileText, color: 'orange' },
   { key: 'risks', label: 'Análise de Riscos', icon: AlertTriangle, color: 'red' },
@@ -389,6 +391,8 @@ export function OCGPage() {
         return id ? <RnfContractsEditor projectId={id} /> : null
       case 'design_tokens':
         return id ? <DesignTokensEditor projectId={id} /> : null
+      case 'figma':
+        return id ? <FigmaImportPanel projectId={id} /> : null
       case 'testing':
         return (ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) ? renderObject(ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'deliverables':
