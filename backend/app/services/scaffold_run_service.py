@@ -457,19 +457,56 @@ async def execute_run(run_id: UUID) -> None:
                 if d.content:
                     generated_content_by_path[d.path] = d.content
 
-    for it_snapshot in all_items_topo:
-        # Pula items já processados (resume): done, failed, skipped
-        if it_snapshot.status in ("done", "failed", "skipped"):
-            continue
+    # MVP-C (2026-04-25): paralelismo respeitando depends_on.
+    # Antes loop processava 1 item por vez (10h+ no AJA com 164 arquivos).
+    # Agora cálculo de "waves" topológicas: items sem dep entre si rodam
+    # em paralelo até SCAFFOLD_PARALLELISM. Wave N+1 só começa quando wave
+    # N termina (peer_contents fica completo).
+    import asyncio as _asyncio
+    from app.core.config import settings as _app_settings
 
-        # Marca generating
-        async with AsyncSessionLocal() as db:
-            it = await db.get(ScaffoldRunItem, it_snapshot.id)
+    parallelism = max(1, getattr(_app_settings, "SCAFFOLD_PARALLELISM", 5))
+
+    # Calcula em qual wave cada path pertence: max(wave dos deps) + 1.
+    # Items sem dep ficam na wave 0. Toposort já garante que deps vêm antes.
+    wave_by_path: Dict[str, int] = {}
+    for path in topo_order:
+        deps = [d for d in deps_by_path.get(path, []) if d in wave_by_path]
+        wave_by_path[path] = (max((wave_by_path[d] for d in deps), default=-1) + 1)
+
+    # Agrupa items por wave preservando ordinal pra desempate previsível.
+    max_wave = max(wave_by_path.values(), default=-1)
+    waves: List[List[ScaffoldRunItem]] = [[] for _ in range(max_wave + 1)]
+    for it in all_items_topo:
+        waves[wave_by_path[it.path]].append(it)
+
+    logger.info(
+        "scaffold_run.waves_computed",
+        run_id=str(run_id),
+        total_items=len(all_items_topo),
+        waves=len(waves),
+        wave_sizes=[len(w) for w in waves],
+        parallelism=parallelism,
+    )
+
+    async def _process_one_item(it_snapshot: ScaffoldRunItem) -> tuple[str, Optional[str], str]:
+        """Processa 1 item end-to-end: marca generating → LLM → parseia → salva.
+
+        Retorna `(path, content_or_None, status_final)`. status_final ∈
+        {'done', 'failed'}. Cada chamada usa session DB própria pra não
+        compartilhar entre coroutines paralelas.
+        """
+        # Pula se já terminado (resume)
+        if it_snapshot.status in ("done", "failed", "skipped"):
+            return (it_snapshot.path, None, it_snapshot.status)
+
+        # Marca generating + started_at
+        async with AsyncSessionLocal() as db_g:
+            it = await db_g.get(ScaffoldRunItem, it_snapshot.id)
             it.status = "generating"
             it.started_at = datetime.now(timezone.utc)
-            await db.commit()
+            await db_g.commit()
 
-        # Camada C — peers diretos com conteúdo já gerado
         deps_for_item = deps_by_path.get(it_snapshot.path, [])
         peer_contents: Dict[str, str] = {
             d: generated_content_by_path[d]
@@ -488,8 +525,9 @@ async def execute_run(run_id: UUID) -> None:
             rnf_contracts=rnf_contracts,
             design_tokens=design_tokens,
         )
+
+        item_max_tokens = clamp_max_tokens(llm_cfg["model"], 32000)
         try:
-            item_max_tokens = clamp_max_tokens(llm_cfg["model"], 32000)
             item_raw = await call_llm(
                 config=llm_cfg,
                 system_prompt="Você é um engenheiro de software sênior, falante nativo de PT-BR. Responda em JSON estrito.",
@@ -498,53 +536,86 @@ async def execute_run(run_id: UUID) -> None:
                 temperature=0.3,
                 log_context="scaffold.item",
             )
-            item_tokens = 0  # call_llm não devolve usage; provider loga.
         except Exception as exc:  # noqa: BLE001
-            failed += 1
-            async with AsyncSessionLocal() as db:
-                it = await db.get(ScaffoldRunItem, it_snapshot.id)
-                run = await db.get(ScaffoldRun, run_id)
+            async with AsyncSessionLocal() as db_e:
+                it = await db_e.get(ScaffoldRunItem, it_snapshot.id)
                 it.status = "failed"
                 it.error = f"LLM erro: {str(exc)[:300]}"
                 it.finished_at = datetime.now(timezone.utc)
-                if run is not None:
-                    run.failed_items = failed
-                    run.last_progress_at = datetime.now(timezone.utc)
-                await db.commit()
-            continue
+                await db_e.commit()
+            return (it_snapshot.path, None, "failed")
 
         parsed_item = _parse_llm_json(item_raw)
-        async with AsyncSessionLocal() as db:
-            it = await db.get(ScaffoldRunItem, it_snapshot.id)
-            run = await db.get(ScaffoldRun, run_id)
+        async with AsyncSessionLocal() as db_s:
+            it = await db_s.get(ScaffoldRunItem, it_snapshot.id)
             if parsed_item is None:
                 it.status = "failed"
-                it.error = f"JSON inválido (tokens={item_tokens})"
-                it.tokens_used = item_tokens
-                failed += 1
+                it.error = "JSON inválido"
+                it.tokens_used = 0
+                it.finished_at = datetime.now(timezone.utc)
+                await db_s.commit()
+                return (it_snapshot.path, None, "failed")
+            content = parsed_item.get("content") or ""
+            notes = (parsed_item.get("notes") or "")[:1000] or None
+            it.content = content
+            it.notes = notes
+            it.tokens_used = 0
+            if content.strip():
+                it.status = "done"
+                final_status = "done"
             else:
-                content = parsed_item.get("content") or ""
-                notes = (parsed_item.get("notes") or "")[:1000] or None
-                it.content = content
-                it.notes = notes
-                it.tokens_used = item_tokens
-                it.status = "done" if content.strip() else "failed"
-                if it.status == "done":
-                    completed += 1
-                    generated_content_by_path[it_snapshot.path] = content
-                else:
-                    it.error = "LLM devolveu content vazio"
-                    failed += 1
+                it.status = "failed"
+                it.error = "LLM devolveu content vazio"
+                final_status = "failed"
             it.finished_at = datetime.now(timezone.utc)
-            # Atualização incremental dos contadores na run + heartbeat de
-            # progresso pro watchdog não considerar zombie. Sem isso, restart
-            # do worker no meio do loop deixava run em 'generating' com
-            # completed_items=0 mesmo havendo arquivos prontos no DB.
-            if run is not None:
-                run.completed_items = completed
-                run.failed_items = failed
-                run.last_progress_at = datetime.now(timezone.utc)
-            await db.commit()
+            await db_s.commit()
+            return (it_snapshot.path, content if final_status == "done" else None, final_status)
+
+    # Semaphore limita concorrência mesmo dentro de wave grande
+    sem = _asyncio.Semaphore(parallelism)
+
+    async def _bounded_process(it: ScaffoldRunItem) -> tuple[str, Optional[str], str]:
+        async with sem:
+            return await _process_one_item(it)
+
+    # Itera waves; dentro de cada, gather paralelo. Heartbeat ao fim de cada
+    # wave (em vez de por item) — reduz pressão no DB e ainda mantém watchdog
+    # informado (worst case = duração da wave maior).
+    for wave_idx, wave in enumerate(waves):
+        pending = [it for it in wave if it.status not in ("done", "failed", "skipped")]
+        if not pending:
+            continue
+        results = await _asyncio.gather(
+            *[_bounded_process(it) for it in pending],
+            return_exceptions=True,
+        )
+        for r in results:
+            if isinstance(r, Exception):
+                failed += 1
+                continue
+            path, content, st = r
+            if st == "done" and content is not None:
+                completed += 1
+                generated_content_by_path[path] = content
+            elif st == "failed":
+                failed += 1
+
+        # Heartbeat por wave: contadores na run + last_progress_at.
+        async with AsyncSessionLocal() as db_hb:
+            run_hb = await db_hb.get(ScaffoldRun, run_id)
+            if run_hb is not None:
+                run_hb.completed_items = completed
+                run_hb.failed_items = failed
+                run_hb.last_progress_at = datetime.now(timezone.utc)
+                await db_hb.commit()
+        logger.info(
+            "scaffold_run.wave_done",
+            run_id=str(run_id),
+            wave_idx=wave_idx,
+            wave_size=len(pending),
+            completed_so_far=completed,
+            failed_so_far=failed,
+        )
 
     # Encerra run
     async with AsyncSessionLocal() as db:

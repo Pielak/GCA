@@ -175,6 +175,14 @@ class Settings(BaseSettings):
     N8N_API_URL: str = "http://n8n:5678/api"
     N8N_API_KEY: Optional[str] = None
 
+    # MVP-C (2026-04-25): paralelismo do scaffold dentro de cada wave
+    # topológica. Items sem dep entre si rodam em paralelo até este cap.
+    # 5 é equilíbrio: rate limit seguro (Anthropic = 50 RPM, DeepSeek varia)
+    # e ganho real de tempo (5x speedup em projetos com baixo acoplamento).
+    # Operador pode subir até ~10 com Sonnet/DeepSeek (cap mais alto de RPM)
+    # ou cair pra 1-2 com Opus em horário de pico.
+    SCAFFOLD_PARALLELISM: int = 5
+
     # Anthropic API (Claude)
     ANTHROPIC_API_KEY: Optional[str] = None
     ANTHROPIC_MODEL: str = "claude-opus-4-6"
