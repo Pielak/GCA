@@ -144,6 +144,47 @@ async def resolve_llm_config(
     }
 
 
+#: Configuração canônica de retry com backoff exponencial em erros
+#: transitórios (rate limit, timeout, network, 5xx). MVP-J fase 1
+#: (2026-04-25): cobre ~50%+ das falhas que antes marcavam item como
+#: failed direto no scaffold/audit. Backoff em segundos: 1, 2, 4 entre
+#: tentativas. Ordem geral: 1ª tenta → falha transitória → espera 1s
+#: → tenta 2 → falha → espera 2s → tenta 3 → falha → propaga.
+_RETRY_MAX_ATTEMPTS = 3
+_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)  # tempo de espera ANTES da tentativa N+1
+
+
+def _is_retriable_httpx_error(exc: Exception) -> bool:
+    """True pra erros transitórios que justificam retry com backoff."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        # 429 = rate limit; 5xx = server error
+        return exc.response.status_code == 429 or exc.response.status_code >= 500
+    return isinstance(exc, (httpx.ReadTimeout, httpx.ConnectError, httpx.NetworkError, httpx.RemoteProtocolError))
+
+
+def _is_retriable_anthropic_error(exc: Exception) -> bool:
+    """True pra exceções do SDK Anthropic que justificam retry. Lazy import
+    pra evitar dependência forte se Anthropic SDK não estiver disponível."""
+    try:
+        from anthropic import (
+            APIConnectionError,
+            APIStatusError,
+            APITimeoutError,
+            RateLimitError,
+        )
+    except ImportError:
+        return False
+    if isinstance(exc, (RateLimitError, APIConnectionError, APITimeoutError)):
+        return True
+    if isinstance(exc, APIStatusError):
+        # 5xx do upstream Anthropic — tenta de novo
+        try:
+            return exc.status_code >= 500 or exc.status_code == 429
+        except Exception:  # noqa: BLE001
+            return False
+    return False
+
+
 async def call_llm(
     *,
     config: dict[str, Any],
@@ -157,8 +198,14 @@ async def call_llm(
 
     Anthropic via SDK nativo; Ollama/DeepSeek/OpenAI/Grok via httpx
     OpenAI-compat. Timeouts separados (Ollama 240s, cloud 60s).
-    Erros de rede/timeout/HTTP são re-levantados como RuntimeError
-    com mensagem em PT-BR (caller mostra pro usuário).
+
+    Retry policy (MVP-J fase 1, 2026-04-25):
+      - 3 tentativas no total com backoff 1s/2s/4s.
+      - Retry em: 429 rate limit, 5xx, ReadTimeout, ConnectError,
+        NetworkError, Anthropic RateLimitError/APIConnectionError/
+        APITimeoutError/APIStatusError(5xx).
+      - NÃO retry em 4xx (exceto 429), JSON malformado, prompt rejeitado
+        — esses são bugs do prompt e merecem falha rápida.
 
     Args:
         config: dict retornado por `resolve_llm_config`.
@@ -167,6 +214,59 @@ async def call_llm(
         temperature: default 0.2.
         log_context: prefixo dos logs estruturados pro caller identificar
             qual service chamou (ex: "module_details", "test_spec").
+    """
+    provider = config["provider"]
+    model = config["model"]
+
+    last_exc: Exception | None = None
+    for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
+        try:
+            return await _invoke_llm_once(
+                config=config,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                log_context=log_context,
+            )
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            retriable = (
+                _is_retriable_anthropic_error(exc)
+                if provider == "anthropic"
+                else _is_retriable_httpx_error(exc)
+            )
+            if not retriable or attempt >= _RETRY_MAX_ATTEMPTS:
+                # Erro não-transitório OU acabaram tentativas: propaga
+                raise
+            backoff = _RETRY_BACKOFF_SECONDS[min(attempt - 1, len(_RETRY_BACKOFF_SECONDS) - 1)]
+            logger.warning(
+                f"{log_context}.llm_retry",
+                provider=provider, model=model,
+                attempt=attempt, max_attempts=_RETRY_MAX_ATTEMPTS,
+                backoff_s=backoff,
+                error_type=type(exc).__name__,
+                error=str(exc)[:200],
+            )
+            import asyncio as _asyncio
+            await _asyncio.sleep(backoff)
+    # Salvaguarda — não deveria chegar aqui (raise no loop cobre)
+    if last_exc:
+        raise last_exc
+    return ""
+
+
+async def _invoke_llm_once(
+    *,
+    config: dict[str, Any],
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int,
+    temperature: float,
+    log_context: str,
+) -> str:
+    """Implementação real da chamada LLM (1 tentativa, sem retry).
+    Wrapper `call_llm` adiciona retry com backoff em erros transitórios.
     """
     provider = config["provider"]
     model = config["model"]
@@ -223,6 +323,11 @@ async def call_llm(
     read_timeout = OLLAMA_READ_TIMEOUT_SECONDS if provider == "ollama" else CLOUD_READ_TIMEOUT_SECONDS
     timeout = httpx.Timeout(connect=10.0, read=read_timeout, write=10.0, pool=5.0)
 
+    # Não converto httpx.ReadTimeout/HTTPStatusError em RuntimeError aqui:
+    # `call_llm` (wrapper externo) precisa do tipo original pra decidir
+    # retry vs propagar (MVP-J fase 1, 2026-04-25). Se acabarem as
+    # tentativas, `call_llm` propaga e o caller wrappa em RuntimeError
+    # se quiser mensagem PT-BR amigável.
     started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -236,20 +341,18 @@ async def call_llm(
             provider=provider, model=model,
             elapsed_s=round(elapsed, 1), limit_s=read_timeout,
         )
+        # ReadTimeout/HTTPStatusError propagam o tipo original pra
+        # `call_llm` decidir retry. Só Ollama mantém RuntimeError explícito
+        # (caso especial: modelo carregando, retry cego não ajuda).
         if provider == "ollama":
             raise RuntimeError(
                 f"Ollama ({model}) não respondeu em {read_timeout}s. Modelo "
                 "pode estar carregando do disco (primeira chamada) ou rodando "
                 "em CPU lenta. Tente novamente — fica em memória após o primeiro uso."
             ) from exc
-        raise RuntimeError(
-            f"{provider} ({model}) não respondeu em {read_timeout}s."
-        ) from exc
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(
-            f"{provider} API retornou erro {exc.response.status_code}: "
-            f"{exc.response.text[:200]}"
-        ) from exc
+        raise  # propaga httpx.ReadTimeout original
+    # httpx.HTTPStatusError NÃO é capturada aqui — propaga direto pra
+    # call_llm verificar 429/5xx (retriable) vs 4xx (não retriable).
 
     elapsed = time.monotonic() - started
     logger.info(
