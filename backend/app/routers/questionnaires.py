@@ -3,11 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import structlog
 
 from app.db.database import get_db
 from app.services.questionnaire_service import QuestionnaireService
+from app.services.persona_validator import PersonasConsolidator
 from app.middleware.auth import get_current_user_from_token
 
 logger = structlog.get_logger(__name__)
@@ -270,3 +271,81 @@ async def archive_expired_questionnaires(
         "archived": archived_count,
         "message": f"{archived_count} questionário(s) arquivado(s) por timeout.",
     }
+
+
+# ============================================================================
+# QUESTIONNAIRE VALIDATION BY PERSONAS
+# ============================================================================
+
+class QuestionnaireValidationRequest(BaseModel):
+    """Request: Validar respostas do questionário pelas Personas"""
+    responses: Dict[str, str]  # {question_id: resposta_texto}
+    extracted_concepts: List[str]  # Conceitos extraídos do documento
+    document_domain: str = "software"  # Domínio: software, juridico, financeiro, etc
+
+
+class PersonaValidationDetail(BaseModel):
+    """Detalhe de validação de uma Persona"""
+    persona: str
+    status: str  # "approved" | "needs_clarification"
+    decision: str
+    severity: str  # "info" | "warning" | "critical"
+
+
+class QuestionnaireValidationResponse(BaseModel):
+    """Response: Resultado da validação por Personas"""
+    all_approved: bool  # True se 5/5 personas aprovaram
+    next_action: str  # "aggregate_to_ocg" | "generate_followup_questionnaire" | "manual_review"
+    personas: List[PersonaValidationDetail]  # 5 personas
+
+
+@router.post("/projects/{project_id}/questionnaire/validate", response_model=QuestionnaireValidationResponse)
+async def validate_questionnaire_responses(
+    project_id: UUID,
+    req: QuestionnaireValidationRequest,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Valida respostas do questionário pelas 5 Personas em paralelo.
+    
+    Fluxo:
+    1. Recebe respostas + conceitos extraídos + domínio
+    2. Chama PersonasConsolidator para validar com todas 5 Personas
+    3. Consolida resultados:
+       - Se 5/5 aprovaram → next_action = "aggregate_to_ocg"
+       - Se alguma precisa clarificação → next_action = "generate_followup_questionnaire"
+       - Se houver erro crítico → next_action = "manual_review"
+    4. Retorna decisões de cada Persona
+    """
+    try:
+        # Criar consolidador de personas
+        consolidator = PersonasConsolidator()
+        
+        # Validar com todas as 5 personas
+        consolidated = consolidator.validate_all(
+            responses=req.responses,
+            extracted_concepts=req.extracted_concepts,
+            document_domain=req.document_domain
+        )
+        
+        # Converter resultados para response format
+        personas_details = [
+            PersonaValidationDetail(
+                persona=r.persona,
+                status=r.status,
+                decision=r.decision,
+                severity=r.severity
+            )
+            for r in consolidated.results
+        ]
+        
+        return QuestionnaireValidationResponse(
+            all_approved=consolidated.all_approved,
+            next_action=consolidated.next_action,
+            personas=personas_details
+        )
+    
+    except Exception as e:
+        logger.error(f"Erro ao validar questionnaire: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro na validação: {str(e)}")

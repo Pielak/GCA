@@ -9,8 +9,10 @@ import structlog
 
 from app.db.database import get_db
 from app.services.ingestion_service import IngestionService
+from app.services.m01_service import M01Service
 from app.middleware.auth import get_current_user_from_token
 from app.dependencies.require_project_setup import require_project_setup_complete
+from pydantic import BaseModel
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["ingestion"])
@@ -583,3 +585,91 @@ async def get_ocg_delta_for_document(
         "pillars": pillars_compare,
         "created_at": delta.created_at.isoformat() if delta.created_at else None,
     }
+
+
+# ============================================================================
+# M01 QUESTIONNAIRE GENERATION
+# ============================================================================
+
+class M01GenerateRequest(BaseModel):
+    """Request: Gerar questionnaire dinâmico via M01"""
+    document_id: UUID
+    domain: str = "software"  # software, juridico, financeiro, etc
+    doc_type: str = "requisitos"  # requisitos, RFP, spec, proposal, etc
+
+
+class M01GenerateResponse(BaseModel):
+    """Response: Questionnaire gerado por M01"""
+    iteration_id: str
+    count: int  # 30-50
+    questions: list
+    extracted_concepts: list
+    gaps_identified: list
+
+
+@router.post("/projects/{project_id}/m01/generate-questionnaire", response_model=M01GenerateResponse)
+async def generate_m01_questionnaire(
+    project_id: UUID,
+    req: M01GenerateRequest,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Gera questionnaire dinâmico (30-50 perguntas) baseado em documento de requisitos.
+    
+    Fluxo:
+    1. Busca documento ingerido pelo ID
+    2. Extrai texto completo
+    3. Chama M01Service para gerar questões dinâmicas
+    4. Retorna questionnaire com iteration_id único
+    """
+    service = IngestionService(db)
+    doc_result = await service.get_document_detail(project_id, req.document_id)
+    
+    if not doc_result:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+    
+    # Extrair texto do documento (assumindo que está no campo 'extracted_text')
+    document_text = doc_result.get("extracted_text") or doc_result.get("content", "")
+    
+    if not document_text or len(document_text.strip()) < 200:
+        raise HTTPException(
+            status_code=400,
+            detail="Documento deve ter pelo menos 200 caracteres de texto para gerar questionnaire"
+        )
+    
+    try:
+        # Gerar questionnaire via M01
+        m01_service = M01Service()
+        questionnaire = m01_service.generate_questionnaire(
+            document_text=document_text,
+            domain=req.domain,
+            doc_type=req.doc_type
+        )
+        
+        # Converter Question objects para dicts
+        questions_list = [
+            {
+                "id": q.id,
+                "text": q.text,
+                "tipo": q.tipo,
+                "opcoes": q.opcoes,
+                "obrigatoria": q.obrigatoria,
+                "dica": q.dica
+            }
+            for q in questionnaire.questions
+        ]
+        
+        return M01GenerateResponse(
+            iteration_id=questionnaire.iteration_id,
+            count=questionnaire.count,
+            questions=questions_list,
+            extracted_concepts=questionnaire.extracted_concepts,
+            gaps_identified=questionnaire.gaps_identified
+        )
+    
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Erro ao gerar M01 questionnaire: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar questionnaire: {str(e)}")
