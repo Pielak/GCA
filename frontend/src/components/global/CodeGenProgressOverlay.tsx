@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { Loader2, CheckCircle2, AlertTriangle, X, ArrowRight, GripVertical } from 'lucide-react'
+import { Loader2, CheckCircle2, AlertTriangle, X, ArrowRight, GripVertical, RotateCw } from 'lucide-react'
 import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
 
 const POS_STORAGE_KEY = 'gca:codegen-overlay-pos'
@@ -66,6 +66,8 @@ export function CodeGenProgressOverlay() {
   const projectName = useCodeGenProgressStore((s) => s.projectName)
   const snapshot = useCodeGenProgressStore((s) => s.snapshot)
   const errorMessage = useCodeGenProgressStore((s) => s.errorMessage)
+  const apply = useCodeGenProgressStore((s) => s.apply)
+  const [retrying, setRetrying] = useState(false)
   const finishedAt = useCodeGenProgressStore((s) => s.finishedAt)
   const startedAt = useCodeGenProgressStore((s) => s.startedAt)
   const dismiss = useCodeGenProgressStore((s) => s.dismiss)
@@ -240,6 +242,32 @@ export function CodeGenProgressOverlay() {
           <div className="mt-2 text-[11px] text-red-400 bg-red-950/30 border border-red-900/40 rounded px-2 py-1">
             {errorMessage}
           </div>
+        )}
+
+        {/* Botão de retry quando o erro veio do executor de apply
+            (run.error.startswith('Apply falhou')) — mesma regra do
+            backend pra permitir retry sem precisar abrir a CodeGenPage. */}
+        {snapshot?.status === 'failed'
+          && (snapshot.error || '').startsWith('Apply falhou') && (
+          <button
+            type="button"
+            onClick={async () => {
+              setRetrying(true)
+              try {
+                await apply()
+              } finally {
+                setRetrying(false)
+              }
+            }}
+            disabled={retrying}
+            className="mt-3 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-xs text-white font-medium transition-colors"
+          >
+            {retrying ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" />Re-tentando apply...</>
+            ) : (
+              <><RotateCw className="w-3.5 h-3.5" />Tentar Aplicar Novamente</>
+            )}
+          </button>
         )}
 
         {!onCurrentProject && (
