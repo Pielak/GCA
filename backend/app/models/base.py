@@ -1373,6 +1373,32 @@ class OCGDeltaLog(Base):
     )
 
 
+class AppPreviewSession(Base):
+    """G4 (2026-04-25) — Sessão de preview do app gerado pelo owner.
+
+    GCA não tem docker.sock montado, então não roda `docker compose up`
+    do app gerado direto. Backend prepara comando shell pronto, persiste
+    sessão aqui, e owner cola/roda local. Status reflete o que GCA SABE:
+    `prepared` quando comando foi entregue, `running` se owner reportou
+    sucesso, `stopped` quando owner declarou que parou, `error` se algo
+    falhou na preparação.
+    """
+    __tablename__ = "app_preview_sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    scaffold_run_id = Column(UUID(as_uuid=True), ForeignKey("scaffold_runs.id", ondelete="SET NULL"), nullable=True)
+    port = Column(Integer, nullable=True)
+    status = Column(String(20), nullable=False, default="prepared")
+    setup_command = Column(Text, nullable=True)
+    preview_url = Column(Text, nullable=True)
+    repository_url = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    stopped_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class GatekeeperItem(Base):
     """Item de rastreamento do Gatekeeper (gap, show_stopper, poor_definition, improvement)"""
     __tablename__ = "gatekeeper_items"

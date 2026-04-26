@@ -11,6 +11,7 @@ import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 import RnfContractsEditor from '@/components/projects/RnfContractsEditor'
 import DesignTokensEditor from '@/components/projects/DesignTokensEditor'
 import { FigmaImportPanel } from '@/components/projects/FigmaImportPanel'
+import { PreviewSessionsPanel } from '@/components/projects/PreviewSessionsPanel'
 import { formatDateTimeBR } from '@/lib/datetime'
 
 /**
@@ -68,6 +69,7 @@ const DIMENSIONS = [
   { key: 'rnf', label: 'Contratos RNF (editável)', icon: Edit2, color: 'violet' },
   { key: 'design_tokens', label: 'Design Tokens (editável)', icon: Edit2, color: 'violet' },
   { key: 'figma', label: 'Figma (import)', icon: ExternalLink, color: 'violet' },
+  { key: 'preview', label: 'Preview Local (G4)', icon: Activity, color: 'emerald' },
   { key: 'testing', label: 'Estratégia de Testes', icon: TestTube2, color: 'emerald' },
   { key: 'deliverables', label: 'Entregáveis', icon: FileText, color: 'orange' },
   { key: 'risks', label: 'Análise de Riscos', icon: AlertTriangle, color: 'red' },
@@ -393,6 +395,8 @@ export function OCGPage() {
         return id ? <DesignTokensEditor projectId={id} /> : null
       case 'figma':
         return id ? <FigmaImportPanel projectId={id} /> : null
+      case 'preview':
+        return id ? <PreviewSessionsPanel projectId={id} /> : null
       case 'testing':
         return (ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) ? renderObject(ocg.TESTING_REQUIREMENTS || ocg.TESTING_STRATEGY) : <p className="text-slate-500 text-sm">Aguardando Documentação</p>
       case 'deliverables':
