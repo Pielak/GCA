@@ -48,13 +48,51 @@ _LOW_CRITICALITY_DEFAULT_MODELS: dict[str, str] = {
 }
 
 
+#: Cap de max_tokens por modelo. Usado pra clamp em chamadas de scaffold/
+#: alta criticidade que pedem 32000+ — DeepSeek-chat aceita 8192, GPT-4o
+#: aceita 16384, Opus 4.6 aceita 32000 sem header beta. Modelo desconhecido
+#: cai no fallback genérico (8192).
+MAX_TOKENS_BY_MODEL: dict[str, int] = {
+    # Anthropic
+    "claude-opus-4-6": 32000,
+    "claude-opus-4-7": 32000,
+    "claude-sonnet-4-6": 64000,
+    "claude-haiku-4-5-20251001": 8192,
+    # OpenAI
+    "gpt-5": 16384,
+    "gpt-4o": 16384,
+    "gpt-4o-mini": 16384,
+    # DeepSeek
+    "deepseek-chat": 8192,
+    "deepseek-reasoner": 8192,
+    # Grok
+    "grok-2": 8192,
+    # Gemini
+    "gemini-2.0-flash": 8192,
+    "gemini-2.5-pro": 8192,
+    # Ollama (modelos locais — limite arbitrário pra não estourar VRAM)
+    "qwen2.5-coder:7b": 8192,
+}
+
+
+def clamp_max_tokens(model: str, requested: int) -> int:
+    """Limita `requested` ao cap conhecido do `model`. Usa 8192 se desconhecido."""
+    cap = MAX_TOKENS_BY_MODEL.get(model, 8192)
+    return min(requested, cap)
+
+
 async def resolve_llm_config(
     db: AsyncSession, project_id: UUID,
+    *,
+    prefer_ollama: bool = True,
 ) -> Optional[dict[str, Any]]:
-    """Resolve provider pra operação de baixa criticidade.
+    """Resolve provider pra operação LLM no contexto do projeto.
 
     Ordem de preferência:
       1. Ollama (se configurado com base_url) — zero custo externo.
+         **Pulado quando `prefer_ollama=False`** (scaffold/alta criticidade
+         devem respeitar o provider default escolhido pelo owner, não cair
+         em local barato sem ele saber).
       2. Provider default do projeto (qualquer).
 
     Retorna `{provider, base_url, api_key, model}` ou None se nenhum
@@ -64,8 +102,10 @@ async def resolve_llm_config(
 
     chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
 
-    # 1. Prefere Ollama quando configurado
+    # 1. Prefere Ollama quando configurado E o caller permitir
     for entry in chain:
+        if not prefer_ollama:
+            break
         if (entry.get("provider") or "").lower() != "ollama":
             continue
         base_url = entry.get("base_url")

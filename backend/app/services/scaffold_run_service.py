@@ -173,24 +173,39 @@ async def execute_run(run_id: UUID) -> None:
 
     Aberto numa session dedicada (worker Celery roda em processo separado).
     Falha de 1 item não invalida os demais — registra `failed` e segue.
+
+    MVP-B (2026-04-25): provider+modelo agora são DINÂMICOS por projeto via
+    `resolve_llm_config(prefer_ollama=False)`. Antes, scaffold ignorava
+    `ProjectSettings.llm_provider/llm_model` e sempre usava
+    `app_settings.ANTHROPIC_MODEL` global. Agora respeita escolha do owner
+    (Anthropic/OpenAI/DeepSeek/Grok/Gemini) e clampa max_tokens ao cap
+    conhecido do modelo (Opus 4.6 = 32k, DeepSeek = 8k, etc.).
     """
-    from anthropic import AsyncAnthropic
-
-    from app.core.config import settings as app_settings
     from app.db.database import AsyncSessionLocal
+    from app.services.llm_low_criticality import (
+        resolve_llm_config,
+        call_llm,
+        clamp_max_tokens,
+    )
 
-    api_key = app_settings.ANTHROPIC_API_KEY
-    if not api_key:
+    # Carrega project_id pra resolver config — buscamos a run primeiro.
+    async with AsyncSessionLocal() as db:
+        run_for_pid = await db.get(ScaffoldRun, run_id)
+        if run_for_pid is None:
+            return
+        project_id_for_llm = run_for_pid.project_id
+
+    async with AsyncSessionLocal() as db:
+        llm_cfg = await resolve_llm_config(db, project_id_for_llm, prefer_ollama=False)
+    if llm_cfg is None:
         async with AsyncSessionLocal() as db:
             run = await db.get(ScaffoldRun, run_id)
             if run:
                 run.status = "failed"
-                run.error = "ANTHROPIC_API_KEY não configurada."
+                run.error = "Nenhum provedor de IA configurado para este projeto. Configure em /admin ou /settings."
                 run.finished_at = datetime.now(timezone.utc)
                 await db.commit()
         return
-
-    client = AsyncAnthropic(api_key=api_key)
 
     # Fase 1 — planning. Aceita 'pending' (start) OU 'generating' (resume após
     # restart do worker). Em resume, pula direto pra Fase 2 com items pending.
@@ -246,14 +261,16 @@ async def execute_run(run_id: UUID) -> None:
     # já estão persistidos no DB. Vai direto pra Fase 2 (loop topológico).
     if not resume_mode:
         try:
-            plan_response = await client.messages.create(
-                model=app_settings.ANTHROPIC_MODEL,
-                max_tokens=32000,
+            plan_max_tokens = clamp_max_tokens(llm_cfg["model"], 32000)
+            plan_raw = await call_llm(
+                config=llm_cfg,
+                system_prompt="Você é um analista sênior de arquitetura de software, falante nativo de PT-BR.",
+                user_prompt=prompt,
+                max_tokens=plan_max_tokens,
                 temperature=0.2,
-                messages=[{"role": "user", "content": prompt}],
+                log_context="scaffold.plan",
             )
-            plan_raw = plan_response.content[0].text
-            plan_tokens = plan_response.usage.output_tokens
+            plan_tokens = 0  # call_llm não devolve usage; será logado pelo provider
         except Exception as exc:  # noqa: BLE001
             async with AsyncSessionLocal() as db:
                 run = await db.get(ScaffoldRun, run_id)
@@ -472,14 +489,16 @@ async def execute_run(run_id: UUID) -> None:
             design_tokens=design_tokens,
         )
         try:
-            item_response = await client.messages.create(
-                model=app_settings.ANTHROPIC_MODEL,
-                max_tokens=32000,
+            item_max_tokens = clamp_max_tokens(llm_cfg["model"], 32000)
+            item_raw = await call_llm(
+                config=llm_cfg,
+                system_prompt="Você é um engenheiro de software sênior, falante nativo de PT-BR. Responda em JSON estrito.",
+                user_prompt=item_prompt,
+                max_tokens=item_max_tokens,
                 temperature=0.3,
-                messages=[{"role": "user", "content": item_prompt}],
+                log_context="scaffold.item",
             )
-            item_raw = item_response.content[0].text
-            item_tokens = item_response.usage.output_tokens
+            item_tokens = 0  # call_llm não devolve usage; provider loga.
         except Exception as exc:  # noqa: BLE001
             failed += 1
             async with AsyncSessionLocal() as db:

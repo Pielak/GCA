@@ -51,6 +51,36 @@ function providerLabel(p: string): string {
   return PROVIDER_LABELS[p] || p
 }
 
+// MVP-B (2026-04-25): combo encadeado provedor → modelo. Antes UI
+// pedia modelo como texto livre (digitação errada quebrava scaffold).
+// Lista canônica em sync com backend MAX_TOKENS_BY_MODEL — adicionar
+// modelo novo aqui exige adicionar no backend também.
+const MODELS_BY_PROVIDER: Record<string, { value: string; label: string }[]> = {
+  anthropic: [
+    { value: 'claude-opus-4-7', label: 'Opus 4.7 (premium, raciocínio máximo)' },
+    { value: 'claude-opus-4-6', label: 'Opus 4.6 (premium)' },
+    { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6 (rápido + barato)' },
+    { value: 'claude-haiku-4-5-20251001', label: 'Haiku 4.5 (mais barato)' },
+  ],
+  openai: [
+    { value: 'gpt-5', label: 'GPT-5 (premium)' },
+    { value: 'gpt-4o', label: 'GPT-4o' },
+    { value: 'gpt-4o-mini', label: 'GPT-4o mini (barato)' },
+  ],
+  deepseek: [
+    { value: 'deepseek-chat', label: 'DeepSeek Chat (V3)' },
+    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1)' },
+  ],
+  grok: [
+    { value: 'grok-2', label: 'Grok 2' },
+  ],
+  gemini: [
+    { value: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { value: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash (rápido)' },
+  ],
+  ollama: [],  // Ollama: modelos locais variáveis — input livre
+}
+
 // Resultado do teste de conexão — `ok=null` significa "provedor válido mas
 // sem teste real implementado" (ex: gemini/ollama). A UI distingue isso
 // do ok=false (chave rejeitada) para não confundir o GP.
@@ -656,18 +686,31 @@ export function ProjectSettingsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-slate-400 text-xs block mb-1">Modelo (opcional)</label>
-                  <input
-                    value={newLlmModel}
-                    onChange={e => setNewLlmModel(e.target.value)}
-                    placeholder={isOllamaSelected ? 'Ex: llama3.1:8b, qwen2.5-coder:7b' : 'Ex: claude-opus-4-6, gpt-4o, deepseek-chat'}
-                    name="llm-model"
-                    autoComplete="off"
-                    spellCheck={false}
-                    data-lpignore="true"
-                    data-1p-ignore="true"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600"
-                  />
+                  <label className="text-slate-400 text-xs block mb-1">Modelo</label>
+                  {(MODELS_BY_PROVIDER[newLlmProvider]?.length ?? 0) > 0 ? (
+                    <select
+                      value={newLlmModel}
+                      onChange={e => setNewLlmModel(e.target.value)}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-violet-600"
+                    >
+                      <option value="">(default do provedor)</option>
+                      {MODELS_BY_PROVIDER[newLlmProvider].map(m => (
+                        <option key={m.value} value={m.value}>{m.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      value={newLlmModel}
+                      onChange={e => setNewLlmModel(e.target.value)}
+                      placeholder={isOllamaSelected ? 'Ex: llama3.1:8b, qwen2.5-coder:7b' : 'Ex: nome do modelo'}
+                      name="llm-model"
+                      autoComplete="off"
+                      spellCheck={false}
+                      data-lpignore="true"
+                      data-1p-ignore="true"
+                      className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-violet-600"
+                    />
+                  )}
                 </div>
               </div>
 
