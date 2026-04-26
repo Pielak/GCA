@@ -257,6 +257,7 @@ async def execute_run(run_id: UUID) -> None:
             architecture=ocg_data.get("ARCHITECTURE_OVERVIEW", {}),
             modules=modules,
             arguider_modules=[],
+            design_md=design_md_content,  # MVP-N
         )
 
     # Em resume mode, pula toda a fase planning — items + plan_summary
@@ -354,6 +355,28 @@ async def execute_run(run_id: UUID) -> None:
         design_tokens = (
             frontend_obj.get("design_tokens") if isinstance(frontend_obj, dict) else None
         )
+
+    # MVP-N (2026-04-26): tenta carregar docs/DESIGN.md do repo Git do
+    # projeto. Best-effort — se Git config faltando, file não existe ou
+    # leitura falha, segue sem (comportamento idêntico ao pré-MVP-N).
+    design_md_content: str | None = None
+    try:
+        from app.services.git_service import GitService
+        async with AsyncSessionLocal() as db_md:
+            git_svc = GitService(db_md)
+            for candidate_path in ("docs/DESIGN.md", "DESIGN.md"):
+                content = await git_svc.get_file_content(run_for_pid.project_id, candidate_path)
+                if content and content.strip():
+                    design_md_content = content
+                    logger.info(
+                        "scaffold_run.design_md_loaded",
+                        run_id=str(run_id),
+                        path=candidate_path,
+                        chars=len(content),
+                    )
+                    break
+    except Exception as exc:  # noqa: BLE001
+        logger.info("scaffold_run.design_md_unavailable", run_id=str(run_id), reason=str(exc)[:100])
 
         items_q = await db.execute(
             select(ScaffoldRunItem)
@@ -543,6 +566,7 @@ async def execute_run(run_id: UUID) -> None:
             rnf_contracts=rnf_contracts,
             design_tokens=design_tokens,
             build_errors=getattr(it_snapshot, "build_errors", None),  # MVP-K
+            design_md=design_md_content,  # MVP-N
         )
 
         item_max_tokens = clamp_max_tokens(llm_cfg["model"], 32000)

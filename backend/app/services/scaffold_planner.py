@@ -52,6 +52,7 @@ def build_plan_prompt(
     architecture: dict[str, Any],
     modules: list[Any],
     arguider_modules: list[Any],
+    design_md: str | None = None,
 ) -> str:
     """Monta prompt pra fase PLAN: LLM retorna apenas lista de arquivos.
 
@@ -86,12 +87,27 @@ def build_plan_prompt(
     modules_block = json.dumps(compact, ensure_ascii=False, indent=1)
     modules_count = len(compact)
 
+    # MVP-N (2026-04-26): DESIGN.md como entrada nativa de design system.
+    # Conceito do Google Stitch (catálogo VoltAgent/awesome-design-md).
+    # Owner cola docs/DESIGN.md no repo Git do projeto antes do scaffold;
+    # GCA lê e injeta aqui pra LLM gerar arquivos coerentes com o estilo.
+    design_md_block = ""
+    if design_md and design_md.strip():
+        design_md_block = (
+            f"\n## DESIGN.md (estilo & princípios — entrada do owner)\n"
+            f"Owner colou um DESIGN.md no projeto. Trate como FONTE CANÔNICA\n"
+            f"de estilo visual, voz, motion, naming, princípios de UI.\n"
+            f"Quando planejar arquivos frontend/UI, respeite o que está aqui.\n"
+            f"```markdown\n{design_md[:6000]}\n```\n"
+        )
+
     return (
         f"Você é um arquiteto de software sênior. Planeje o scaffold completo do projeto "
         f"`{project_name}` (slug: {project_slug}).\n\n"
         f"Descrição: {project_description or '(não fornecida)'}\n\n"
         f"Stack recomendada:\n{stack_json}\n\n"
-        f"Arquitetura:\n{arch_json}\n\n"
+        f"Arquitetura:\n{arch_json}\n"
+        f"{design_md_block}\n"
         f"## MÓDULOS DO BACKLOG ORDENADOS PELO ROADMAP ({modules_count} prontos pra CodeGen)\n"
         f"Ordem canônica: critical/high (Fase 1) → medium (Fase 2) → low (Fase 3),\n"
         f"e dentro de cada prioridade, ready_for_codegen primeiro. Preserve essa\n"
@@ -158,6 +174,7 @@ def build_item_prompt(
     rnf_contracts: Any = None,
     design_tokens: Any = None,
     build_errors: str | None = None,
+    design_md: str | None = None,
 ) -> str:
     """Monta prompt pra fase ITEM: LLM retorna conteúdo de 1 arquivo.
 
@@ -196,6 +213,22 @@ def build_item_prompt(
     if design_tokens:
         tokens_text = f"\n\nDesign tokens canônicos (frontend — use estes, NÃO invente):\n{json.dumps(design_tokens, ensure_ascii=False)[:2000]}\n"
 
+    # MVP-N (2026-04-26): DESIGN.md como contrato de estilo no nível do
+    # arquivo. Complementa design_tokens (cores hex) com voz, motion,
+    # princípios de naming, padrões de componente. LLM usa pra gerar
+    # frontend coerente com a marca/estilo escolhido pelo owner.
+    design_md_text = ""
+    if design_md and design_md.strip():
+        design_md_text = (
+            f"\n\n## DESIGN.md (estilo & princípios canônicos)\n"
+            f"Este projeto tem DESIGN.md no repo. Trate como FONTE CANÔNICA\n"
+            f"de estilo, voz, motion, naming, hierarquia visual. Especialmente\n"
+            f"importante pra arquivos frontend (.tsx, .vue, componentes UI,\n"
+            f"layouts, páginas). Aplique princípios e tokens daqui no que\n"
+            f"você gerar:\n"
+            f"```markdown\n{design_md[:5000]}\n```\n"
+        )
+
     # MVP-K (2026-04-26) — quando este arquivo falhou na build local do
     # owner, ele reportou erros via fix-build-errors. Injetamos como seção
     # PRIORITÁRIA pro LLM consertar conscientemente. Se não veio nada,
@@ -224,7 +257,8 @@ def build_item_prompt(
         f"Stack:\n{stack_json}\n\n"
         f"Arquitetura:\n{arch_json}\n"
         f"{rnf_text}"
-        f"{tokens_text}\n"
+        f"{tokens_text}"
+        f"{design_md_text}\n"
         f"{peers_text}"
         f"{build_errors_text}\n\n"
         f"## ARQUIVO A GERAR\n"
