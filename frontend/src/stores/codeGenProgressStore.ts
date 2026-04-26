@@ -304,7 +304,13 @@ export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) =
     apply: async () => {
       const { runId, snapshot } = get()
       if (!runId || !snapshot) return null
-      if (snapshot.status !== 'completed') {
+      // Aceita 'completed' (caso normal) e 'failed' apenas quando o erro
+      // veio do próprio executor de apply (run.error 'Apply falhou: ...'),
+      // espelhando a regra do backend. Geração travada não reaproveita.
+      const isApplyFailedRetriable =
+        snapshot.status === 'failed'
+        && (snapshot.error || '').startsWith('Apply falhou')
+      if (snapshot.status !== 'completed' && !isApplyFailedRetriable) {
         set({ errorMessage: 'Scaffold ainda não terminou — aguarde o status completed.' })
         return null
       }

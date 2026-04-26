@@ -363,14 +363,21 @@ export function CodeGeneratorPage() {
     }))
     setFileTree(buildTreeWithStatus(treeItems))
 
-    // Quando termina, summary + libera apply
+    // Quando termina, summary + libera apply.
+    // Aceita também status='failed' QUANDO o erro veio do executor de apply
+    // (run.error.startswith('Apply falhou')) — backend permite retry nesse
+    // caso, então UI também mostra o botão.
     const isCompleted = storeSnapshot.status === 'completed'
-    if (!storeActive && storeFinishedAt && isCompleted) {
+    const isApplyFailedRetriable =
+      storeSnapshot.status === 'failed'
+      && (storeSnapshot.error || '').startsWith('Apply falhou')
+    if ((isCompleted || isApplyFailedRetriable) && storeSnapshot.completed_items > 0) {
       const doneCount = storeSnapshot.completed_items
+      const retryHint = isApplyFailedRetriable ? ' (apply anterior falhou — pode tentar de novo)' : ''
       setScaffoldSummary(
-        `${storeSnapshot.plan_summary || `Scaffold com ${storeSnapshot.total_items} arquivos`} — ${doneCount} prontos pra commit. Clique em "Aplicar no Git".`,
+        `${storeSnapshot.plan_summary || `Scaffold com ${storeSnapshot.total_items} arquivos`} — ${doneCount} prontos pra commit. Clique em "Aplicar no Git".${retryHint}`,
       )
-      setScaffoldPendingApply(doneCount > 0)
+      setScaffoldPendingApply(true)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, storeActive, storeProjectId, storeSnapshot, storeFinishedAt])
