@@ -25,14 +25,47 @@ class GatekeeperService:
         self.db = db
 
     async def get_project_gatekeeper(self, project_id: UUID) -> dict:
-        """Consolida todos os items e módulos do projeto."""
+        """Consolida todos os items e módulos do projeto.
+
+        MVP-G (2026-04-25): aplica `filter_out_deferred` em gaps via
+        gap_aging_service. Antes, items com `gap_signature` em DeferredGap.deferred_at
+        ficavam visíveis na UI mesmo após N sightings sem ação do owner —
+        UX inviável (AJA tinha 862 items, maioria deprecada). Agora gaps
+        cujo signature bate com algum DeferredGap ativo são suprimidos.
+        """
         # Items
         items_result = await self.db.execute(
             select(GatekeeperItem).where(GatekeeperItem.project_id == project_id)
         )
         items = items_result.scalars().all()
 
-        gaps = [i for i in items if i.item_type == "gap"]
+        # MVP-G — carrega signatures deferred uma única vez pra filtragem batch
+        from app.services.gap_aging_service import (
+            get_deferred_signatures,
+            gap_signature,
+        )
+        deferred_sigs = await get_deferred_signatures(self.db, project_id)
+
+        def _is_deferred_gap(item) -> bool:
+            """True se o item bate em algum signature deferred. Conservador:
+            qualquer falha na extração de pilar/texto retorna False (deixa passar)."""
+            if not deferred_sigs or item.item_type != "gap":
+                return False
+            try:
+                data = json.loads(item.item_data) if item.item_data else {}
+            except json.JSONDecodeError:
+                return False
+            pillar = data.get("affected_pillar") or data.get("pillar")
+            text = data.get("name") or data.get("description") or data.get("text")
+            if not text:
+                return False
+            sig = gap_signature(pillar, text)
+            return sig in deferred_sigs
+
+        # Aplica filtro só em gaps (aging service só processa gaps por enquanto).
+        # Show_stoppers/poor_defs/improvements continuam visíveis até suporte
+        # explícito no aging service.
+        gaps = [i for i in items if i.item_type == "gap" and not _is_deferred_gap(i)]
         show_stoppers = [i for i in items if i.item_type == "show_stopper"]
         poor_defs = [i for i in items if i.item_type == "poor_definition"]
         improvements = [i for i in items if i.item_type == "improvement"]

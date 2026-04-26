@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
-import { Zap, MessageSquare, Send, CheckCircle, Clock, AlertCircle, XCircle, Loader2, Eye, EyeOff } from 'lucide-react';
+import { Zap, MessageSquare, Send, CheckCircle, Clock, AlertCircle, XCircle, Loader2, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { HelpTooltip } from '@/components/ui/HelpTooltip';
 import { useGatekeeperData, useResolveItem, useIgnoreItem, type GatekeeperItem } from '@/hooks/useArguider';
+import { apiClient } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
 import QuestionnaireDownloadPanel from '@/components/projects/QuestionnaireDownloadPanel';
 import { formatDateBR } from '@/lib/datetime'
 
@@ -46,6 +48,8 @@ export function ArguiderPage() {
   const { data: gatekeeper, isLoading } = useGatekeeperData(projectId);
   const resolveMutation = useResolveItem(projectId);
   const ignoreMutation = useIgnoreItem(projectId);
+  const queryClient = useQueryClient();
+  const [cleaningUp, setCleaningUp] = useState(false);
 
   // Combinar todos os items em uma lista unificada
   const allItems = useMemo(() => {
@@ -77,6 +81,38 @@ export function ArguiderPage() {
   const pendingCount = allItems.filter(i => i.status === 'pending').length;
   const resolvedCount = allItems.filter(i => i.status === 'resolved').length;
   const ignoredCount = allItems.filter(i => i.status === 'ignored').length;
+
+  const handleCleanup = async () => {
+    if (!projectId) return;
+    if (!confirm(
+      'Limpar Arguidor:\n\n' +
+      'Reprocessa todas as análises do projeto e marca como "deferred" gaps ' +
+      'que apareceram em 5+ ingestões sem ação do owner. Items deferred somem ' +
+      'da UI até alguém resolvê-los manualmente. Apenas gaps recorrentes são ' +
+      'afetados — show stoppers, poor definitions e sugestões ficam visíveis.\n\n' +
+      'Continuar?',
+    )) return;
+    setCleaningUp(true);
+    try {
+      const res = await apiClient.post(`/projects/${projectId}/arguider/cleanup`);
+      const d = res.data || {};
+      alert(
+        `Cleanup concluído.\n\n` +
+        `Análises reprocessadas: ${d.analyses_processed}\n` +
+        `Gaps avaliados: ${d.total_gaps}\n` +
+        `Novos signatures deferred: ${d.deferred_now}\n` +
+        `Total deferred no projeto: ${d.deferred_total_after}\n\n` +
+        `${d.message || ''}`,
+      );
+      // Invalida a query do gatekeeper pra refetch da UI já com filtro aplicado
+      queryClient.invalidateQueries({ queryKey: ['gatekeeper', projectId] });
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || err?.message || 'Falha';
+      alert(`Erro no cleanup: ${detail}`);
+    } finally {
+      setCleaningUp(false);
+    }
+  };
 
   const handleResolve = () => {
     if (!selected || !response.trim()) return;
@@ -191,6 +227,24 @@ export function ArguiderPage() {
           projectId={projectId}
           items={allItems}
         />
+      )}
+
+      {/* Botão de cleanup do Arguidor (MVP-G) */}
+      {allItems.length > 0 && (
+        <div className="flex justify-end">
+          <button
+            onClick={handleCleanup}
+            disabled={cleaningUp}
+            className="flex items-center gap-2 px-3 py-2 text-xs bg-amber-700 hover:bg-amber-600 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors font-medium"
+            title="Reprocessa análises e marca como 'deferred' gaps recorrentes (5+ sightings) sem ação. Itens deferred somem da UI."
+          >
+            {cleaningUp ? (
+              <><Loader2 className="w-3.5 h-3.5 animate-spin" />Limpando...</>
+            ) : (
+              <><Trash2 className="w-3.5 h-3.5" />Limpar Arguidor (Aging)</>
+            )}
+          </button>
+        </div>
       )}
 
       {/* Stats */}

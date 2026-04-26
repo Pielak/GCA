@@ -39,6 +39,93 @@ async def get_gatekeeper(
     return await service.get_project_gatekeeper(project_id)
 
 
+@router.post("/projects/{project_id}/arguider/cleanup")
+async def arguider_cleanup(
+    project_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """MVP-G — Cleanup retroativo do Arguidor.
+
+    Itera análises Arguidor existentes do projeto e roda
+    `gap_aging_service.update_sightings_for_gaps` em cada uma. Gaps que
+    aparecem >= DEFER_THRESHOLD (5) sightings em modo solo_owner viram
+    `deferred_at`. UI do gatekeeper passa a esconder esses (filtro do
+    GatekeeperService.get_project_gatekeeper).
+
+    Cobre o caso AJA: 37 documentos × ~23 items médios = 862 items
+    pendentes. Boa parte é gap recorrente entre docs sem ação do owner —
+    deveriam estar deferred mas o aging só rodava em ingestão nova.
+
+    Returns:
+        dict com summary {analyses_processed, total_gaps, deferred_now,
+        already_deferred, gaps_visible_now}.
+    """
+    from sqlalchemy import select
+    from app.models.base import ArguiderAnalysis
+    from app.services.gap_aging_service import (
+        update_sightings_for_gaps,
+        get_deferred_signatures,
+    )
+    import json
+
+    # Pré: snapshot do estado deferred ANTES do reprocessamento
+    before_sigs = await get_deferred_signatures(db, project_id)
+
+    analyses_q = await db.execute(
+        select(ArguiderAnalysis)
+        .where(ArguiderAnalysis.project_id == project_id)
+        .order_by(ArguiderAnalysis.created_at.asc())
+    )
+    analyses = analyses_q.scalars().all()
+    if not analyses:
+        return {
+            "analyses_processed": 0,
+            "total_gaps": 0,
+            "deferred_now": 0,
+            "already_deferred": len(before_sigs),
+            "message": "Nenhuma análise Arguidor encontrada — ingerir documentos primeiro.",
+        }
+
+    total_gaps = 0
+    total_defer_triggered = 0
+    for a in analyses:
+        try:
+            gaps_raw = json.loads(a.gaps) if a.gaps else []
+        except json.JSONDecodeError:
+            gaps_raw = []
+        if not gaps_raw:
+            continue
+        stats = await update_sightings_for_gaps(db, project_id, gaps_raw)
+        total_gaps += stats.get("total_processed", 0)
+        total_defer_triggered += stats.get("defer_triggered", 0)
+
+    await db.commit()
+    after_sigs = await get_deferred_signatures(db, project_id)
+
+    logger.info(
+        "arguider.cleanup_done",
+        project_id=str(project_id),
+        analyses=len(analyses),
+        gaps_processed=total_gaps,
+        deferred_now=total_defer_triggered,
+        deferred_total_after=len(after_sigs),
+    )
+
+    return {
+        "analyses_processed": len(analyses),
+        "total_gaps": total_gaps,
+        "deferred_now": total_defer_triggered,
+        "already_deferred": len(before_sigs),
+        "deferred_total_after": len(after_sigs),
+        "message": (
+            f"Reprocessadas {len(analyses)} análises com {total_gaps} gaps. "
+            f"{total_defer_triggered} novos signatures deferred nesta passada "
+            f"(total agora: {len(after_sigs)})."
+        ),
+    }
+
+
 @router.get("/projects/{project_id}/gatekeeper/modules")
 async def get_modules(
     project_id: UUID,
