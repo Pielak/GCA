@@ -160,7 +160,7 @@ def _build_audit_prompt(
 
 async def _audit_one_item(
     *,
-    client,
+    llm_cfg: dict,
     project_name: str,
     item: ScaffoldRunItem,
     stack: dict,
@@ -182,15 +182,17 @@ async def _audit_one_item(
     )
 
     try:
-        response = await client.messages.create(
-            model=app_settings.ANTHROPIC_MODEL,
-            max_tokens=4096,
+        from app.services.llm_low_criticality import call_llm, clamp_max_tokens
+        item_max_tokens = clamp_max_tokens(llm_cfg["model"], 4096)
+        raw = await call_llm(
+            config=llm_cfg,
+            system_prompt=SYSTEM_PROMPT,
+            user_prompt=prompt,
+            max_tokens=item_max_tokens,
             temperature=0.1,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            log_context="code_audit.item",
         )
-        raw = response.content[0].text
-        tokens = response.usage.output_tokens
+        tokens = 0  # call_llm não devolve usage
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "code_audit.llm_error",
@@ -248,15 +250,56 @@ async def audit_run(run_id: UUID) -> Dict[str, Any]:
 
     Retorna {audited, skipped, findings_created, errors}.
     """
-    from anthropic import AsyncAnthropic
     from app.db.database import AsyncSessionLocal
+    from app.services.llm_low_criticality import resolve_llm_config
 
-    api_key = app_settings.ANTHROPIC_API_KEY
-    if not api_key:
-        logger.warning("code_audit.no_api_key", run_id=str(run_id))
-        return {"audited": 0, "skipped": 0, "findings_created": 0, "errors": ["no_api_key"]}
+    # MVP-B fase 2 (2026-04-25): Arguidor #2 é trabalho DO PROJETO (audita
+    # código gerado pelo tenant), não trabalho de admin do GCA. Logo o
+    # billing fica com o tenant e a IA usada deve ser a configurada no
+    # projeto. Antes desta correção, code_audit_service usava
+    # `app_settings.ANTHROPIC_API_KEY` (env global do GCA admin) — o que
+    # significa que o tenant trocava pra DeepSeek na UI mas Arguidor #2
+    # continuava queimando conta de Anthropic do admin. Regra arquitetural
+    # canônica: env global do GCA = SÓ análise de questionário inicial e
+    # bootstrap (decisão admin de aceitar projeto). Resto = config do
+    # projeto.
+    async with AsyncSessionLocal() as db_pre:
+        run_pre = await db_pre.get(ScaffoldRun, run_id)
+        if run_pre is None:
+            return {"audited": 0, "skipped": 0, "findings_created": 0, "errors": ["run_not_found"]}
+        project_id_pre = run_pre.project_id
 
-    client = AsyncAnthropic(api_key=api_key)
+    async with AsyncSessionLocal() as db_cfg:
+        llm_cfg = await resolve_llm_config(db_cfg, project_id_pre, prefer_ollama=False)
+    if llm_cfg is None:
+        # Fallback EXPLÍCITO pro env global do GCA com warning. Acontece
+        # quando GP ainda não configurou provedor próprio. Admin absorve
+        # o custo temporariamente — sinalizamos via WARNING pra alertar.
+        api_key = app_settings.ANTHROPIC_API_KEY
+        if not api_key:
+            logger.warning(
+                "code_audit.no_provider",
+                run_id=str(run_id),
+                project_id=str(project_id_pre),
+            )
+            return {
+                "audited": 0,
+                "skipped": 0,
+                "findings_created": 0,
+                "errors": ["nenhum provedor de IA configurado pra projeto nem pro GCA admin"],
+            }
+        logger.warning(
+            "code_audit.fallback_to_admin_env",
+            run_id=str(run_id),
+            project_id=str(project_id_pre),
+            note="projeto sem provider — usando env global do GCA admin (custo absorvido pelo admin)",
+        )
+        llm_cfg = {
+            "provider": "anthropic",
+            "base_url": None,
+            "api_key": api_key,
+            "model": app_settings.ANTHROPIC_MODEL,
+        }
 
     async with AsyncSessionLocal() as db:
         run = await db.get(ScaffoldRun, run_id)
@@ -306,7 +349,7 @@ async def audit_run(run_id: UUID) -> Dict[str, Any]:
         batch = auditable[i : i + _AUDIT_BATCH_SIZE]
         results = await asyncio.gather(*[
             _audit_one_item(
-                client=client,
+                llm_cfg=llm_cfg,
                 project_name=project_name,
                 item=it,
                 stack=stack,
