@@ -186,6 +186,7 @@ async def execute_run(run_id: UUID) -> None:
         resolve_llm_config,
         call_llm,
         clamp_max_tokens,
+        get_provider_max_concurrency,
     )
 
     # Carrega project_id pra resolver config — buscamos a run primeiro.
@@ -269,6 +270,8 @@ async def execute_run(run_id: UUID) -> None:
                 max_tokens=plan_max_tokens,
                 temperature=0.2,
                 log_context="scaffold.plan",
+                auto_continue=True,   # MVP-J fase 2 — continuation se truncado
+                expect_json=True,     # MVP-J fase 3 — reprompt se JSON ruim
             )
             plan_tokens = 0  # call_llm não devolve usage; será logado pelo provider
         except Exception as exc:  # noqa: BLE001
@@ -465,7 +468,21 @@ async def execute_run(run_id: UUID) -> None:
     import asyncio as _asyncio
     from app.core.config import settings as _app_settings
 
-    parallelism = max(1, getattr(_app_settings, "SCAFFOLD_PARALLELISM", 5))
+    # MVP-J fase 4 (2026-04-25): clamp ao RPM do provider em uso.
+    # SCAFFOLD_PARALLELISM=5 é teto do operador, mas se provider tem rate
+    # limit menor (ex: Grok 30 RPM = ~2 paralelas seguras), get_provider_max_concurrency
+    # reduz pra não estourar 429 e disparar retry recorrente.
+    requested_parallelism = max(1, getattr(_app_settings, "SCAFFOLD_PARALLELISM", 5))
+    parallelism = get_provider_max_concurrency(llm_cfg["provider"], requested_parallelism)
+    if parallelism != requested_parallelism:
+        logger.info(
+            "scaffold_run.parallelism_adjusted",
+            run_id=str(run_id),
+            provider=llm_cfg["provider"],
+            requested=requested_parallelism,
+            applied=parallelism,
+            reason="rate_limit_safety",
+        )
 
     # Calcula em qual wave cada path pertence: max(wave dos deps) + 1.
     # Items sem dep ficam na wave 0. Toposort já garante que deps vêm antes.
@@ -535,6 +552,8 @@ async def execute_run(run_id: UUID) -> None:
                 max_tokens=item_max_tokens,
                 temperature=0.3,
                 log_context="scaffold.item",
+                auto_continue=True,   # MVP-J fase 2 — continuation se truncado
+                expect_json=True,     # MVP-J fase 3 — reprompt se JSON ruim
             )
         except Exception as exc:  # noqa: BLE001
             async with AsyncSessionLocal() as db_e:

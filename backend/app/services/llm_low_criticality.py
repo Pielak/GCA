@@ -81,6 +81,44 @@ def clamp_max_tokens(model: str, requested: int) -> int:
     return min(requested, cap)
 
 
+#: MVP-J fase 4 (2026-04-25): rate limit típico por provider em
+#: requests por minuto (RPM). Usado pra limitar concorrência do scaffold
+#: dinâmico — sem isso, paralelismo=5 fixo estoura DeepSeek (que tem
+#: tier free de 30 RPM no chat) ou subutiliza Anthropic (50 RPM).
+#:
+#: Valores são tier free/baixo conservador. Operador com tier maior
+#: pode subir SCAFFOLD_PARALLELISM via env var pra forçar concurrency
+#: maior — get_provider_max_concurrency respeita o requested se for
+#: menor que o cap derivado do RPM.
+RPM_BY_PROVIDER: dict[str, int] = {
+    "anthropic": 50,
+    "openai": 60,
+    "deepseek": 60,
+    "grok": 30,
+    "gemini": 60,
+    "ollama": 999,  # local, sem rate limit prático
+}
+
+
+def get_provider_max_concurrency(provider: str, requested: int) -> int:
+    """Concurrency segura pro provider, dado `requested` (cap do operador).
+
+    Heurística: cada chamada LLM dura em média ~5s (varia 2-30s). Pra
+    não estourar RPM, concurrency segura ≈ RPM / 12 (5s × 12 = 60s).
+    Provider desconhecido cai em 30 RPM conservador.
+    """
+    rpm = RPM_BY_PROVIDER.get((provider or "").lower(), 30)
+    safe = max(1, rpm // 12)
+    return min(requested, safe)
+
+
+#: Stop reasons normalizados pra MVP-J fase 2 (truncamento detection).
+#: Anthropic: stop_reason ∈ {end_turn, max_tokens, stop_sequence, tool_use}.
+#: OpenAI-compat: finish_reason ∈ {stop, length, tool_calls, content_filter}.
+#: Mapeamos pra: 'stop' (terminou natural) | 'length' (truncado por cap).
+STOP_REASON_TRUNCATED = {"length", "max_tokens"}
+
+
 async def resolve_llm_config(
     db: AsyncSession, project_id: UUID,
     *,
@@ -185,39 +223,43 @@ def _is_retriable_anthropic_error(exc: Exception) -> bool:
     return False
 
 
-async def call_llm(
+_MAX_CONTINUATIONS = 3       # MVP-J fase 2 — limite de continuations contra truncamento
+_MAX_JSON_REPROMPTS = 2      # MVP-J fase 3 — limite de reprompts contra JSON malformado
+
+
+def _strip_md_fences(text: str) -> str:
+    """Remove ```json ... ``` ou ``` ... ``` do início/fim. Tolerante."""
+    import re as _re
+    s = (text or "").strip()
+    m = _re.match(r"^```(?:json|JSON)?\s*\n?(.*?)\n?```\s*$", s, _re.DOTALL)
+    return m.group(1).strip() if m else s
+
+
+def _is_valid_json(text: str) -> bool:
+    """True se text é JSON parseável (após strip de fences markdown)."""
+    import json as _json
+    try:
+        _json.loads(_strip_md_fences(text))
+        return True
+    except (ValueError, TypeError):
+        return False
+
+
+async def _call_with_retry(
     *,
     config: dict[str, Any],
     system_prompt: str,
     user_prompt: str,
-    max_tokens: int = 1500,
-    temperature: float = 0.2,
-    log_context: str = "llm_low_crit",
-) -> str:
-    """Chama LLM fazendo dispatch por provider. Retorna texto cru.
-
-    Anthropic via SDK nativo; Ollama/DeepSeek/OpenAI/Grok via httpx
-    OpenAI-compat. Timeouts separados (Ollama 240s, cloud 60s).
-
-    Retry policy (MVP-J fase 1, 2026-04-25):
-      - 3 tentativas no total com backoff 1s/2s/4s.
-      - Retry em: 429 rate limit, 5xx, ReadTimeout, ConnectError,
-        NetworkError, Anthropic RateLimitError/APIConnectionError/
-        APITimeoutError/APIStatusError(5xx).
-      - NÃO retry em 4xx (exceto 429), JSON malformado, prompt rejeitado
-        — esses são bugs do prompt e merecem falha rápida.
-
-    Args:
-        config: dict retornado por `resolve_llm_config`.
-        system_prompt/user_prompt: conteúdo da chamada.
-        max_tokens: budget de output (default 1500).
-        temperature: default 0.2.
-        log_context: prefixo dos logs estruturados pro caller identificar
-            qual service chamou (ex: "module_details", "test_spec").
-    """
+    max_tokens: int,
+    temperature: float,
+    log_context: str,
+    messages_override: list | None = None,
+) -> tuple[str, str]:
+    """Wrapper de retry (J1) ao redor de _invoke_llm_once. Retorna
+    `(text, finish_reason)`. finish_reason ∈ {'stop', 'length',
+    'tool_use', 'content_filter', 'unknown'}."""
     provider = config["provider"]
     model = config["model"]
-
     last_exc: Exception | None = None
     for attempt in range(1, _RETRY_MAX_ATTEMPTS + 1):
         try:
@@ -228,6 +270,7 @@ async def call_llm(
                 max_tokens=max_tokens,
                 temperature=temperature,
                 log_context=log_context,
+                messages_override=messages_override,
             )
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
@@ -237,7 +280,6 @@ async def call_llm(
                 else _is_retriable_httpx_error(exc)
             )
             if not retriable or attempt >= _RETRY_MAX_ATTEMPTS:
-                # Erro não-transitório OU acabaram tentativas: propaga
                 raise
             backoff = _RETRY_BACKOFF_SECONDS[min(attempt - 1, len(_RETRY_BACKOFF_SECONDS) - 1)]
             logger.warning(
@@ -250,10 +292,145 @@ async def call_llm(
             )
             import asyncio as _asyncio
             await _asyncio.sleep(backoff)
-    # Salvaguarda — não deveria chegar aqui (raise no loop cobre)
     if last_exc:
         raise last_exc
-    return ""
+    return ("", "unknown")
+
+
+async def call_llm(
+    *,
+    config: dict[str, Any],
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 1500,
+    temperature: float = 0.2,
+    log_context: str = "llm_low_crit",
+    auto_continue: bool = False,
+    expect_json: bool = False,
+) -> str:
+    """Chama LLM fazendo dispatch por provider. Retorna texto cru.
+
+    Anthropic via SDK nativo; Ollama/DeepSeek/OpenAI/Grok via httpx
+    OpenAI-compat. Timeouts separados (Ollama 240s, cloud 60s).
+
+    Adaptações ativas (MVP-J, 2026-04-25):
+      - Fase 1 — Retry: 3 tentativas com backoff 1s/2s/4s em 429/5xx/
+        ReadTimeout/ConnectError/Anthropic RateLimitError etc. NÃO
+        retry em 4xx (exceto 429) — bugs determinísticos = falha rápida.
+      - Fase 2 — Continuation se `auto_continue=True`: detecta finish_reason
+        in {'length','max_tokens'} e re-chama com histórico + prompt
+        "continue de onde parou", até `_MAX_CONTINUATIONS=3` iterações.
+      - Fase 3 — Reprompt se `expect_json=True`: ao final, valida que
+        output é JSON parseável; se não, re-chama pedindo correção,
+        até `_MAX_JSON_REPROMPTS=2` tentativas. Caller continua
+        responsável por parsear.
+
+    Args:
+        config: dict retornado por `resolve_llm_config`.
+        system_prompt/user_prompt: conteúdo da chamada.
+        max_tokens: budget de output (default 1500).
+        temperature: default 0.2.
+        log_context: prefixo dos logs estruturados.
+        auto_continue: ativa continuation se output truncado (J2).
+        expect_json: ativa reprompt se output não for JSON válido (J3).
+    """
+    provider = config["provider"]
+    model = config["model"]
+
+    # Fase 1+2 — primeira chamada + continuations contra truncamento
+    accumulated, finish = await _call_with_retry(
+        config=config,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        log_context=log_context,
+    )
+
+    if auto_continue:
+        for cont_iter in range(_MAX_CONTINUATIONS):
+            if finish not in STOP_REASON_TRUNCATED:
+                break
+            logger.warning(
+                f"{log_context}.truncated_continuing",
+                provider=provider, model=model,
+                iteration=cont_iter + 1,
+                accumulated_chars=len(accumulated),
+            )
+            cont_messages = [
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": accumulated},
+                {
+                    "role": "user",
+                    "content": (
+                        "Sua resposta anterior foi truncada (atingiu o cap de "
+                        "tokens de output). Continue EXATAMENTE de onde parou, "
+                        "sem repetir nada do que já enviou e sem reabrir code "
+                        "fences markdown. Se a resposta é JSON, complete a "
+                        "sintaxe (fechar strings, chaves, colchetes). Não "
+                        "adicione preâmbulo nem comentários."
+                    ),
+                },
+            ]
+            cont_text, finish = await _call_with_retry(
+                config=config,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,  # ignorado quando messages_override
+                max_tokens=max_tokens,
+                temperature=temperature,
+                log_context=log_context,
+                messages_override=cont_messages,
+            )
+            accumulated += cont_text
+        else:
+            logger.warning(
+                f"{log_context}.truncated_after_max_continuations",
+                provider=provider, model=model,
+                max_iters=_MAX_CONTINUATIONS,
+                accumulated_chars=len(accumulated),
+            )
+
+    # Fase 3 — reprompt em JSON malformado
+    if expect_json and not _is_valid_json(accumulated):
+        for reprompt_iter in range(_MAX_JSON_REPROMPTS):
+            logger.warning(
+                f"{log_context}.invalid_json_reprompting",
+                provider=provider, model=model,
+                iteration=reprompt_iter + 1,
+                preview=accumulated[:200],
+            )
+            fix_messages = [
+                {"role": "user", "content": user_prompt},
+                {"role": "assistant", "content": accumulated},
+                {
+                    "role": "user",
+                    "content": (
+                        "Sua resposta anterior NÃO é JSON válido — falhou ao "
+                        "parsear. Devolva APENAS o JSON corrigido, sem "
+                        "markdown fences (```), sem preâmbulo, sem comentários. "
+                        "Garanta strings escapadas, chaves balanceadas e "
+                        "colchetes fechados."
+                    ),
+                },
+            ]
+            accumulated, finish = await _call_with_retry(
+                config=config,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                log_context=log_context,
+                messages_override=fix_messages,
+            )
+            if _is_valid_json(accumulated):
+                logger.info(
+                    f"{log_context}.invalid_json_recovered",
+                    provider=provider, model=model,
+                    iteration=reprompt_iter + 1,
+                )
+                break
+
+    return accumulated
 
 
 async def _invoke_llm_once(
@@ -264,9 +441,19 @@ async def _invoke_llm_once(
     max_tokens: int,
     temperature: float,
     log_context: str,
-) -> str:
+    messages_override: list | None = None,
+) -> tuple[str, str]:
     """Implementação real da chamada LLM (1 tentativa, sem retry).
-    Wrapper `call_llm` adiciona retry com backoff em erros transitórios.
+    Wrapper `call_llm` adiciona retry, continuation, reprompt JSON.
+
+    Retorna `(text, finish_reason)`. finish_reason normalizado:
+      - 'stop' = LLM terminou natural
+      - 'length' = truncado por max_tokens
+      - 'tool_use' / 'content_filter' / 'unknown' = outros casos
+
+    Args:
+        messages_override: se None, usa system+user padrão. Se passado,
+            usa direto (pra continuation/reprompt).
     """
     provider = config["provider"]
     model = config["model"]
@@ -275,22 +462,32 @@ async def _invoke_llm_once(
     if provider == "anthropic":
         from anthropic import AsyncAnthropic
         client = AsyncAnthropic(api_key=config["api_key"])
+        anthropic_messages = (
+            messages_override
+            if messages_override is not None
+            else [{"role": "user", "content": user_prompt}]
+        )
         started = time.monotonic()
         response = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
+            messages=anthropic_messages,
         )
         elapsed = time.monotonic() - started
         logger.info(
             f"{log_context}.llm_call_ok",
             provider=provider, model=model, elapsed_s=round(elapsed, 1),
         )
+        # Normaliza stop_reason: end_turn → stop, max_tokens → length
+        raw_stop = getattr(response, "stop_reason", "") or ""
+        finish = "length" if raw_stop == "max_tokens" else (
+            "stop" if raw_stop == "end_turn" else (raw_stop or "unknown")
+        )
         if not response.content:
-            return ""
-        return response.content[0].text
+            return ("", finish)
+        return (response.content[0].text, finish)
 
     # Ollama / OpenAI-compat
     provider_urls = {
@@ -310,14 +507,26 @@ async def _invoke_llm_once(
     if config.get("api_key"):
         headers["Authorization"] = f"Bearer {config['api_key']}"
 
+    # Mensagens: messages_override tem prioridade pra continuation/reprompt.
+    # Quando override é passado, NÃO incluímos system de novo no payload —
+    # caller já posicionou tudo. Caso contrário, system+user padrão.
+    if messages_override is not None:
+        payload_messages = (
+            [{"role": "system", "content": system_prompt}] + messages_override
+            if system_prompt
+            else list(messages_override)
+        )
+    else:
+        payload_messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
     payload = {
         "model": model,
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": payload_messages,
     }
 
     read_timeout = OLLAMA_READ_TIMEOUT_SECONDS if provider == "ollama" else CLOUD_READ_TIMEOUT_SECONDS
@@ -361,5 +570,10 @@ async def _invoke_llm_once(
     )
     choices = body.get("choices") or []
     if not choices:
-        return ""
-    return choices[0].get("message", {}).get("content", "") or ""
+        return ("", "unknown")
+    first = choices[0]
+    text = (first.get("message", {}) or {}).get("content", "") or ""
+    raw_finish = (first.get("finish_reason") or "").lower()
+    # OpenAI-compat 'stop'/'length' já são canônicos. Outros viram 'unknown'.
+    finish = raw_finish if raw_finish in ("stop", "length", "tool_calls", "content_filter") else "unknown"
+    return (text, finish)
