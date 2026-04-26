@@ -1000,7 +1000,15 @@ async def apply_scaffold_run(
             status_code=status.HTTP_409_CONFLICT,
             detail="Run já foi aplicada. Use retry-failed pra items que falharam ou nova run pra mudanças.",
         )
-    if run.status != "completed":
+    # Aceita retry quando erro veio do próprio executor de apply (apply falhou
+    # mas geração estava OK) — caso típico: bug introduzido no executor antes
+    # de algum commit chegar ao remote. Reconhecido via run.error contendo
+    # "Apply falhou" (string emitida por scaffold_apply_executor.unhandled).
+    apply_failed_in_executor = (
+        run.status == "failed"
+        and (run.error or "").startswith("Apply falhou")
+    )
+    if run.status != "completed" and not apply_failed_in_executor:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Run em status '{run.status}'. Aguarde a geração terminar (status=completed) antes de aplicar.",
