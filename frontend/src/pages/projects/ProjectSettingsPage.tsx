@@ -8,13 +8,14 @@ import { useAuthStore } from '@/stores/authStore'
 import { useSetupStatus } from '@/hooks/useSetupStatus'
 import { RepositoryPage } from '@/pages/projects/RepositoryPage'
 import { QuestionnairePage } from '@/pages/projects/QuestionnairePage'
+import { InitialQuestionnaireForm } from '@/components/questionnaire/InitialQuestionnaireForm'
 import { getErrorMessage } from '@/lib/errors'
 import { IssueTrackerPanel } from '@/components/settings/IssueTrackerPanel'
 import { NotifierPanel } from '@/components/settings/NotifierPanel'
 import { formatDateTimeBR } from '@/lib/datetime'
 
-type TabKey = 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations' | 'governance'
-const VALID_TABS: TabKey[] = ['llm', 'smtp', 'repo', 'questionario', 'integrations', 'governance']
+type TabKey = 'initial-questionnaire' | 'llm' | 'smtp' | 'repo' | 'questionario' | 'integrations' | 'governance'
+const VALID_TABS: TabKey[] = ['initial-questionnaire', 'llm', 'smtp', 'repo', 'questionario', 'integrations', 'governance']
 
 type GovernanceMode = 'solo_owner' | 'team' | 'corporate'
 
@@ -482,6 +483,11 @@ export function ProjectSettingsPage() {
       {/* Tabs — parametrização do projeto consolidada aqui (contrato MVP 1). */}
       {/* Badges ✓/○ no label quando o item faz parte do setup obrigatório. */}
       <div className="flex gap-1 border-b border-slate-800 overflow-x-auto">
+        <button onClick={() => setActiveTab('initial-questionnaire')}
+          className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'initial-questionnaire' ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
+          <ClipboardList className="w-3.5 h-3.5" /> Questão. Inicial
+          <span className="text-[10px] text-slate-500 uppercase tracking-wide">prioridade</span>
+        </button>
         <button onClick={() => setActiveTab('llm')}
           className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${activeTab === 'llm' ? 'border-violet-500 text-violet-400' : 'border-transparent text-slate-500 hover:text-slate-300'}`}>
           <Cpu className="w-3.5 h-3.5" /> Provedor de IA
@@ -520,6 +526,20 @@ export function ProjectSettingsPage() {
           <ShieldCheck className="w-3.5 h-3.5" /> Governança
         </button>
       </div>
+
+      {/* Tab: Questionário Inicial — 20 perguntas essenciais */}
+      {activeTab === 'initial-questionnaire' && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+          <div className="space-y-2">
+            <h3 className="text-slate-200 text-base font-semibold">Questionário Inicial</h3>
+            <p className="text-slate-400 text-sm">
+              Responda as 20 perguntas essenciais sobre seu projeto. As respostas guiam as 5 personas
+              a gerar questionários dinâmicos customizados.
+            </p>
+          </div>
+          <InitialQuestionnaireForm projectId={projectId} />
+        </div>
+      )}
 
       {/* Tab: Provedor de IA — lista multi-provider + form "adicionar" */}
       {activeTab === 'llm' && (
