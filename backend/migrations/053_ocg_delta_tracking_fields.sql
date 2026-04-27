@@ -12,10 +12,10 @@ BEGIN;
 
 -- Adicionar colunas de rastreamento à tabela ocg_delta_log
 ALTER TABLE ocg_delta_log
-ADD COLUMN source VARCHAR(50) DEFAULT 'document_ingestion' COMMENT 'Origem da mudança: questionnaire_response, persona_validation, document_ingestion, manual_edit, etc',
-ADD COLUMN persona_id VARCHAR(20) COMMENT 'Persona que validou (gp, arquiteto, dba, dev_sr, qa) — NULL se não persona',
-ADD COLUMN decision VARCHAR(30) COMMENT 'Decisão: approved, needs_clarification, rejected, etc',
-ADD COLUMN hash_chain VARCHAR(64) COMMENT 'SHA256 da sequência de deltas até este ponto — para auditoria/integridade';
+ADD COLUMN source VARCHAR(50) DEFAULT 'document_ingestion',
+ADD COLUMN persona_id VARCHAR(20),
+ADD COLUMN decision VARCHAR(30),
+ADD COLUMN hash_chain VARCHAR(64);
 
 -- Criar índice para buscar rápido by source e persona
 CREATE INDEX idx_ocg_delta_source ON ocg_delta_log(project_id, source);
@@ -85,24 +85,5 @@ COMMENT ON COLUMN ocg_delta_log.source IS 'Origem da mudança: questionnaire_res
 COMMENT ON COLUMN ocg_delta_log.persona_id IS 'Persona que validou (gp, arquiteto, dba, dev_sr, qa) — NULL se não persona';
 COMMENT ON COLUMN ocg_delta_log.decision IS 'Decisão: approved, needs_clarification, rejected';
 COMMENT ON COLUMN ocg_delta_log.hash_chain IS 'SHA256 da sequência de deltas — para auditoria/integridade';
-
--- Inserir um record de "migração executada" no log de sistema
-INSERT INTO ocg_delta_log (
-    id, project_id, ocg_version_from, ocg_version_to, fields_changed,
-    change_summary, trigger_source, source, decision, created_at
-)
-SELECT
-    uuid_generate_v4(),
-    id,
-    0, 0,
-    '{"migration": "053_ocg_delta_tracking_fields"}',
-    'Migration 053: Added OCG delta tracking fields and expansion validation',
-    'system',
-    'system_migration',
-    'approved',
-    NOW()
-FROM projects
-WHERE deleted_at IS NULL
-LIMIT 1;
 
 COMMIT;

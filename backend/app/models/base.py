@@ -2027,3 +2027,81 @@ class DeferredGap(Base):
     deferred_at = Column(DateTime(timezone=True), nullable=True)
     revived_at = Column(DateTime(timezone=True), nullable=True)
     revived_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+
+class InitialQuestionnaire(Base):
+    """Questionário Inicial — 20 perguntas essenciais que guiam as 5 Personas.
+
+    User responde direto no browser (form HTML inline). Respostas persistem
+    automaticamente enquanto digita. Cada pergunta pode ter:
+    - Resposta de texto (textarea)
+    - Opções selecionadas (checklist/radio)
+    - Imagens anexadas (file upload)
+
+    Fluxo:
+    1. User acessa /projects/{id}/settings?tab=questionario
+    2. Vê form com 20 perguntas
+    3. Digita respostas (auto-save a cada 2s)
+    4. Clica "Submeter" quando pronto
+    5. Personas leem as respostas e geram seus questionários dinâmicos
+    """
+    __tablename__ = "initial_questionnaires"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Status: draft (preenchendo), submitted (enviado), validated (personas leram)
+    status = Column(String(20), nullable=False, default="draft")
+
+    # Seção A: Contexto do Projeto
+    q1_name = Column(Text, nullable=True)  # Nome e objetivo
+    q1_objective = Column(Text, nullable=True)
+    q2_type = Column(String(50), nullable=True)  # novo_sistema, refactor, feature, manutencao
+    q3_users = Column(Text, nullable=True)  # Quem são os usuários
+    q3_volume = Column(Integer, nullable=True)  # Quantos simultâneos
+    q4_months = Column(Integer, nullable=True)  # Prazo em meses
+    q4_target_date = Column(String(10), nullable=True)  # YYYY-MM-DD
+
+    # Seção B: Requisitos Funcionais
+    q5_flows = Column(Text, nullable=True)  # 3-5 fluxos (um por linha)
+    q6_integrations = Column(JSONB, nullable=True, default={})  # Lista de integrações selecionadas
+    q6_integrations_detail = Column(Text, nullable=True)  # Detalhes de cada integração
+    q7_frequency = Column(String(50), nullable=True)  # centenas_dia, milhares_dia, etc
+    q8_reports = Column(Text, nullable=True)  # Relatórios e analytics
+    q9_rules = Column(Text, nullable=True)  # Regras de negócio complexas
+
+    # Seção C: Requisitos Não-Funcionais
+    q10_performance = Column(String(50), nullable=True)  # nao_critica, importante, critica, ultra_critica
+    q11_uptime = Column(String(50), nullable=True)  # 99, 99.5, 99.9, 99.99, 99.999
+    q12_sensitive_data = Column(JSONB, nullable=True, default={})  # Checklist de tipos de dados
+    q13_scalability = Column(String(50), nullable=True)  # estavel, modesto, agressivo, exponencial
+    q14_compliance = Column(JSONB, nullable=True, default={})  # LGPD, GDPR, HIPAA, etc
+    q15_longevity = Column(String(50), nullable=True)  # mvp_curto, medio_prazo, longo_prazo, permanente
+
+    # Seção D: Contexto Técnico
+    q16_stack = Column(Text, nullable=True)  # Backend, frontend, DB, infra
+    q17_existing_infra = Column(Text, nullable=True)  # Infraestrutura a reutilizar
+    q18_constraints = Column(Text, nullable=True)  # Constraints técnicos conhecidos
+
+    # Seção E: Visão do GCA
+    q19_gca_expectations = Column(JSONB, nullable=True, default={})  # Checklist de expectativas
+    q20_risks = Column(Text, nullable=True)  # Riscos e incertezas
+
+    # Imagens anexadas (por pergunta)
+    # Formato: {"q1": [{"url": "...", "uploaded_at": "...", "size_bytes": ...}], ...}
+    question_images = Column(JSONB, nullable=True, default={})
+
+    # Metadados
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    validated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    validated_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_initial_questionnaire_project", project_id),
+        Index("idx_initial_questionnaire_status", project_id, status),
+        UniqueConstraint("project_id", name="uq_initial_questionnaire_per_project"),
+    )
