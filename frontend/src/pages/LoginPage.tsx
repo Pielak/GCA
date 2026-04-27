@@ -429,9 +429,24 @@ export function LoginPage() {
             </div>
           )}
 
+          {/* Admin button — visible only to admins */}
+          {user?.is_admin && (
+            <div className="mb-6">
+              <button
+                type="button"
+                onClick={() => navigate('/admin')}
+                className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+              >
+                <Lock size={20} />
+                🔐 Painel de Administração
+              </button>
+              <p className="text-slate-500 text-xs mt-2 text-center">Gerencie toda a instância GCA (usuários, projetos globais, configurações)</p>
+            </div>
+          )}
+
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-5">
-            {/* Projeto (combo) — opcional para admin, obrigatório para membros */}
+            {/* Projeto (combo) — obrigatório para membros */}
             <div className="space-y-2">
               <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">
                 <FolderPlus className="w-3.5 h-3.5" />
@@ -448,7 +463,7 @@ export function LoginPage() {
                   transition-all duration-300 appearance-none cursor-pointer
                 "
               >
-                <option value="" className="bg-[#1c1c34]">— sem projeto (acesso administrativo) —</option>
+                <option value="" className="bg-[#1c1c34]">Selecione um projeto</option>
                 {projects.map(p => (
                   <option key={p.id} value={p.slug} className="bg-[#1c1c34]">
                     {p.name}
@@ -458,7 +473,7 @@ export function LoginPage() {
               <p className="text-[10px] text-slate-600">
                 {selectedSlug
                   ? 'Suas credenciais serão validadas neste projeto.'
-                  : 'Sem projeto selecionado: apenas administradores conseguem entrar.'}
+                  : 'Selecione seu projeto para continuar. Administradores podem usar o painel acima.'}
               </p>
             </div>
 
