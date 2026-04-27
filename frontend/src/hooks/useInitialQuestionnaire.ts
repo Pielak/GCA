@@ -59,7 +59,7 @@ const AUTO_SAVE_DELAY_MS = 2000
 export function useInitialQuestionnaire(projectId?: string) {
   const [formData, setFormData] = useState<InitialQuestionnaireData>({})
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
-  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const autoSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Fetch questionnaire
   const { data: questionnaire, isLoading, refetch } = useQuery({
