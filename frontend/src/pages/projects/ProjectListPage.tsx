@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Shield, Code2, TestTube2, Activity, Loader2 } from 'lucide-react'
+import { Shield, Code2, TestTube2, Activity, Loader2, Lock } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -59,10 +59,23 @@ export function ProjectListPage() {
 
   const isAdmin = user?.is_admin ?? false
   const myProjects = projects.filter((p) => p.userRole && p.userRole !== 'admin_viewer')
-  const otherProjects = isAdmin ? projects.filter((p) => !p.userRole || p.userRole === 'admin_viewer') : []
 
   return (
     <div className="p-6 space-y-6">
+      {/* Admin Access Button (prominent & separate) */}
+      {isAdmin && (
+        <div className="mb-8">
+          <button
+            onClick={() => navigate('/admin')}
+            className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
+          >
+            <Lock size={20} />
+            🔐 Painel de Administração
+          </button>
+          <p className="text-slate-500 text-xs mt-2 text-center">Gerencie toda a instância GCA (usuários, projetos globais, configurações)</p>
+        </div>
+      )}
+
       <div>
         <h1 className="text-xl font-semibold text-slate-100">Meus Projetos</h1>
         <p className="text-slate-500 text-sm mt-0.5">{myProjects.length} projeto{myProjects.length !== 1 ? 's' : ''} acessiveis ao seu perfil</p>
@@ -158,40 +171,7 @@ export function ProjectListPage() {
       </div>
       )}
 
-      {otherProjects.length > 0 && (
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-slate-400">Todos os Projetos (somente leitura)</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {otherProjects.map(proj => (
-              <div
-                key={proj.id}
-                onClick={() => navigate(`/projects/${proj.id}`)}
-                className="bg-slate-900 border border-slate-800 rounded-xl p-5 cursor-pointer hover:border-violet-600/40 hover:bg-slate-800/60 transition-all group opacity-75"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-lg bg-violet-900/40 border border-violet-800/40 flex items-center justify-center text-violet-400 font-bold text-sm flex-shrink-0">
-                      {proj.name.charAt(0)}
-                    </div>
-                    <div>
-                      <p className="text-slate-200 text-sm font-medium group-hover:text-violet-300 transition-colors">{proj.name}</p>
-                      <p className="text-slate-500 text-xs">{OUTPUT_LABELS[proj.outputProfile] || proj.outputProfile}</p>
-                    </div>
-                  </div>
-                  <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">Somente Leitura</span>
-                </div>
-                <p className="text-slate-400 text-xs leading-relaxed mb-4">{proj.description}</p>
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${
-                    proj.status === 'active' ? 'bg-emerald-500/20 text-emerald-300' : 'bg-slate-700 text-slate-400'
-                  }`}>{proj.status}</span>
-                  {proj.gatekeeperScore > 0 && <span className="text-slate-500 text-xs">GK: {proj.gatekeeperScore}/100</span>}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Note: "Todos os Projetos (somente leitura)" removed in favor of dedicated Admin button */}
 
       {projects.length === 0 && (
         <div className="text-center py-16">
