@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Save, Send, Loader2, AlertCircle, CheckCircle2, Image as ImageIcon, X } from 'lucide-react'
+import { Save, Send, Loader2, AlertCircle, CheckCircle2, Image as ImageIcon, X, HelpCircle } from 'lucide-react'
 import { useInitialQuestionnaire, type InitialQuestionnaireData } from '@/hooks/useInitialQuestionnaire'
 
 interface InitialQuestionnaireFormProps {
@@ -20,6 +20,27 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
   } = useInitialQuestionnaire(projectId)
 
   const [expandedSection, setExpandedSection] = useState<string | null>('A')
+  const [tooltipVisible, setTooltipVisible] = useState<string | null>(null)
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+
+  // Calcular progresso: quantos campos foram preenchidos
+  const countFilledFields = () => {
+    let filled = 0
+    let total = 0
+    sections.forEach((section) => {
+      section.fields.forEach((field) => {
+        total++
+        const value = formData[field.key as keyof InitialQuestionnaireData]
+        if (value !== null && value !== undefined && value !== '' && (!Array.isArray(value) || value.length > 0)) {
+          filled++
+        }
+      })
+    })
+    return { filled, total }
+  }
+
+  const { filled, total } = countFilledFields()
+  const progress = (filled / total) * 100
 
   if (isLoading) {
     return (
@@ -36,6 +57,41 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
     updateField(field, items)
+  }
+
+  const validateField = (fieldKey: string, value: unknown) => {
+    const errors = { ...validationErrors }
+
+    // Validar campos numéricos
+    if (fieldKey === 'q3_volume' && value !== '' && value !== null) {
+      const num = Number(value)
+      if (isNaN(num) || num <= 0) {
+        errors[fieldKey] = 'Deve ser um número maior que 0'
+      } else {
+        delete errors[fieldKey]
+      }
+    }
+
+    if (fieldKey === 'q4_months' && value !== '' && value !== null) {
+      const num = Number(value)
+      if (isNaN(num) || num <= 0) {
+        errors[fieldKey] = 'Deve ser um número maior que 0'
+      } else {
+        delete errors[fieldKey]
+      }
+    }
+
+    // Validar que pelo menos 1 item foi selecionado em tags importantes
+    if ((fieldKey === 'q6_integrations' || fieldKey === 'q12_sensitive_data' || fieldKey === 'q14_compliance') && Array.isArray(value)) {
+      if (value.length === 0) {
+        errors[fieldKey] = 'Selecione pelo menos uma opção'
+      } else {
+        delete errors[fieldKey]
+      }
+    }
+
+    setValidationErrors(errors)
+    return Object.keys(errors).length === 0
   }
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, questionId: string) => {
@@ -75,12 +131,12 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
         {
           key: 'q1_name',
           label: 'Q1. Nome e Objetivo do Projeto',
-          help: 'Ex: "Plataforma de Agendamentos para Clínicas"',
+          help: 'Exemplo: "Sistema de Agendamento SaaS para clínicas de saúde — permite pacientes marcar consultas online, médicos gerenciar agenda, e recepcionistas confirmar"',
         },
         {
           key: 'q1_objective',
           label: 'Objetivo Principal',
-          help: 'Descrição breve do propósito do projeto',
+          help: 'Responda em 1-2 linhas: qual é o problema que você está resolvendo? Para quem? Por quê?',
           type: 'textarea',
         },
         {
@@ -98,12 +154,13 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
         {
           key: 'q3_users',
           label: 'Q3. Usuários Finais',
-          help: 'Ex: "Pacientes, médicos, recepcionistas"',
+          help: 'Exemplo: "Pacientes, médicos, recepcionistas" — liste os roles principais com 1-3 palavras cada',
         },
         {
           key: 'q3_volume',
           label: 'Quantos usuários simultâneos esperados?',
           type: 'number',
+          help: 'Número: pico esperado de sessões simultâneas (ex: 100, 1000, 10000)',
         },
         {
           key: 'q4_months',
@@ -274,6 +331,24 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
 
   return (
     <div className="space-y-6">
+      {/* Progress Bar */}
+      {!isSubmitted && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-medium text-slate-700">Progresso: {filled}/{total} campos preenchidos</p>
+            <span className="text-xs text-slate-500">{Math.round(progress)}%</span>
+          </div>
+          <div className="w-full bg-slate-200 rounded-full h-2 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-300 ${
+                progress < 50 ? 'bg-amber-500' : progress < 100 ? 'bg-blue-500' : 'bg-green-500'
+              }`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Status Bar */}
       {status === 'submitted' && (
         <div className="flex items-center gap-2 rounded-lg bg-green-50 border border-green-200 p-4">
@@ -317,8 +392,29 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
               <div className="px-6 py-4 space-y-6 bg-white border-t">
                 {section.fields.map((field) => (
                   <div key={field.key} className="space-y-2">
-                    <label className="block font-medium text-slate-900">{field.label}</label>
-                    {field.help && <p className="text-sm text-slate-600">{field.help}</p>}
+                    <div className="flex items-center gap-2 group">
+                      <label className="block font-medium text-slate-900">{field.label}</label>
+                      {field.help && (
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onMouseEnter={() => setTooltipVisible(field.key)}
+                            onMouseLeave={() => setTooltipVisible(null)}
+                            onClick={() => setTooltipVisible(tooltipVisible === field.key ? null : field.key)}
+                            className="text-slate-400 hover:text-slate-600 transition-colors"
+                          >
+                            <HelpCircle size={16} />
+                          </button>
+                          {tooltipVisible === field.key && (
+                            <div className="absolute bottom-full left-0 mb-2 p-2 bg-slate-900 text-white text-xs rounded shadow-lg whitespace-nowrap z-50">
+                              {field.help}
+                              <div className="absolute top-full left-2 w-0 h-0 border-l-4 border-r-4 border-t-4 border-l-transparent border-r-transparent border-t-slate-900" />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    {field.help && <p className="text-xs text-slate-500 italic">{field.help}</p>}
 
                     {field.type === 'textarea' ? (
                       <textarea
@@ -344,15 +440,27 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
                         ))}
                       </select>
                     ) : field.type === 'number' ? (
-                      <input
-                        type="number"
-                        value={(formData[field.key as keyof InitialQuestionnaireData] as number) || ''}
-                        onChange={(e) =>
-                          updateField(field.key as keyof InitialQuestionnaireData, parseInt(e.target.value) || '')
-                        }
-                        disabled={isSubmitted}
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50"
-                      />
+                      <div>
+                        <input
+                          type="number"
+                          value={(formData[field.key as keyof InitialQuestionnaireData] as number) || ''}
+                          onChange={(e) => {
+                            updateField(field.key as keyof InitialQuestionnaireData, parseInt(e.target.value) || '')
+                            validateField(field.key, parseInt(e.target.value) || '')
+                          }}
+                          disabled={isSubmitted}
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent disabled:bg-slate-50 transition-colors ${
+                            validationErrors[field.key]
+                              ? 'border-red-400 focus:ring-red-500'
+                              : 'border-slate-300 focus:ring-blue-500'
+                          }`}
+                        />
+                        {validationErrors[field.key] && (
+                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                            <AlertCircle size={12} /> {validationErrors[field.key]}
+                          </p>
+                        )}
+                      </div>
                     ) : field.type === 'date' ? (
                       <input
                         type="date"
@@ -362,14 +470,32 @@ export function InitialQuestionnaireForm({ projectId }: InitialQuestionnaireForm
                         className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50"
                       />
                     ) : field.type === 'tags' ? (
-                      <input
-                        type="text"
-                        value={((formData[field.key as keyof InitialQuestionnaireData] as string[]) || []).join(', ')}
-                        onChange={(e) => handleArrayFieldChange(field.key as keyof InitialQuestionnaireData, e.target.value)}
-                        disabled={isSubmitted}
-                        placeholder="Separadas por vírgula"
-                        className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent disabled:bg-slate-50"
-                      />
+                      <div>
+                        <input
+                          type="text"
+                          value={((formData[field.key as keyof InitialQuestionnaireData] as string[]) || []).join(', ')}
+                          onChange={(e) => {
+                            handleArrayFieldChange(field.key as keyof InitialQuestionnaireData, e.target.value)
+                            const items = e.target.value
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter((s) => s.length > 0)
+                            validateField(field.key, items)
+                          }}
+                          disabled={isSubmitted}
+                          placeholder="Separadas por vírgula"
+                          className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:border-transparent disabled:bg-slate-50 transition-colors ${
+                            validationErrors[field.key]
+                              ? 'border-red-400 focus:ring-red-500'
+                              : 'border-slate-300 focus:ring-blue-500'
+                          }`}
+                        />
+                        {validationErrors[field.key] && (
+                          <p className="text-xs text-red-600 mt-1 flex items-center gap-1">
+                            <AlertCircle size={12} /> {validationErrors[field.key]}
+                          </p>
+                        )}
+                      </div>
                     ) : (
                       <input
                         type="text"
