@@ -93,6 +93,7 @@ celery_app = Celery(
 )
 
 # Configuração canônica (documentada inline para não precisar abrir docs).
+# MVP 29 Fase 29.1: Hardening Celery — fila persistente + idempotência auditada.
 celery_app.conf.update(
     # Timezone alinhado à instância (BACKUP_TIMEZONE).
     timezone=_resolve_timezone(),
@@ -103,9 +104,14 @@ celery_app.conf.update(
     accept_content=["json"],
     # Result expiration: 1 hora (suficiente pra poll; não encher Redis).
     result_expires=3600,
-    # Retry policy default (Fase 13.4 ajusta por task).
+    # MVP 29.1: Hardening — fila persistente. Se worker cai e se reconecta,
+    # broker redistribui tasks não-acked. visibility_timeout 1800s (30 min)
+    # garante que task não fica travada se worker morre durante processamento.
     task_acks_late=True,
     task_reject_on_worker_lost=True,
+    task_visibility_timeout=1800,  # 30 min — máximo de lock por task
+    task_ignore_result=False,  # Garantir result backend (necessário pra idempotência)
+    # Retry policy default (Fase 13.4 ajusta por task).
     task_default_retry_delay=60,
     task_default_max_retries=3,
     # DLQ: tasks que esgotam retries vão para `celery_dlq`.

@@ -62,6 +62,53 @@ def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
 _LEASE_TTL_SECONDS = 600  # 10 min — janela conservadora pra tasks de propagação
 
 
+# MVP 29.1 — Idempotência guards para tasks críticas
+def _check_document_already_analyzed(document_id: str, project_id: str) -> bool:
+    """Retorna True se documento já foi analisado (status != 'processing').
+
+    Garante que task redistribuída não roda 2x. Check simples: se
+    arguider_status não é 'processing', assume que processamento já
+    completou (sucesso ou erro de domínio — ambos são finais).
+
+    MVP 29.1: Guard de idempotência crítica pra pipeline_ingest_task.
+    Falha silenciosa (retorna False) se DB inacessível — fail-open.
+    """
+    try:
+        from sqlalchemy import select
+        from app.db.database import SessionLocal
+        from app.models.base import IngestedDocument
+
+        with SessionLocal() as session:
+            stmt = select(IngestedDocument).where(
+                (IngestedDocument.id == UUID(document_id))
+                & (IngestedDocument.project_id == UUID(project_id))
+            )
+            doc = session.execute(stmt).scalar_one_or_none()
+            if not doc:
+                logger.warning(
+                    "pipeline_ingest.document_not_found",
+                    document_id=document_id,
+                    project_id=project_id,
+                )
+                return False
+            # Se status não é 'processing', já foi analisado (sucesso/erro)
+            is_analyzed = doc.arguider_status != "processing"
+            if is_analyzed:
+                logger.info(
+                    "pipeline_ingest.document_status",
+                    document_id=document_id,
+                    status=doc.arguider_status,
+                )
+            return is_analyzed
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "pipeline_ingest.idempotency_check_failed",
+            document_id=document_id,
+            error=str(exc)[:100],
+        )
+        return False  # fail-open: melhor rodar 2x que não rodar
+
+
 def _try_claim_task_lease(key: str, ttl_seconds: int = _LEASE_TTL_SECONDS) -> bool:
     """Retorna True se esta execução claimou o slot; False se outra já
     claimou nos últimos `ttl_seconds`. Nunca levanta — se o Redis estiver
@@ -141,9 +188,26 @@ def pipeline_ingest_task(self, document_id: str, project_id: str, file_type: str
         Exceptions do domínio (análise inválida, quarentena) são
         registradas no arguider_status do doc e NÃO disparam retry —
         já são tratadas por `_analyze_async` via status='error'.
+
+    MVP 29.1 Hardening: Idempotência por document_id. Se task é redistribuída
+    após worker death, check inicial garante que não processa 2x.
     """
     import time
     t0 = time.time()
+
+    # MVP 29.1 — Idempotência guard: check se doc já foi processado
+    if _check_document_already_analyzed(document_id, project_id):
+        logger.info(
+            "pipeline_ingest_task.idempotent_skip",
+            document_id=document_id,
+            project_id=project_id,
+            reason="document_already_analyzed",
+        )
+        return {
+            "status": "ok_idempotent",
+            "document_id": document_id,
+            "duration_ms": 0,
+        }
 
     try:
         _run_coro_isolated(_run_analyze_async(document_id, project_id, file_type))
