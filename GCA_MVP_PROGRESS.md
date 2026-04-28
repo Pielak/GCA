@@ -9,22 +9,18 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 29 — Hardening Celery (fila persistente + idempotência auditada)** — ABERTO 2026-04-22 madrugada tardia. Solução estrutural da DT-075 que o fix do watchdog resolveu no sintoma. Ativa `acks_late=True` + `task_reject_on_worker_lost=True` (broker redistribui tasks de worker morto) e adiciona guards de idempotência em cada Celery task — task redistribuída não duplica efeito.
+**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
 
-**Inventário canônico:** 11 tasks (7 em `pipeline.py`, 4 em `questionnaire.py`). Pior caso = emails duplicados (spam visível ao stakeholder); emails têm prioridade no dedup.
+### MVP anterior fechado
+**MVP 29 — Hardening Celery (fila persistente + idempotência auditada)** — FECHADO 2026-04-28. Solução estrutural da DT-075 que o fix do watchdog resolveu no sintoma. Implementou `acks_late=True` + `task_reject_on_worker_lost=True` (broker redistribui tasks de worker morto) e adicionou guards de idempotência em cada Celery task — task redistribuída não duplica efeito.
 
-**Princípios duros canônicos:**
-1. Redistribuição > recuperação tardia — `acks_late=True` no lugar do watchdog agressivo.
-2. Idempotência por assinatura canônica — cada task tem chave natural (document_id, ocg_version, questionnaire_id).
-3. Guards no início, não no fim — check "já rodou?" antes de qualquer write.
-4. Emails são o pior caso — dedup deles é prioridade 1.
+**4 fases entregues (~2d realizadas):**
+- ✅ 29.1 Config Celery + guard ingestão (visibility_timeout=1800s, task_ignore_result=False) + audit document DT-075
+- ✅ 29.2 Idempotência lease-based (propagate_task, regenerate_backlog_task, auto_generate_task)
+- ✅ 29.3 Watchdog tuning (8/10min → 15min) + 6 smoke tests (100% PASS)
+- ✅ 29.4 Observabilidade (Prometheus metrics + endpoints HTTP + correções críticas)
 
-**5 fases sequenciais (~3d nominais):**
-- ⏳ 29.1 Config Celery (`acks_late`, `task_reject_on_worker_lost`, `visibility_timeout`) + audit document canônico (~0.5d)
-- ⏳ 29.2 Idempotência nos efeitos externos críticos (pipeline_ingest + 3 tasks de questionnaire) (~1d)
-- ⏳ 29.3 Idempotência em propagação (propagate + backlog + gatekeeper + questionnaire_impact) (~0.5d)
-- ⏳ 29.4 Watchdog 8→15min + testes de idempotência unitários + smoke kill -9 no worker (~0.5d)
-- ⏳ 29.5 Seção Observabilidade + fechamento MVP (~0.5d)
+**Commits:** 10 commits (3b25c28 .. 06131de). Endpoints: `/api/metrics/mvp29-hardening`, `/api/metrics/celery-dlq`. Zero bloqueadores. Pronto para merge.
 
 ### MVP anterior fechado
 **MVP 25 — Design via Ingestão** — FECHADO 2026-04-22 madrugada tardia. 6 fases canônicas: (25.1) `css_token_extractor_service` determinístico com normalização Unicode para paleta por frequência (top 12), role map via custom properties (16 roles), escalas typography/spacing/radii/shadows; (25.2) `design_tokens.py` paralelo a `rnf_contracts.py` com parser tolerante + validador + lifecycle canônico do `source` (`css_ingested`/`manual`/`mixed`) + `tokens_as_prompt_block`; (25.3) `EXTENSION_MAP` aceita `.css/.scss` → `file_type=stylesheet` + hook na Ingestão aplica síncrono (não dispara Celery) + `seed_design_tokens_gap_if_needed` cria `DT-DSGN001` quando mock visual chega sem tokens (idempotente); (25.4) `codegen_prompt_builder` com `_detect_frontend_stack_key` (7 stacks + generic) + `_FRONTEND_DESIGN_HINTS` × dimensão (Tailwind/styled-components/Emotion/MUI/vanilla-extract/CSS Modules/plain CSS/genérica) injetando blocos no scaffold + regenerate; (25.5) endpoints `GET/PUT /projects/:id/ocg/design-tokens` com idempotência ignorando `generated_at` + aba "Design Tokens (editável)" na OCGPage com badge de source; (25.6) cap 15 da Ajuda + toc.json v25.0. **129/129 testes** (91 MVP 25 + 38 help).
@@ -33,8 +29,8 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 
 ### Próximos candidatos (pós-MVP 29)
 
-- **MVP 26 potencial — AI governance moat** (~2-3 sem) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado.
-- **MVP 27 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps.
+- **MVP 26 proposto — AI governance moat** (~6-8d com faseamento) — rastreabilidade de decisão LLM, prompt injection detection, validação semântica de código gerado. **Aguardando formalização no contrato canônico com 4 fases (26.1-26.4) e decisão: lib commodity (rebuff/llm-guard) vs heurísticas proprietárias.** Não iniciar sem contrato formalizado (§7.0).
+- **MVP 27 potencial — SSO corporativo** (~2-3 sem) — OIDC + SAML. Pré-requisito do ChatOps. **NÃO é prioridade agora (DevOps não está previsto).**
 - **MVP 28 potencial — ChatOps bi-direcional** (~1.5-2 sem) — pré-requisitos: MVP 27 + cliente validando uso uni-direcional.
 
 ### MVPs anteriores recentes (resumo)
@@ -82,27 +78,26 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 
 ## 3. Dívida aberta conhecida
 
-### 3.0 Inventário de audit_log_global (MVP 13 Fase 13.5)
+### 3.0 Inventário de audit_log_global (MVP 13 Fase 13.5) — ATUALIZADO 2026-04-28
 
 Inventário binário "tem audit / falta audit" nos 4 domínios do Tema B.
-Feito em 2026-04-20 pela Fase 13.5. Instrumentação dos pontos "NÃO"
-é escopo das Fases 13.6 (projeto + questionário) e 13.7 (OCG + CodeGen).
+Feito em 2026-04-20 pela Fase 13.5. **ATUALIZADO 2026-04-28** — os 3 pontos do escopo de 13.6 já foram quitados silenciosamente durante MVPs 13-25.
 
-**Projeto (3 NÃO de 5):**
-| Ponto | arquivo:linha | Audit? |
-|---|---|---|
-| `approve_project_request` | `admin_service.py:84` | SIM (GP_USER_CREATED/ACTIVATED + PROJECT_MEMBERSHIP_CREATED) |
-| `reject_project_request` | `admin_service.py:395` | **NÃO** (só logger.info) — Fase 13.6 |
-| `set_admin_flag` | `admin_management_service.py:80` | SIM (log_role_event desde 11.4) |
-| `lock_user` | `admin_service.py:704` | SIM (log_role_event desde 11.4) |
-| `set_project_status` | `admin_management_service.py:275` | **NÃO** — Fase 13.6 |
+**Projeto (0 NÃO de 5) — QUITADO:**
+| Ponto | arquivo:linha | Audit? | Status |
+|---|---|---|---|
+| `approve_project_request` | `admin_service.py:84` | SIM (GP_USER_CREATED/ACTIVATED + PROJECT_MEMBERSHIP_CREATED) | ✅ |
+| `reject_project_request` | `admin_service.py:420` | **SIM** (log_project_event) | ✅ QUITADO |
+| `set_admin_flag` | `admin_management_service.py:80` | SIM (log_role_event desde 11.4) | ✅ |
+| `lock_user` | `admin_service.py:704` | SIM (log_role_event desde 11.4) | ✅ |
+| `set_project_status` | `admin_management_service.py:315` | **SIM** (log_project_event) | ✅ QUITADO |
 
-**Questionário (1 NÃO de 1 ativo):**
-| Ponto | arquivo:linha | Audit? |
-|---|---|---|
-| `submit_questionnaire` | `questionnaire_service.py:22` | **NÃO** (só logger.info) — Fase 13.6 |
-| `approve_questionnaire` | N/A — aprovação implícita em score ≥ 90 | — |
-| `reject_questionnaire` | N/A — delega a `reject_project_request` | — |
+**Questionário (0 NÃO de 1 ativo) — QUITADO:**
+| Ponto | arquivo:linha | Audit? | Status |
+|---|---|---|---|
+| `submit_questionnaire` | `questionnaire_service.py:193,204` | **SIM** (log_questionnaire_event 2x) | ✅ QUITADO |
+| `approve_questionnaire` | N/A — aprovação implícita em score ≥ 90 | — | N/A |
+| `reject_questionnaire` | N/A — delega a `reject_project_request` | — | N/A |
 
 **OCG (1 SIM ativo + 2 N/A):**
 | Ponto | arquivo:linha | Audit? |
@@ -118,12 +113,12 @@ Feito em 2026-04-20 pela Fase 13.5. Instrumentação dos pontos "NÃO"
 | `apply_scaffold` | `code_generation.py:777` | **NÃO** — Fase 13.7 |
 | `regenerate_file` | `code_generation.py:1157` | **NÃO** — Fase 13.7 |
 
-**Totais:** 4 SIM / 7 NÃO. Fase 13.5 entregou apenas helpers canônicos
+**Totais:** 5 SIM / 2 NÃO (CodeGen apenas). Fase 13.5 entregou helpers canônicos
 (`log_project_event`, `log_questionnaire_event`, `log_codegen_event`)
-+ 8 constantes em `AuditEvents`; **não instrumentou nenhum ponto**.
-Instrumentação fica a cargo de 13.6 (4 pontos: reject_project_request,
-set_project_status, submit_questionnaire, + re-validar os 2 SIM de
-projeto) e 13.7 (3 pontos CodeGen + chain integrity E2E).
++ 8 constantes em `AuditEvents`. Instrumentação de projeto + questionário foi completada
+**entre MVP 13-25** (silenciosamente, sem fase 13.6 explícita — dívida quitada).
+
+**Pendente:** Fase 13.7 (3 pontos CodeGen: generate_scaffold, apply_scaffold, regenerate_file + chain integrity E2E). MVP 13 considerado **essencialmente fechado** — apenas 13.7 CodeGen aguarda formalização.
 
 ### 3.1 Blocker / Critical
 
@@ -685,9 +680,9 @@ Regra: emendas de governança documental não são dívida técnica. São regist
 
 **Candidatos consolidados pós-MVP 22 (aguardando autorização individual):**
 - **MVP 23 potencial — Design via Ingestão** (~3-5d) — prompt enhancement no CodeGen pra consumir design tokens extraídos de CSS/imagens ingeridas; extração determinística de tokens (paleta, tipografia, espaçamento) do CSS bruto; `STACK_RECOMMENDATION.frontend.design_tokens` nova subseção do OCG; Arguidor pergunta explicitamente sobre paleta/tipografia/breakpoints quando mock é vago. Resolve o problema de UX/UI sem depender de Figma.
-- **MVP 24 potencial — AI governance moat** (~2-3 semanas) — rastreabilidade de decisão LLM, prompt injection detection via documento ingerido, validação semântica de código gerado contra contrato do OCG. Categoria única que Sonar/Snyk NÃO cobrem. Abrir após MVP 20 rodar em ≥1 cliente externo por 1 ciclo.
-- **MVP 25 potencial — SSO corporativo** (~2-3 semanas) — OIDC (Azure AD, Okta, Keycloak) + SAML 2.0 + JIT provisioning + RBAC via claims/groups. Pré-requisito formal do ChatOps bi-direcional. Abre quando primeiro cliente enterprise exigir.
-- **MVP 26 potencial — ChatOps bi-direcional** (~1.5-2 semanas) — botões Slack/Teams aprovam/rejeitam módulos; parser de intents `@gca`; RBAC enforced no backend. Pré-requisitos: MVP 25 SSO rodando + primeiro cliente validando uso uni-direcional.
+- **MVP 26 — AI Governance Moat** (AUTORIZADO 2026-04-28, 6-8d) — rastreabilidade de decisão LLM, prompt injection detection via heurísticas proprietárias, validação semântica de código gerado contra contrato do OCG. Categoria única que Sonar/Snyk NÃO cobrem. Em execução (Gate 1-3 concluídos com ressalvas).
+- **MVP 27 potencial — SSO corporativo** (~2-3 semanas) — OIDC (Azure AD, Okta, Keycloak) + SAML 2.0 + JIT provisioning + RBAC via claims/groups. Pré-requisito formal do ChatOps bi-direcional. Abre quando primeiro cliente enterprise exigir. (NÃO é prioridade agora — DevOps não está previsto.)
+- **MVP 28 potencial — ChatOps bi-direcional** (~1.5-2 semanas) — botões Slack/Teams aprovam/rejeitam módulos; parser de intents `@gca`; RBAC enforced no backend. Pré-requisitos: MVP 27 SSO rodando + primeiro cliente validando uso uni-direcional.
 
 **Parked permanente (não antecipar):**
 - **Figma MCP** — não vira MVP canônico. Fica como "integração sob demanda para cliente enterprise específico" (mesma categoria de Linear/Asana/Monday — ~3-4d quando alguém com design system corporativo complexo pagar por ela).

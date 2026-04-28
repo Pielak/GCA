@@ -860,6 +860,100 @@ Os três temas compartilham a mesma tese arquitetural — **"GCA como hub que co
 - Não permitir que modelo barato/local tome decisão oficial crítica sozinho.
 - Não avançar para o próximo MVP enquanto o gate da fase atual estiver fechado.
 
+### MVP 26 — AI Governance Moat: Rastreabilidade LLM + Detecção de Prompt Injection + Validação Semântica de Código
+
+**Data de abertura:** 2026-04-28  
+**Duração estimada:** 6-8 dias úteis (4 fases, ~2d cada)  
+**Pré-requisitos:** MVP 29 fechado (Celery idempotente para audit confiável)
+
+#### Em escopo
+
+1. **Fase 26.1 — Rastreabilidade de Decisão LLM (~2d)**
+   - Estender `AIUsageLog` com campos novos: `temperature NUMERIC(4,2)`, `prompt_version VARCHAR(255)`, `decision_type` ∈ {ARGUIDER_ANALYSIS, CODEGEN_GENERATION, OCG_CONSOLIDATION, ERS_GENERATION}. (Campos `input_hash`/`output_hash` já existem em `OCGAnalysisLog`; Arguider usa mesmo padrão.)
+   - Audit automático em `arguider_service.py` quando LLM é chamado: registra qual modelo, temperatura, versão de prompt via nova entrada em `AIUsageLog`.
+   - Audit em `code_generation.py` quando CodeGen executa: registra qual modelo/provider, qual linguagem, quantos módulos gerados em `AIUsageLog`.
+   - Audit em `ocg_consolidation.py` quando OCG é consolidado: registra qual modelo usou pra arbitragem em `AIUsageLog`.
+   - Endpoint novo: `GET /api/audit/llm-decisions?project_id=X&start_date=Y&end_date=Z` → lista de decisões LLM via join `AIUsageLog ⟵ GlobalAuditLog` com filtro por `project_id`.
+   - **Regra dura:** sem escrita na auditoria = sem chamada de LLM (fail-closed). NFR: latência de `log_llm_decision()` ≤ 50ms p95 em DB normal; se >200ms, LLM call falha com erro explícito.
+
+2. **Fase 26.2 — Detecção de Prompt Injection (~2d)**
+   - Integração com **heurísticas proprietárias** (decisão registrada: opção 2, controle total vs lib commodity).
+   - Detector determinístico integrado em `arguider_service.py` **antes** da chamada ao LLM: se input é detectado como injeção, loga flag `prompt_injection_detected=true` e muda comportamento para um de:
+     - **Modo restritivo** (padrão): bloqueia ingestão, retorna erro claro "Input contém padrões suspeitos"; evento vai para `GlobalAuditLog` com `event_type=PROMPT_INJECTION_BLOCKED`.
+     - **Modo permissivo** (config por projeto): processa mas marca flag de risco em tudo que sair (código gerado recebe comentário `// Generated with prompt injection risk flag`).
+   - Testes: payload de injeção fake é detectado; payload limpo passa; comutação de modo funciona; compartimentalização preservada.
+
+3. **Fase 26.3 — Validação Semântica de Código Gerado (~2d)**
+   - Extensão de `rnf_validation_service.py` (MVP 23.4 existente, função pura): novo método `validate_business_rules(generated_code, business_rules: list[dict]) → RnfValidationReport`.
+   - Validação: código gerado respeita `BUSINESS_RULES` (MVP 23 já entregue) e `RNF_CONTRACTS` (MVP 23 já entregue)?
+   - Exemplos de violações detectáveis:
+     - Função gerada sem tratamento de erro, mas `RNF_CONTRACTS` exige error-handling obrigatório.
+     - Módulo gerado sem logs estruturados, mas `BUSINESS_RULES` exige auditoria em cada transação.
+     - Variable naming gerado não segue convenção (ex: camelCase quando `BUSINESS_RULES` exige snake_case).
+   - Nível de severidade: HIGH (bloqueia merge), MEDIUM (aviso, permite merge), LOW (info apenas).
+   - Integração: após CodeGen completar, dispara validação automática. Se HIGH: status `generated_module.status=REVIEW_REQUIRED` + notificação GP. Se MEDIUM/LOW: log só.
+   - Comportamento gracioso: se `business_rules=[]` ou `ocg.business_rules` vazio, retorna `[]` (sem violações, sem erro).
+   - Testes: violação real é detectada; code pass validation não gera falso-positivo; compartimentalização preservada.
+
+4. **Fase 26.4 — Endpoint de Observabilidade + Dogfood (~1-2d)**
+   - Novo endpoint: `GET /api/metrics/ai-governance?project_id=X` → JSON com:
+     ```json
+     {
+       "status": "ok",
+       "timestamp": "ISO-8601",
+       "metrics": {
+         "total_llm_decisions": N,
+         "decisions_by_model": {"gpt-4": M, "claude-3": K, ...},
+         "prompt_injections_detected": N,
+         "prompt_injections_blocked": N,
+         "code_validation_violations": {"HIGH": N, "MEDIUM": K, "LOW": L},
+         "audit_entries_last_24h": N
+       }
+     }
+     ```
+   - RBAC: Admin + GP do projeto.
+   - Smoke live: rodar Arguider, ver LLM decision no audit; tentar injetar prompt, ver bloqueio ou flag; gerar código, validar contra BUSINESS_RULES, ver resultado.
+   - Atualizar Ajuda: capítulo novo **"Governança de IA"** cobrindo: como ler audit de decisões LLM, como interpretar detecção de injection, como validar código semanticamente, como usar endpoint de métricas.
+
+#### Fora de escopo
+
+- **Prompt versioning avançado** (ex: git-like diffs de prompts) — fica para MVP 27+.
+- **Remediation automática** (ex: regenerar código com constraint novo) — manual primeiro, automação depois.
+- **Modelos proprietários de injection detection** — usar lib commodity.
+- **Fine-tuning de modelo Arguider** — fora de escopo.
+- **Compliance automation** (ex: gerar relatórios LGPD automáticos) — separate MVP.
+
+#### Regras duras de 26
+
+- **Decisão registrada (2026-04-28):** heurísticas proprietárias (opção 2). Integração determinística em lugar de lib commodity. Controle total, customização para RNF_CONTRACTS GCA.
+- **NFRs numéricos obrigatórios:**
+  - Latência `log_llm_decision()` síncrona: ≤ 50ms p95 em DB normal; >200ms → LLM call falha com erro explícito.
+  - Latência `GET /api/metrics/ai-governance?project_id=X`: ≤ 300ms p95 para projetos com ≤50k audit entries.
+  - False-positive rate em injection detection: < 5% em fixture canônica de 40+ payloads (20+ clean, 20+ injection).
+  - Cobertura de padrões de injeção: mínimo 8 categorias (prompt override, role injection, jailbreak, context poisoning, indirect, SQL, code, etc).
+- **Stop-rule dura: ≤2d por fase**. Se qualquer fase passar de 2d, pausar e reportar blocker.
+- §10 aplicável: zero refactor em Arguidor/CodeGen/OCG updater além da integração estrita de audit.
+- Sem LLM no caminho crítico da validação — detector de injection é determinístico (heurísticas proprietárias).
+- Compartimentalização §2.2 preservada: audit de projeto A nunca vaza em audit de projeto B.
+- **Cada fase exige revalidação §9 (gate) antes da próxima.**
+
+#### Critério de aceite (quando 26 completo)
+
+- ✅ Audit estendido funciona: `AIUsageLog` persiste `temperature`, `prompt_version`, `decision_type` em Arguider/CodeGen/OCG updater.
+- ✅ Prompt injection detector integrado e operacional (modo restritivo ou permissivo configurável). False-positive rate < 5% em fixture canônica.
+- ✅ Validação semântica funciona contra BUSINESS_RULES + RNF_CONTRACTS via `rnf_validation_service.validate_business_rules()`.
+- ✅ Endpoint `/api/metrics/ai-governance` retorna JSON válido, latência ≤ 300ms p95.
+- ✅ Testes: suite baseline ~1800+ tests + 40+ novos, 100% cobertura de métodos novos, distribuídos por fase (26.1 ≥10, 26.2 ≥12, 26.3 ≥12, 26.4 ≥8).
+- ✅ Zero regressão: suite existente ≥ baseline sem degradação.
+- ✅ tsc frontend = 0.
+- ✅ Ajuda atualizada com novo capítulo "Governança de IA", indexado em FTS5.
+- ✅ Zero DTs abertas no fim do MVP.
+
+#### Próximos candidatos após 26
+
+- **MVP 27 potencial — SSO corporativo** (OIDC + SAML). NÃO é prioridade agora (DevOps não está previsto).
+- **MVP 28 potencial — ChatOps bi-direcional** (Slack/Teams aprovação de módulos). Pré-req: MVP 27.
+
 ---
 
 ## 10. Constraint de escopo e anti-alucinação
