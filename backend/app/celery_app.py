@@ -125,16 +125,18 @@ celery_app.conf.update(
     # Sem isso, docs presos em 'processing' só eram limpos no restart do
     # backend. Agora é independente — sobrevive a uptimes longos do
     # backend e cobre falhas silenciosas do worker.
+    # MVP 29.3: Aumentar threshold para ser mais conservador.
+    # visibility_timeout=1800s (30min) → watchdog marca zombie após 15min.
     beat_schedule={
         "watchdog-ingestion-zombies": {
             "task": "app.tasks.pipeline.watchdog_ingestion_zombies",
             "schedule": 300.0,  # 5 minutos
-            "args": (8,),  # threshold_minutes
+            "args": (15,),  # threshold_minutes — MVP 29.3: 8→15 (alinhado com visibility_timeout)
         },
         "watchdog-scaffold-zombies": {
             "task": "app.tasks.scaffold.watchdog_scaffold_zombies",
             "schedule": 300.0,  # 5 minutos
-            "args": (10,),  # threshold_minutes — re-enfileira após 10 min sem progresso
+            "args": (15,),  # threshold_minutes — MVP 29.3: 10→15 (conservador, leave room for recovery)
         },
     },
 )

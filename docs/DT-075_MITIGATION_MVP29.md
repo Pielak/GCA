@@ -67,21 +67,20 @@ Implementar guards similares em:
 - Fail-open: Redis inacessível → executa (melhor 2x que travar)
 - Commit: `63d9538`
 
-### 29.3 — Idempotência em Propagação (0.5d)
-Lease-based dedup:
-- `_try_claim_task_lease()` — SET NX EX no Redis
-- Tasks de propagação que já rodam: propagate + backlog + gatekeeper
-- TTL 10min — task só roda 1x por janela
-
-### 29.4 — Watchdog + Smoke Tests (0.5d)
+### 29.3 — Watchdog + Smoke Tests (0.5d)
+Refinar watchdog e validar idempotência end-to-end:
 - Watchdog: 300s (5min) → 900s (15min) threshold
 - Testes de idempotência unitários
-- Smoke kill -9 no worker mid-task
+- Smoke kill -9 no worker mid-task para validar recovery
 
-### 29.5 — Observabilidade + Fechamento (0.5d)
+### 29.4 — Observabilidade + Fechamento (0.5d)
 - Prometheus metrics: task redistributions, idempotent skips
 - Docs de DT-075 no help
 - Testes regressivos
+- Merge final para produção
+
+**Nota:** MVP 29.2 consolidou original 29.2+29.3 (lease-based dedup em 3 tasks).
+MVP 29.3 agora cobre watchdog tuning + smoke tests (original 29.4).
 
 ---
 
