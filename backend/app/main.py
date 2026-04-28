@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 import structlog
 from app.core.config import settings
 from app.db.database import init_db
-from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, admin_gca_router, setup, qa_router, external_repos_router, notifications_router, deliverables_router, public_requests_router, metrics as metrics_router
+from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, admin_gca_router, setup, qa_router, external_repos_router, notifications_router, deliverables_router, public_requests_router
 from app.routers.initial_questionnaire_router import router as initial_questionnaire_router
 from app.routers.technical_questionnaire_router import router as technical_questionnaire_router
 from app.routers.admin_gp_router import router as admin_gp_router
@@ -22,7 +22,7 @@ from app.routers.figma_router import router as figma_router
 from app.routers.preview_router import router as preview_router
 from app.routers.pipeline_orchestration_router import router as pipeline_orchestration_router
 from app.routers.questionnaire_pdf_router import router as questionnaire_pdf_router
-from app.routers.metrics_router import router as metrics_router, project_router as metrics_project_router
+from app.routers.metrics import router as metrics_router
 from app.routers.backup_router import (
     router as backup_project_router,
     admin_router as backup_admin_router,
@@ -246,7 +246,6 @@ app.include_router(preview_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(pipeline_orchestration_router, prefix=f"{settings.API_PREFIX}")
 app.include_router(questionnaire_pdf_router, prefix=f"{settings.API_PREFIX}", tags=["questionnaire-pdf"])
 app.include_router(metrics_router, prefix=f"{settings.API_PREFIX}", tags=["metrics"])
-app.include_router(metrics_project_router, prefix=f"{settings.API_PREFIX}", tags=["project-metrics"])
 app.include_router(backup_project_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
 app.include_router(backup_admin_router, prefix=f"{settings.API_PREFIX}", tags=["admin-backups"])
 app.include_router(backup_status_router, prefix=f"{settings.API_PREFIX}", tags=["backups"])
@@ -265,7 +264,7 @@ app.include_router(iterative_questionnaire_router, prefix=f"{settings.API_PREFIX
 app.include_router(initial_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["initial-questionnaire"])
 app.include_router(technical_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["technical-questionnaire"])
 app.include_router(applied_defaults_router, prefix=f"{settings.API_PREFIX}", tags=["applied-defaults"])
-app.include_router(metrics_router.router, tags=["metrics"])
+app.include_router(metrics_router, tags=["metrics"])
 
 
 @app.get("/health")

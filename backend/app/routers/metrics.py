@@ -27,10 +27,11 @@ async def get_mvp29_hardening_metrics():
     - High idempotent skips → normal, expected in MVP 29
     - High failure rate → investigate task errors
     """
+    from datetime import datetime, timezone
     metrics = get_metrics()
     return {
         "status": "ok",
-        "timestamp": "2026-04-28T00:00:00Z",  # TODO: adicionar timestamp real
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "metrics": metrics,
     }
 
