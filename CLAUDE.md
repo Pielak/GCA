@@ -33,6 +33,25 @@ Para estado atual do MVP, ver `GCA_MVP_PROGRESS.md`. Para histórico, ver `docs/
 
 ---
 
+## Estrutura de Diretórios — GCA + Projetos
+
+**Padrão estabelecido:** Separação clara entre codebase do GCA e dados de projetos.
+
+```
+/home/luiz/
+├── GCA/              # ← Codebase + documentação (este repo)
+└── projetos/         # ← Dados de projetos (isolado do GCA)
+    ├── projeto-1/
+    ├── projeto-2/
+    └── ...
+```
+
+**Regra:** Novos projetos devem ser criados em `/home/luiz/nome-do-projeto`.
+
+Ver `docs/PROJECT_CREATION_GUIDE.md` para instruções completas.
+
+---
+
 ## Antes de qualquer trabalho
 
 1. Ler `GCA_CANONICAL_CONTRACT.md` — fonte soberana para decisões formais.
