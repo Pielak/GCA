@@ -119,21 +119,21 @@ function ParticleCanvas() {
 
 const FEATURES = [
   {
-    id: 'pilares',
-    icon: '🛡️',
-    label: '7 Pilares',
-    summary: 'Gatekeeper documental',
-    detail: 'Cada projeto passa por avaliação em 7 dimensões: Negócio, Compliance, Escopo, NFR, Arquitetura, Dados e Segurança. Scores abaixo de 70% em Segurança ou Compliance bloqueiam todo o pipeline.',
-    gradient: 'from-violet-600/20 to-purple-600/20',
-    border: 'border-violet-500/30',
-    glow: 'hover:shadow-[0_0_30px_rgba(139,92,246,0.15)]',
+    id: 'personas',
+    icon: '👥',
+    label: '5 Personas',
+    summary: 'Governança por função',
+    detail: 'Admin (instância), Gerente de Projetos (escopo), Arquiteto (design), DBA (dados), Dev Sênior (implementação), Tester-QA (qualidade). Cada persona valida seu domínio no fluxo Gatekeeper antes de avançar.',
+    gradient: 'from-blue-600/20 to-cyan-600/20',
+    border: 'border-blue-500/30',
+    glow: 'hover:shadow-[0_0_30px_rgba(59,130,246,0.15)]',
   },
   {
     id: 'ia',
     icon: '🧠',
     label: 'IA Assistida',
-    summary: '8 agentes especializados',
-    detail: 'Pipeline de 8 agentes IA trabalham em paralelo: Analyzer decompõe o problema, 7 especialistas avaliam cada pilar, Consolidator gera o OCG. Cada agente declara confiança e gaps encontrados.',
+    summary: 'Multi-linguagem',
+    detail: 'Suporte para TypeScript, Python, Go, Java, Kotlin, C#, SQL, Bash, YAML e mais. Cada linguagem tem especialista IA que entende padrões, convenções e melhores práticas do ecossistema. Análise cruzada em tempo real.',
     gradient: 'from-cyan-600/20 to-blue-600/20',
     border: 'border-cyan-500/30',
     glow: 'hover:shadow-[0_0_30px_rgba(6,182,212,0.15)]',
@@ -396,6 +396,15 @@ export function LoginPage() {
           <p className="text-slate-600 text-xs font-mono">v0.8.0</p>
         </div>
       </div>
+
+      {/* ═══ ADMIN ACCESS BUTTON — Top Right ═══ */}
+      <button
+        onClick={() => navigate('/admin')}
+        className="absolute top-6 right-6 z-20 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-lg transition-all transform hover:scale-105"
+      >
+        <Lock size={16} />
+        🔐 Admin
+      </button>
 
       {/* ═══ RIGHT PANEL — Login ═══ */}
       <div className="flex-1 flex flex-col items-center justify-center p-8 relative z-10">
