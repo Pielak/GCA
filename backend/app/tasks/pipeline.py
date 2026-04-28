@@ -191,12 +191,16 @@ def pipeline_ingest_task(self, document_id: str, project_id: str, file_type: str
 
     MVP 29.1 Hardening: Idempotência por document_id. Se task é redistribuída
     após worker death, check inicial garante que não processa 2x.
+    MVP 29.4: Observabilidade — metrics de idempotent skips.
     """
     import time
     t0 = time.time()
 
     # MVP 29.1 — Idempotência guard: check se doc já foi processado
     if _check_document_already_analyzed(document_id, project_id):
+        from app.metrics import on_idempotent_skip
+        on_idempotent_skip("pipeline_ingest_task", project_id, "document_already_analyzed")
+
         logger.info(
             "pipeline_ingest_task.idempotent_skip",
             document_id=document_id,
@@ -305,8 +309,12 @@ def propagate_task(self, project_id: str, changes: list, ocg_version) -> dict:
     MVP 29.2: Lease-based dedup pra evitar rodadas duplas após worker death.
     """
     # MVP 29.2 — Idempotência lease-based
+    # MVP 29.4 — Observabilidade de skips
     lease_key = _lease_key("propagate", project_id, ocg_version)
     if not _try_claim_task_lease(lease_key, ttl_seconds=600):
+        from app.metrics import on_idempotent_skip
+        on_idempotent_skip("propagate_task", project_id, "lease_already_claimed")
+
         logger.info(
             "propagate_task.idempotent_skip",
             project_id=project_id,
@@ -350,8 +358,12 @@ def regenerate_backlog_task(self, project_id: str, ocg_version, trigger: str) ->
     MVP 29.2: Lease-based dedup pra evitar rodadas duplas após worker death.
     """
     # MVP 29.2 — Idempotência lease-based
+    # MVP 29.4 — Observabilidade de skips
     lease_key = _lease_key("regenerate_backlog", project_id, ocg_version)
     if not _try_claim_task_lease(lease_key, ttl_seconds=600):
+        from app.metrics import on_idempotent_skip
+        on_idempotent_skip("regenerate_backlog_task", project_id, "lease_already_claimed")
+
         logger.info(
             "regenerate_backlog_task.idempotent_skip",
             project_id=project_id,
@@ -430,10 +442,14 @@ def auto_generate_task(self, project_id: str, updated_ocg: dict) -> dict:
     MVP 29.2: Lease-based dedup pra evitar rodadas duplas após worker death.
     """
     # MVP 29.2 — Idempotência lease-based
+    # MVP 29.4 — Observabilidade de skips
     # Usa ocg_version do payload ou timestamp/hash como fallback
     ocg_version = updated_ocg.get("version") or updated_ocg.get("updated_at")
     lease_key = _lease_key("auto_generate", project_id, ocg_version)
     if not _try_claim_task_lease(lease_key, ttl_seconds=600):
+        from app.metrics import on_idempotent_skip
+        on_idempotent_skip("auto_generate_task", project_id, "lease_already_claimed")
+
         logger.info(
             "auto_generate_task.idempotent_skip",
             project_id=project_id,
