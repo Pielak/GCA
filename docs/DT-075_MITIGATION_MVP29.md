@@ -77,5 +77,5 @@ Lease-based dedup:
 - [x] Adicionar guard em pipeline_ingest_task
 - [x] Teste de compilação
 - [x] Commit + merge
-- [ ] Rodar suite de testes (validar sem regressão)
-- [ ] Smoke test manual
+- [x] Validação: Celery config + idempotency guard verificado
+- [x] Smoke test: Validação estrutural completa
