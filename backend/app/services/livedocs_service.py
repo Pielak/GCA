@@ -113,7 +113,10 @@ class LiveDocsService:
 
             # Buscar documento ingerido
             result = await self.db.execute(
-                select(IngestedDocument).where(IngestedDocument.id == document_id)
+                select(IngestedDocument).where(
+                    (IngestedDocument.id == document_id) &
+                    (IngestedDocument.project_id == project_id)
+                )
             )
             doc = result.scalar_one_or_none()
             if not doc:
@@ -162,7 +165,10 @@ class LiveDocsService:
         """
         try:
             result = await self.db.execute(
-                select(GeneratedModule).where(GeneratedModule.id == module_id)
+                select(GeneratedModule).where(
+                    (GeneratedModule.id == module_id) &
+                    (GeneratedModule.project_id == project_id)
+                )
             )
             module = result.scalar_one_or_none()
             if not module:

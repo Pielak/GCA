@@ -517,7 +517,12 @@ async def generate_scaffold(
     doc_ids = [d.id for d in ingested_docs]
     arguider_analyses = []
     if doc_ids:
-        analyses_result = await db.execute(select(ArguiderAnalysis).where(ArguiderAnalysis.document_id.in_(doc_ids)))
+        analyses_result = await db.execute(
+            select(ArguiderAnalysis).where(
+                (ArguiderAnalysis.document_id.in_(doc_ids)) &
+                (ArguiderAnalysis.project_id == project_id)
+            )
+        )
         arguider_analyses = analyses_result.scalars().all()
 
     # 4. Construir prompt abrangente

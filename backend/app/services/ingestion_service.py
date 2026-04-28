@@ -1521,7 +1521,10 @@ class IngestionService:
 
                         # Carregar análise do Arguidor
                         arguider_result = await db.execute(
-                            select(ArguiderAnalysis).where(ArguiderAnalysis.document_id == document_id)
+                            select(ArguiderAnalysis).where(
+                                (ArguiderAnalysis.document_id == document_id) &
+                                (ArguiderAnalysis.project_id == project_id)
+                            )
                         )
                         analysis = arguider_result.scalar_one_or_none()
                         analysis_data = {}
@@ -1760,7 +1763,10 @@ class IngestionService:
 
         # Buscar análise
         analysis_result = await self.db.execute(
-            select(ArguiderAnalysis).where(ArguiderAnalysis.document_id == document_id)
+            select(ArguiderAnalysis).where(
+                (ArguiderAnalysis.document_id == document_id) &
+                (ArguiderAnalysis.project_id == project_id)
+            )
         )
         analysis = analysis_result.scalar_one_or_none()
         if analysis:

@@ -342,7 +342,10 @@ async def evaluate_convergence_after_ocg_update(
     """Chamado pelo OCG Updater quando o doc fonte do update é uma resposta de iteração."""
     iter_result = await db.execute(
         select(CustomQuestionnaireIteration)
-        .where(CustomQuestionnaireIteration.answer_document_id == trigger_document_id)
+        .where(
+            (CustomQuestionnaireIteration.answer_document_id == trigger_document_id) &
+            (CustomQuestionnaireIteration.project_id == project_id)
+        )
         .order_by(desc(CustomQuestionnaireIteration.iteration))
         .limit(1)
     )

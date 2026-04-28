@@ -513,7 +513,10 @@ class ArguiderService:
         try:
             # Atualizar status
             doc = await self.db.execute(
-                select(IngestedDocument).where(IngestedDocument.id == document_id)
+                select(IngestedDocument).where(
+                    (IngestedDocument.id == document_id) &
+                    (IngestedDocument.project_id == project_id)
+                )
             )
             document = doc.scalar_one_or_none()
             if document:
@@ -664,7 +667,10 @@ class ArguiderService:
             # bateria em duplicate key. Fix: checar se existe e atualizar
             # in-place; caso contrário, criar.
             existing_analysis = (await self.db.execute(
-                select(ArguiderAnalysis).where(ArguiderAnalysis.document_id == document_id)
+                select(ArguiderAnalysis).where(
+                    (ArguiderAnalysis.document_id == document_id) &
+                    (ArguiderAnalysis.project_id == project_id)
+                )
             )).scalar_one_or_none()
 
             analysis_fields = {
