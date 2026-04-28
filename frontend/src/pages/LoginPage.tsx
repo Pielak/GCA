@@ -6,6 +6,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
 import { apiClient as api } from '@/lib/api'
 import { getErrorMessage, type ApiError } from '@/lib/errors'
+import { AnimatedGearsBackground } from '@/components/AnimatedGearsBackground'
 
 // ═══════════════════════════════════════════════════════════════════════
 // Particle Network — canvas animado de fundo
@@ -283,27 +284,27 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex bg-[#06060e] overflow-hidden relative">
-      {/* ── Particle network background ── */}
-      <div className="absolute inset-0 z-0">
-        <ParticleCanvas />
+    <div className="min-h-screen flex bg-[#0f0f1e] overflow-hidden relative">
+      {/* ── Animated gears background ── */}
+      <div className="absolute inset-0 z-0 lg:w-[55%]">
+        <AnimatedGearsBackground />
       </div>
 
-      {/* ── Gradient overlays ── */}
-      <div className="absolute inset-0 z-[1] bg-gradient-to-br from-violet-950/30 via-transparent to-cyan-950/20 pointer-events-none" />
-      <div className="absolute bottom-0 left-0 right-0 h-1/3 z-[1] bg-gradient-to-t from-[#06060e] to-transparent pointer-events-none" />
+      {/* ── Gradient overlays (tech-forward: ciano + dark) ── */}
+      <div className="absolute inset-0 z-[1] bg-gradient-to-br from-slate-950/40 via-transparent to-cyan-950/15 pointer-events-none" />
+      <div className="absolute bottom-0 left-0 right-0 h-1/3 z-[1] bg-gradient-to-t from-[#0f0f1e] to-transparent pointer-events-none" />
 
-      {/* ── Animated glow orbs ── */}
-      <div className="absolute top-[15%] left-[20%] w-[500px] h-[500px] rounded-full z-[1] pointer-events-none"
-        style={{
-          background: 'radial-gradient(circle, rgba(112,56,224,0.08) 0%, transparent 70%)',
-          animation: 'breathe 8s ease-in-out infinite',
-        }}
-      />
-      <div className="absolute bottom-[10%] right-[15%] w-[400px] h-[400px] rounded-full z-[1] pointer-events-none"
+      {/* ── Animated glow orbs (tech-forward: ciano) ── */}
+      <div className="absolute top-[15%] left-[10%] w-[600px] h-[600px] rounded-full z-[1] pointer-events-none"
         style={{
           background: 'radial-gradient(circle, rgba(0,184,204,0.06) 0%, transparent 70%)',
-          animation: 'breathe 10s ease-in-out infinite 3s',
+          animation: 'breathe 12s ease-in-out infinite',
+        }}
+      />
+      <div className="absolute bottom-[5%] right-[5%] w-[500px] h-[500px] rounded-full z-[1] pointer-events-none"
+        style={{
+          background: 'radial-gradient(circle, rgba(34,197,94,0.04) 0%, transparent 70%)',
+          animation: 'breathe 14s ease-in-out infinite 2s',
         }}
       />
 
