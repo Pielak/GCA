@@ -10,6 +10,7 @@ import { useProjectPermissions } from '@/hooks/useProjectPermissions'
 import { useIterativeQuestionnaireStatus } from '@/hooks/useIterativeQuestionnaireStatus'
 import { ReadOnlyBanner } from '@/components/ui/ReadOnlyBanner'
 import { useAuthStore } from '@/stores/authStore'
+import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
 import { CodeGenProgressOverlay } from '@/components/global/CodeGenProgressOverlay'
 
 interface ProjectHeader {
@@ -64,6 +65,11 @@ export function ProjectDetailLayout() {
   const { can, role, roles, isReadOnly } = useProjectPermissions()
   const user = useAuthStore((s) => s.user)
   const { data: iqStatus } = useIterativeQuestionnaireStatus(id)
+
+  // Ao trocar de projeto, limpa dados de scaffold do projeto anterior
+  useEffect(() => {
+    useCodeGenProgressStore.getState().reset()
+  }, [id])
 
   useEffect(() => {
     const load = async () => {

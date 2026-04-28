@@ -132,11 +132,9 @@ async def approve(
 ) -> dict:
     user = await _require_gp_or_admin(project_id, user_id, db)
     try:
-        term = await approve_term(db, term_id, actor_id=user.id)
+        term = await approve_term(db, project_id, term_id, actor_id=user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    if term.project_id != project_id:
-        raise HTTPException(status_code=404, detail="Termo não pertence ao projeto")
     return _term_as_dict(term)
 
 
@@ -149,11 +147,9 @@ async def reject(
 ) -> dict:
     user = await _require_gp_or_admin(project_id, user_id, db)
     try:
-        term = await reject_term(db, term_id, actor_id=user.id)
+        term = await reject_term(db, project_id, term_id, actor_id=user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    if term.project_id != project_id:
-        raise HTTPException(status_code=404, detail="Termo não pertence ao projeto")
     return _term_as_dict(term)
 
 
@@ -167,11 +163,9 @@ async def update_definition(
 ) -> dict:
     user = await _require_gp_or_admin(project_id, user_id, db)
     try:
-        term = await update_term_definition(db, term_id, body.definition, actor_id=user.id)
+        term = await update_term_definition(db, project_id, term_id, body.definition, actor_id=user.id)
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
-    if term.project_id != project_id:
-        raise HTTPException(status_code=404, detail="Termo não pertence ao projeto")
     return _term_as_dict(term)
 
 

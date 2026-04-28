@@ -133,7 +133,7 @@ class ModuleCodegenService:
         """
         try:
             # 1. Buscar candidato
-            candidate = await self._fetch_candidate(module_candidate_id)
+            candidate = await self._fetch_candidate(project_id, module_candidate_id)
             if not candidate:
                 logger.error(
                     "codegen.candidato_nao_encontrado",
@@ -573,10 +573,13 @@ class ModuleCodegenService:
     # Métodos auxiliares internos
     # ============================================================================
 
-    async def _fetch_candidate(self, candidate_id: UUID) -> Optional[ModuleCandidate]:
-        """Busca candidato a módulo por ID."""
+    async def _fetch_candidate(self, project_id: UUID, candidate_id: UUID) -> Optional[ModuleCandidate]:
+        """Busca candidato a módulo por ID, validando project_id."""
         result = await self.db.execute(
-            select(ModuleCandidate).where(ModuleCandidate.id == candidate_id)
+            select(ModuleCandidate).where(
+                (ModuleCandidate.id == candidate_id) &
+                (ModuleCandidate.project_id == project_id)
+            )
         )
         return result.scalar_one_or_none()
 

@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, X } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
+import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
 import { apiClient as api } from '@/lib/api'
 import { getErrorMessage, type ApiError } from '@/lib/errors'
 
@@ -237,6 +238,8 @@ export function LoginPage() {
         // joga em caso de 4xx — então cair aqui sem project_id é bug,
         // não credencial inválida.
         if (result?.project_id) {
+          // Limpa dados de scaffold do projeto anterior antes de trocar
+          useCodeGenProgressStore.getState().reset()
           localStorage.setItem(LAST_PROJECT_KEY, selectedSlug)
           navigate('/')
         } else {

@@ -124,6 +124,20 @@ function clearRunId(projectId: string) {
   } catch { /* ignora */ }
 }
 
+function clearAllProjectData() {
+  try {
+    // Remove todos os keys gca:scaffold:active:* do localStorage
+    const keysToRemove: string[] = []
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i)
+      if (key && key.startsWith('gca:scaffold:active:')) {
+        keysToRemove.push(key)
+      }
+    }
+    keysToRemove.forEach(key => localStorage.removeItem(key))
+  } catch { /* ignora */ }
+}
+
 export const useCodeGenProgressStore = create<CodeGenProgressState>((set, get) => {
   /**
    * Loop de poll. Backoff exponencial em erros de rede; reset ao 1º sucesso.

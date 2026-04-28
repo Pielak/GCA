@@ -430,10 +430,11 @@ async def list_approved_for_ers(
 
 async def approve_term(
     db: AsyncSession,
+    project_id: UUID,
     term_id: UUID,
     actor_id: UUID,
 ) -> ProjectGlossaryTerm:
-    term = await _get_term_or_raise(db, term_id)
+    term = await _get_term_or_raise(db, project_id, term_id)
     term.status = STATUS_APPROVED
     term.approved_by = actor_id
     term.approved_at = datetime.now(timezone.utc)
@@ -448,10 +449,11 @@ async def approve_term(
 
 async def reject_term(
     db: AsyncSession,
+    project_id: UUID,
     term_id: UUID,
     actor_id: UUID,
 ) -> ProjectGlossaryTerm:
-    term = await _get_term_or_raise(db, term_id)
+    term = await _get_term_or_raise(db, project_id, term_id)
     term.status = STATUS_REJECTED
     term.rejected_by = actor_id
     term.rejected_at = datetime.now(timezone.utc)
@@ -465,12 +467,13 @@ async def reject_term(
 
 async def update_term_definition(
     db: AsyncSession,
+    project_id: UUID,
     term_id: UUID,
     definition: str,
     actor_id: UUID,
 ) -> ProjectGlossaryTerm:
     """GP edita a definição do termo. Não muda status."""
-    term = await _get_term_or_raise(db, term_id)
+    term = await _get_term_or_raise(db, project_id, term_id)
     term.definition = (definition or "").strip()[:2000]
     await db.commit()
     await db.refresh(term)
@@ -526,9 +529,12 @@ async def create_manual_term(
     return fresh
 
 
-async def _get_term_or_raise(db: AsyncSession, term_id: UUID) -> ProjectGlossaryTerm:
+async def _get_term_or_raise(db: AsyncSession, project_id: UUID, term_id: UUID) -> ProjectGlossaryTerm:
     term = (await db.execute(
-        select(ProjectGlossaryTerm).where(ProjectGlossaryTerm.id == term_id)
+        select(ProjectGlossaryTerm).where(
+            (ProjectGlossaryTerm.id == term_id) &
+            (ProjectGlossaryTerm.project_id == project_id)
+        )
     )).scalar_one_or_none()
     if term is None:
         raise ValueError(f"Termo {term_id} não encontrado")
