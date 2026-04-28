@@ -34,7 +34,7 @@ Substituir watchdog agressivo (reactivo) por **fila persistente + idempotência*
 - Task initial check: se True, pula processamento (ok_idempotent)
 - Fail-open: se DB falha, processa (melhor 2x que 0x)
 
-### Impacto
+### Impacto MVP 29.1
 
 | Cenário | Antes | Depois |
 |---------|-------|--------|
@@ -42,15 +42,30 @@ Substituir watchdog agressivo (reactivo) por **fila persistente + idempotência*
 | Watchdog reenfileira zombie | Task enfileirada 2x | 1ª execução completa, 2ª skipa via guard |
 | Email task duplica | Email enviado 2x (visível) | 1ª envia, 2ª skipa (próximas fases: email dedup específico) |
 
+### Impacto MVP 29.2
+
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Worker morre durante propagation | Task redistribui, corre 2x (backlog duplo) | Lease blocks 2ª execução por 10min, 1ª termina limpo |
+| Worker morre durante backlog regen | Task redistribui, items deleted/recreated 2x | Lease blocks 2ª, estado final igual a 1x |
+| Worker morre durante auto_generate | Task redistribui, deliverables regenerados 2x | Lease blocks 2ª, generators skip verified items |
+| Múltiplas rodadas paralelas (race) | Task A + Task B rodam simultaneamente | Apenas 1 clama lease, outro retorna ok_idempotent |
+
 ---
 
 ## Próximas Fases (Planejadas)
 
-### 29.2 — Idempotência Crítica (1d)
+### 29.2 — Idempotência Crítica (1d) ✅ COMPLETA
 Implementar guards similares em:
-- `propagate_task` — by ocg_version + timestamp
-- `auto_generate_task` — by ocg_version + trigger signature
-- `regenerate_backlog_task` — by ocg_version + timestamp
+- `propagate_task` — by ocg_version + timestamp ✅
+- `auto_generate_task` — by ocg_version + trigger signature ✅
+- `regenerate_backlog_task` — by ocg_version + timestamp ✅
+
+**Implementação:** Lease-based dedup via Redis SET NX EX (TTL 600s).
+- Key pattern: `gca:task:{task_name}:{project_id}:{ocg_version}`
+- Se lease já claimado: return `ok_idempotent` (skip execution)
+- Fail-open: Redis inacessível → executa (melhor 2x que travar)
+- Commit: `63d9538`
 
 ### 29.3 — Idempotência em Propagação (0.5d)
 Lease-based dedup:
