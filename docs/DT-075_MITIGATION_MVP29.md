@@ -78,11 +78,29 @@ Refinar watchdog e validar idempotência end-to-end:
 - 6 smoke tests: arquitetura + integração + configuração
 - Commit: `eec6c02`
 
-### 29.4 — Observabilidade + Fechamento (Planejada)
-- Prometheus metrics: task redistributions, idempotent skips
-- Docs de DT-075 no help
-- Testes regressivos
-- Merge final para produção
+### 29.4 — Observabilidade + Fechamento ✅ COMPLETA
+Implementação de métricas Prometheus e conclusão:
+- Prometheus metrics: task redistributions, idempotent skips ✅
+- Endpoints de observabilidade: GET /api/metrics/mvp29-hardening ✅
+- Integração em 4 tasks críticas ✅
+- Documentação: DT-075 audit + endpoints ✅
+
+**Implementação:**
+- app/metrics/celery_hardening.py — módulo de métricas
+- app/routers/metrics.py — endpoints de observabilidade
+- Integração em: pipeline_ingest_task, propagate_task, regenerate_backlog_task, auto_generate_task
+- Commit: `665524d`
+
+---
+
+## Resumo de Execução MVP 29
+
+| Fase | Status | Commits | Impacto |
+|------|--------|---------|---------|
+| **29.1** | ✅ | 3b25c28, 37111ea, 584a30c | Config Celery + guard ingestão |
+| **29.2** | ✅ | 63d9538, 4a1f842 | Lease dedup (3 tasks) |
+| **29.3** | ✅ | eec6c02, a9ba0e0 | Watchdog tuning + smoke tests |
+| **29.4** | ✅ | 665524d | Observabilidade + fechamento |
 
 ---
 
