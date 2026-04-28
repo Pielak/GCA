@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.db.database import init_db
 from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, admin_gca_router, setup, qa_router, external_repos_router, notifications_router, deliverables_router, public_requests_router
 from app.routers.initial_questionnaire_router import router as initial_questionnaire_router
+from app.routers.technical_questionnaire_router import router as technical_questionnaire_router
 from app.routers.admin_gp_router import router as admin_gp_router
 from app.routers.project_setup_router import router as project_setup_router
 from app.routers.member_roles_router import router as member_roles_router
@@ -262,6 +263,7 @@ app.include_router(release_admin_router, prefix=f"{settings.API_PREFIX}", tags=[
 app.include_router(release_user_router, prefix=f"{settings.API_PREFIX}", tags=["releases"])
 app.include_router(iterative_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["iterative-questionnaire"])
 app.include_router(initial_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["initial-questionnaire"])
+app.include_router(technical_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["technical-questionnaire"])
 app.include_router(applied_defaults_router, prefix=f"{settings.API_PREFIX}", tags=["applied-defaults"])
 
 

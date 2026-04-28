@@ -47,6 +47,7 @@ import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
 import { ProjectMetricsPage } from './pages/projects/ProjectMetricsPage';
 import { HelpPage } from './pages/HelpPage';
 import { IterativeQuestionnairePage } from './pages/projects/IterativeQuestionnairePage';
+import { TechnicalQuestionnairePage } from './pages/projects/TechnicalQuestionnairePage';
 import { AppliedDefaultsPage } from './pages/projects/AppliedDefaultsPage';
 
 export const router = createBrowserRouter([
@@ -157,6 +158,7 @@ export const router = createBrowserRouter([
           { path: 'external-repos', Component: ExternalReposPage },
           { path: 'ingestion', element: <RequireProjectSetup><IngestionPage /></RequireProjectSetup> },
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
+          { path: 'technical-questionnaire', element: <RequireProjectSetup><TechnicalQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
           { path: 'applied-defaults', element: <RequireProjectSetup><AppliedDefaultsPage /></RequireProjectSetup> },

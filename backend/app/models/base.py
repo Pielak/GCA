@@ -2105,3 +2105,54 @@ class InitialQuestionnaire(Base):
         Index("idx_initial_questionnaire_status", project_id, status),
         UniqueConstraint("project_id", name="uq_initial_questionnaire_per_project"),
     )
+
+
+class TechnicalQuestionnaire(Base):
+    """Questionário Técnico Dinâmico — N perguntas com visibilidade condicional.
+
+    Diferente do Initial Questionnaire (20 perguntas fixas), os questionários
+    técnicos suportam qualquer número de perguntas com:
+    - Visibilidade condicional (pergunta aparece se outra responder X)
+    - Validação cruzada automática (se Q3=Não, Q7-14 devem estar vazios)
+    - Schema flexível definido em código (technical_questions_schema.py)
+    - Progresso calculado apenas com perguntas visíveis
+
+    Fluxo:
+    1. User acessa /projects/{id}/technical-questionnaire
+    2. Vê form com perguntas dinâmicas (algumas ocultas inicialmente)
+    3. Digita respostas (auto-save a cada 2s)
+    4. Respostas mostram/ocultam mais perguntas
+    5. Clica "Validar Escopo" quando progresso >= 80%
+    6. Sistema valida conflitos lógicos (Q3=Não + A.2 preenchido = erro)
+    7. Personas leem as respostas validadas
+    """
+    __tablename__ = "technical_questionnaires"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Respostas em JSONB: {"Q1": "valor", "Q3": ["opt1", "opt2"], ...}
+    # Schema das perguntas é definido em technical_questions_schema.py
+    responses = Column(JSONB, nullable=False, default={})
+
+    # Progresso em percentual (0-100)
+    # Calculado como: (perguntas_visíveis_preenchidas / perguntas_visíveis) * 100
+    progress_percent = Column(Integer, nullable=False, default=0)
+
+    # Status: draft (preenchendo), submitted (enviado), validated (personas leram)
+    status = Column(String(20), nullable=False, default="draft")
+
+    # Metadados: quem preencheu/validou e quando
+    submitted_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    validated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    validated_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_technical_questionnaire_project", project_id),
+        Index("idx_technical_questionnaire_status", project_id, status),
+        Index("idx_technical_questionnaire_submitted_by", submitted_by),
+    )
