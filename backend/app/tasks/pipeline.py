@@ -301,7 +301,24 @@ def propagate_task(self, project_id: str, changes: list, ocg_version) -> dict:
 
     Substitui `asyncio.create_task(_propagate_async(...))` em
     ingestion_service (linhas 247 e 1327 pré-13.3b).
+
+    MVP 29.2: Lease-based dedup pra evitar rodadas duplas após worker death.
     """
+    # MVP 29.2 — Idempotência lease-based
+    lease_key = _lease_key("propagate", project_id, ocg_version)
+    if not _try_claim_task_lease(lease_key, ttl_seconds=600):
+        logger.info(
+            "propagate_task.idempotent_skip",
+            project_id=project_id,
+            ocg_version=ocg_version,
+            reason="lease_already_claimed",
+        )
+        return {
+            "status": "ok_idempotent",
+            "project_id": project_id,
+            "reason": "another_execution_in_progress",
+        }
+
     try:
         _run_coro_isolated(_run_propagate(project_id, changes, ocg_version))
     except Exception as exc:  # noqa: BLE001
@@ -329,7 +346,25 @@ def regenerate_backlog_task(self, project_id: str, ocg_version, trigger: str) ->
     """Regenera backlog a partir do OCG atual. Substitui
     `asyncio.create_task(_regenerate_backlog_async(...))` em
     ingestion_service linha 255 pré-13.3b.
+
+    MVP 29.2: Lease-based dedup pra evitar rodadas duplas após worker death.
     """
+    # MVP 29.2 — Idempotência lease-based
+    lease_key = _lease_key("regenerate_backlog", project_id, ocg_version)
+    if not _try_claim_task_lease(lease_key, ttl_seconds=600):
+        logger.info(
+            "regenerate_backlog_task.idempotent_skip",
+            project_id=project_id,
+            ocg_version=ocg_version,
+            trigger=trigger,
+            reason="lease_already_claimed",
+        )
+        return {
+            "status": "ok_idempotent",
+            "project_id": project_id,
+            "reason": "another_execution_in_progress",
+        }
+
     try:
         _run_coro_isolated(_run_regenerate_backlog(project_id, ocg_version, trigger))
     except Exception as exc:  # noqa: BLE001
@@ -391,7 +426,26 @@ def auto_generate_task(self, project_id: str, updated_ocg: dict) -> dict:
     em ocg_updater_service linha 369 pré-13.3c. O payload `updated_ocg`
     pode ser grande mas é serializável JSON — trafega OK pelo broker.
     Se tamanho virar gargalo, migrar pra fetch no DB via project_id.
+
+    MVP 29.2: Lease-based dedup pra evitar rodadas duplas após worker death.
     """
+    # MVP 29.2 — Idempotência lease-based
+    # Usa ocg_version do payload ou timestamp/hash como fallback
+    ocg_version = updated_ocg.get("version") or updated_ocg.get("updated_at")
+    lease_key = _lease_key("auto_generate", project_id, ocg_version)
+    if not _try_claim_task_lease(lease_key, ttl_seconds=600):
+        logger.info(
+            "auto_generate_task.idempotent_skip",
+            project_id=project_id,
+            ocg_version=ocg_version,
+            reason="lease_already_claimed",
+        )
+        return {
+            "status": "ok_idempotent",
+            "project_id": project_id,
+            "reason": "another_execution_in_progress",
+        }
+
     try:
         _run_coro_isolated(_run_auto_generate(project_id, updated_ocg))
     except Exception as exc:  # noqa: BLE001
