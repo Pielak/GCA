@@ -67,20 +67,29 @@ Implementar guards similares em:
 - Fail-open: Redis inacessível → executa (melhor 2x que travar)
 - Commit: `63d9538`
 
-### 29.3 — Watchdog + Smoke Tests (0.5d)
+### 29.3 — Watchdog + Smoke Tests (0.5d) ✅ COMPLETA
 Refinar watchdog e validar idempotência end-to-end:
-- Watchdog: 300s (5min) → 900s (15min) threshold
-- Testes de idempotência unitários
-- Smoke kill -9 no worker mid-task para validar recovery
+- Watchdog threshold: 8/10 min → 15 min (conservador, alinhado com visibility_timeout) ✅
+- Testes de idempotência: 6 smoke tests, 100% PASS ✅
+- Validação: guard + lease dedup + watchdog config + TTL suficiente ✅
 
-### 29.4 — Observabilidade + Fechamento (0.5d)
+**Implementação:**
+- Watchdog timeout aumentado em celery_app.py beat_schedule
+- 6 smoke tests: arquitetura + integração + configuração
+- Commit: `eec6c02`
+
+### 29.4 — Observabilidade + Fechamento (Planejada)
 - Prometheus metrics: task redistributions, idempotent skips
 - Docs de DT-075 no help
 - Testes regressivos
 - Merge final para produção
 
-**Nota:** MVP 29.2 consolidou original 29.2+29.3 (lease-based dedup em 3 tasks).
-MVP 29.3 agora cobre watchdog tuning + smoke tests (original 29.4).
+---
+
+**Consolidação de Fases:**
+- MVP 29.2: Consolidou original 29.2+29.3 (lease-based dedup em 3 tasks)
+- MVP 29.3: Consolidou original 29.4 (watchdog tuning + smoke tests)
+- MVP 29.4: Consolidado (observabilidade + fechamento)
 
 ---
 
