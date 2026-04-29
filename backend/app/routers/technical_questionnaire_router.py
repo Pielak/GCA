@@ -92,12 +92,11 @@ async def get_technical_questionnaire(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
 
-    # Get or create technical questionnaire (get first draft, or create new)
+    # Get or create technical questionnaire (prefer submitted, fallback to draft)
     stmt = select(TechnicalQuestionnaire).where(
-        (TechnicalQuestionnaire.project_id == project_id) &
-        (TechnicalQuestionnaire.status == "draft")
-    )
-    questionnaire = await db.scalar(stmt)
+        TechnicalQuestionnaire.project_id == project_id
+    ).order_by(TechnicalQuestionnaire.status.desc())  # "submitted" > "draft" alphabetically
+    questionnaire = (await db.scalars(stmt)).first()
 
     if not questionnaire:
         # Create empty draft
@@ -157,12 +156,11 @@ async def save_technical_questionnaire(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
 
-    # Get or create technical questionnaire
+    # Get or create technical questionnaire (prefer submitted, fallback to draft)
     stmt = select(TechnicalQuestionnaire).where(
-        (TechnicalQuestionnaire.project_id == project_id) &
-        (TechnicalQuestionnaire.status == "draft")
-    )
-    questionnaire = await db.scalar(stmt)
+        TechnicalQuestionnaire.project_id == project_id
+    ).order_by(TechnicalQuestionnaire.status.desc())  # "submitted" > "draft" alphabetically
+    questionnaire = (await db.scalars(stmt)).first()
 
     if not questionnaire:
         questionnaire = TechnicalQuestionnaire(
