@@ -254,3 +254,164 @@ async def _analyze_document_async(
             project_id=str(project_id),
             document_id=str(document_id),
         )
+
+        # Disparar geração de follow-up questions após análise completar
+        generate_follow_up_questions.delay(str(ocg.id))
+
+
+@celery_app.task(bind=True, max_retries=2, acks_late=True)
+def generate_follow_up_questions(self, ocg_individual_id: str):
+    """
+    Gera follow-up questions para um OCG Individual.
+    Disparado após análise inicial completar.
+    """
+    import asyncio
+
+    try:
+        asyncio.run(
+            _generate_follow_up_async(UUID(ocg_individual_id))
+        )
+        logger.info(
+            "persona.follow_up_generated",
+            ocg_id=ocg_individual_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "persona.follow_up_generation_failed",
+            ocg_id=ocg_individual_id,
+            error=str(exc),
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+
+async def _generate_follow_up_async(ocg_individual_id: UUID):
+    """Gera follow-up questions async."""
+    from app.services.follow_up_service import FollowUpService
+
+    async with AsyncSessionLocal() as db:
+        service = FollowUpService(db)
+        await service.generate_follow_up_questions(ocg_individual_id)
+
+
+@celery_app.task(bind=True, max_retries=2, acks_late=True)
+def refine_ocg_with_answers(self, ocg_individual_id: str, answered_by: str):
+    """
+    Re-analisa OCG Individual após user responder follow-up questions.
+    Armazena parecer refinado.
+    """
+    import asyncio
+
+    try:
+        asyncio.run(
+            _refine_ocg_async(UUID(ocg_individual_id), UUID(answered_by))
+        )
+        logger.info(
+            "persona.ocg_refined",
+            ocg_id=ocg_individual_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "persona.ocg_refinement_failed",
+            ocg_id=ocg_individual_id,
+            error=str(exc),
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+
+async def _refine_ocg_async(ocg_individual_id: UUID, answered_by: UUID):
+    """Re-analisa OCG com contexto de respostas."""
+    from app.models.base import (
+        OCGIndividual,
+        PersonaFollowUpQuestion,
+        OCGIndividualRefined,
+    )
+    from app.services.llm_service import LLMServiceFactory, LLMProvider
+    from app.core.config import settings
+
+    async with AsyncSessionLocal() as db:
+        # 1. Buscar OCG original
+        ocg = await db.get(OCGIndividual, ocg_individual_id)
+        if not ocg:
+            logger.warning("persona.ocg_not_found_for_refinement", ocg_id=str(ocg_individual_id))
+            return
+
+        # 2. Buscar perguntas e respostas
+        from sqlalchemy import select
+        questions = await db.scalars(
+            select(PersonaFollowUpQuestion).where(
+                PersonaFollowUpQuestion.ocg_individual_id == ocg_individual_id
+            )
+        )
+        questions_list = questions.all()
+
+        # Montar contexto de Q&A
+        qa_context = "Respostas do usuário às perguntas de clarificação:\n\n"
+        for q in questions_list:
+            qa_context += f"P: {q.question_text}\n"
+            qa_context += f"R: {q.answer_text or '(sem resposta)'}\n\n"
+
+        # 3. Re-analisar com contexto
+        persona_name = ocg.persona_name
+        original_parecer = json.dumps(ocg.parecer, ensure_ascii=False)
+
+        prompt = f"""Refine sua análise anterior baseado nas respostas do usuário.
+
+ANÁLISE ANTERIOR:
+{original_parecer}
+
+CONTEXTO ADICIONAL (respostas do usuário):
+{qa_context}
+
+Gere um parecer REFINADO em JSON com os mesmos campos, mas atualizado com as novas informações.
+Destaque quais campos mudaram e por quê.
+
+Retorne JSON: {{ "parecer_refined": {{...}}, "changed_fields": [...], "change_summary": "..." }}"""
+
+        try:
+            api_key = settings.ANTHROPIC_API_KEY
+            client = LLMServiceFactory.create_client(LLMProvider.ANTHROPIC, api_key)
+
+            response = await client.generate(
+                prompt=prompt,
+                max_tokens=2000,
+                temperature=0.5,
+            )
+
+            # Parse resposta
+            import re
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
+            if not json_match:
+                logger.warning("persona.invalid_refinement_response", ocg_id=str(ocg_individual_id))
+                return
+
+            response_json = json.loads(json_match.group())
+
+            # 4. Armazenar análise refinada
+            refined = OCGIndividualRefined(
+                ocg_individual_id=ocg_individual_id,
+                refinement_iteration=1,
+                parecer_refined=response_json.get("parecer_refined", {}),
+                changed_fields=response_json.get("changed_fields", []),
+                change_summary=response_json.get("change_summary", ""),
+            )
+            db.add(refined)
+
+            # Marcar perguntas como refinement_complete
+            for q in questions_list:
+                q.status = "refinement_complete"
+                db.add(q)
+
+            await db.commit()
+
+            logger.info(
+                "persona.ocg_refinement_complete",
+                ocg_id=str(ocg_individual_id),
+                changed_fields=response_json.get("changed_fields", []),
+            )
+
+        except Exception as e:
+            logger.error(
+                "persona.refinement_llm_failed",
+                ocg_id=str(ocg_individual_id),
+                error=str(e),
+            )

@@ -370,6 +370,108 @@ async def consolidate_personas_analysis(
         raise HTTPException(status_code=500, detail=f"Erro na consolidação: {str(e)}")
 
 
+@router.get("/projects/{project_id}/ingestion/{document_id}/follow-up-questions")
+async def get_follow_up_questions(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Lista follow-up questions pendentes para um documento.
+
+    Retorna perguntas geradas por personas para clarificação.
+    """
+    from app.models.base import PersonaFollowUpQuestion
+    from sqlalchemy import select
+
+    questions = await db.scalars(
+        select(PersonaFollowUpQuestion).where(
+            (PersonaFollowUpQuestion.project_id == project_id) &
+            (PersonaFollowUpQuestion.document_id == document_id) &
+            (PersonaFollowUpQuestion.status.in_(["pending", "answered"]))
+        )
+    )
+    questions_list = questions.all()
+
+    return {
+        "document_id": str(document_id),
+        "questions": [
+            {
+                "id": str(q.id),
+                "persona_name": q.persona_name,
+                "question_text": q.question_text,
+                "context": q.context,
+                "question_order": q.question_order,
+                "answer_text": q.answer_text,
+                "status": q.status,
+                "created_at": q.created_at.isoformat() if q.created_at else None,
+            }
+            for q in questions_list
+        ],
+        "total_questions": len(questions_list),
+        "answered_count": sum(1 for q in questions_list if q.status == "answered"),
+    }
+
+
+class FollowUpAnswerRequest(BaseModel):
+    """Request para submeter respostas às follow-up questions."""
+    answers: dict[str, str]  # {question_id: answer_text}
+
+
+@router.post("/projects/{project_id}/ingestion/{document_id}/follow-up-answers")
+async def submit_follow_up_answers(
+    project_id: UUID,
+    document_id: UUID,
+    request: FollowUpAnswerRequest,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Submete respostas às follow-up questions.
+
+    Dispara re-análise (refinement) de cada persona.
+    """
+    from app.services.follow_up_service import FollowUpService
+
+    service = FollowUpService(db)
+
+    # Buscar OCG Individual para disparar refinement
+    from app.models.base import PersonaFollowUpQuestion
+    from sqlalchemy import select, func
+
+    question_result = await db.scalar(
+        select(PersonaFollowUpQuestion.ocg_individual_id).where(
+            (PersonaFollowUpQuestion.project_id == project_id) &
+            (PersonaFollowUpQuestion.document_id == document_id)
+        ).limit(1)
+    )
+
+    if not question_result:
+        raise HTTPException(status_code=404, detail="Nenhuma pergunta encontrada")
+
+    success = await service.submit_answers(
+        ocg_individual_id=question_result,
+        answers=request.answers,
+        answered_by=current_user_id,
+    )
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Erro ao submeter respostas")
+
+    logger.info(
+        "ingestion.follow_up_answers_submitted",
+        document_id=str(document_id),
+        answer_count=len(request.answers),
+        submitted_by=str(current_user_id),
+    )
+
+    return {
+        "success": True,
+        "message": "Respostas submetidas. Personas estão refinando análises...",
+        "document_id": str(document_id),
+        "answer_count": len(request.answers),
+    }
+
+
 @router.get("/projects/{project_id}/ingestion/{document_id}/content")
 async def get_document_content(
     project_id: UUID,

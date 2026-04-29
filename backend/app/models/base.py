@@ -2332,3 +2332,72 @@ class OCGIndividual(Base):
         Index("idx_ocg_individual_status", status),
         UniqueConstraint("document_id", "persona_id", name="uq_ocg_individual_per_document_persona"),
     )
+
+
+class PersonaFollowUpQuestion(Base):
+    """Follow-up question feita por persona após análise inicial.
+
+    Personas geram perguntas de clarificação baseadas na análise.
+    User responde, personas refinam suas análises.
+    """
+    __tablename__ = "persona_follow_up_questions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    ocg_individual_id = Column(UUID(as_uuid=True), ForeignKey("ocg_individual.id", ondelete="CASCADE"), nullable=False, index=True)
+    persona_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    persona_name = Column(String(100), nullable=False)
+
+    # Pergunta
+    question_text = Column(String, nullable=False)
+    context = Column(String(500), nullable=True)
+    question_order = Column(Integer, default=0)
+
+    # Resposta
+    answer_text = Column(String, nullable=True)
+    answer_provided_at = Column(DateTime(timezone=True), nullable=True)
+    answered_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Status
+    status = Column(String(20), nullable=False, default="pending")  # pending, answered, refinement_complete
+
+    # Rastreamento
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_follow_up_project", project_id),
+        Index("idx_follow_up_document", document_id),
+        Index("idx_follow_up_persona", persona_id),
+        Index("idx_follow_up_status", status),
+        Index("idx_follow_up_ocg", ocg_individual_id),
+    )
+
+
+class OCGIndividualRefined(Base):
+    """Parecer refinado após Q&A com user.
+
+    Armazena versões refinadas do OCG Individual
+    após user responder perguntas de clarificação.
+    """
+    __tablename__ = "ocg_individual_refined"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ocg_individual_id = Column(UUID(as_uuid=True), ForeignKey("ocg_individual.id", ondelete="CASCADE"), nullable=False, index=True)
+    refinement_iteration = Column(Integer, nullable=False, default=1)
+
+    # Parecer refinado
+    parecer_refined = Column(JSONB, nullable=False, default={})
+
+    # Mudanças detectadas
+    changed_fields = Column(JSONB, nullable=True, default=[])
+    change_summary = Column(String(500), nullable=True)
+
+    # Rastreamento
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_ocg_refined_original", ocg_individual_id),
+        UniqueConstraint("ocg_individual_id", "refinement_iteration", name="uq_ocg_refined_iteration"),
+    )
