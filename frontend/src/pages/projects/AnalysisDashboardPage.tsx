@@ -14,6 +14,7 @@ import { Loader, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, GitCompare }
 import { useToast } from '@/hooks/useToast'
 import { ComparisonView } from '@/components/analysis/ComparisonView'
 import { RefinementTimeline } from '@/components/analysis/RefinementTimeline'
+import { OCGGlobalView } from '@/components/analysis/OCGGlobalView'
 
 interface PersonaAnalysis {
   persona_id: string
@@ -67,6 +68,7 @@ export function AnalysisDashboardPage() {
   const [expandedPersona, setExpandedPersona] = useState<string | null>(null)
   const [refinementHistory, setRefinementHistory] = useState<Record<string, RefinementHistory>>({})
   const [selectedForComparison, setSelectedForComparison] = useState<string[]>([])
+  const [currentTab, setCurrentTab] = useState<'analyses' | 'consolidated'>('analyses')
   const toast = useToast()
 
   useEffect(() => {
@@ -229,7 +231,32 @@ export function AnalysisDashboardPage() {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex gap-4 border-b border-gray-200">
+        <button
+          onClick={() => setCurrentTab('analyses')}
+          className={`px-4 py-3 font-medium transition-colors ${
+            currentTab === 'analyses'
+              ? 'text-emerald-600 border-b-2 border-emerald-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Análises Individuais
+        </button>
+        <button
+          onClick={() => setCurrentTab('consolidated')}
+          className={`px-4 py-3 font-medium transition-colors ${
+            currentTab === 'consolidated'
+              ? 'text-emerald-600 border-b-2 border-emerald-600'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          Parecer Consolidado
+        </button>
+      </div>
+
       {/* Personas Grid */}
+      {currentTab === 'analyses' && (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Análises de Personas</h2>
@@ -351,6 +378,12 @@ export function AnalysisDashboardPage() {
           </div>
         ))}
       </div>
+      )}
+
+      {/* Consolidated Tab */}
+      {currentTab === 'consolidated' && (
+        <OCGGlobalView projectId={projectId!} documentId={documentId!} />
+      )}
     </div>
   )
 }

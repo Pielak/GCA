@@ -258,6 +258,9 @@ async def _analyze_document_async(
         # Disparar geração de follow-up questions após análise completar
         generate_follow_up_questions.delay(str(ocg.id))
 
+        # Disparar consolidação automática (se todas 7 completarem)
+        auto_consolidate_ocg.delay(str(document_id), str(project_id))
+
 
 @celery_app.task(bind=True, max_retries=2, acks_late=True)
 def generate_follow_up_questions(self, ocg_individual_id: str):
@@ -415,3 +418,81 @@ Retorne JSON: {{ "parecer_refined": {{...}}, "changed_fields": [...], "change_su
                 ocg_id=str(ocg_individual_id),
                 error=str(e),
             )
+
+
+@celery_app.task(bind=True, max_retries=2, acks_late=True)
+def auto_consolidate_ocg(self, document_id: str, project_id: str):
+    """
+    Consolida OCG Global automaticamente após todas as 7 análises completarem.
+    Disparado por cada persona após completar análise.
+    """
+    import asyncio
+
+    try:
+        asyncio.run(
+            _auto_consolidate_async(UUID(document_id), UUID(project_id))
+        )
+        logger.info(
+            "persona.ocg_auto_consolidation_triggered",
+            document_id=document_id,
+            project_id=project_id,
+        )
+    except Exception as exc:
+        logger.error(
+            "persona.ocg_auto_consolidation_failed",
+            document_id=document_id,
+            project_id=project_id,
+            error=str(exc),
+        )
+        raise self.retry(exc=exc, countdown=60)
+
+
+async def _auto_consolidate_async(document_id: UUID, project_id: UUID):
+    """Verifica se todas as 7 análises completaram e consolida."""
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import OCGIndividual, OCGGlobal
+    from sqlalchemy import select
+
+    async with AsyncSessionLocal() as db:
+        # 1. Contar análises completas
+        completed = await db.scalar(
+            select(OCGIndividual).where(
+                (OCGIndividual.document_id == document_id) &
+                (OCGIndividual.status == "completed")
+            )
+        )
+        
+        # 2. Se todas as 7 completaram, consolidar
+        total_personas = await db.scalar(
+            select(OCGIndividual).where(
+                OCGIndividual.document_id == document_id
+            )
+        )
+
+        # Contar de forma mais eficiente
+        from sqlalchemy import func
+        completed_count = await db.scalar(
+            select(func.count(OCGIndividual.id)).where(
+                (OCGIndividual.document_id == document_id) &
+                (OCGIndividual.status == "completed")
+            )
+        )
+
+        if completed_count == 7:
+            # Verificar se já foi consolidado
+            existing = await db.scalar(
+                select(OCGGlobal).where(OCGGlobal.document_id == document_id)
+            )
+
+            if not existing:
+                # Disparar consolidação
+                from app.services.ocg_consolidation_service import OCGConsolidationService
+                service = OCGConsolidationService(db)
+                ocg_global = await service.consolidate_document(project_id, document_id)
+
+                if ocg_global:
+                    logger.info(
+                        "persona.ocg_auto_consolidated",
+                        document_id=str(document_id),
+                        project_id=str(project_id),
+                    )
