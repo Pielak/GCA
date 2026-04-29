@@ -5,8 +5,9 @@
  */
 
 import React, { useState, useEffect } from 'react'
-import { Loader, AlertCircle, CheckCircle2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader, AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Edit2 } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
+import { ConflictResolutionModal } from './ConflictResolutionModal'
 
 interface OCGGlobalData {
   ocg_global_id: string
@@ -26,6 +27,7 @@ export function OCGGlobalView({ projectId, documentId }: Props) {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<OCGGlobalData | null>(null)
   const [expandedFields, setExpandedFields] = useState<Set<string>>(new Set())
+  const [resolvingField, setResolvingField] = useState<string | null>(null)
   const toast = useToast()
 
   useEffect(() => {
@@ -98,8 +100,27 @@ export function OCGGlobalView({ projectId, documentId }: Props) {
   const conflictCount = Object.keys(data.conflicting_fields).length
   const totalFields = consensusCount + conflictCount
 
+  // Preparar dados para modal de conflito
+  const conflictModalField = resolvingField && data?.conflicting_fields[resolvingField]
+  const conflictModalVotes = resolvingField && data?.voting_results[resolvingField]
+
   return (
     <div className="space-y-6">
+      {/* Modal de Resolução */}
+      {resolvingField && conflictModalField && conflictModalVotes && (
+        <ConflictResolutionModal
+          projectId={projectId}
+          documentId={documentId}
+          field={resolvingField}
+          options={Object.entries(conflictModalField).map(([persona, value]) => ({
+            persona,
+            value,
+          }))}
+          votes={conflictModalVotes}
+          onClose={() => setResolvingField(null)}
+          onSuccess={() => fetchOCGGlobal()}
+        />
+      )}
       {/* Header */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h2 className="text-2xl font-bold text-gray-900">Parecer Consolidado (OCG Global)</h2>
@@ -239,6 +260,17 @@ export function OCGGlobalView({ projectId, documentId }: Props) {
                             </div>
                           ))}
                         </div>
+                      </div>
+
+                      {/* Botão de Resolver */}
+                      <div className="mt-4 pt-4 border-t border-amber-200">
+                        <button
+                          onClick={() => setResolvingField(field)}
+                          className="inline-flex items-center gap-2 px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 text-sm font-medium"
+                        >
+                          <Edit2 className="h-4 w-4" />
+                          Resolver Manualmente
+                        </button>
                       </div>
                     </div>
                   )}
