@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Save, Send, Loader2, AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Download, HelpCircle } from 'lucide-react'
 import { useTechnicalQuestionnaire } from '@/hooks/useTechnicalQuestionnaire'
+import { useToast } from '@/hooks/useToast'
 
 interface TechnicalQuestionnaireFormProps {
   projectId?: string
@@ -201,6 +202,7 @@ const TECHNICAL_QUESTIONS = [
 ]
 
 export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: TechnicalQuestionnaireFormProps) {
+  const toast = useToast()
   const {
     responses,
     updateField,
@@ -208,7 +210,7 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
     progress,
     validate,
     submit: hookSubmit,
-    saveNow,
+    saveNow: hookSaveNow,
     isLoading,
     isSaving,
     isValidating,
@@ -218,16 +220,28 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
     validationError,
   } = useTechnicalQuestionnaire(projectId)
 
-  // Wrapper around submit to call onSubmitted callback
+  // Wrapper around saveNow with toast
+  const saveNow = async () => {
+    try {
+      await hookSaveNow()
+      toast.success('Questionário salvo')
+    } catch (err) {
+      toast.error('Erro ao salvar questionário')
+      throw err
+    }
+  }
+
+  // Wrapper around submit to call onSubmitted callback with toast
   const submit = async () => {
     try {
       await hookSubmit()
+      toast.success('Questionário submetido com sucesso!')
       // Chamar callback após sucesso
       if (onSubmitted) {
         await onSubmitted()
       }
     } catch (err) {
-      // Erro já é tratado pelo hook
+      toast.error('Erro ao submeter questionário')
       throw err
     }
   }
@@ -266,17 +280,26 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
   }
 
   const handleValidate = async () => {
-    const result = await validate()
-    if (!result.is_valid) {
-      setValidationErrors(
-        result.conflicts.reduce(
-          (acc, conflict) => ({
-            ...acc,
-            [conflict.split(':')[0]]: conflict,
-          }),
-          {}
+    try {
+      const result = await validate()
+      if (result.is_valid) {
+        toast.success('Escopo validado com sucesso!')
+        setValidationErrors({})
+      } else {
+        toast.warning(`Escopo inválido: ${result.conflicts.length} conflito(s)`)
+        setValidationErrors(
+          result.conflicts.reduce(
+            (acc, conflict) => ({
+              ...acc,
+              [conflict.split(':')[0]]: conflict,
+            }),
+            {}
+          )
         )
-      )
+      }
+    } catch (err) {
+      toast.error('Erro ao validar escopo')
+      throw err
     }
   }
 
