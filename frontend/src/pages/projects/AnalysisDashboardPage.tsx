@@ -12,6 +12,8 @@ import React, { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { Loader, ChevronDown, ChevronUp, AlertCircle, CheckCircle2, GitCompare } from 'lucide-react'
 import { useToast } from '@/hooks/useToast'
+import { ComparisonView } from '@/components/analysis/ComparisonView'
+import { RefinementTimeline } from '@/components/analysis/RefinementTimeline'
 
 interface PersonaAnalysis {
   persona_id: string
@@ -176,6 +178,17 @@ export function AnalysisDashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Comparison Modal */}
+      {selectedForComparison.length === 2 && (
+        <ComparisonView
+          projectId={projectId!}
+          documentId={documentId!}
+          personaAId={selectedForComparison[0]}
+          personaBId={selectedForComparison[1]}
+          onClose={() => setSelectedForComparison([])}
+        />
+      )}
+
       {/* Header */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h1 className="text-3xl font-bold text-gray-900">{dashboard.document_name}</h1>
@@ -318,27 +331,12 @@ export function AnalysisDashboardPage() {
                   </div>
                 )}
 
-                {/* Refinement History */}
-                {refinementHistory[analysis.persona_id]?.refinements && refinementHistory[analysis.persona_id].refinements.length > 0 && (
-                  <div className="border-t border-gray-200 pt-4">
-                    <h4 className="font-medium text-gray-900 mb-3">Histórico de Refinements</h4>
-                    <div className="space-y-3">
-                      {refinementHistory[analysis.persona_id].refinements.map((ref) => (
-                        <div key={ref.iteration} className="bg-purple-50 border border-purple-200 rounded-lg p-3">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="font-medium text-purple-900">Iteração {ref.iteration}</span>
-                            <span className="text-xs text-purple-700">{new Date(ref.created_at).toLocaleDateString('pt-BR')}</span>
-                          </div>
-                          <p className="text-sm text-purple-700 mb-2">{ref.change_summary}</p>
-                          {ref.changed_fields.length > 0 && (
-                            <div className="text-xs text-purple-600">
-                              Campos alterados: {ref.changed_fields.join(', ')}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                {/* Refinement Timeline */}
+                {refinementHistory[analysis.persona_id] && (
+                  <RefinementTimeline
+                    originalParecer={refinementHistory[analysis.persona_id].original_parecer}
+                    refinements={refinementHistory[analysis.persona_id].refinements}
+                  />
                 )}
 
                 {/* Metadata */}
