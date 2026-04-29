@@ -331,6 +331,45 @@ async def reanalyze_document(
     }
 
 
+@router.post("/projects/{project_id}/ingestion/{document_id}/consolidate-ocg")
+async def consolidate_personas_analysis(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Consolida análises de 7 personas e detecta conflitos.
+
+    Dispara após todas as personas completarem análise.
+    Consolida pareceres individuais em OCG Global.
+    Detecta automaticamente conflitos entre opiniões.
+    """
+    from app.services.ocg_consolidation_service import OCGConsolidationService
+
+    service = OCGConsolidationService(db)
+    try:
+        ocg_global, conflicts = await service.consolidate_and_detect_conflicts(
+            project_id=project_id,
+            document_id=document_id,
+        )
+
+        return {
+            "success": True,
+            "message": f"Consolidação completa. {len(conflicts)} conflitos detectados.",
+            "document_id": str(document_id),
+            "conflicts_count": len(conflicts),
+            "ocg_global": ocg_global,
+            "conflicts": conflicts,
+        }
+    except Exception as e:
+        logger.error(
+            "ingestion.consolidation_failed",
+            document_id=str(document_id),
+            error=str(e),
+        )
+        raise HTTPException(status_code=500, detail=f"Erro na consolidação: {str(e)}")
+
+
 @router.get("/projects/{project_id}/ingestion/{document_id}/content")
 async def get_document_content(
     project_id: UUID,

@@ -2290,3 +2290,45 @@ class Resolution(Base):
         Index("idx_resolution_discrepancy", discrepancy_id),
         Index("idx_resolution_project", project_id),
     )
+
+
+class OCGIndividual(Base):
+    """Parecer individual de cada persona sobre documento ingerido.
+
+    Após ingestão, 7 personas analisam documento em paralelo.
+    Cada uma gera OCG Individual (análise especializada).
+    Consolida-se em OCG Global + detecta conflitos.
+    """
+    __tablename__ = "ocg_individual"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    persona_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Tipo da persona (para referência rápida)
+    persona_name = Column(String(100), nullable=False)  # "Persona - DBA", etc
+
+    # Resultado da análise (JSON estruturado)
+    parecer = Column(JSONB, nullable=False, default={})  # { titulo, analise, riscos, recomendacoes, criticidade }
+
+    # Status da análise
+    status = Column(String(20), nullable=False, default="pending")  # pending, analyzing, completed, error
+    error_message = Column(String, nullable=True)
+
+    # IA Provider usado
+    ai_provider = Column(String(50), nullable=True)
+    ai_model = Column(String(100), nullable=True)
+
+    # Rastreamento temporal
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_ocg_individual_project", project_id),
+        Index("idx_ocg_individual_document", document_id),
+        Index("idx_ocg_individual_persona", persona_id),
+        Index("idx_ocg_individual_status", status),
+        UniqueConstraint("document_id", "persona_id", name="uq_ocg_individual_per_document_persona"),
+    )

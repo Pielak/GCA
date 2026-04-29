@@ -147,45 +147,107 @@ async def _analyze_document_async(
     Async implementation: fetch document, call LLM, store result.
     """
     async with AsyncSessionLocal() as db:
-        # 1. Get persona user by full_name (personas have no email)
+        # 1. Get persona user by full_name
         persona_name = PERSONA_NAMES.get(persona_type)
         if not persona_name:
             logger.warning("persona.unknown_type", persona=persona_type)
             return
 
-        from sqlalchemy import select
+        from sqlalchemy import select, text
         persona = await db.scalar(
             select(User).where(User.full_name == persona_name)
         )
         if not persona:
-            logger.warning("persona.user_not_found", persona=persona_type, full_name=persona_name)
+            logger.warning("persona.user_not_found", persona=persona_type)
             return
 
-        # Fetch API key for authentication
-        api_key_row = await db.scalar(
-            select(
-                "SELECT api_key_encrypted FROM user_api_keys WHERE user_id = :user_id"
-            ).bindparams(user_id=persona.id)
+        # 2. Fetch document content from database
+        from app.models.base import IngestedDocument
+        document = await db.scalar(
+            select(IngestedDocument).where(IngestedDocument.id == document_id)
         )
-        if not api_key_row:
-            logger.warning("persona.api_key_not_found", persona_id=str(persona.id))
+        if not document:
+            logger.warning("persona.document_not_found", document_id=str(document_id))
             return
 
-        # 2. Fetch document content (via internal API call)
-        # TODO: implement document fetch with authentication
-        document_content = "TODO: fetch from /projects/{project_id}/ingestion/{document_id}/content"
+        # Read document content from filesystem
+        import os
+        doc_path = f"/app/data/ingestion/{document.filename}"
+        if not os.path.exists(doc_path):
+            logger.warning("persona.document_file_not_found", path=doc_path)
+            return
+
+        try:
+            with open(doc_path, "r", encoding="utf-8", errors="ignore") as f:
+                document_content = f.read()[:5000]  # Limitar a 5K chars
+        except Exception as e:
+            logger.error("persona.document_read_failed", document_id=str(document_id), error=str(e))
+            return
 
         # 3. Call LLM with persona-specific prompt
-        # TODO: call LLM (Anthropic/OpenAI/DeepSeek based on project settings)
-        ocg_individual = {
-            "persona": persona_type,
-            "titulo": f"Análise {persona_type}",
-            "parecer": "TODO: LLM response",
-            "criticidade": "MEDIA",
-        }
+        prompt = PERSONA_PROMPTS[persona_type]
+        full_prompt = f"{prompt}\n\n---DOCUMENTO---\n{document.original_filename}\n\n{document_content}\n\n---INSTRUÇÃO---\nGere um parecer estruturado em JSON com os campos especificados acima."
+
+        try:
+            # Import LLM service
+            from app.services.llm_service import LLMServiceFactory, LLMProvider
+            from app.core.config import settings
+
+            # Get API key for Anthropic
+            api_key = settings.ANTHROPIC_API_KEY
+            client = LLMServiceFactory.create_client(LLMProvider.ANTHROPIC, api_key)
+
+            # Call LLM
+            response = await client.generate(
+                prompt=full_prompt,
+                max_tokens=2000,
+                temperature=0.5,
+            )
+
+            # Parse LLM response (esperando JSON)
+            import re
+            json_match = re.search(r"\{.*\}", response, re.DOTALL)
+            if json_match:
+                parecer = json.loads(json_match.group())
+            else:
+                parecer = {
+                    "titulo": f"Análise {persona_type}",
+                    "parecer": response,
+                    "criticidade": "MEDIA",
+                }
+
+        except Exception as e:
+            logger.error(
+                "persona.llm_call_failed",
+                persona=persona_type,
+                document_id=str(document_id),
+                error=str(e),
+            )
+            parecer = {
+                "titulo": f"Análise {persona_type}",
+                "parecer": f"Erro na análise: {str(e)}",
+                "criticidade": "MEDIA",
+            }
 
         # 4. Store OCG Individual
-        # TODO: create and persist OCG Individual record
+        from app.models.base import OCGIndividual
+        from datetime import datetime, timezone
+
+        ocg = OCGIndividual(
+            project_id=project_id,
+            document_id=document_id,
+            persona_id=persona.id,
+            persona_name=persona_name,
+            parecer=parecer,
+            status="completed",
+            ai_provider="anthropic",
+            ai_model="claude-opus-4-7",
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+        )
+        db.add(ocg)
+        await db.commit()
+
         logger.info(
             "persona.ocg_individual_stored",
             persona=persona_type,
