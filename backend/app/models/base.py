@@ -2401,3 +2401,40 @@ class OCGIndividualRefined(Base):
         Index("idx_ocg_refined_original", ocg_individual_id),
         UniqueConstraint("ocg_individual_id", "refinement_iteration", name="uq_ocg_refined_iteration"),
     )
+
+
+class OCGGlobal(Base):
+    """Parecer consolidado de todas as 7 personas.
+
+    Após todas as análises individuais (OCG Individual) serem completas,
+    consolida-se um OCG Global que mescla insights e detecta conflitos.
+
+    Estratégia de consolidação:
+    - Campos com consenso: todos as personas têm mesmo valor
+    - Campos com conflito: votação por frequência, ou override manual
+    - Meta-informação: quais personas concordam/discordam
+    """
+    __tablename__ = "ocg_global"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Parecer consolidado (resultado final)
+    parecer_consolidated = Column(JSONB, nullable=False, default={})
+
+    # Meta-dados de consolidação
+    consensus_fields = Column(JSONB, nullable=False, default=[])  # Campos em que 100% concordam
+    conflicting_fields = Column(JSONB, nullable=False, default={})  # { field: { persona: value, ... } }
+    voting_results = Column(JSONB, nullable=False, default={})  # { field: { value: count, ... } }
+
+    # Rastreamento
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    consolidated_at = Column(DateTime(timezone=True), nullable=True)  # Quando foi consolidado
+    consolidated_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)  # Quem disparou consolidação (opcional - pode ser automático)
+
+    __table_args__ = (
+        Index("idx_ocg_global_project", project_id),
+        Index("idx_ocg_global_document", document_id),
+        UniqueConstraint("document_id", name="uq_ocg_global_per_document"),
+    )

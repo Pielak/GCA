@@ -1,185 +1,212 @@
 """
-Consolidação de OCG Individual de 7 personas em OCG Global + detecção de conflitos.
+OCG Consolidation Service
 
-Após todas as personas analisarem um documento:
-1. Consolida pareceres em OCG Global
-2. Detecta conflitos entre opiniões
-3. Propõe resoluções baseadas em votação/precedência
+Consolida as 7 análises individuais (OCG Individual) em uma única análise global (OCG Global).
+Detecta consenso, conflitos e aplica votação para campos divergentes.
+
+Estratégia:
+1. Buscar todas as 7 OCG Individual para um documento
+2. Extrair campos comuns e detectar consenso
+3. Para campos divergentes: contar frequências e aplicar votação
+4. Armazenar resultado em OCG Global com metadados de consolidação
 """
+
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime, timezone
 import structlog
 import json
-from typing import Dict, List, Tuple
+from collections import Counter
+from typing import Dict, List, Any
 
-from app.models.base import OCGIndividual, Discrepancy, IngestedDocument
+from app.models.base import OCGIndividual, OCGGlobal, IngestedDocument
 
 logger = structlog.get_logger(__name__)
 
 
 class OCGConsolidationService:
-    """Serviço para consolidar análises de personas e detectar conflitos."""
+    """Serviço de consolidação de OCG"""
 
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def consolidate_and_detect_conflicts(
+    async def consolidate_document(
         self,
         project_id: UUID,
         document_id: UUID,
-    ) -> Tuple[Dict, List[Dict]]:
+    ) -> OCGGlobal | None:
         """
-        Consolida 7 OCG Individual em OCG Global + detecta conflitos.
+        Consolida todas as análises de um documento em OCG Global.
 
-        Returns: (ocg_global, discrepancies)
+        Retorna OCGGlobal criado ou None se falhar.
         """
-        # 1. Buscar todas as análises de personas para este documento
-        ocg_individuals = await self.db.scalars(
-            select(OCGIndividual).where(
-                (OCGIndividual.project_id == project_id) &
-                (OCGIndividual.document_id == document_id)
+        try:
+            # 1. Buscar todas as OCG Individual
+            ocg_individuals = await self.db.scalars(
+                select(OCGIndividual).where(
+                    (OCGIndividual.project_id == project_id) &
+                    (OCGIndividual.document_id == document_id)
+                )
             )
-        )
-        ocg_list = ocg_individuals.all()
+            individuals = ocg_individuals.all()
 
-        if not ocg_list:
-            logger.warning("ocg.no_personas_analyzed", project_id=str(project_id), document_id=str(document_id))
-            return {}, []
+            if not individuals:
+                logger.warning(
+                    "ocg_consolidation.no_analyses",
+                    project_id=str(project_id),
+                    document_id=str(document_id),
+                )
+                return None
 
-        logger.info("ocg.consolidation_start", persona_count=len(ocg_list), document_id=str(document_id))
+            if len(individuals) != 7:
+                logger.warning(
+                    "ocg_consolidation.incomplete_analyses",
+                    project_id=str(project_id),
+                    document_id=str(document_id),
+                    count=len(individuals),
+                )
 
-        # 2. Extrair campos com potencial conflito
-        parecer_dict = {}
-        for ocg in ocg_list:
-            parecer_dict[ocg.persona_name] = ocg.parecer
+            # 2. Detectar consenso e conflitos
+            consensus_fields, conflicting_fields, voting_results = self._analyze_pareceres(individuals)
 
-        # 3. Detectar conflitos
-        conflicts = self._detect_conflicts(parecer_dict)
+            # 3. Montar parecer consolidado
+            consolidated = self._merge_pareceres(
+                individuals,
+                consensus_fields,
+                conflicting_fields,
+                voting_results,
+            )
 
-        # 4. Armazenar conflitos detectados
-        for conflict in conflicts:
-            discrepancy = Discrepancy(
+            # 4. Armazenar OCG Global
+            ocg_global = OCGGlobal(
                 project_id=project_id,
-                technical_questionnaire_id=None,  # Documento, não questionnaire
-                field_path=conflict["field_name"],
-                conflicting_personas=conflict["conflicting_personas"],
-                conflicting_values=conflict["values_proposed"],
-                severity=conflict["severity"],
-                category=conflict["category"],
-                status="unresolved",
-                context=f"Detecção automática: personas discordam sobre {conflict['field_name']}",
+                document_id=document_id,
+                parecer_consolidated=consolidated,
+                consensus_fields=consensus_fields,
+                conflicting_fields=conflicting_fields,
+                voting_results=voting_results,
+                consolidated_at=datetime.now(timezone.utc),
             )
-            self.db.add(discrepancy)
+            self.db.add(ocg_global)
+            await self.db.commit()
+            await self.db.refresh(ocg_global)
 
-        await self.db.commit()
+            logger.info(
+                "ocg_consolidation.complete",
+                project_id=str(project_id),
+                document_id=str(document_id),
+                consensus_count=len(consensus_fields),
+                conflicting_count=len(conflicting_fields),
+            )
 
-        # 5. Consolidar em OCG Global
-        ocg_global = self._consolidate_ocg(parecer_dict, conflicts)
+            return ocg_global
 
-        logger.info(
-            "ocg.consolidation_complete",
-            project_id=str(project_id),
-            document_id=str(document_id),
-            conflicts_detected=len(conflicts),
-        )
+        except Exception as e:
+            logger.error(
+                "ocg_consolidation.failed",
+                project_id=str(project_id),
+                document_id=str(document_id),
+                error=str(e),
+            )
+            await self.db.rollback()
+            return None
 
-        return ocg_global, conflicts
-
-    def _detect_conflicts(self, parecer_dict: Dict[str, Dict]) -> List[Dict]:
+    def _analyze_pareceres(self, individuals: List[OCGIndividual]) -> tuple:
         """
-        Detecta conflitos entre pareceres de personas.
-        Retorna lista de conflitos com field_name, personas, valores.
+        Analisa pareceres para detectar consenso e conflitos.
+
+        Retorna: (consensus_fields, conflicting_fields, voting_results)
         """
-        conflicts = []
+        consensus_fields = []
+        conflicting_fields = {}
+        voting_results = {}
 
-        # Extrair campos chave que podem ter conflito
-        # Exemplos: criticidade, recomendações, riscos
-        criticalities = {}
-        recommendations = {}
+        # Coletar todos os campos únicos
+        all_keys = set()
+        for ocg in individuals:
+            if ocg.parecer:
+                all_keys.update(ocg.parecer.keys())
 
-        for persona_name, parecer in parecer_dict.items():
-            if isinstance(parecer, dict):
-                # Agrupar por criticidade
-                crit = parecer.get("criticidade", "MEDIA")
-                if "criticidade" not in criticalities:
-                    criticalities["criticidade"] = {}
-                if crit not in criticalities["criticidade"]:
-                    criticalities["criticidade"][crit] = []
-                criticalities["criticidade"][crit].append(persona_name)
+        # Analisar cada campo
+        for field in all_keys:
+            values = [ocg.parecer.get(field) if ocg.parecer else None for ocg in individuals]
 
-                # Agrupar por primeiras recomendações
-                recs = parecer.get("recomendacoes", [])
-                if recs and len(recs) > 0:
-                    first_rec = recs[0] if isinstance(recs, list) else str(recs)
-                    if "recomendacao_principal" not in recommendations:
-                        recommendations["recomendacao_principal"] = {}
-                    if first_rec not in recommendations["recomendacao_principal"]:
-                        recommendations["recomendacao_principal"][first_rec] = []
-                    recommendations["recomendacao_principal"][first_rec].append(persona_name)
+            # Converter para string para comparação (lidar com arrays e objetos)
+            str_values = [json.dumps(v, sort_keys=True) if v else "null" for v in values]
 
-        # Detectar quando há 2+ valores diferentes
-        for field_name, value_dict in criticalities.items():
-            if len(value_dict) > 1:  # Múltiplos valores
-                conflicting_personas = []
-                values_proposed = {}
-                for value, personas in value_dict.items():
-                    conflicting_personas.extend(personas)
-                    values_proposed[value] = personas
+            # Contar frequências
+            freq = Counter(str_values)
 
-                # Classificar severidade do conflito
-                values_list = list(value_dict.keys())
-                if "ALTA" in values_list and "BAIXA" in values_list:
-                    severity = "critical"
-                elif ("ALTA" in values_list or "MEDIA" in values_list) and "BAIXA" in values_list:
-                    severity = "high"
-                else:
-                    severity = "medium"
+            if len(freq) == 1:
+                # Consenso: todos têm o mesmo valor
+                consensus_fields.append(field)
+            else:
+                # Conflito: valores diferentes
+                conflicting_fields[field] = {
+                    ocg.persona_name: ocg.parecer.get(field) if ocg.parecer else None
+                    for ocg in individuals
+                }
 
-                conflicts.append({
-                    "field_name": field_name,
-                    "conflicting_personas": conflicting_personas,
-                    "values_proposed": {p: values_proposed.get(v, [p])[0] for p, v in zip(conflicting_personas, values_list)},
-                    "severity": severity,
-                    "category": "assessment",
-                })
+                # Votação: qual valor apareceu mais
+                voting_results[field] = {
+                    v: count for v, count in sorted(freq.items(), key=lambda x: x[1], reverse=True)
+                }
 
-        return conflicts
+        return consensus_fields, conflicting_fields, voting_results
 
-    def _consolidate_ocg(self, parecer_dict: Dict[str, Dict], conflicts: List[Dict]) -> Dict:
+    def _merge_pareceres(
+        self,
+        individuals: List[OCGIndividual],
+        consensus_fields: List[str],
+        conflicting_fields: Dict,
+        voting_results: Dict,
+    ) -> Dict[str, Any]:
         """
-        Consolida pareceres de personas em OCG Global.
-        Estratégia: votação simples para campos com conflito, merge para campos sem conflito.
+        Mescla as 7 análises em uma única consolidada.
+
+        Estratégia:
+        - Campos em consenso: usa o valor unânime
+        - Campos em conflito: usa o valor que apareceu mais (votação)
+        - Campos adicionais: descrição do conflito
         """
-        ocg_global = {
-            "consolidado_em": datetime.now(timezone.utc).isoformat(),
-            "personas_total": len(parecer_dict),
-            "conflitos_detectados": len(conflicts),
-            "pareceres_individuais": parecer_dict,
-            "conclusoes": {
-                "criticidade_maxima": "ALTA",  # Sempre usar máxima criticidade
-                "riscos_consolidados": self._consolidate_list_field(parecer_dict, "riscos"),
-                "recomendacoes_consolidadas": self._consolidate_list_field(parecer_dict, "recomendacoes"),
-            },
+        consolidated = {}
+
+        # Base: tomar do primeiro parecer
+        if individuals and individuals[0].parecer:
+            consolidated = individuals[0].parecer.copy()
+
+        # Campos em consenso: manter como está
+        for field in consensus_fields:
+            if field in consolidated:
+                continue
+            # Buscar valor do consenso
+            for ocg in individuals:
+                if ocg.parecer and field in ocg.parecer:
+                    consolidated[field] = ocg.parecer[field]
+                    break
+
+        # Campos em conflito: usar votação
+        for field, votes in voting_results.items():
+            if votes:
+                # Pegar valor mais votado
+                most_voted_json = max(votes, key=votes.get)
+                try:
+                    most_voted = json.loads(most_voted_json)
+                except:
+                    most_voted = most_voted_json
+
+                consolidated[f"{field}_consolidated"] = most_voted
+                consolidated[f"{field}_consensus"] = False
+                consolidated[f"{field}_votes"] = {
+                    v: count for v, count in votes.items()
+                }
+
+        # Metadados de consolidação
+        consolidated["_consolidation_metadata"] = {
+            "consensus_fields": consensus_fields,
+            "conflicting_fields": list(conflicting_fields.keys()),
+            "consolidated_at": datetime.now(timezone.utc).isoformat(),
         }
-        return ocg_global
 
-    def _consolidate_list_field(self, parecer_dict: Dict[str, Dict], field_name: str) -> List[str]:
-        """
-        Consolida campos lista (riscos, recomendações) de múltiplas personas.
-        Remove duplicatas, mantém ordem por frequência.
-        """
-        all_items = []
-        for parecer in parecer_dict.values():
-            if isinstance(parecer, dict):
-                items = parecer.get(field_name, [])
-                if isinstance(items, list):
-                    all_items.extend(items)
-
-        # Deduplica mantendo ordem de frequência
-        seen = {}
-        for item in all_items:
-            seen[item] = seen.get(item, 0) + 1
-
-        return sorted(seen.keys(), key=lambda x: -seen[x])[:10]  # Top 10
+        return consolidated

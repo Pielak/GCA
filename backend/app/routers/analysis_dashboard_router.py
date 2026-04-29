@@ -136,9 +136,12 @@ async def get_analysis_dashboard(
         },
     }
 
-    # 5. Tentar buscar OCG Global (se consolidado)
-    # Será armazenado em algum lugar (por enquanto, retornar None)
-    ocg_global = None
+    # 5. Buscar OCG Global (se existir)
+    from app.models.base import OCGGlobal
+    ocg_global_record = await db.scalar(
+        select(OCGGlobal).where(OCGGlobal.document_id == document_id)
+    )
+    ocg_global = ocg_global_record.parecer_consolidated if ocg_global_record else None
 
     return AnalysisDashboardResponse(
         document_id=str(document_id),
@@ -392,3 +395,75 @@ async def get_analysis_summary(
         conflicting_fields=conflicting_fields,
         analysis_readiness=readiness,
     )
+
+
+@router.post(
+    "/projects/{project_id}/ingestion/{document_id}/consolidate-ocg"
+)
+async def consolidate_ocg(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Consolida as 7 análises de personas em OCG Global.
+
+    Detecta consenso, conflitos e aplica votação para campos divergentes.
+    """
+    # 1. Verificar documento
+    document = await db.get(IngestedDocument, document_id)
+    if not document or document.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    # 2. Consolidar
+    from app.services.ocg_consolidation_service import OCGConsolidationService
+    service = OCGConsolidationService(db)
+    ocg_global = await service.consolidate_document(project_id, document_id)
+
+    if not ocg_global:
+        raise HTTPException(status_code=400, detail="Falha ao consolidar análises")
+
+    return {
+        "ocg_global_id": str(ocg_global.id),
+        "consensus_fields": ocg_global.consensus_fields,
+        "conflicting_fields": list(ocg_global.conflicting_fields.keys()),
+        "consolidated_at": ocg_global.consolidated_at.isoformat() if ocg_global.consolidated_at else None,
+    }
+
+
+@router.get(
+    "/projects/{project_id}/ingestion/{document_id}/ocg-global"
+)
+async def get_ocg_global(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retorna OCG Global consolidado para um documento.
+
+    Se ainda não consolidado, retorna 404.
+    """
+    from app.models.base import OCGGlobal
+
+    # Verificar documento
+    document = await db.get(IngestedDocument, document_id)
+    if not document or document.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    # Buscar OCG Global
+    ocg_global = await db.scalar(
+        select(OCGGlobal).where(OCGGlobal.document_id == document_id)
+    )
+
+    if not ocg_global:
+        raise HTTPException(status_code=404, detail="OCG Global não consolidado para este documento")
+
+    return {
+        "ocg_global_id": str(ocg_global.id),
+        "parecer_consolidated": ocg_global.parecer_consolidated,
+        "consensus_fields": ocg_global.consensus_fields,
+        "conflicting_fields": ocg_global.conflicting_fields,
+        "voting_results": ocg_global.voting_results,
+        "consolidated_at": ocg_global.consolidated_at.isoformat() if ocg_global.consolidated_at else None,
+    }
