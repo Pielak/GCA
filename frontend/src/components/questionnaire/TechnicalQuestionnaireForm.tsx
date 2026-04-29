@@ -387,7 +387,7 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
 
             <button
               onClick={handleValidate}
-              disabled={isValidating || progress < 80}
+              disabled={isValidating || progress < 70}
               className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isValidating ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
@@ -396,7 +396,7 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
 
             <button
               onClick={submit}
-              disabled={isSaving || progress < 80}
+              disabled={isSaving || progress < 70}
               className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
@@ -405,7 +405,7 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
 
             <button
               className="flex items-center gap-2 px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={progress < 80}
+              disabled={progress < 70}
             >
               <Download size={18} />
               Exportar PDF
@@ -432,7 +432,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
       return (
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <label className="block text-sm font-medium text-gray-900">
+            <label className="block text-sm font-medium text-white">
               {question.numero}. {question.pergunta}
               {question.obrigatoria && <span className="text-red-500">*</span>}
             </label>
@@ -460,7 +460,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
-            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            className="w-full px-3 py-2 border rounded-lg text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
           />
           {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
         </div>
@@ -470,7 +470,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
       return (
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <label className="block text-sm font-medium text-gray-900">
+            <label className="block text-sm font-medium text-white">
               {question.numero}. {question.pergunta}
               {question.obrigatoria && <span className="text-red-500">*</span>}
             </label>
@@ -498,7 +498,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
             rows={4}
-            className="w-full px-3 py-2 border border-blue-300 text-blue-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+            className="w-full px-3 py-2 border border-blue-300 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
           />
           {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
         </div>
@@ -508,7 +508,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
       return (
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <label className="block text-sm font-medium text-gray-900">
+            <label className="block text-sm font-medium text-white">
               {question.numero}. {question.pergunta}
               {question.obrigatoria && <span className="text-red-500">*</span>}
             </label>
@@ -535,7 +535,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
-            className="w-full px-3 py-2 border border-blue-300 text-blue-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
+            className="w-full px-3 py-2 border border-blue-300 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
           >
             <option value="">Selecione uma opção...</option>
             {question.opcoes.map((opt: string) => (
@@ -552,7 +552,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
       return (
         <div>
           <div className="flex items-center gap-2 mb-2">
-            <label className="block text-sm font-medium text-gray-900">
+            <label className="block text-sm font-medium text-white">
               {question.numero}. {question.pergunta}
               {question.obrigatoria && <span className="text-red-500">*</span>}
             </label>
@@ -602,7 +602,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
                     className="rounded accent-green-600"
                   />
                   <span className={`text-sm font-medium ${
-                    isChecked ? 'text-green-700' : 'text-blue-700'
+                    isChecked ? 'text-green-700' : 'text-gray-900'
                   }`}>
                     {opt}
                   </span>
@@ -631,7 +631,7 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
             />
             <div className="flex items-center gap-2">
               <span className={`text-sm font-medium ${
-                value ? 'text-green-700' : 'text-blue-700'
+                value ? 'text-green-700' : 'text-white'
               }`}>
                 {question.numero}. {question.pergunta}
                 {question.obrigatoria && <span className="text-red-500">*</span>}
