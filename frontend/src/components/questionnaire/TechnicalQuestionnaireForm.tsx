@@ -4,6 +4,7 @@ import { useTechnicalQuestionnaire } from '@/hooks/useTechnicalQuestionnaire'
 
 interface TechnicalQuestionnaireFormProps {
   projectId?: string
+  onSubmitted?: () => void | Promise<void>
 }
 
 // Schema das perguntas técnicas (importado do backend, mas aqui simplificado para o frontend)
@@ -184,14 +185,14 @@ const TECHNICAL_QUESTIONS = [
   },
 ]
 
-export function TechnicalQuestionnaireForm({ projectId }: TechnicalQuestionnaireFormProps) {
+export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: TechnicalQuestionnaireFormProps) {
   const {
     responses,
     updateField,
     visibleQuestions,
     progress,
     validate,
-    submit,
+    submit: hookSubmit,
     saveNow,
     isLoading,
     isSaving,
@@ -201,6 +202,20 @@ export function TechnicalQuestionnaireForm({ projectId }: TechnicalQuestionnaire
     error,
     validationError,
   } = useTechnicalQuestionnaire(projectId)
+
+  // Wrapper around submit to call onSubmitted callback
+  const submit = async () => {
+    try {
+      await hookSubmit()
+      // Chamar callback após sucesso
+      if (onSubmitted) {
+        await onSubmitted()
+      }
+    } catch (err) {
+      // Erro já é tratado pelo hook
+      throw err
+    }
+  }
 
   const [expandedSections, setExpandedSections] = useState<Set<string>>(
     new Set(['A', 'B', 'C', 'D'])
