@@ -324,6 +324,28 @@ class PersonasBoardResponse(BaseModel):
     consolidated_ocg_delta: Dict[str, Any] = {}
 
 
+class DiscrepancyModel(BaseModel):
+    """Discrepância entre personas"""
+    id: str
+    field_path: str
+    conflicting_personas: List[str]
+    conflicting_values: Dict[str, Any]
+    severity: str
+    category: Optional[str] = None
+    status: str
+    context: Optional[str] = None
+    created_at: str
+    resolved_at: Optional[str] = None
+
+
+class DiscrepanciesResponse(BaseModel):
+    """Board de discrepâncias detectadas"""
+    questionnaire_id: str
+    discrepancies: List[DiscrepancyModel]
+    unresolved_count: int
+    all_resolved: bool
+
+
 @router.get("/{project_id}/technical-questionnaire/{questionnaire_id}/personas-board", response_model=PersonasBoardResponse)
 async def get_personas_board(
     project_id: UUID,
@@ -402,3 +424,248 @@ async def get_personas_board(
         all_completed=all_completed,
         consolidated_ocg_delta=consolidated_delta,
     )
+
+
+# ============================================================================
+# MVP C — Discrepancy Detection & Resolution
+# ============================================================================
+
+@router.post("/{project_id}/technical-questionnaire/{questionnaire_id}/detect-discrepancies")
+async def detect_discrepancies(
+    project_id: UUID,
+    questionnaire_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Detect discrepancies between persona evaluations.
+
+    Runs after all personas complete evaluation.
+    Finds fields where personas disagree and creates Discrepancy records.
+    """
+    from app.models.base import PersonaResponse, Discrepancy
+    from app.services.discrepancy_detector import detect_persona_discrepancies
+
+    # Verify project and questionnaire
+    stmt = select(Project).where(Project.id == project_id)
+    project = await db.scalar(stmt)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    stmt = select(TechnicalQuestionnaire).where(
+        (TechnicalQuestionnaire.id == questionnaire_id) &
+        (TechnicalQuestionnaire.project_id == project_id)
+    )
+    questionnaire = await db.scalar(stmt)
+    if not questionnaire:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Questionário não encontrado")
+
+    # Fetch all persona responses
+    stmt = select(PersonaResponse).where(
+        PersonaResponse.technical_questionnaire_id == questionnaire_id
+    )
+    persona_responses_list = await db.scalars(stmt)
+
+    # Build persona_responses dict for detector
+    persona_responses = {}
+    for resp in persona_responses_list:
+        persona_responses[resp.persona_name] = {
+            "ocg_delta": resp.ocg_delta,
+            "status": resp.status,
+            "decision": resp.decision,
+        }
+
+    # Detect discrepancies
+    discrepancies_found = detect_persona_discrepancies(persona_responses)
+
+    # Save to database
+    for disc in discrepancies_found:
+        existing = await db.scalar(
+            select(Discrepancy).where(
+                (Discrepancy.technical_questionnaire_id == questionnaire_id) &
+                (Discrepancy.field_path == disc.field_path)
+            )
+        )
+
+        if not existing:
+            discrepancy = Discrepancy(
+                project_id=project_id,
+                technical_questionnaire_id=questionnaire_id,
+                field_path=disc.field_path,
+                conflicting_personas=disc.conflicting_personas,
+                conflicting_values=disc.conflicting_values,
+                severity=disc.severity,
+                category=disc.category,
+                status="unresolved",
+                context=f"Conflito entre {', '.join(disc.conflicting_personas)}",
+                detected_at=datetime.utcnow(),
+            )
+            db.add(discrepancy)
+
+    await db.commit()
+
+    logger.info(
+        "discrepancies_detected_and_saved",
+        project_id=str(project_id),
+        questionnaire_id=str(questionnaire_id),
+        discrepancy_count=len(discrepancies_found),
+    )
+
+    return {
+        "status": "ok",
+        "discrepancies_found": len(discrepancies_found),
+        "discrepancies": [
+            {
+                "field_path": d.field_path,
+                "conflicting_personas": d.conflicting_personas,
+                "severity": d.severity,
+            }
+            for d in discrepancies_found
+        ],
+    }
+
+
+@router.get("/{project_id}/technical-questionnaire/{questionnaire_id}/discrepancies-board", response_model=DiscrepanciesResponse)
+async def get_discrepancies_board(
+    project_id: UUID,
+    questionnaire_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Retrieve discrepancies board for technical questionnaire.
+
+    Shows all detected discrepancies and their resolution status.
+    """
+    from app.models.base import Discrepancy
+
+    # Verify project and questionnaire
+    stmt = select(Project).where(Project.id == project_id)
+    project = await db.scalar(stmt)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    stmt = select(TechnicalQuestionnaire).where(
+        (TechnicalQuestionnaire.id == questionnaire_id) &
+        (TechnicalQuestionnaire.project_id == project_id)
+    )
+    questionnaire = await db.scalar(stmt)
+    if not questionnaire:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Questionário não encontrado")
+
+    # Fetch all discrepancies
+    stmt = select(Discrepancy).where(
+        Discrepancy.technical_questionnaire_id == questionnaire_id
+    ).order_by(Discrepancy.severity.desc(), Discrepancy.field_path)
+    discrepancies_list = await db.scalars(stmt)
+
+    # Build response
+    discrepancies = []
+    unresolved_count = 0
+
+    for disc in discrepancies_list:
+        discrepancies.append(
+            DiscrepancyModel(
+                id=str(disc.id),
+                field_path=disc.field_path,
+                conflicting_personas=disc.conflicting_personas,
+                conflicting_values=disc.conflicting_values,
+                severity=disc.severity,
+                category=disc.category,
+                status=disc.status,
+                context=disc.context,
+                created_at=disc.created_at.isoformat() if disc.created_at else None,
+                resolved_at=disc.resolved_at.isoformat() if disc.resolved_at else None,
+            )
+        )
+        if disc.status == "unresolved":
+            unresolved_count += 1
+
+    all_resolved = unresolved_count == 0
+
+    logger.info(
+        "discrepancies_board_retrieved",
+        project_id=str(project_id),
+        questionnaire_id=str(questionnaire_id),
+        discrepancy_count=len(discrepancies),
+        unresolved_count=unresolved_count,
+    )
+
+    return DiscrepanciesResponse(
+        questionnaire_id=str(questionnaire_id),
+        discrepancies=discrepancies,
+        unresolved_count=unresolved_count,
+        all_resolved=all_resolved,
+    )
+
+
+class ResolveDiscrepancyRequest(BaseModel):
+    """Request to resolve a discrepancy"""
+    resolved_value: str  # Valor escolhido (pode ser um dos conflitantes ou novo)
+    resolution_type: str  # "vote", "override", "arbitration", "compromise"
+    vote_details: Optional[Dict[str, Any]] = None  # Se votação
+    justification: Optional[str] = None
+
+
+@router.post("/{project_id}/technical-questionnaire/{questionnaire_id}/discrepancies/{discrepancy_id}/resolve")
+async def resolve_discrepancy(
+    project_id: UUID,
+    questionnaire_id: UUID,
+    discrepancy_id: UUID,
+    req: ResolveDiscrepancyRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Resolve a discrepancy (vote, override, arbitration).
+    """
+    from app.models.base import Discrepancy, Resolution
+
+    # Verify resources exist
+    stmt = select(Project).where(Project.id == project_id)
+    project = await db.scalar(stmt)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    stmt = select(Discrepancy).where(
+        (Discrepancy.id == discrepancy_id) &
+        (Discrepancy.technical_questionnaire_id == questionnaire_id)
+    )
+    discrepancy = await db.scalar(stmt)
+    if not discrepancy:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Discrepância não encontrada")
+
+    # Create resolution record
+    resolution = Resolution(
+        discrepancy_id=discrepancy_id,
+        project_id=project_id,
+        resolved_value=req.resolved_value,
+        resolution_type=req.resolution_type,
+        vote_details=req.vote_details or {},
+        resolved_by=current_user.id,
+        justification=req.justification,
+    )
+    db.add(resolution)
+
+    # Update discrepancy status
+    discrepancy.status = "resolved"
+    discrepancy.resolved_at = datetime.utcnow()
+    discrepancy.resolved_by = current_user.id
+    discrepancy.resolution_notes = f"Resolvido por votação" if req.resolution_type == "vote" else f"Resolvido por {req.resolution_type}"
+
+    await db.commit()
+
+    logger.info(
+        "discrepancy_resolved",
+        project_id=str(project_id),
+        discrepancy_id=str(discrepancy_id),
+        resolution_type=req.resolution_type,
+        resolved_by=str(current_user.id),
+    )
+
+    return {
+        "status": "ok",
+        "discrepancy_id": str(discrepancy_id),
+        "resolved_value": req.resolved_value,
+        "resolution_type": req.resolution_type,
+    }

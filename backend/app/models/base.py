@@ -2206,3 +2206,86 @@ class PersonaResponse(Base):
         Index("idx_persona_response_persona", technical_questionnaire_id, persona_name),
         UniqueConstraint("technical_questionnaire_id", "persona_name", name="uq_persona_response_per_questionnaire"),
     )
+
+
+class Discrepancy(Base):
+    """Conflito entre avaliações de personas.
+
+    Quando 2+ personas discordam sobre campo específico do OCG,
+    sistema detecta e permite team resolver (votação, override, arbitragem).
+
+    Exemplos:
+    - P1 (GP) diz "escopo crítico" vs P5 (QA) diz "escopo médio"
+    - P2 (Arquiteto) recomenda "microserviços" vs P4 (Dev Sr) diz "monolito"
+    """
+    __tablename__ = "discrepancies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    technical_questionnaire_id = Column(UUID(as_uuid=True), ForeignKey("technical_questionnaires.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Campo em conflito (ex: "escopo", "arquitetura.stack", "dados.retention_policy")
+    field_path = Column(String(200), nullable=False)
+
+    # Personas envolvidas (JSONB array de persona_names, ex: ["gp", "qa", "dev_sr"])
+    conflicting_personas = Column(JSONB, nullable=False, default=[])
+
+    # Valores em conflito (JSONB object: {"gp": "crítico", "qa": "baixa", "dev_sr": "média"})
+    conflicting_values = Column(JSONB, nullable=False, default={})
+
+    # Categorização do conflito
+    severity = Column(String(20), nullable=False, default="medium")  # low, medium, high, critical
+    category = Column(String(50), nullable=True)  # "scope", "architecture", "performance", "data", etc
+
+    # Status da resolução
+    status = Column(String(20), nullable=False, default="unresolved")  # unresolved, voted, overridden, arbitrated, resolved
+
+    # Rastreamento de resolução
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    detected_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Contexto/anotações
+    context = Column(String, nullable=True)  # Descrição da discrepância
+    resolution_notes = Column(String, nullable=True)  # Como foi resolvida
+
+    __table_args__ = (
+        Index("idx_discrepancy_project", project_id),
+        Index("idx_discrepancy_questionnaire", technical_questionnaire_id),
+        Index("idx_discrepancy_status", technical_questionnaire_id, status),
+    )
+
+
+class Resolution(Base):
+    """Registro de como uma discrepância foi resolvida.
+
+    Permite rastreamento de: votação (team), override (GP), arbitragem (Admin).
+    """
+    __tablename__ = "resolutions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    discrepancy_id = Column(UUID(as_uuid=True), ForeignKey("discrepancies.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Qual valor foi escolhido (pode ser um dos conflitantes ou novo)
+    resolved_value = Column(Text, nullable=False)
+
+    # Como foi resolvido
+    resolution_type = Column(String(50), nullable=False)  # "vote", "override", "arbitration", "compromise"
+
+    # Votação: {"gp": "microserviços", "qa": "monolito", "dev_sr": "microserviços"}
+    # Resultado: "microserviços" (venceu com 2/3)
+    vote_details = Column(JSONB, nullable=True, default={})
+
+    # Quem resolveu
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Justificativa
+    justification = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("idx_resolution_discrepancy", discrepancy_id),
+        Index("idx_resolution_project", project_id),
+    )

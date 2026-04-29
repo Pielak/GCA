@@ -12,6 +12,7 @@ import { getErrorMessage } from '@/lib/errors'
 import { formatDateTimeBR } from '@/lib/datetime'
 import { TechnicalQuestionnaireForm } from '@/components/questionnaire/TechnicalQuestionnaireForm'
 import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
+import { DiscrepancyBoard } from '@/components/questionnaire/DiscrepancyBoard'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -75,6 +76,18 @@ export function QuestionnairePage() {
     } catch { /* sem questionário ainda */ }
   }
 
+  const triggerDiscrepancyDetection = async () => {
+    if (!projectId || !existing) return
+    try {
+      await fetch(
+        `/api/projects/${projectId}/technical-questionnaire/${existing.id}/detect-discrepancies`,
+        { method: 'POST', credentials: 'include' }
+      )
+    } catch (err) {
+      console.error('Failed to detect discrepancies:', err)
+    }
+  }
+
   useEffect(() => {
     if (!projectId) { setLoading(false); return }
     fetchExisting().finally(() => setLoading(false))
@@ -110,15 +123,30 @@ export function QuestionnairePage() {
 
       {/* MVP B — Persona Board (avaliação em tempo real) */}
       {existing?.submitted_at && projectId && (
-        <div className="mt-8 pt-6 border-t border-slate-700">
+        <div className="mt-8 pt-6 border-t border-slate-700 space-y-6">
           <PersonaBoard
             projectId={projectId}
             questionnaireId={existing.id}
             pollInterval={2000}
             onBoardUpdate={(allCompleted) => {
               if (allCompleted) {
+                // Trigger discrepancy detection when all personas complete
+                triggerDiscrepancyDetection()
                 // Refresh questionnaire status when all personas complete
                 fetchExisting()
+              }
+            }}
+          />
+
+          {/* MVP C — Discrepancy Board (após personas completarem) */}
+          <DiscrepancyBoard
+            projectId={projectId}
+            questionnaireId={existing.id}
+            pollInterval={2000}
+            onDiscrepanciesUpdate={(unresolvedCount) => {
+              // Pode-se disparar OCG consolidado quando todas discrepâncias forem resolvidas
+              if (unresolvedCount === 0) {
+                // Todos os conflitos resolvidos
               }
             }}
           />
