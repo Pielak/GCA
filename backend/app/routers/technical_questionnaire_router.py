@@ -201,6 +201,34 @@ async def save_technical_questionnaire(
     await db.commit()
     await db.refresh(questionnaire)
 
+    # Após submissão bem-sucedida, dispara geração automática de OCG
+    # (MVP Fase 1: user responde 15 perguntas → OCG gerado na mesma sessão)
+    if req.submit:
+        try:
+            from app.tasks.pipeline import auto_generate_task
+            # Prepara OCG inicial com dados do TechnicalQuestionnaire
+            ocg_data = {
+                "project_id": str(project_id),
+                "source": "technical_questionnaire",
+                "responses": req.responses,
+                "created_by": str(current_user.id),
+                "created_at": datetime.utcnow().isoformat(),
+            }
+            auto_generate_task.delay(str(project_id), ocg_data)
+            logger.info(
+                "technical_questionnaire_ocg_generation_queued",
+                project_id=str(project_id),
+                task_queued=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "technical_questionnaire_ocg_generation_failed_to_queue",
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            # Não bloqueia o retorno se o Celery falhar — questionário já foi salvo
+
     return TechnicalQuestionnaireResponse(
         id=str(questionnaire.id),
         project_id=str(questionnaire.project_id),
