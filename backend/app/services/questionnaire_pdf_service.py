@@ -374,6 +374,22 @@ def generate_pdf(
 # Extração de respostas do PDF preenchido
 # ──────────────────────────────────────────────────────────────────
 
+def _normalize_response_keys(answers: Dict[str, Any]) -> Dict[str, Any]:
+    """Normaliza chaves JSONB: converte "1" → "Q1", "42" → "Q42", etc.
+
+    Mantém chaves já com prefixo "Q" como estão.
+    """
+    normalized = {}
+    for key, value in answers.items():
+        # Se é numérico puro, adiciona prefixo "Q"
+        if isinstance(key, str) and key.isdigit():
+            normalized_key = f"Q{key}"
+        else:
+            normalized_key = key
+        normalized[normalized_key] = value
+    return normalized
+
+
 def extract_answers_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
     """Extrai respostas dos campos AcroForm de um PDF preenchido.
 
@@ -381,6 +397,8 @@ def extract_answers_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
       - q{N} (textfield/choice) → resposta direta
       - q{N}_cb_{idx} (checkbox) → coleta checked, monta lista
       - q{N}_cb_outros + q{N}_outros → adiciona "Outros: ..." à lista
+
+    Retorna chaves normalizadas: "Q1", "Q2", etc (não "1", "2", etc)
     """
     import pypdf
 
@@ -446,7 +464,8 @@ def extract_answers_from_pdf(pdf_bytes: bytes) -> Dict[str, Any]:
         if selected:
             answers[q_id] = selected
 
-    return answers
+    # Normalizar chaves: "1" → "Q1", "42" → "Q42"
+    return _normalize_response_keys(answers)
 
 
 def extract_answers_from_text(text: str) -> Dict[str, Any]:
@@ -455,6 +474,8 @@ def extract_answers_from_text(text: str) -> Dict[str, Any]:
     Procura padrões como:
         Q1. Nome do projeto: Minha Aplicação
         Q15. Entregável: API, Microserviço
+
+    Retorna chaves normalizadas: "Q1", "Q2", etc
     """
     import re
 
@@ -478,4 +499,5 @@ def extract_answers_from_text(text: str) -> Dict[str, Any]:
         else:
             answers[q_id] = value
 
-    return answers
+    # Normalizar chaves: "1" → "Q1", "42" → "Q42"
+    return _normalize_response_keys(answers)
