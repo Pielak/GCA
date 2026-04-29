@@ -386,7 +386,7 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
                     value={responses[question.numero]}
                     onChange={(value) => updateField(question.numero, value)}
                     error={validationErrors[question.numero]}
-                    disabled={isSubmitted}
+                    disabled={false}
                   />
                 ))}
               </div>
@@ -397,44 +397,40 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
 
       {/* Botões de ação */}
       <div className="mt-8 flex gap-4">
-        {!isSubmitted && (
-          <>
-            <button
-              onClick={saveNow}
-              disabled={isSaving || !hasUnsavedChanges}
-              className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
-              Salvar
-            </button>
+        <button
+          onClick={saveNow}
+          disabled={isSaving || !hasUnsavedChanges}
+          className="flex items-center gap-2 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Save size={18} />}
+          Salvar
+        </button>
 
-            <button
-              onClick={handleValidate}
-              disabled={isValidating || progress < 70}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isValidating ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
-              Validar Escopo
-            </button>
+        <button
+          onClick={handleValidate}
+          disabled={isValidating || progress < 70}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isValidating ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
+          Validar Escopo
+        </button>
 
-            <button
-              onClick={submit}
-              disabled={isSaving || progress < 70}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
-              Submeter
-            </button>
+        <button
+          onClick={submit}
+          disabled={isSaving || progress < 70}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
+          Submeter
+        </button>
 
-            <button
-              className="flex items-center gap-2 px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={progress < 70}
-            >
-              <Download size={18} />
-              Exportar PDF
-            </button>
-          </>
-        )}
+        <button
+          className="flex items-center gap-2 px-4 py-2 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
+          disabled={progress < 70}
+        >
+          <Download size={18} />
+          Exportar PDF
+        </button>
       </div>
 
       {hasUnsavedChanges && (
