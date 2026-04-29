@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Save, Send, Loader2, AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Download } from 'lucide-react'
+import { Save, Send, Loader2, AlertCircle, CheckCircle2, ChevronDown, ChevronUp, Download, HelpCircle } from 'lucide-react'
 import { useTechnicalQuestionnaire } from '@/hooks/useTechnicalQuestionnaire'
 
 interface TechnicalQuestionnaireFormProps {
@@ -15,6 +15,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'A.1',
     obrigatoria: true,
+    help: 'Identifica se você está construindo algo novo, melhorando um sistema existente ou apenas corrigindo bugs',
     opcoes: [
       'Novo sistema',
       'Refactor de existente',
@@ -31,6 +32,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'A.1',
     obrigatoria: true,
+    help: 'Define a urgência do projeto e ajuda a planejar recursos e metodologia',
     opcoes: [
       'Curto (2-4 semanas)',
       'Médio (1-3 meses)',
@@ -46,6 +48,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'A.1',
     obrigatoria: true,
+    help: 'Determina se a aplicação precisa crescer horizontalmente (múltiplas instâncias) ou apenas verticalmente',
     opcoes: ['Não', 'Sim, modesto', 'Sim, agressivo'],
     visibleIf: [],
     revela: ['Q7', 'Q8', 'Q9', 'Q10'],
@@ -56,6 +59,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'A.2',
     obrigatoria: false,
+    help: 'Escolhe entre banco relacional (transações ACID), NoSQL (flexibilidade), ou outras abordagens',
     opcoes: [
       'SQL relacional',
       'NoSQL (MongoDB, DynamoDB)',
@@ -72,6 +76,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'text',
     secao: 'B.1',
     obrigatoria: false,
+    help: 'Exemplos: Python/FastAPI, Node.js/Express, Java/Spring, Go, C#/.NET',
     opcoes: [],
     visibleIf: [],
     revela: [],
@@ -82,6 +87,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'text',
     secao: 'B.1',
     obrigatoria: false,
+    help: 'Exemplos: React, Vue, Angular, Svelte, ou aplicação desktop/mobile',
     opcoes: [],
     visibleIf: [],
     revela: [],
@@ -92,6 +98,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'text',
     secao: 'B.2',
     obrigatoria: true,
+    help: 'Número de requisições HTTP/segundo. Afeta escolha de cache, load balancing, DB',
     opcoes: [],
     visibleIf: [{ dependsOn: 'Q3', valor: 'Sim, modesto' }],
     revela: ['Q11'],
@@ -102,6 +109,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'multiselect',
     secao: 'B.2',
     obrigatoria: false,
+    help: 'Redis para cache em memória, CDN para assets, Memcached para sessões',
     opcoes: ['Redis', 'Memcached', 'CDN', 'Nenhuma'],
     visibleIf: [{ dependsOn: 'Q3', valor: 'Sim, modesto' }],
     revela: [],
@@ -112,6 +120,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'B.2',
     obrigatoria: false,
+    help: 'Para processar tarefas assíncronas: envio de emails, processamento de imagens, notificações',
     opcoes: ['Não', 'Sim, SQS/SNS', 'Sim, RabbitMQ', 'Sim, Kafka'],
     visibleIf: [{ dependsOn: 'Q3', valor: 'Sim, agressivo' }],
     revela: ['Q12'],
@@ -122,6 +131,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'B.3',
     obrigatoria: false,
+    help: '99.9% = ~8h downtime/ano; 99.99% = ~52min/ano. Afeta redundância e failover',
     opcoes: ['99.0%', '99.5%', '99.9%', '99.99%', 'Não crítico'],
     visibleIf: [{ dependsOn: 'Q3', valor: 'Sim, agressivo' }],
     revela: [],
@@ -132,6 +142,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'multiselect',
     secao: 'C.1',
     obrigatoria: false,
+    help: 'CRM, ERP, payment gateways, SMS, analytics, etc. Determina APIs a usar',
     opcoes: [
       'CRM (Salesforce, HubSpot)',
       'ERP (SAP, Oracle)',
@@ -149,6 +160,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'dropdown',
     secao: 'C.1',
     obrigatoria: false,
+    help: 'REST (mais comum), GraphQL (mais eficiente), gRPC (performático), Webhooks (eventos)',
     opcoes: ['REST API', 'GraphQL', 'gRPC', 'Webhooks', 'Não decidido'],
     visibleIf: [{ dependsOn: 'Q9', valor: 'Sim, Kafka' }],
     revela: [],
@@ -159,6 +171,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'textarea',
     secao: 'C.2',
     obrigatoria: false,
+    help: 'Autenticação (OAuth, JWT), autorização (RBAC), encryption, compliance (HIPAA, PCI-DSS)',
     opcoes: [],
     visibleIf: [],
     revela: [],
@@ -169,6 +182,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'text',
     secao: 'D.1',
     obrigatoria: false,
+    help: 'Exemplos: 100ms, 500ms, 1s. Afeta arquitetura (sync vs async), escolha de DB',
     opcoes: [],
     visibleIf: [{ dependsOn: 'Q3', valor: 'Sim, agressivo' }],
     revela: [],
@@ -179,6 +193,7 @@ const TECHNICAL_QUESTIONS = [
     tipo: 'multiselect',
     secao: 'D.2',
     obrigatoria: false,
+    help: 'LGPD (Brasil), GDPR (Europa), HIPAA (saúde EUA), SOC 2 (auditoria)',
     opcoes: ['LGPD', 'GDPR', 'HIPAA', 'SOC 2', 'Nenhuma'],
     visibleIf: [],
     revela: [],
@@ -410,14 +425,36 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
 }
 
 function RenderQuestion({ question, value, onChange, error, disabled }: any) {
+  const [showHelp, setShowHelp] = useState(false)
+
   switch (question.tipo) {
     case 'text':
       return (
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-2">
-            {question.numero}. {question.pergunta}
-            {question.obrigatoria && <span className="text-red-500">*</span>}
-          </label>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="block text-sm font-medium text-gray-900">
+              {question.numero}. {question.pergunta}
+              {question.obrigatoria && <span className="text-red-500">*</span>}
+            </label>
+            {question.help && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseEnter={() => setShowHelp(true)}
+                  onMouseLeave={() => setShowHelp(false)}
+                  className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                  title={question.help}
+                >
+                  <HelpCircle className="w-4 h-4" />
+                </button>
+                {showHelp && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-blue-50 border border-blue-300 rounded-lg p-2 text-xs text-blue-900 z-10">
+                    {question.help}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <input
             type="text"
             value={value || ''}
@@ -432,16 +469,36 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
     case 'textarea':
       return (
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-2">
-            {question.numero}. {question.pergunta}
-            {question.obrigatoria && <span className="text-red-500">*</span>}
-          </label>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="block text-sm font-medium text-gray-900">
+              {question.numero}. {question.pergunta}
+              {question.obrigatoria && <span className="text-red-500">*</span>}
+            </label>
+            {question.help && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseEnter={() => setShowHelp(true)}
+                  onMouseLeave={() => setShowHelp(false)}
+                  className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                  title={question.help}
+                >
+                  <HelpCircle className="w-4 h-4" />
+                </button>
+                {showHelp && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-blue-50 border border-blue-300 rounded-lg p-2 text-xs text-blue-900 z-10">
+                    {question.help}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <textarea
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
             rows={4}
-            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            className="w-full px-3 py-2 border border-blue-300 text-blue-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
           />
           {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
         </div>
@@ -450,19 +507,39 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
     case 'dropdown':
       return (
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-2">
-            {question.numero}. {question.pergunta}
-            {question.obrigatoria && <span className="text-red-500">*</span>}
-          </label>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="block text-sm font-medium text-gray-900">
+              {question.numero}. {question.pergunta}
+              {question.obrigatoria && <span className="text-red-500">*</span>}
+            </label>
+            {question.help && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseEnter={() => setShowHelp(true)}
+                  onMouseLeave={() => setShowHelp(false)}
+                  className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                  title={question.help}
+                >
+                  <HelpCircle className="w-4 h-4" />
+                </button>
+                {showHelp && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-blue-50 border border-blue-300 rounded-lg p-2 text-xs text-blue-900 z-10">
+                    {question.help}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <select
             value={value || ''}
             onChange={(e) => onChange(e.target.value)}
             disabled={disabled}
-            className="w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-gray-100"
+            className="w-full px-3 py-2 border border-blue-300 text-blue-700 rounded-lg focus:outline-none focus:ring-2 focus:ring-green-500 disabled:bg-gray-100"
           >
             <option value="">Selecione uma opção...</option>
             {question.opcoes.map((opt: string) => (
-              <option key={opt} value={opt}>
+              <option key={opt} value={opt} className={value === opt ? 'bg-green-100 text-green-700' : ''}>
                 {opt}
               </option>
             ))}
@@ -474,30 +551,64 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
     case 'multiselect':
       return (
         <div>
-          <label className="block text-sm font-medium text-gray-900 mb-2">
-            {question.numero}. {question.pergunta}
-            {question.obrigatoria && <span className="text-red-500">*</span>}
-          </label>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="block text-sm font-medium text-gray-900">
+              {question.numero}. {question.pergunta}
+              {question.obrigatoria && <span className="text-red-500">*</span>}
+            </label>
+            {question.help && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseEnter={() => setShowHelp(true)}
+                  onMouseLeave={() => setShowHelp(false)}
+                  className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                  title={question.help}
+                >
+                  <HelpCircle className="w-4 h-4" />
+                </button>
+                {showHelp && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-blue-50 border border-blue-300 rounded-lg p-2 text-xs text-blue-900 z-10">
+                    {question.help}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           <div className="space-y-2">
-            {question.opcoes.map((opt: string) => (
-              <label key={opt} className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={(value || []).includes(opt)}
-                  onChange={(e) => {
-                    const selected = value || []
-                    if (e.target.checked) {
-                      onChange([...selected, opt])
-                    } else {
-                      onChange(selected.filter((s: string) => s !== opt))
-                    }
-                  }}
-                  disabled={disabled}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-700">{opt}</span>
-              </label>
-            ))}
+            {question.opcoes.map((opt: string) => {
+              const isChecked = (value || []).includes(opt)
+              return (
+                <label
+                  key={opt}
+                  className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
+                    isChecked
+                      ? 'bg-green-100 border border-green-500'
+                      : 'bg-blue-50 border border-blue-300 hover:bg-blue-100'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={isChecked}
+                    onChange={(e) => {
+                      const selected = value || []
+                      if (e.target.checked) {
+                        onChange([...selected, opt])
+                      } else {
+                        onChange(selected.filter((s: string) => s !== opt))
+                      }
+                    }}
+                    disabled={disabled}
+                    className="rounded accent-green-600"
+                  />
+                  <span className={`text-sm font-medium ${
+                    isChecked ? 'text-green-700' : 'text-blue-700'
+                  }`}>
+                    {opt}
+                  </span>
+                </label>
+              )
+            })}
           </div>
           {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
         </div>
@@ -506,19 +617,45 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
     case 'checkbox':
       return (
         <div>
-          <label className="flex items-center gap-2">
+          <div className={`flex items-center gap-2 p-2 rounded-lg transition-colors ${
+            value
+              ? 'bg-green-100 border border-green-500'
+              : 'bg-blue-50 border border-blue-300'
+          }`}>
             <input
               type="checkbox"
               checked={value || false}
               onChange={(e) => onChange(e.target.checked)}
               disabled={disabled}
-              className="rounded"
+              className="rounded accent-green-600"
             />
-            <span className="text-sm font-medium text-gray-900">
-              {question.numero}. {question.pergunta}
-              {question.obrigatoria && <span className="text-red-500">*</span>}
-            </span>
-          </label>
+            <div className="flex items-center gap-2">
+              <span className={`text-sm font-medium ${
+                value ? 'text-green-700' : 'text-blue-700'
+              }`}>
+                {question.numero}. {question.pergunta}
+                {question.obrigatoria && <span className="text-red-500">*</span>}
+              </span>
+              {question.help && (
+                <div className="relative">
+                  <button
+                    type="button"
+                    onMouseEnter={() => setShowHelp(true)}
+                    onMouseLeave={() => setShowHelp(false)}
+                    className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                    title={question.help}
+                  >
+                    <HelpCircle className="w-4 h-4" />
+                  </button>
+                  {showHelp && (
+                    <div className="absolute bottom-full left-0 mb-2 w-48 bg-blue-50 border border-blue-300 rounded-lg p-2 text-xs text-blue-900 z-10">
+                      {question.help}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
           {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
         </div>
       )
