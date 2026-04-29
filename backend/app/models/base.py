@@ -2156,3 +2156,53 @@ class TechnicalQuestionnaire(Base):
         Index("idx_technical_questionnaire_status", project_id, status),
         Index("idx_technical_questionnaire_submitted_by", submitted_by),
     )
+
+
+class PersonaResponse(Base):
+    """Resposta de uma Persona para validação de questionário técnico.
+
+    Rastreia avaliação de cada persona (GP, Arquiteto, DBA, Dev Sr, QA, etc)
+    em tempo real, permitindo:
+    - Board visual com status de cada persona
+    - Consolidação paralela de OCGs
+    - Detecção de discrepâncias entre personas
+    - Histórico de decisões por persona
+    """
+    __tablename__ = "persona_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    technical_questionnaire_id = Column(UUID(as_uuid=True), ForeignKey("technical_questionnaires.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Qual persona avaliou: "gp" | "arquiteto" | "dba" | "dev_sr" | "qa"
+    persona_name = Column(String(50), nullable=False)
+
+    # Status da avaliação
+    status = Column(String(20), nullable=False, default="pending")  # pending, evaluating, completed, error
+
+    # Resultado da validação
+    decision = Column(String, nullable=True)  # Texto da decisão (1-2 frases)
+    ocg_delta = Column(JSONB, nullable=False, default={})  # Seção OCG a agregar
+    followup_questions = Column(JSONB, nullable=True, default=None)  # Array de perguntas de clarificação
+    severity = Column(String(20), nullable=False, default="info")  # info, warning, critical
+
+    # Rastreabilidade temporal
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Tratamento de erros
+    error_message = Column(String, nullable=True)
+
+    # Qual IA provider foi usado
+    ai_provider_used = Column(String(50), nullable=True)  # "anthropic", "deepseek", etc
+    ai_model_used = Column(String(100), nullable=True)  # "claude-sonnet-4-6", "deepseek-chat", etc
+
+    __table_args__ = (
+        Index("idx_persona_response_project", project_id),
+        Index("idx_persona_response_questionnaire", technical_questionnaire_id),
+        Index("idx_persona_response_status", technical_questionnaire_id, status),
+        Index("idx_persona_response_persona", technical_questionnaire_id, persona_name),
+        UniqueConstraint("technical_questionnaire_id", "persona_name", name="uq_persona_response_per_questionnaire"),
+    )

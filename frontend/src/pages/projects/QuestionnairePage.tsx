@@ -11,6 +11,7 @@ import { QUESTION_SCHEMA, type QuestionDef } from '@/data/questionSchema'
 import { getErrorMessage } from '@/lib/errors'
 import { formatDateTimeBR } from '@/lib/datetime'
 import { TechnicalQuestionnaireForm } from '@/components/questionnaire/TechnicalQuestionnaireForm'
+import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -106,6 +107,23 @@ export function QuestionnairePage() {
 
       {/* Status card (se já submetido) */}
       {existing && <StatusCard q={existing} />}
+
+      {/* MVP B — Persona Board (avaliação em tempo real) */}
+      {existing?.submitted_at && projectId && (
+        <div className="mt-8 pt-6 border-t border-slate-700">
+          <PersonaBoard
+            projectId={projectId}
+            questionnaireId={existing.id}
+            pollInterval={2000}
+            onBoardUpdate={(allCompleted) => {
+              if (allCompleted) {
+                // Refresh questionnaire status when all personas complete
+                fetchExisting()
+              }
+            }}
+          />
+        </div>
+      )}
 
       {/* Painel de correção inline — só aparece quando há bloqueadores */}
       {existing && projectId && (existing.blocking_issues?.length ?? 0) > 0 && (

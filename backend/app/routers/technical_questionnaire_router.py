@@ -201,28 +201,42 @@ async def save_technical_questionnaire(
     await db.commit()
     await db.refresh(questionnaire)
 
-    # Após submissão bem-sucedida, dispara geração automática de OCG
-    # (MVP Fase 1: user responde 15 perguntas → OCG gerado na mesma sessão)
+    # Após submissão bem-sucedida, dispara avaliação paralela das Personas
+    # (MVP B: 7 personas avaliam em paralelo com IA do projeto)
     if req.submit:
         try:
-            from app.tasks.pipeline import auto_generate_task
-            # Prepara OCG inicial com dados do TechnicalQuestionnaire
-            ocg_data = {
-                "project_id": str(project_id),
-                "source": "technical_questionnaire",
-                "responses": req.responses,
-                "created_by": str(current_user.id),
-                "created_at": datetime.utcnow().isoformat(),
-            }
-            auto_generate_task.delay(str(project_id), ocg_data)
+            from app.tasks.questionnaire import evaluate_persona_task
+            from celery import group
+
+            # Personas a avaliar
+            personas = ["gp", "arquiteto", "dba", "dev_sr", "qa"]
+
+            # Preparar grupo de tasks paralelas
+            persona_tasks = group(
+                evaluate_persona_task.s(
+                    persona_name=persona,
+                    technical_questionnaire_id=str(questionnaire.id),
+                    project_id=str(project_id),
+                    responses=req.responses,
+                    extracted_concepts=[],  # TODO: extrair do documento ingerido
+                    document_domain="software",
+                )
+                for persona in personas
+            )
+
+            # Disparar em paralelo
+            persona_tasks.apply_async()
+
             logger.info(
-                "technical_questionnaire_ocg_generation_queued",
+                "technical_questionnaire_personas_evaluation_queued",
                 project_id=str(project_id),
+                questionnaire_id=str(questionnaire.id),
+                personas_count=len(personas),
                 task_queued=True,
             )
         except Exception as exc:
             logger.warning(
-                "technical_questionnaire_ocg_generation_failed_to_queue",
+                "technical_questionnaire_personas_evaluation_failed_to_queue",
                 project_id=str(project_id),
                 error=str(exc),
                 exc_info=True,
@@ -279,4 +293,112 @@ async def validate_technical_questionnaire(
         progress_percent=validation_result["progress"],
         visible_questions=visible,
         conflicts=validation_result["conflicts"],
+    )
+
+
+# ============================================================================
+# MVP B — Personas Board Endpoints
+# ============================================================================
+
+class PersonaResponseModel(BaseModel):
+    """Resposta de uma Persona no board"""
+    id: str
+    persona_name: str
+    status: str  # pending, evaluating, completed, error
+    decision: Optional[str] = None
+    ocg_delta: Dict[str, Any] = {}
+    followup_questions: Optional[List[Dict]] = None
+    severity: str = "info"
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    error_message: Optional[str] = None
+    ai_provider_used: Optional[str] = None
+    ai_model_used: Optional[str] = None
+
+
+class PersonasBoardResponse(BaseModel):
+    """Board de respostas das Personas"""
+    questionnaire_id: str
+    personas: List[PersonaResponseModel]
+    all_completed: bool
+    consolidated_ocg_delta: Dict[str, Any] = {}
+
+
+@router.get("/{project_id}/technical-questionnaire/{questionnaire_id}/personas-board", response_model=PersonasBoardResponse)
+async def get_personas_board(
+    project_id: UUID,
+    questionnaire_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """
+    Retrieve real-time board of persona responses for technical questionnaire.
+
+    Shows status of each persona evaluation (pending, evaluating, completed, error)
+    and allows team to track progress.
+    """
+    # Verify project exists
+    stmt = select(Project).where(Project.id == project_id)
+    project = await db.scalar(stmt)
+    if not project:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
+
+    # Verify questionnaire exists
+    from app.models.base import TechnicalQuestionnaire, PersonaResponse
+    stmt = select(TechnicalQuestionnaire).where(
+        (TechnicalQuestionnaire.id == questionnaire_id) &
+        (TechnicalQuestionnaire.project_id == project_id)
+    )
+    questionnaire = await db.scalar(stmt)
+    if not questionnaire:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Questionário não encontrado")
+
+    # Fetch all persona responses
+    stmt = select(PersonaResponse).where(
+        PersonaResponse.technical_questionnaire_id == questionnaire_id
+    ).order_by(PersonaResponse.persona_name)
+    persona_responses = await db.scalars(stmt)
+
+    # Build response
+    personas = []
+    consolidated_delta = {}
+    for resp in persona_responses:
+        personas.append(
+            PersonaResponseModel(
+                id=str(resp.id),
+                persona_name=resp.persona_name,
+                status=resp.status,
+                decision=resp.decision,
+                ocg_delta=resp.ocg_delta,
+                followup_questions=resp.followup_questions,
+                severity=resp.severity,
+                started_at=resp.started_at.isoformat() if resp.started_at else None,
+                completed_at=resp.completed_at.isoformat() if resp.completed_at else None,
+                error_message=resp.error_message,
+                ai_provider_used=resp.ai_provider_used,
+                ai_model_used=resp.ai_model_used,
+            )
+        )
+
+        # Merge OCG deltas if persona approved
+        if resp.status == "completed" and resp.ocg_delta:
+            for key, value in resp.ocg_delta.items():
+                if key not in consolidated_delta:
+                    consolidated_delta[key] = value
+
+    all_completed = all(p.status == "completed" for p in personas) if personas else False
+
+    logger.info(
+        "personas_board_retrieved",
+        project_id=str(project_id),
+        questionnaire_id=str(questionnaire_id),
+        personas_count=len(personas),
+        all_completed=all_completed,
+    )
+
+    return PersonasBoardResponse(
+        questionnaire_id=str(questionnaire_id),
+        personas=personas,
+        all_completed=all_completed,
+        consolidated_ocg_delta=consolidated_delta,
     )
