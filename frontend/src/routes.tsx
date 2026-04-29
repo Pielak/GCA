@@ -25,6 +25,7 @@ import { ProjectTeamPage } from './app/pages/projects/ProjectTeamPage';
 import { OCGPage } from './pages/projects/OCGPage';
 import { IngestionPage } from './pages/projects/IngestionPage';
 import { DiscrepanciesPage } from './pages/projects/DiscrepanciesPage';
+import { AnalysisDashboardPage } from './pages/projects/AnalysisDashboardPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
 import { BacklogPage } from './pages/projects/BacklogPage';
 import { RequireProjectSetup } from './components/guards/RequireProjectSetup';
@@ -159,6 +160,7 @@ export const router = createBrowserRouter([
           { path: 'external-repos', Component: ExternalReposPage },
           { path: 'ingestion', element: <RequireProjectSetup><IngestionPage /></RequireProjectSetup> },
           { path: 'ingestion/:documentId/discrepancies', element: <RequireProjectSetup><DiscrepanciesPage /></RequireProjectSetup> },
+          { path: 'ingestion/:documentId/analysis-dashboard', element: <RequireProjectSetup><AnalysisDashboardPage /></RequireProjectSetup> },
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'technical-questionnaire', element: <RequireProjectSetup><TechnicalQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
