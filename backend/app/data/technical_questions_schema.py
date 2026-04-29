@@ -129,7 +129,7 @@ TECHNICAL_QUESTIONS_SCHEMA: List[Dict[str, Any]] = [
     question(
         numero="Q5",
         pergunta="Qual é o stack tecnológico preferido? (Backend)",
-        tipo="multiselect",
+        tipo="multiselect_with_other",
         secao="B.1",
         obrigatoria=False,
         opcoes=[
@@ -151,7 +151,7 @@ TECHNICAL_QUESTIONS_SCHEMA: List[Dict[str, Any]] = [
     question(
         numero="Q6",
         pergunta="Qual é o stack tecnológico preferido? (Frontend)",
-        tipo="multiselect",
+        tipo="multiselect_with_other",
         secao="B.1",
         obrigatoria=False,
         opcoes=[
@@ -242,7 +242,7 @@ TECHNICAL_QUESTIONS_SCHEMA: List[Dict[str, Any]] = [
     question(
         numero="Q13",
         pergunta="Há requisitos de segurança específicos?",
-        tipo="multiselect",
+        tipo="multiselect_with_other",
         secao="C.2",
         obrigatoria=False,
         opcoes=[

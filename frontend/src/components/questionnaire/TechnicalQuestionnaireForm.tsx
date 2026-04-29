@@ -637,6 +637,108 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
         </div>
       )
 
+    case 'multiselect_with_other':
+      return (
+        <div>
+          <div className="flex items-center gap-2 mb-2">
+            <label className="block text-sm font-medium text-white">
+              {question.numero}. {question.pergunta}
+              {question.obrigatoria && <span className="text-red-500">*</span>}
+            </label>
+            {question.help && (
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseEnter={() => setShowHelp(true)}
+                  onMouseLeave={() => setShowHelp(false)}
+                  className="text-blue-500 hover:text-blue-700 focus:outline-none"
+                  title={question.help}
+                >
+                  <HelpCircle className="w-4 h-4" />
+                </button>
+                {showHelp && (
+                  <div className="absolute bottom-full left-0 mb-2 w-48 bg-blue-50 border border-blue-300 rounded-lg p-2 text-xs text-blue-900 z-10">
+                    {question.help}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+          <div className="space-y-2">
+            {question.opcoes.map((opt: string) => {
+              const isChecked = (value || []).includes(opt)
+              const isOtherChecked = Array.isArray(value) &&
+                value.some((v: any) => typeof v === 'string' && v.startsWith('Outro:'))
+
+              return (
+                <div key={opt}>
+                  <label
+                    className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-colors ${
+                      isChecked || (opt === 'Outro' && isOtherChecked)
+                        ? 'bg-green-100 border border-green-500'
+                        : 'bg-blue-50 border border-blue-300 hover:bg-blue-100'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isChecked || (opt === 'Outro' && isOtherChecked)}
+                      onChange={(e) => {
+                        const selected = Array.isArray(value) ? [...value] : []
+                        if (opt === 'Outro') {
+                          // Remove any existing "Outro: ..." entry
+                          const filtered = selected.filter((v: any) => !v.startsWith('Outro:'))
+                          if (e.target.checked) {
+                            onChange([...filtered, 'Outro:'])
+                          } else {
+                            onChange(filtered)
+                          }
+                        } else {
+                          if (e.target.checked && !selected.includes(opt)) {
+                            onChange([...selected, opt])
+                          } else {
+                            onChange(selected.filter((s: any) => s !== opt))
+                          }
+                        }
+                      }}
+                      disabled={disabled}
+                      className="rounded accent-green-600"
+                    />
+                    <span className={`text-sm font-medium ${
+                      isChecked || (opt === 'Outro' && isOtherChecked) ? 'text-green-700' : 'text-gray-900'
+                    }`}>
+                      {opt}
+                    </span>
+                  </label>
+
+                  {opt === 'Outro' && isOtherChecked && (
+                    <input
+                      type="text"
+                      placeholder="Descreva outras opções..."
+                      value={(() => {
+                        const outro = (value || []).find((v: any) => typeof v === 'string' && v.startsWith('Outro:'))
+                        return outro ? outro.substring(6).trim() : ''
+                      })()}
+                      onChange={(e) => {
+                        const selected = (value || []).filter((v: any) => !v.startsWith('Outro:'))
+                        const texto = e.target.value.trim()
+                        if (texto) {
+                          onChange([...selected, `Outro: ${texto}`])
+                        } else {
+                          onChange([...selected, 'Outro:'])
+                        }
+                      }}
+                      disabled={disabled}
+                      className="ml-6 mt-1 w-full px-2 py-1 border border-gray-300 rounded text-sm text-gray-900"
+                    />
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          {error && <p className="mt-1 text-sm text-red-600">{error}</p>}
+        </div>
+      )
+
     case 'checkbox':
       return (
         <div>
