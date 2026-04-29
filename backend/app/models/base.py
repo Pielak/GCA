@@ -25,6 +25,7 @@ class User(Base):
     # Admin HERDA Support: verificação em código é (is_admin OR is_support).
     # Support nunca vira Admin por essa via.
     is_support = Column(Boolean, default=False, nullable=False)
+    is_engine = Column(Boolean, default=False, nullable=False)  # System IA_* personas (skip notifications)
     first_access_completed = Column(Boolean, default=False, index=True)  # Tracks if first password change done
     password_changed_at = Column(DateTime(timezone=True), nullable=True)  # Last password change timestamp
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

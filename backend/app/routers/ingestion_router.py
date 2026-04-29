@@ -74,6 +74,20 @@ async def upload_document(
     sc = result.pop("status_code", 200)
     if sc >= 400:
         raise HTTPException(status_code=sc, detail=result.get("error", result.get("message", "")))
+
+    # Dispatch persona analysis tasks for successful ingestion
+    if sc == 200 and "document_id" in result:
+        from app.tasks.persona_tasks import analyze_document_with_persona
+        document_id = result.get("document_id")
+        # Dispatch 7 parallel persona tasks
+        for persona in ["IA_DBA", "IA_Compliance", "IA_Security", "IA_Arquiteto", "IA_Dev", "IA_Tester", "IA_QA"]:
+            analyze_document_with_persona.delay(
+                document_id=str(document_id),
+                project_id=str(project_id),
+                persona_type=persona,
+            )
+        logger.info("personas.analysis_dispatched", document_id=str(document_id), count=7)
+
     return result
 
 

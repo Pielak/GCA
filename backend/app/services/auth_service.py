@@ -75,12 +75,87 @@ class AuthService:
             await db.refresh(user)
 
             logger.info("auth.bootstrap_admin_created", user_id=str(user.id), email=email)
+
+            # Criar 7 Personas IA_* canônicas
+            await AuthService.bootstrap_personas(db)
+
             return True, user, None
 
         except Exception as e:
             await db.rollback()
             logger.error("auth.bootstrap_admin_failed", error=str(e))
             return False, None, str(e)
+
+    @staticmethod
+    async def bootstrap_personas(db: AsyncSession) -> None:
+        """Cria 7 usuários IA_* canônicos (Personas especializadas)."""
+        import secrets
+        import hashlib
+        from sqlalchemy import text
+
+        personas = [
+            ("IA_DBA", "Persona - DBA", "ia_dba@gca.local"),
+            ("IA_Compliance", "Persona - Compliance", "ia_compliance@gca.local"),
+            ("IA_Security", "Persona - Segurança", "ia_security@gca.local"),
+            ("IA_Arquiteto", "Persona - Arquiteto", "ia_arquiteto@gca.local"),
+            ("IA_Dev", "Persona - Desenvolvedor", "ia_dev@gca.local"),
+            ("IA_Tester", "Persona - Tester", "ia_tester@gca.local"),
+            ("IA_QA", "Persona - QA", "ia_qa@gca.local"),
+        ]
+
+        for email_prefix, full_name, email in personas:
+
+            # Verificar se já existe
+            result = await db.execute(select(User).where(User.email == email))
+            existing = result.scalar_one_or_none()
+            if existing:
+                logger.info("auth.persona_already_exists", email=email)
+                continue
+
+            try:
+                # Criar usuário engine
+                temp_password = secrets.token_urlsafe(32)
+                user = User(
+                    email=email,
+                    full_name=full_name,
+                    password_hash=hash_password(temp_password),
+                    is_active=True,
+                    is_admin=False,
+                    is_engine=True,
+                    first_access_completed=True,
+                    password_changed_at=datetime.now(timezone.utc),
+                    last_login_at=datetime.now(timezone.utc),
+                )
+                db.add(user)
+                await db.flush()
+
+                # Gerar API key
+                api_key = f"gca_{secrets.token_urlsafe(32)}"
+                api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+                # Criptografar API key no BD
+                master_key = settings.GCA_MASTER_KEY
+                await db.execute(
+                    text("""
+                        INSERT INTO user_api_keys (user_id, api_key_hash, api_key_encrypted, is_active)
+                        VALUES (:user_id, :hash, pgp_sym_encrypt(:api_key, :master_key), TRUE)
+                    """),
+                    {
+                        "user_id": str(user.id),
+                        "hash": api_key_hash,
+                        "api_key": api_key,
+                        "master_key": master_key,
+                    },
+                )
+
+                logger.info("auth.persona_created", email=email, persona=email_prefix)
+
+            except Exception as e:
+                await db.rollback()
+                logger.error("auth.persona_creation_failed", email=email, error=str(e))
+                continue
+
+        await db.commit()
 
     @staticmethod
     async def login(

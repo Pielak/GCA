@@ -89,6 +89,8 @@ celery_app = Celery(
         "app.tasks.questionnaire",
         # 2026-04-25 — scaffold server-side persistido (camada A).
         "app.tasks.scaffold",
+        # 2026-04-29 — personas analysis tasks.
+        "app.tasks.persona_tasks",
     ],
 )
 
