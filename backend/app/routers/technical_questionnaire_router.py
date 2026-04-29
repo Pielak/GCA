@@ -182,12 +182,12 @@ async def save_technical_questionnaire(
     # Handle submission
     if req.submit:
         questionnaire.status = "submitted"
-        questionnaire.submitted_by = current_user.id
+        questionnaire.submitted_by = current_user
         questionnaire.submitted_at = datetime.utcnow()
         logger.info(
             "technical_questionnaire_submitted",
             project_id=str(project_id),
-            user_id=str(current_user.id),
+            user_id=str(current_user),
             progress=questionnaire.progress_percent,
         )
     else:
