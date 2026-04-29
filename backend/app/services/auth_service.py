@@ -88,35 +88,34 @@ class AuthService:
 
     @staticmethod
     async def bootstrap_personas(db: AsyncSession) -> None:
-        """Cria 7 usuários IA_* canônicos (Personas especializadas)."""
+        """Cria 7 usuários IA_* canônicos (Personas especializadas, sem email)."""
         import secrets
         import hashlib
         from sqlalchemy import text
 
         personas = [
-            ("IA_DBA", "Persona - DBA", "ia_dba@gca.local"),
-            ("IA_Compliance", "Persona - Compliance", "ia_compliance@gca.local"),
-            ("IA_Security", "Persona - Segurança", "ia_security@gca.local"),
-            ("IA_Arquiteto", "Persona - Arquiteto", "ia_arquiteto@gca.local"),
-            ("IA_Dev", "Persona - Desenvolvedor", "ia_dev@gca.local"),
-            ("IA_Tester", "Persona - Tester", "ia_tester@gca.local"),
-            ("IA_QA", "Persona - QA", "ia_qa@gca.local"),
+            ("Persona - DBA",),
+            ("Persona - Compliance",),
+            ("Persona - Segurança",),
+            ("Persona - Arquiteto",),
+            ("Persona - Desenvolvedor",),
+            ("Persona - Tester",),
+            ("Persona - QA",),
         ]
 
-        for email_prefix, full_name, email in personas:
-
+        for (full_name,) in personas:
             # Verificar se já existe
-            result = await db.execute(select(User).where(User.email == email))
+            result = await db.execute(select(User).where(User.full_name == full_name))
             existing = result.scalar_one_or_none()
             if existing:
-                logger.info("auth.persona_already_exists", email=email)
+                logger.info("auth.persona_already_exists", persona=full_name)
                 continue
 
             try:
-                # Criar usuário engine
+                # Criar usuário engine (sem email — é robô, não recebe notificações)
                 temp_password = secrets.token_urlsafe(32)
                 user = User(
-                    email=email,
+                    email=None,  # Personas não têm email
                     full_name=full_name,
                     password_hash=hash_password(temp_password),
                     is_active=True,
@@ -148,11 +147,11 @@ class AuthService:
                     },
                 )
 
-                logger.info("auth.persona_created", email=email, persona=email_prefix)
+                logger.info("auth.persona_created", persona=full_name, user_id=str(user.id))
 
             except Exception as e:
                 await db.rollback()
-                logger.error("auth.persona_creation_failed", email=email, error=str(e))
+                logger.error("auth.persona_creation_failed", persona=full_name, error=str(e))
                 continue
 
         await db.commit()

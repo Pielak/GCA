@@ -93,14 +93,14 @@ Formato: JSON com campos: titulo, parecer (texto), cenarios_criticos (lista), me
 Formato: JSON com campos: titulo, parecer (texto), blockers (lista), observacoes (lista), criticidade""",
 }
 
-PERSONA_EMAILS = {
-    "IA_DBA": "ia_dba@gca.local",
-    "IA_Compliance": "ia_compliance@gca.local",
-    "IA_Security": "ia_security@gca.local",
-    "IA_Arquiteto": "ia_arquiteto@gca.local",
-    "IA_Dev": "ia_dev@gca.local",
-    "IA_Tester": "ia_tester@gca.local",
-    "IA_QA": "ia_qa@gca.local",
+PERSONA_NAMES = {
+    "IA_DBA": "Persona - DBA",
+    "IA_Compliance": "Persona - Compliance",
+    "IA_Security": "Persona - Segurança",
+    "IA_Arquiteto": "Persona - Arquiteto",
+    "IA_Dev": "Persona - Desenvolvedor",
+    "IA_Tester": "Persona - Tester",
+    "IA_QA": "Persona - QA",
 }
 
 
@@ -147,19 +147,18 @@ async def _analyze_document_async(
     Async implementation: fetch document, call LLM, store result.
     """
     async with AsyncSessionLocal() as db:
-        # 1. Fetch document content via internal API (requires auth)
-        persona_email = PERSONA_EMAILS.get(persona_type)
-        if not persona_email:
+        # 1. Get persona user by full_name (personas have no email)
+        persona_name = PERSONA_NAMES.get(persona_type)
+        if not persona_name:
             logger.warning("persona.unknown_type", persona=persona_type)
             return
 
-        # Get persona user and API key
         from sqlalchemy import select
         persona = await db.scalar(
-            select(User).where(User.email == persona_email)
+            select(User).where(User.full_name == persona_name)
         )
         if not persona:
-            logger.warning("persona.user_not_found", email=persona_email)
+            logger.warning("persona.user_not_found", persona=persona_type, full_name=persona_name)
             return
 
         # Fetch API key for authentication

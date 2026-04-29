@@ -16,7 +16,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=True, index=True)  # NULL for engine personas
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(255))
     is_active = Column(Boolean, default=True, index=True)
@@ -40,7 +40,7 @@ class User(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "email ~ '^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Z|a-z]{2,}$'",
+            "(email IS NULL) OR (email ~ '^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Z|a-z]{2,}$')",
             name="email_format"
         ),
     )
