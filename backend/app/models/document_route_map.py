@@ -28,7 +28,7 @@ class DocumentRouteMap(Base):
     # Relations
     document = relationship("IngestedDocument", back_populates="route_maps")
     auditor_output = relationship("AuditorOutput", back_populates="route_map", uselist=False)
-    persona_responses = relationship("PersonaResponse", back_populates="route_map", cascade="all, delete-orphan")
+    gatekeeper_persona_responses = relationship("GatekeeperPersonaResponse", back_populates="route_map", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<DocumentRouteMap(document_id={self.document_id}, version={self.version}, chunks={self.total_chunks})>"

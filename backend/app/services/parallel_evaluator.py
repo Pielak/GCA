@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.models.document_route_map import DocumentRouteMap
 from app.models.auditor_output import AuditorOutput
-from app.models.persona_response import PersonaResponse
+from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
 from app.services.personas.base import PersonaOutput
 from app.services.personas.gp import GPPersona
 from app.services.llm_client import LLMClient
@@ -38,7 +38,7 @@ class ParallelEvaluator:
         self,
         route_map: DocumentRouteMap,
         auditor_output: AuditorOutput,
-    ) -> dict[str, PersonaResponse]:
+    ) -> dict[str, GatekeeperPersonaResponse]:
         """
         Run Passada 1 (tentative analysis).
 
@@ -47,7 +47,7 @@ class ParallelEvaluator:
             auditor_output: AuditorOutput from Phase A
 
         Returns:
-            dict of persona_tag → PersonaResponse (persisted to DB)
+            dict of persona_tag → GatekeeperPersonaResponse (persisted to DB)
         """
 
         logger.info("Starting Passada 1 (tentative analysis)", extra={
@@ -83,10 +83,10 @@ class ParallelEvaluator:
         results = await asyncio.gather(*tasks.values())
         elapsed_sec = time.perf_counter() - start
 
-        # Map results to PersonaResponse models
+        # Map results to GatekeeperPersonaResponse models
         responses = {}
         for (persona_tag, _), persona_output in zip(tasks.items(), results):
-            response_model = PersonaResponse(
+            response_model = GatekeeperPersonaResponse(
                 route_map_id=route_map.id,
                 persona_tag=persona_tag,
                 passada=1,
@@ -125,7 +125,7 @@ class ParallelEvaluator:
         route_map: DocumentRouteMap,
         auditor_output: AuditorOutput,
         human_answers: dict[str, str],  # {question_id → answer_text}
-    ) -> dict[str, PersonaResponse]:
+    ) -> dict[str, GatekeeperPersonaResponse]:
         """
         Run Passada 2 (final analysis after human answers).
 
@@ -135,7 +135,7 @@ class ParallelEvaluator:
             human_answers: Answers to questions from Passada 1
 
         Returns:
-            dict of persona_tag → PersonaResponse (passada=2, tentative=false)
+            dict of persona_tag → GatekeeperPersonaResponse (passada=2, tentative=false)
         """
 
         logger.info("Starting Passada 2 (final analysis)", extra={
@@ -171,10 +171,10 @@ class ParallelEvaluator:
         results = await asyncio.gather(*tasks.values())
         elapsed_sec = time.perf_counter() - start
 
-        # Map results to PersonaResponse models
+        # Map results to GatekeeperPersonaResponse models
         responses = {}
         for (persona_tag, _), persona_output in zip(tasks.items(), results):
-            response_model = PersonaResponse(
+            response_model = GatekeeperPersonaResponse(
                 route_map_id=route_map.id,
                 persona_tag=persona_tag,
                 passada=2,

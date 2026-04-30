@@ -74,19 +74,85 @@ def test_gp_persona_instantiation():
 def test_parallel_evaluator_instantiation():
     """Test ParallelEvaluator can be instantiated."""
     from app.services.llm_client import AnthropicLLMClient
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy import create_engine
-    from app.db.database import Base
-
-    # In-memory SQLite
-    engine = create_engine('sqlite:///:memory:')
-    Base.metadata.create_all(engine)
-    SessionLocal = sessionmaker(bind=engine)
-    db = SessionLocal()
+    from unittest.mock import MagicMock
 
     llm = AnthropicLLMClient()
+    db = MagicMock()  # Mock database session
+
     evaluator = ParallelEvaluator(llm, db)
 
     assert evaluator.llm == llm
     assert evaluator.db == db
     assert "gp" in evaluator.PERSONAS
+
+
+@pytest.mark.asyncio
+async def test_parallel_evaluator_passada_1_with_mock_llm():
+    """Test Passada 1 execution with mocked LLM."""
+    from app.services.llm_client import AnthropicLLMClient, LLMResponse, LLMUsage
+    from unittest.mock import MagicMock, AsyncMock, patch
+    from app.schemas.chunk import Chunk
+    from uuid import uuid4
+
+    # Create mock LLM
+    llm = AnthropicLLMClient()
+
+    # Mock the complete method to return a valid GP response
+    mock_response = LLMResponse(
+        content='{"scores": {"escopo": 85, "stack": 72, "dados": 90, "implementacao": 80, "testes": 75}, "approved": true, "issues": [], "questions": [], "justification": "Escopo claro e time preparado"}',
+        usage=LLMUsage(
+            input_tokens=1000,
+            output_tokens=300,
+            cached_input_tokens=0
+        ),
+        finish_reason="end_turn"
+    )
+
+    llm.complete = AsyncMock(return_value=mock_response)
+
+    # Create mock database and evaluator
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = MagicMock()
+
+    evaluator = ParallelEvaluator(llm, db)
+
+    # Create mock inputs
+    route_map_id = uuid4()
+    chunks = [
+        Chunk(
+            id="chunk_001",
+            heading_path="/Requisitos/Escopo",
+            chunk_type="section",
+            text="O sistema deve ser um e-commerce com carrinho de compras",
+            first_sentence="O sistema deve ser um e-commerce com carrinho de compras",
+            position=0,
+            tags=["GP", "ARQ"],
+            token_count=20,
+        )
+    ]
+
+    # Create mock route_map and auditor_output
+    route_map = MagicMock()
+    route_map.id = route_map_id
+    route_map.chunks = [c.__dict__ for c in chunks]
+
+    auditor_output = MagicMock()
+    auditor_output.summary = "E-commerce com autenticação"
+    auditor_output.highlights = {"GP": ["Escopo claro", "Timeline definida"]}
+    auditor_output.backlog_to_specialists = []
+
+    # Run Passada 1
+    responses = await evaluator.run_passada_1(route_map, auditor_output)
+
+    # Verify results
+    assert "gp" in responses
+    assert db.add.called
+    assert db.commit.called
+
+    # Verify the response has correct structure
+    gp_response = responses["gp"]
+    assert gp_response.persona_tag == "gp"
+    assert gp_response.passada == 1
+    assert gp_response.tentative is True
+    assert gp_response.approved is True
