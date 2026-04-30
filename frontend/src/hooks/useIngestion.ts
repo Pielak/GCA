@@ -37,6 +37,8 @@ export interface IngestedDocument {
   arguider_stage?: ArguiderStage
   arguider_progress_percent?: number
   arguider_stage_updated_at?: string | null
+  // MVP X — custo em tokens da análise Arguidor (LLM)
+  tokens_used?: number | null
 }
 
 export interface DocumentDetail extends IngestedDocument {

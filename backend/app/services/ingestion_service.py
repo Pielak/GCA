@@ -1760,13 +1760,18 @@ class IngestionService:
                 pass
 
     async def list_documents(self, project_id: UUID) -> list[dict]:
-        """Lista documentos do projeto."""
+        """Lista documentos do projeto com tokens_used da análise Arguidor."""
+        from sqlalchemy import outerjoin
+
+        # LEFT JOIN com ArguiderAnalysis pra pegar tokens_used
         result = await self.db.execute(
-            select(IngestedDocument)
+            select(IngestedDocument, ArguiderAnalysis.tokens_used)
+            .outerjoin(ArguiderAnalysis, IngestedDocument.id == ArguiderAnalysis.document_id)
             .where(IngestedDocument.project_id == project_id)
             .order_by(IngestedDocument.created_at.desc())
         )
-        docs = result.scalars().all()
+        rows = result.all()
+
         return [
             {
                 "id": str(d.id),
@@ -1798,8 +1803,10 @@ class IngestionService:
                     d.arguider_stage_updated_at.isoformat()
                     if getattr(d, "arguider_stage_updated_at", None) else None
                 ),
+                # MVP X Fase X.Y — tokens usado na análise Arguidor (custo LLM)
+                "tokens_used": tokens_used,
             }
-            for d in docs
+            for d, tokens_used in rows
         ]
 
     async def get_document_detail(self, project_id: UUID, document_id: UUID) -> dict | None:

@@ -437,6 +437,13 @@ export function IngestionPage() {
                   <span className="text-slate-400 text-xs">{fileTypeLabel(doc.file_type)}</span>
                   <span className="text-slate-400 text-xs">{formatFileSize(doc.file_size_bytes)}</span>
                   <span className="text-slate-500 text-xs">{formatDateBR(doc.created_at)}</span>
+                  {doc.tokens_used ? (
+                    <span className="text-slate-600 text-xs" title="Tokens usados na análise Arguidor">
+                      {doc.tokens_used.toLocaleString()} tk
+                    </span>
+                  ) : (
+                    <span className="text-slate-700 text-xs opacity-0">— tk</span>
+                  )}
                   <div className="flex flex-col gap-1 text-xs min-w-[180px]">
                     <div className="flex items-center gap-2">
                       {doc.arguider_status === 'processing' ? (
