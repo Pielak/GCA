@@ -362,11 +362,7 @@ async def update_ticket_status(
     is_author = ticket.author_id == user_id
     is_admin = bool(user and user.is_admin)
 
-    # GP check: se não é admin e não é autor, só pode se for GP do projeto.
-    if not is_admin and not is_author:
-        # svc.get_ticket já exigiu autorização ampla (admin OR author OR gp do projeto).
-        # Aqui refina: GP é ok, outros não passam desse ponto pq get_ticket teria barrado.
-        pass
+    # Autorização já foi validada em get_ticket (admin OR author OR gp do projeto).
 
     try:
         updated = await svc.update_status(

@@ -51,7 +51,7 @@ import { HelpPage } from './pages/HelpPage';
 import { IterativeQuestionnairePage } from './pages/projects/IterativeQuestionnairePage';
 import { TechnicalQuestionnairePage } from './pages/projects/TechnicalQuestionnairePage';
 import { AppliedDefaultsPage } from './pages/projects/AppliedDefaultsPage';
-import { PilaresVivosPage } from './pages/projects/PilaresVivosPage';
+import { PilaresVivosView } from './components/analysis/PilaresVivosView';
 
 export const router = createBrowserRouter([
   {
@@ -165,7 +165,7 @@ export const router = createBrowserRouter([
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'technical-questionnaire', element: <RequireProjectSetup><TechnicalQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
-          { path: 'pilares-vivos', element: <RequireProjectSetup><PilaresVivosPage /></RequireProjectSetup> },
+          { path: 'pilares-vivos', element: <RequireProjectSetup><PilaresVivosView projectId={projectId} /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
           { path: 'applied-defaults', element: <RequireProjectSetup><AppliedDefaultsPage /></RequireProjectSetup> },
           { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },

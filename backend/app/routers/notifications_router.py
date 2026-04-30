@@ -111,8 +111,8 @@ async def notifications_ws(websocket: WebSocket, token: str):
             if msg and '"ping"' in msg:
                 await websocket.send_text('{"type":"pong"}')
     except WebSocketDisconnect:
-        pass
-    except Exception:  # noqa: BLE001
-        pass
+        pass  # Normal disconnect
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ws_notifications_error", error=str(e), user_id=user_id)
     finally:
         await ws_manager.disconnect(user_id, websocket)
