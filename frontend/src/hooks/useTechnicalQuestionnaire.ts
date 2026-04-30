@@ -137,7 +137,9 @@ export function useTechnicalQuestionnaire(projectId?: string) {
     })
     // onSuccess callback já chama setHasUnsavedChanges(false)
     await refetch()
-  }, [responses, saveMutation, refetch])
+    // Retorna o ID do questionário
+    return questionnaire?.id || result.id
+  }, [responses, saveMutation, refetch, questionnaire])
 
   // Save immediately without auto-save delay
   const saveNow = useCallback(async () => {

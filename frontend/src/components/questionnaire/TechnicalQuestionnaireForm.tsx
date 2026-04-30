@@ -5,7 +5,7 @@ import { useToast } from '@/hooks/useToast'
 
 interface TechnicalQuestionnaireFormProps {
   projectId?: string
-  onSubmitted?: () => void | Promise<void>
+  onSubmitted?: (questionnaireId: string) => void | Promise<void>
 }
 
 // Schema das perguntas técnicas (importado do backend, mas aqui simplificado para o frontend)
@@ -234,11 +234,11 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
   // Wrapper around submit to call onSubmitted callback with toast
   const submit = async () => {
     try {
-      await hookSubmit()
+      const questionnaireId = await hookSubmit()
       toast.success('Questionário submetido com sucesso!')
-      // Chamar callback após sucesso
-      if (onSubmitted) {
-        await onSubmitted()
+      // Chamar callback após sucesso, passando o ID do questionário
+      if (onSubmitted && questionnaireId) {
+        await onSubmitted(questionnaireId)
       }
     } catch (err) {
       toast.error('Erro ao submeter questionário')

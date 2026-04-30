@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { CheckCircle2 } from 'lucide-react'
 import { TechnicalQuestionnaireForm } from '@/components/questionnaire/TechnicalQuestionnaireForm'
+import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
 
 export function TechnicalQuestionnairePage() {
   const { projectId } = useParams<{ projectId: string }>()
   const [isSubmitted, setIsSubmitted] = useState(false)
+  const [questionnaireId, setQuestionnaireId] = useState<string | null>(null)
 
   if (!projectId) {
     return (
@@ -19,11 +21,14 @@ export function TechnicalQuestionnairePage() {
     <div className="min-h-screen bg-gray-50 py-8">
       <TechnicalQuestionnaireForm
         projectId={projectId}
-        onSubmitted={() => setIsSubmitted(true)}
+        onSubmitted={(qId) => {
+          setQuestionnaireId(qId || '')
+          setIsSubmitted(true)
+        }}
       />
 
       {isSubmitted && (
-        <div className="max-w-4xl mx-auto p-6 mt-6">
+        <div className="max-w-4xl mx-auto p-6 mt-6 space-y-6">
           <div className="p-4 bg-green-50 border border-green-200 rounded-lg">
             <div className="flex items-start gap-3">
               <CheckCircle2 className="text-green-600 flex-shrink-0 mt-0.5" size={24} />
@@ -44,6 +49,16 @@ export function TechnicalQuestionnairePage() {
               </div>
             </div>
           </div>
+
+          {questionnaireId && (
+            <div>
+              <h2 className="text-2xl font-bold text-gray-900 mb-4">Análise de Personas</h2>
+              <PersonaBoard
+                projectId={projectId!}
+                questionnaireId={questionnaireId}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>
