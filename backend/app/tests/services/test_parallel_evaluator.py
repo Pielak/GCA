@@ -246,15 +246,18 @@ async def test_parallel_evaluator_passada_1_with_multiple_personas():
     # Run Passada 1
     responses = await evaluator.run_passada_1(route_map, auditor_output)
 
-    # Verify both personas executed
+    # Verify all core personas executed
     assert "gp" in responses
     assert "arq" in responses
-    assert len(responses) == 2
+    assert "dba" in responses
+    assert "dev" in responses
+    assert "qa" in responses
+    assert len(responses) == 5
 
-    # Verify both responses are correctly structured
-    assert responses["gp"].persona_tag == "gp"
-    assert responses["arq"].persona_tag == "arq"
+    # Verify all responses are correctly structured
+    for persona_tag in ["gp", "arq", "dba", "dev", "qa"]:
+        assert responses[persona_tag].persona_tag == persona_tag
 
-    # Verify database was called
-    assert db.add.call_count == 2
+    # Verify database was called for all personas
+    assert db.add.call_count == 5
     assert db.commit.called

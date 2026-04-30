@@ -11,6 +11,9 @@ from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
 from app.services.personas.base import PersonaOutput
 from app.services.personas.gp import GPPersona
 from app.services.personas.arq import ArchitectPersona
+from app.services.personas.dba import DBAPersona
+from app.services.personas.dev import DevPersona
+from app.services.personas.qa import QAPersona
 from app.services.llm_client import LLMClient
 from app.schemas.chunk import Chunk
 
@@ -24,9 +27,9 @@ class ParallelEvaluator:
     PERSONAS = {
         "gp": GPPersona,
         "arq": ArchitectPersona,
-        # "dba": DBAPersona,         # TODO: Phase B.1
-        # "dev": DevPersona,         # TODO: Phase B.1
-        # "qa": QAPersona,           # TODO: Phase B.1
+        "dba": DBAPersona,
+        "dev": DevPersona,
+        "qa": QAPersona,
         # "ux": UXPersona,           # TODO: Phase C
         # "ui": UIPersona,           # TODO: Phase C
     }
