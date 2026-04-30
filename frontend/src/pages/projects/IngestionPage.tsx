@@ -392,7 +392,7 @@ export function IngestionPage() {
                     </div>
                     {doc.content_status === 'lost' ? (
                       <span
-                        className="text-slate-500 text-sm font-medium truncate line-through cursor-not-allowed"
+                        className="text-slate-500 text-[11px] font-medium truncate line-through cursor-not-allowed"
                         title="Conteúdo perdido — bytes não disponíveis para visualização"
                       >
                         {doc.original_filename}
@@ -408,7 +408,7 @@ export function IngestionPage() {
                             alert(`Falha ao abrir documento: ${getErrorMessage(err)}`)
                           }
                         }}
-                        className="text-slate-200 text-sm font-medium truncate hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
+                        className="text-slate-200 text-[11px] font-medium truncate hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
                         title="Abrir documento (read-only)"
                       >
                         {doc.original_filename}
@@ -434,17 +434,17 @@ export function IngestionPage() {
                       </span>
                     )}
                   </div>
-                  <span className="text-slate-400 text-xs">{fileTypeLabel(doc.file_type)}</span>
-                  <span className="text-slate-400 text-xs">{formatFileSize(doc.file_size_bytes)}</span>
-                  <span className="text-slate-500 text-xs">{formatDateBR(doc.created_at)}</span>
+                  <span className="text-slate-400 text-[10px]">{fileTypeLabel(doc.file_type)}</span>
+                  <span className="text-slate-400 text-[10px]">{formatFileSize(doc.file_size_bytes)}</span>
+                  <span className="text-slate-500 text-[10px]">{formatDateBR(doc.created_at)}</span>
                   {doc.tokens_used ? (
-                    <span className="text-slate-600 text-xs" title="Tokens usados na análise Arguidor">
+                    <span className="text-slate-600 text-[10px]" title="Tokens usados na análise Arguidor">
                       {doc.tokens_used.toLocaleString()} tk
                     </span>
                   ) : (
-                    <span className="text-slate-700 text-xs opacity-0">— tk</span>
+                    <span className="text-slate-700 text-[10px] opacity-0">— tk</span>
                   )}
-                  <div className="flex flex-col gap-1 text-xs min-w-[180px]">
+                  <div className="flex flex-col gap-1 text-[10px] min-w-[180px]">
                     <div className="flex items-center gap-2">
                       {doc.arguider_status === 'processing' ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
