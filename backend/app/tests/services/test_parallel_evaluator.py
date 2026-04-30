@@ -2,6 +2,7 @@
 import pytest
 from app.services.personas.base import PersonaScore, PersonaIssue, PersonaQuestion, PersonaOutput
 from app.services.personas.gp import GPPersona
+from app.services.personas.arq import ArchitectPersona
 from app.services.parallel_evaluator import ParallelEvaluator
 
 
@@ -69,6 +70,18 @@ def test_gp_persona_instantiation():
     assert gp.tag == "gp"
     assert gp.name == "Gerente de Projetos"
     assert gp.llm == llm
+
+
+def test_architect_persona_instantiation():
+    """Test ARQ persona can be instantiated."""
+    from app.services.llm_client import AnthropicLLMClient
+
+    llm = AnthropicLLMClient()
+    arq = ArchitectPersona(llm)
+
+    assert arq.tag == "arq"
+    assert arq.name == "Arquiteto de Projetos"
+    assert arq.llm == llm
 
 
 def test_parallel_evaluator_instantiation():
@@ -156,3 +169,92 @@ async def test_parallel_evaluator_passada_1_with_mock_llm():
     assert gp_response.passada == 1
     assert gp_response.tentative is True
     assert gp_response.approved is True
+
+
+@pytest.mark.asyncio
+async def test_parallel_evaluator_passada_1_with_multiple_personas():
+    """Test Passada 1 execution with GP and ARQ personas in parallel."""
+    from app.services.llm_client import AnthropicLLMClient, LLMResponse, LLMUsage
+    from unittest.mock import MagicMock, AsyncMock, patch
+    from app.schemas.chunk import Chunk
+    from uuid import uuid4
+
+    # Create mock LLM
+    llm = AnthropicLLMClient()
+
+    # Mock responses for GP and ARQ
+    gp_response = LLMResponse(
+        content='{"scores": {"escopo": 85, "stack": 72, "dados": 90, "implementacao": 80, "testes": 75}, "approved": true, "issues": [], "questions": [], "justification": "Escopo claro"}',
+        usage=LLMUsage(input_tokens=1000, output_tokens=300, cached_input_tokens=0),
+        finish_reason="end_turn"
+    )
+
+    arq_response = LLMResponse(
+        content='{"scores": {"stack": 88, "integracao": 75, "acoplamento": 82, "escalabilidade": 80, "nfr": 85}, "approved": true, "issues": [], "questions": [], "justification": "Stack apropriado"}',
+        usage=LLMUsage(input_tokens=1200, output_tokens=350, cached_input_tokens=0),
+        finish_reason="end_turn"
+    )
+
+    # Set up mock to return different responses based on call count
+    responses_list = [gp_response, arq_response]
+    call_count = 0
+
+    async def mock_complete(*args, **kwargs):
+        nonlocal call_count
+        result = responses_list[call_count % len(responses_list)]
+        call_count += 1
+        return result
+
+    llm.complete = mock_complete
+
+    # Create mock database and evaluator
+    db = MagicMock()
+    db.add = MagicMock()
+    db.commit = MagicMock()
+
+    evaluator = ParallelEvaluator(llm, db)
+
+    # Verify both personas are registered
+    assert "gp" in evaluator.PERSONAS
+    assert "arq" in evaluator.PERSONAS
+
+    # Create mock inputs
+    route_map_id = uuid4()
+    chunks = [
+        Chunk(
+            id="chunk_001",
+            heading_path="/Arquitetura",
+            chunk_type="section",
+            text="O sistema usa Node.js no backend e React no frontend",
+            first_sentence="O sistema usa Node.js no backend e React no frontend",
+            position=0,
+            tags=["GP", "ARQ"],
+            token_count=20,
+        )
+    ]
+
+    # Create mock route_map and auditor_output
+    route_map = MagicMock()
+    route_map.id = route_map_id
+    route_map.chunks = [c.__dict__ for c in chunks]
+
+    auditor_output = MagicMock()
+    auditor_output.summary = "E-commerce com stack moderno"
+    auditor_output.highlights = {"GP": [], "ARQ": []}
+    auditor_output.backlog_to_specialists = []
+
+    # Run Passada 1
+    responses = await evaluator.run_passada_1(route_map, auditor_output)
+
+    # Verify both personas executed
+    assert "gp" in responses
+    assert "arq" in responses
+    assert len(responses) == 2
+
+    # Verify both responses are correctly structured
+    assert responses["gp"].persona_tag == "gp"
+    assert responses["arq"].persona_tag == "arq"
+
+    # Verify database was called
+    assert db.add.call_count == 2
+    assert db.commit.called
