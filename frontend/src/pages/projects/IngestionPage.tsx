@@ -457,6 +457,15 @@ export function IngestionPage() {
                         stageUpdatedAt={doc.arguider_stage_updated_at ?? null}
                       />
                     )}
+                    {/* MVP X — Aguardando análise (sequencial: na fila esperando sua vez) */}
+                    {doc.arguider_status === 'pending' && doc.arguider_stage !== 'completed' && (
+                      <div className="text-slate-500 text-[11px] leading-tight">
+                        <span className="inline-block">⏳ Aguardando análise...</span>
+                        <div className="text-slate-600/70 text-[10px] mt-0.5">
+                          Em fila. Processamento sequencial, um documento por vez.
+                        </div>
+                      </div>
+                    )}
                     {/* Feedback visual quando aguardando OCG — personas analisando em background */}
                     {doc.arguider_stage === 'completed' && doc.arguider_status === 'pending' && (
                       <div className="text-violet-400 text-[11px] leading-tight">
