@@ -14,6 +14,8 @@ from app.services.personas.arq import ArchitectPersona
 from app.services.personas.dba import DBAPersona
 from app.services.personas.dev import DevPersona
 from app.services.personas.qa import QAPersona
+from app.services.personas.ux import UXPersona
+from app.services.personas.ui import UIPersona
 from app.services.llm_client import LLMClient
 from app.schemas.chunk import Chunk
 
@@ -30,8 +32,8 @@ class ParallelEvaluator:
         "dba": DBAPersona,
         "dev": DevPersona,
         "qa": QAPersona,
-        # "ux": UXPersona,           # TODO: Phase C
-        # "ui": UIPersona,           # TODO: Phase C
+        "ux": UXPersona,
+        "ui": UIPersona,
     }
 
     def __init__(self, llm_client: LLMClient, db: Session):
