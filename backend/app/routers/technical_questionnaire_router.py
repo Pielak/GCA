@@ -232,6 +232,31 @@ async def save_technical_questionnaire(
                 personas_count=len(personas),
                 task_queued=True,
             )
+
+            # NOVO: Disparar regeneração de Pilares Vivos após Questionário Técnico
+            # ser submetido (junto com avaliação de personas)
+            try:
+                from app.tasks.pilares_vivos_task import regenerar_pilares_apos_analise
+
+                regenerar_pilares_apos_analise.delay(
+                    project_id=str(project_id),
+                    user_id=str(current_user),
+                    trigger="questionnaire",
+                )
+                logger.info(
+                    "pilares_vivos.regeneracao_disparada",
+                    project_id=str(project_id),
+                    trigger="questionnaire",
+                    questionnaire_id=str(questionnaire.id),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "pilares_vivos.falha_ao_disparar",
+                    project_id=str(project_id),
+                    error=str(exc),
+                )
+                # Não bloqueia — Pilares é regenerável manualmente
+
         except Exception as exc:
             logger.warning(
                 "technical_questionnaire_personas_evaluation_failed_to_queue",
