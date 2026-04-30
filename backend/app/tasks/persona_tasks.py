@@ -496,3 +496,21 @@ async def _auto_consolidate_async(document_id: UUID, project_id: UUID):
                         document_id=str(document_id),
                         project_id=str(project_id),
                     )
+
+                    # NOVO: Disparar regeneração de Pilares Vivos após OCG consolidado
+                    # Obter user_id que fez upload do documento
+                    from app.models.base import IngestedDocument
+                    doc = await db.get(IngestedDocument, document_id)
+                    if doc:
+                        from app.tasks.pilares_vivos_task import regenerar_pilares_apos_analise
+                        regenerar_pilares_apos_analise.delay(
+                            project_id=str(project_id),
+                            user_id=str(doc.uploaded_by),
+                            trigger="ingestao",
+                        )
+                        logger.info(
+                            "pilares_vivos.regeneracao_disparada",
+                            project_id=str(project_id),
+                            trigger="ingestao",
+                            document_id=str(document_id),
+                        )
