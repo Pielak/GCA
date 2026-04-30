@@ -169,19 +169,14 @@ async def _analyze_document_async(
             logger.warning("persona.document_not_found", document_id=str(document_id))
             return
 
-        # Read document content from filesystem
-        import os
-        doc_path = f"/app/data/ingestion/{document.filename}"
-        if not os.path.exists(doc_path):
-            logger.warning("persona.document_file_not_found", path=doc_path)
+        # Read document content via storage (path correto: /app/storage/ingested/<project_id>/<filename>)
+        from app.utils.ingested_storage import read_ingested
+        file_bytes = read_ingested(project_id, document.filename)
+        if file_bytes is None:
+            logger.warning("persona.document_file_not_found", path=f"ingested/{project_id}/{document.filename}")
             return
 
-        try:
-            with open(doc_path, "r", encoding="utf-8", errors="ignore") as f:
-                document_content = f.read()[:5000]  # Limitar a 5K chars
-        except Exception as e:
-            logger.error("persona.document_read_failed", document_id=str(document_id), error=str(e))
-            return
+        document_content = file_bytes.decode("utf-8", errors="ignore")[:5000]
 
         # 3. Call LLM with persona-specific prompt
         prompt = PERSONA_PROMPTS[persona_type]
