@@ -140,5 +140,6 @@ try:
     from app.models.document_route_map import DocumentRouteMap
     from app.models.auditor_output import AuditorOutput
     from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
+    from app.models.human_answer import HumanAnswer
 except ImportError:
     pass  # Models may not be created yet during initial setup
