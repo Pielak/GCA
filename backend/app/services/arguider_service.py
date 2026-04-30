@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from app.utils.retry import gca_retry
 from uuid import uuid4, UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from anthropic import AsyncAnthropic
 import structlog
@@ -510,6 +510,29 @@ class ArguiderService:
         fallback pra casos onde canonização não é possível (XLSX/IMAGE
         no MVP, ou falha na canonização).
         """
+        # DT-AUDITORIA-003: Validação de entrada — Arguidor recusa análise
+        # se OCG não tem todas as 7 análises de personas. Evita criar items
+        # fictícios sem base em dados reais.
+        from app.models.base import OCGIndividual
+        personas_count_result = await self.db.execute(
+            select(func.count(OCGIndividual.id)).where(
+                OCGIndividual.project_id == project_id
+            )
+        )
+        personas_count = personas_count_result.scalar() or 0
+        if personas_count < 7:
+            logger.warning(
+                "arguider.incomplete_ocg",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                personas_completed=personas_count,
+                required=7,
+            )
+            raise ValueError(
+                f"OCG incompleto: {personas_count}/7 personas completaram análise. "
+                "Aguarde todas as personas terminarem antes de analisar ingestão."
+            )
+
         try:
             # Atualizar status
             doc = await self.db.execute(

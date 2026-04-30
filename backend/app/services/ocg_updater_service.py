@@ -14,7 +14,7 @@ Fluxo:
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
@@ -266,7 +266,15 @@ class OCGUpdaterService:
         ocg = await self._load_current_ocg(project_id)
         if not ocg:
             logger.warning("ocg_updater.ocg_not_found", project_id=str(project_id))
-            raise ValueError(f"OCG não encontrado para o projeto {project_id}.")
+            # DT-AUDITORIA-002: Em vez de falhar, retornar status especial
+            # indicando que OCG não está pronto (personas ainda analisando).
+            # Caller pode colocar documento em fila de retry ou status "awaiting_ocg".
+            return {
+                "status": "awaiting_ocg",
+                "project_id": str(project_id),
+                "message": "OCG não disponível. Personas ainda estão analisando. Retry automático em breve.",
+                "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
+            }
 
         version_from = ocg.version
         current_ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
