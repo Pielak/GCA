@@ -278,6 +278,8 @@ class OCGUpdaterService:
 
         version_from = ocg.version
         current_ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+        # Flag: OCG veio do fallback OCGGlobal (SimpleNamespace, não ORM)
+        ocg_from_global = not isinstance(ocg, OCG)
 
         # 2. Chamar o LLM (DT-033: agora usa chave DO PROJETO, não do admin —
         # ingestão reativa é Camada Projeto, contrato §6.6 Contexto B).
@@ -289,8 +291,9 @@ class OCGUpdaterService:
                 project_id=str(project_id),
                 error=str(exc),
             )
-            await self._mark_ocg_pending(ocg)
-            await self.db.commit()
+            if not ocg_from_global:
+                await self._mark_ocg_pending(ocg)
+                await self.db.commit()
             return {
                 "ocg_id": str(ocg.id),
                 "version_from": version_from,
@@ -605,7 +608,38 @@ class OCGUpdaterService:
             .execution_options(populate_existing=True)
         )
         result = await self.db.execute(stmt)
-        return result.scalar_one_or_none()
+        ocg = result.scalar_one_or_none()
+        if ocg:
+            return ocg
+
+        # Fallback: OCGGlobal (consolidado das personas) quando não há OCG legacy
+        from app.models.base import OCGGlobal
+        globals_list = await self.db.execute(
+            select(OCGGlobal).where(OCGGlobal.project_id == project_id)
+        )
+        all_globals = globals_list.scalars().all()
+        if not all_globals:
+            return None
+
+        ocg_data = {
+            "documents": [
+                {
+                    "document_id": str(g.document_id),
+                    "parecer": g.parecer_consolidated,
+                    "consensus": g.consensus_fields,
+                    "conflicts": g.conflicting_fields,
+                }
+                for g in all_globals
+            ],
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        # Usar SimpleNamespace pra compatibilidade com .id, .version, .ocg_data
+        from types import SimpleNamespace
+        return SimpleNamespace(
+            id=all_globals[0].id,
+            version=1,
+            ocg_data=json.dumps(ocg_data, ensure_ascii=False, default=str),
+        )
 
     async def _call_llm(
         self,
