@@ -27,6 +27,7 @@ import { IngestionPage } from './pages/projects/IngestionPage';
 import { DiscrepanciesPage } from './pages/projects/DiscrepanciesPage';
 import { AnalysisDashboardPage } from './pages/projects/AnalysisDashboardPage';
 import { GatekeeperPage } from './pages/projects/GatekeeperPage';
+import { GatekeeperPassadaPage } from './pages/projects/GatekeeperPassadaPage';
 import { BacklogPage } from './pages/projects/BacklogPage';
 import { RequireProjectSetup } from './components/guards/RequireProjectSetup';
 import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
@@ -165,6 +166,7 @@ export const router = createBrowserRouter([
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'technical-questionnaire', element: <RequireProjectSetup><TechnicalQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
+          { path: 'gatekeeper-passada/:id', element: <RequireProjectSetup><GatekeeperPassadaPage /></RequireProjectSetup> },
           { path: 'pilares-vivos', element: <RequireProjectSetup><PilaresVivosView /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
           { path: 'applied-defaults', element: <RequireProjectSetup><AppliedDefaultsPage /></RequireProjectSetup> },
