@@ -441,6 +441,8 @@ export function IngestionPage() {
                     <div className="flex items-center gap-2">
                       {doc.arguider_status === 'processing' ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                      ) : doc.arguider_stage === 'completed' && doc.arguider_status === 'pending' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />
                       ) : (
                         <span title={st.label}>{st.icon}</span>
                       )}
@@ -454,6 +456,15 @@ export function IngestionPage() {
                         percent={doc.arguider_progress_percent ?? 0}
                         stageUpdatedAt={doc.arguider_stage_updated_at ?? null}
                       />
+                    )}
+                    {/* Feedback visual quando aguardando OCG — personas analisando em background */}
+                    {doc.arguider_stage === 'completed' && doc.arguider_status === 'pending' && (
+                      <div className="text-violet-400 text-[11px] leading-tight">
+                        <span className="inline-block animate-pulse">◆ Analisando em background...</span>
+                        <div className="text-violet-500/70 text-[10px] mt-0.5">
+                          Personas avaliando questionário técnico. Retry automático a cada 30s.
+                        </div>
+                      </div>
                     )}
                   </div>
                   {/* Actions — wrapper único pra contar como 1 cell do grid
