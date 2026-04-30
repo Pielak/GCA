@@ -586,3 +586,55 @@ Gere o codigo completo do modulo, pronto para commit."""
         "model": model,
         "status": "generating",
     }
+
+
+@router.patch("/projects/{project_id}/backlog/reorder")
+async def reorder_backlog_items(
+    project_id: UUID,
+    payload: dict,
+    _perm: dict = Depends(require_action("backlog:manage")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Atualiza ordem de exibição dos itens do backlog.
+
+    Body: {"reorder": [{"id": "uuid", "display_order": 0}, ...]}
+
+    Persiste nova ordem para suportar drag-and-drop no frontend.
+    """
+    from app.models.base import BacklogItem
+
+    if not isinstance(payload, dict) or "reorder" not in payload:
+        raise HTTPException(status_code=400, detail="Body deve conter chave 'reorder' com array de objetos")
+
+    reorder_list = payload.get("reorder", [])
+    if not isinstance(reorder_list, list):
+        raise HTTPException(status_code=400, detail="'reorder' deve ser um array")
+
+    updated_count = 0
+
+    for item_data in reorder_list:
+        if not isinstance(item_data, dict) or "id" not in item_data or "display_order" not in item_data:
+            continue
+
+        item_id = UUID(item_data["id"])
+        new_order = int(item_data["display_order"])
+
+        item = await db.get(BacklogItem, item_id)
+        if not item or item.project_id != project_id:
+            continue
+
+        item.display_order = new_order
+        updated_count += 1
+
+    await db.commit()
+
+    logger.info(
+        "backlog.reorder_completed",
+        project_id=str(project_id),
+        items_updated=updated_count,
+    )
+
+    return {
+        "success": True,
+        "items_updated": updated_count,
+    }

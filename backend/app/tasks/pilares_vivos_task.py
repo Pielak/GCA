@@ -2,6 +2,7 @@
 Celery tasks para Pilares Vivos — regeneração e notificações
 """
 import asyncio
+import time
 from uuid import UUID
 
 import structlog
@@ -11,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import engine as async_engine
-from app.models.base import ProjectMember
+from app.models.base import ProjectMember, PilaresVivosJob
 from app.services.notification_inapp_service import InAppNotificationService
 from app.services.pilares_vivos_service import PilaresVivosService
 
@@ -24,6 +25,7 @@ def regenerar_pilares_apos_analise(
     project_id: str,
     user_id: str,
     trigger: str = "ingestao",
+    job_id: str = None,
 ):
     """Regenera Pilares Vivos após análise de documento ou mudança de questionnaire.
 
@@ -31,6 +33,7 @@ def regenerar_pilares_apos_analise(
         project_id: UUID do projeto
         user_id: UUID do usuário que disparou
         trigger: "ingestao" | "questionnaire" | "manual"
+        job_id: UUID do PilaresVivosJob (se disparado via API assíncrona)
 
     Executado após:
     - Todas as 7 personas terminarem análise de ingestão
@@ -40,6 +43,9 @@ def regenerar_pilares_apos_analise(
     try:
         project_uuid = UUID(project_id)
         user_uuid = UUID(user_id)
+        job_uuid = UUID(job_id) if job_id else None
+
+        start_time = time.time()
 
         asyncio.run(
             _regenerar_pilares_async(
@@ -47,6 +53,8 @@ def regenerar_pilares_apos_analise(
                 user_uuid,
                 trigger,
                 async_engine,
+                job_uuid,
+                start_time,
             )
         )
 
@@ -59,7 +67,10 @@ def regenerar_pilares_apos_analise(
             erro=str(exc),
             retry_count=self.request.retries,
         )
-        # Retry com backoff
+
+        if job_uuid:
+            asyncio.run(_marcar_job_falhou(job_uuid, str(exc), async_engine))
+
         raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
 
 
@@ -68,11 +79,19 @@ async def _regenerar_pilares_async(
     user_id: UUID,
     trigger: str,
     async_engine,
+    job_id: UUID = None,
+    start_time: float = None,
 ) -> dict:
-    """Executa regeneração dentro de sessão assíncrona."""
+    """Executa regeneração dentro de sessão assíncrona e atualiza job status."""
+    from datetime import datetime, timezone
+
     async_session = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
 
     async with async_session() as db:
+        # Marcar job como processing
+        if job_id:
+            await _atualizar_job_status(job_id, "processing", async_engine)
+
         result = await PilaresVivosService.regenerar_pilares(
             db=db,
             project_id=project_id,
@@ -89,6 +108,16 @@ async def _regenerar_pilares_async(
                 pilares_id=result.get("pilares_id"),
             )
 
+            # Atualizar job com resultado
+            if job_id and start_time:
+                tempo_total = time.time() - start_time
+                await _marcar_job_completo(
+                    job_id,
+                    resultado=result.get("documento", {}),
+                    tempo_segundos=tempo_total,
+                    async_engine=async_engine,
+                )
+
             # Disparar notificação se houver DTs bloqueantes
             await _verificar_e_notificar_bloqueantes(
                 db=db,
@@ -102,6 +131,9 @@ async def _regenerar_pilares_async(
                 trigger=trigger,
                 erro=result.get("erro"),
             )
+
+            if job_id:
+                await _marcar_job_falhou(job_id, result.get("erro", "erro desconhecido"), async_engine)
 
         return result
 
@@ -199,3 +231,55 @@ async def _verificar_e_notificar_bloqueantes(
                 link=f"/projects/{str(project_id)}/pilares-vivos",
                 severity="info",
             )
+
+
+async def _atualizar_job_status(job_id: UUID, status: str, async_engine):
+    """Atualiza status do job de Pilares Vivos."""
+    from datetime import datetime, timezone
+
+    async_session = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_session() as db:
+        result = await db.execute(select(PilaresVivosJob).where(PilaresVivosJob.id == job_id))
+        job = result.scalar_one_or_none()
+
+        if job:
+            job.status = status
+            if status == "processing":
+                job.iniciado_em = datetime.now(timezone.utc)
+            await db.commit()
+
+
+async def _marcar_job_completo(job_id: UUID, resultado: dict, tempo_segundos: float, async_engine):
+    """Marca job como completo com resultado."""
+    from datetime import datetime, timezone
+
+    async_session = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_session() as db:
+        result = await db.execute(select(PilaresVivosJob).where(PilaresVivosJob.id == job_id))
+        job = result.scalar_one_or_none()
+
+        if job:
+            job.status = "completed"
+            job.resultado_json = resultado
+            job.tempo_total_segundos = round(tempo_segundos, 2)
+            job.concluido_em = datetime.now(timezone.utc)
+            await db.commit()
+
+
+async def _marcar_job_falhou(job_id: UUID, erro: str, async_engine):
+    """Marca job como falhado com mensagem de erro."""
+    from datetime import datetime, timezone
+
+    async_session = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_session() as db:
+        result = await db.execute(select(PilaresVivosJob).where(PilaresVivosJob.id == job_id))
+        job = result.scalar_one_or_none()
+
+        if job:
+            job.status = "failed"
+            job.erro_mensagem = erro[:500]  # Limitar tamanho
+            job.concluido_em = datetime.now(timezone.utc)
+            await db.commit()

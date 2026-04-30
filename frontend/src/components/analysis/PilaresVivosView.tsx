@@ -38,8 +38,7 @@ const PERSONAS_INFO = {
 const PERSONAS_ORDER = ['P4_Arquiteto', 'P1_DBA', 'P2_Compliance', 'P3_Seguranca', 'P5_Dev', 'P6_Tester', 'P7_QA']
 
 export function PilaresVivosView({ projectId }: Props) {
-  const { data, loading, error, inicializar, regenerar } = usePilaresVivos(projectId)
-  const [regenerando, setRegenerando] = useState(false)
+  const { data, loading, error, inicializar, regenerar, jobStatus } = usePilaresVivos(projectId)
   const [selectedPersona, setSelectedPersona] = useState('P4_Arquiteto')
   const [expandedDTs, setExpandedDTs] = useState<Set<string>>(new Set())
   const [exportOpen, setExportOpen] = useState(false)
@@ -51,10 +50,9 @@ export function PilaresVivosView({ projectId }: Props) {
 
   const handleRegenerar = async () => {
     try {
-      setRegenerando(true)
       await regenerar()
-    } finally {
-      setRegenerando(false)
+    } catch (err) {
+      console.error('Erro ao regenerar:', err)
     }
   }
 
@@ -87,6 +85,40 @@ export function PilaresVivosView({ projectId }: Props) {
     copiarParaClipboard(data, 'Projeto')
     toast.success('Copiado para clipboard')
     setExportOpen(false)
+  }
+
+  if (jobStatus && (jobStatus.status === 'queued' || jobStatus.status === 'processing')) {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <Loader className="h-8 w-8 animate-spin text-emerald-600" />
+        <div className="ml-4">
+          <div className="text-gray-700 text-lg font-medium">
+            Regenerando Pilares Vivos...
+          </div>
+          <div className="text-gray-500 text-sm mt-2">
+            Status: {jobStatus.status === 'queued' ? 'Aguardando...' : 'Processando...'}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (jobStatus && jobStatus.status === 'failed') {
+    return (
+      <div className="flex items-center justify-center p-12">
+        <AlertCircle className="h-8 w-8 text-red-600" />
+        <div className="ml-4">
+          <div className="text-red-700 text-lg font-medium">Falha na Regeneração</div>
+          <div className="text-red-500 text-sm mt-2">{jobStatus.erro_mensagem}</div>
+          <button
+            onClick={handleRegenerar}
+            className="mt-4 px-4 py-2 bg-emerald-600 text-white rounded hover:bg-emerald-700"
+          >
+            Tentar Novamente
+          </button>
+        </div>
+      </div>
+    )
   }
 
   if (loading && !data) {

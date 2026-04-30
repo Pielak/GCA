@@ -494,6 +494,9 @@ class BacklogItem(Base):
     commit_sha = Column(String(64), nullable=True)  # SHA do commit no repo
     branch_name = Column(String(200), nullable=True)  # Branch temporaria
 
+    # Drag-and-drop order (default 0, updated by user reordering)
+    display_order = Column(Integer, nullable=False, default=0)
+
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
@@ -2368,4 +2371,35 @@ class PilaresVivosHistory(Base):
         Index("idx_pilares_history_project", project_id),
         Index("idx_pilares_history_current", pilares_vivos_id),
         Index("idx_pilares_history_gerado_em", gerado_em),
+    )
+
+
+class PilaresVivosJob(Base):
+    """Rastreamento de jobs assíncronos para regeneração de Pilares Vivos.
+
+    Converte endpoint síncrono /pilares/regenerar para padrão async com Celery.
+    Frontend faz poll até job completar (status: completed/failed).
+    """
+    __tablename__ = "pilares_vivos_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="queued")  # queued, processing, completed, failed
+
+    resultado_json = Column(JSONB, nullable=True)
+
+    iniciado_em = Column(DateTime(timezone=True), nullable=True)
+    concluido_em = Column(DateTime(timezone=True), nullable=True)
+    tempo_total_segundos = Column(Numeric(8, 2), nullable=True)
+
+    criado_em = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    criado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    celery_task_id = Column(String(255), nullable=True, index=True)
+    erro_mensagem = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_pilares_vivos_jobs_project", project_id),
+        Index("idx_pilares_vivos_jobs_status", status),
+        Index("idx_pilares_vivos_jobs_created", "criado_em"),
     )
