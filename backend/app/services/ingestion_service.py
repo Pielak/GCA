@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4, UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -639,13 +639,39 @@ class IngestionService:
                 ),
             }
 
-        # MVP 13 Fase 13.3b: upload dispara via Celery. Bytes já foram
-        # persistidos via write_ingested antes desta linha; task lé
-        # via read_ingested. Timeout + error handling via retry policy
-        # da task. Watchdog DT-073 continua como rede de segurança.
+        # MVP X Fase X.Y — Processamento sequencial de documentos por projeto.
+        # Enfileira APENAS se não há outro documento em processamento no projeto.
+        # Reduz tokens (análise paralela pesada) + risco de alucinação.
         from app.tasks.pipeline import pipeline_ingest_task
+
+        # Checar se há outro doc em processamento neste projeto
+        processing_count = await self.db.scalar(
+            select(func.count(IngestedDocument.id)).where(
+                and_(
+                    IngestedDocument.project_id == project_id,
+                    IngestedDocument.arguider_status == "processing",
+                )
+            )
+        )
+
         try:
-            pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+            # Se nenhum em processamento, enfileira este
+            if processing_count == 0:
+                pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+                logger.info(
+                    "ingestion.document_enqueued",
+                    document_id=str(doc_id),
+                    project_id=str(project_id),
+                    position="first",
+                )
+            else:
+                # Há outro em processamento — este ficará na fila (pending) até callback do anterior
+                logger.info(
+                    "ingestion.document_queued_waiting",
+                    document_id=str(doc_id),
+                    project_id=str(project_id),
+                    position="waiting_sequential",
+                )
         except Exception as exc:
             # Se enfileiramento falhar (Celery/Redis indisponível),
             # registra erro explícito + watchdog (DT-073) reconsiliaará.

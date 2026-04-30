@@ -235,6 +235,46 @@ def pipeline_ingest_task(self, document_id: str, project_id: str, file_type: str
     }
 
 
+async def _enqueue_next_pending_document(project_id: UUID, db) -> None:
+    """Enfileira o próximo documento pending do projeto (processamento sequencial).
+
+    MVP X — Estratégia: processa 1 doc por vez para reduzir tokens + alucinação.
+    Quando um doc termina, esse callback enfileira o próximo automaticamente.
+    """
+    from sqlalchemy import select, and_
+    from app.models.base import IngestedDocument
+
+    # Buscar próximo doc pending (não processing) do mesmo projeto
+    res = await db.execute(
+        select(IngestedDocument).where(
+            and_(
+                IngestedDocument.project_id == project_id,
+                IngestedDocument.arguider_status == "pending",
+            )
+        ).order_by(IngestedDocument.created_at.asc()).limit(1)
+    )
+    next_doc = res.scalar_one_or_none()
+
+    if next_doc:
+        try:
+            pipeline_ingest_task.delay(
+                str(next_doc.id), str(project_id), next_doc.file_type or ""
+            )
+            logger.info(
+                "ingestion.next_document_enqueued",
+                document_id=str(next_doc.id),
+                project_id=str(project_id),
+                position="next_sequential",
+            )
+        except Exception as exc:
+            logger.error(
+                "ingestion.next_enqueue_failed",
+                document_id=str(next_doc.id),
+                project_id=str(project_id),
+                error=str(exc),
+            )
+
+
 async def _run_analyze_async(document_id: str, project_id: str, file_type: str) -> None:
     """Wrapper assíncrono: abre session, carrega bytes, chama service.
 
@@ -290,6 +330,11 @@ async def _run_analyze_async(document_id: str, project_id: str, file_type: str) 
                 file_bytes,
                 file_type or doc.file_type,
             )
+
+            # MVP X — Enfileira próximo documento do mesmo projeto (processamento sequencial)
+            # Reduz tokens + alucinação ao processar 1 doc por vez
+            await _enqueue_next_pending_document(UUID(project_id), db)
+
         except Exception as exc:
             logger.error(
                 "pipeline_ingest_task.analyze_failed",
