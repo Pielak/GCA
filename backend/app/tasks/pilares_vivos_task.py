@@ -87,55 +87,68 @@ async def _regenerar_pilares_async(
 
     async_session = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
 
-    async with async_session() as db:
-        # Marcar job como processing
-        if job_id:
-            await _atualizar_job_status(job_id, "processing", async_engine)
+    try:
+        async with async_session() as db:
+            # Marcar job como processing
+            if job_id:
+                await _atualizar_job_status(job_id, "processing", async_engine)
 
-        result = await PilaresVivosService.regenerar_pilares(
-            db=db,
-            project_id=project_id,
-            user_id=user_id,
-        )
-
-        if result["sucesso"]:
-            logger.info(
-                "pilares_vivos.regeneracao_sucesso",
-                project_id=str(project_id),
-                user_id=str(user_id),
-                trigger=trigger,
-                tempo=result.get("tempo_total"),
-                pilares_id=result.get("pilares_id"),
-            )
-
-            # Atualizar job com resultado
-            if job_id and start_time:
-                tempo_total = time.time() - start_time
-                await _marcar_job_completo(
-                    job_id,
-                    resultado=result.get("documento", {}),
-                    tempo_segundos=tempo_total,
-                    async_engine=async_engine,
-                )
-
-            # Disparar notificação se houver DTs bloqueantes
-            await _verificar_e_notificar_bloqueantes(
+            result = await PilaresVivosService.regenerar_pilares(
                 db=db,
                 project_id=project_id,
-                documento=result.get("documento", {}),
-            )
-        else:
-            logger.error(
-                "pilares_vivos.regeneracao_falhou_async",
-                project_id=str(project_id),
-                trigger=trigger,
-                erro=result.get("erro"),
+                user_id=user_id,
             )
 
-            if job_id:
-                await _marcar_job_falhou(job_id, result.get("erro", "erro desconhecido"), async_engine)
+            if result["sucesso"]:
+                logger.info(
+                    "pilares_vivos.regeneracao_sucesso",
+                    project_id=str(project_id),
+                    user_id=str(user_id),
+                    trigger=trigger,
+                    tempo=result.get("tempo_total"),
+                    pilares_id=result.get("pilares_id"),
+                )
 
-        return result
+                # Atualizar job com resultado
+                if job_id and start_time:
+                    tempo_total = time.time() - start_time
+                    await _marcar_job_completo(
+                        job_id,
+                        resultado=result.get("documento", {}),
+                        tempo_segundos=tempo_total,
+                        async_engine=async_engine,
+                    )
+
+                # Disparar notificação se houver DTs bloqueantes
+                await _verificar_e_notificar_bloqueantes(
+                    db=db,
+                    project_id=project_id,
+                    documento=result.get("documento", {}),
+                )
+            else:
+                logger.error(
+                    "pilares_vivos.regeneracao_falhou_async",
+                    project_id=str(project_id),
+                    trigger=trigger,
+                    erro=result.get("erro"),
+                )
+
+                if job_id:
+                    await _marcar_job_falhou(job_id, result.get("erro", "erro desconhecido"), async_engine)
+
+            return result
+    except Exception as exc:
+        logger.error(
+            "pilares_vivos.regeneracao_exception",
+            project_id=str(project_id),
+            user_id=str(user_id),
+            trigger=trigger,
+            error=str(exc),
+            exc_info=True,
+        )
+        if job_id:
+            await _marcar_job_falhou(job_id, f"Exceção: {str(exc)[:500]}", async_engine)
+        raise
 
 
 async def _verificar_e_notificar_bloqueantes(

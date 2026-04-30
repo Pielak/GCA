@@ -91,18 +91,28 @@ async def _run_notify_admins(gp_email, project_name, questionnaire_id, project_i
     from app.services.questionnaire_service import QuestionnaireService
 
     qid = UUID(questionnaire_id) if isinstance(questionnaire_id, str) else questionnaire_id
-    async with AsyncSessionLocal() as db:
-        claimed = await _try_claim_questionnaire_flag(db, qid, "admins_notified_at")
-        if not claimed:
-            return  # skip silencioso: email já foi enviado
+    try:
+        async with AsyncSessionLocal() as db:
+            claimed = await _try_claim_questionnaire_flag(db, qid, "admins_notified_at")
+            if not claimed:
+                return  # skip silencioso: email já foi enviado
 
-    pid: Any = UUID(project_id) if project_id else None
-    await QuestionnaireService._notify_admins_questionnaire_submitted(
-        gp_email=gp_email,
-        project_name=project_name,
-        questionnaire_id=questionnaire_id,
-        project_id=pid,
-    )
+        pid: Any = UUID(project_id) if project_id else None
+        await QuestionnaireService._notify_admins_questionnaire_submitted(
+            gp_email=gp_email,
+            project_name=project_name,
+            questionnaire_id=questionnaire_id,
+            project_id=pid,
+        )
+    except Exception as exc:
+        logger.error(
+            "notify_admins.failed",
+            questionnaire_id=str(qid),
+            gp_email=gp_email,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 @celery_app.task(
@@ -137,18 +147,29 @@ async def _run_send_analysis_email(gp_email, project_id, questionnaire_id, notif
     from app.services.questionnaire_service import QuestionnaireService
 
     qid = UUID(questionnaire_id) if isinstance(questionnaire_id, str) else questionnaire_id
-    async with AsyncSessionLocal() as db:
-        claimed = await _try_claim_questionnaire_flag(db, qid, "analysis_email_sent_at")
-        if not claimed:
-            return  # skip silencioso
+    try:
+        async with AsyncSessionLocal() as db:
+            claimed = await _try_claim_questionnaire_flag(db, qid, "analysis_email_sent_at")
+            if not claimed:
+                return  # skip silencioso
 
-    await QuestionnaireService._send_analysis_email(
-        gp_email=gp_email,
-        project_id=project_id,
-        questionnaire_id=questionnaire_id,
-        notification_type=notification_type,
-        analysis_result=analysis_result,
-    )
+        await QuestionnaireService._send_analysis_email(
+            gp_email=gp_email,
+            project_id=project_id,
+            questionnaire_id=questionnaire_id,
+            notification_type=notification_type,
+            analysis_result=analysis_result,
+        )
+    except Exception as exc:
+        logger.error(
+            "send_analysis_email.failed",
+            questionnaire_id=str(qid),
+            project_id=project_id,
+            gp_email=gp_email,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 @celery_app.task(
@@ -177,12 +198,23 @@ def trigger_n8n_analysis_task(
 
 async def _run_trigger_n8n(questionnaire_id, project_id, gp_email, responses):
     from app.services.questionnaire_service import QuestionnaireService
-    await QuestionnaireService._trigger_n8n_analysis(
-        questionnaire_id=questionnaire_id,
-        project_id=project_id,
-        gp_email=gp_email,
-        responses=responses,
-    )
+    qid = UUID(questionnaire_id) if isinstance(questionnaire_id, str) else questionnaire_id
+    try:
+        await QuestionnaireService._trigger_n8n_analysis(
+            questionnaire_id=questionnaire_id,
+            project_id=project_id,
+            gp_email=gp_email,
+            responses=responses,
+        )
+    except Exception as exc:
+        logger.error(
+            "trigger_n8n_analysis.failed",
+            questionnaire_id=str(qid),
+            project_id=project_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 @celery_app.task(
@@ -220,23 +252,33 @@ async def _run_generate_ocg(questionnaire_id, project_id, gp_email):
     from app.services.questionnaire_service import QuestionnaireService
 
     qid = UUID(questionnaire_id)
-    async with AsyncSessionLocal() as db:
-        existing = (await db.execute(
-            select(OCG.id).where(OCG.questionnaire_id == qid).limit(1)
-        )).scalar_one_or_none()
-        if existing is not None:
-            logger.info(
-                "generate_ocg_task.skip_already_exists",
-                questionnaire_id=str(qid),
-                ocg_id=str(existing),
-            )
-            return
+    try:
+        async with AsyncSessionLocal() as db:
+            existing = (await db.execute(
+                select(OCG.id).where(OCG.questionnaire_id == qid).limit(1)
+            )).scalar_one_or_none()
+            if existing is not None:
+                logger.info(
+                    "generate_ocg_task.skip_already_exists",
+                    questionnaire_id=str(qid),
+                    ocg_id=str(existing),
+                )
+                return
 
-    await QuestionnaireService._generate_ocg(
-        questionnaire_id=qid,
-        project_id=UUID(project_id),
-        gp_email=gp_email,
-    )
+        await QuestionnaireService._generate_ocg(
+            questionnaire_id=qid,
+            project_id=UUID(project_id),
+            gp_email=gp_email,
+        )
+    except Exception as exc:
+        logger.error(
+            "generate_ocg.failed",
+            questionnaire_id=str(qid),
+            project_id=project_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 # ============================================================================
@@ -327,83 +369,113 @@ async def _run_evaluate_persona(
     pid = UUID(project_id) if isinstance(project_id, str) else project_id
 
     async with AsyncSessionLocal() as db:
-        # 1. Fetch project settings (LLM configuration)
-        stmt = select(ProjectSettings).where(
-            (ProjectSettings.project_id == pid) &
-            (ProjectSettings.setting_type == "llm")
-        )
-        project_settings = await db.scalar(stmt)
-
-        # Parse IA config
-        if project_settings and project_settings.settings_json:
-            settings_data = json.loads(project_settings.settings_json) if isinstance(project_settings.settings_json, str) else project_settings.settings_json
-            provider = settings_data.get("provider", "anthropic")
-            model = settings_data.get("model", "claude-sonnet-4-6-20250514")
-        else:
-            provider = "anthropic"
-            model = "claude-sonnet-4-6-20250514"
-
-        # 2. Create or update PersonaResponse record
-        stmt = select(PersonaResponse).where(
-            (PersonaResponse.technical_questionnaire_id == qid) &
-            (PersonaResponse.persona_name == persona_name)
-        )
-        persona_response = await db.scalar(stmt)
-
-        if not persona_response:
-            persona_response = PersonaResponse(
-                project_id=pid,
-                technical_questionnaire_id=qid,
-                persona_name=persona_name,
-                status="pending",
+        try:
+            # 1. Fetch project settings (LLM configuration)
+            stmt = select(ProjectSettings).where(
+                (ProjectSettings.project_id == pid) &
+                (ProjectSettings.setting_type == "llm")
             )
-            db.add(persona_response)
-            await db.flush()
+            project_settings = await db.scalar(stmt)
 
-        # 3. Mark as evaluating
-        persona_response.status = "evaluating"
-        persona_response.started_at = datetime.now(timezone.utc)
-        persona_response.ai_provider_used = provider
-        persona_response.ai_model_used = model
-        await db.commit()
+            # Parse IA config
+            if project_settings and project_settings.settings_json:
+                settings_data = json.loads(project_settings.settings_json) if isinstance(project_settings.settings_json, str) else project_settings.settings_json
+                provider = settings_data.get("provider", "anthropic")
+                model = settings_data.get("model", "claude-sonnet-4-6-20250514")
+            else:
+                provider = "anthropic"
+                model = "claude-sonnet-4-6-20250514"
 
-        # 4. Map persona_name to class and instantiate
-        persona_map = {
-            "gp": GPValidator,
-            "arquiteto": ArquitetoValidator,
-            "dba": DBAValidator,
-            "dev_sr": DevSrValidator,
-            "qa": QAValidator,
-        }
+            # 2. Create or update PersonaResponse record
+            stmt = select(PersonaResponse).where(
+                (PersonaResponse.technical_questionnaire_id == qid) &
+                (PersonaResponse.persona_name == persona_name)
+            )
+            persona_response = await db.scalar(stmt)
 
-        PersonaClass = persona_map.get(persona_name, GPValidator)
-        validator = PersonaClass(
-            project_id=pid,
-            provider=provider,
-            model=model,
-        )
+            if not persona_response:
+                persona_response = PersonaResponse(
+                    project_id=pid,
+                    technical_questionnaire_id=qid,
+                    persona_name=persona_name,
+                    status="pending",
+                )
+                db.add(persona_response)
+                await db.flush()
 
-        # 5. Run validation
-        result = validator.validate(
-            responses=responses,
-            extracted_concepts=extracted_concepts,
-            document_domain=document_domain,
-        )
+            # 3. Mark as evaluating
+            persona_response.status = "evaluating"
+            persona_response.started_at = datetime.now(timezone.utc)
+            persona_response.ai_provider_used = provider
+            persona_response.ai_model_used = model
+            await db.commit()
 
-        # 6. Update PersonaResponse with result
-        persona_response.status = "completed"
-        persona_response.decision = result.decision
-        persona_response.ocg_delta = result.ocg_delta
-        persona_response.followup_questions = result.followup_questions
-        persona_response.severity = result.severity
-        persona_response.completed_at = datetime.now(timezone.utc)
-        await db.commit()
+            # 4. Map persona_name to class and instantiate
+            persona_map = {
+                "gp": GPValidator,
+                "arquiteto": ArquitetoValidator,
+                "dba": DBAValidator,
+                "dev_sr": DevSrValidator,
+                "qa": QAValidator,
+            }
 
-        logger.info(
-            "evaluate_persona_task.completed",
-            persona=persona_name,
-            questionnaire_id=str(qid),
-            status=result.status,
-            provider=provider,
-            model=model,
-        )
+            PersonaClass = persona_map.get(persona_name, GPValidator)
+            validator = PersonaClass(
+                project_id=pid,
+                provider=provider,
+                model=model,
+            )
+
+            # 5. Run validation
+            result = validator.validate(
+                responses=responses,
+                extracted_concepts=extracted_concepts,
+                document_domain=document_domain,
+            )
+
+            # 6. Update PersonaResponse with result
+            persona_response.status = "completed"
+            persona_response.decision = result.decision
+            persona_response.ocg_delta = result.ocg_delta
+            persona_response.followup_questions = result.followup_questions
+            persona_response.severity = result.severity
+            persona_response.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+
+            logger.info(
+                "evaluate_persona_task.completed",
+                persona=persona_name,
+                questionnaire_id=str(qid),
+                status=result.status,
+                provider=provider,
+                model=model,
+            )
+        except Exception as exc:
+            logger.error(
+                "evaluate_persona_task.validation_failed",
+                persona=persona_name,
+                questionnaire_id=str(qid),
+                project_id=str(pid),
+                error=str(exc),
+                exc_info=True,
+            )
+            # Mark PersonaResponse as failed to prevent stuck state
+            try:
+                stmt = select(PersonaResponse).where(
+                    (PersonaResponse.technical_questionnaire_id == qid) &
+                    (PersonaResponse.persona_name == persona_name)
+                )
+                persona_response = await db.scalar(stmt)
+                if persona_response:
+                    persona_response.status = "failed"
+                    persona_response.error_message = f"Validação falhou: {str(exc)[:500]}"
+                    persona_response.completed_at = datetime.now(timezone.utc)
+                    await db.commit()
+            except Exception as db_exc:
+                logger.error(
+                    "evaluate_persona_task.error_marking_failed",
+                    persona=persona_name,
+                    questionnaire_id=str(qid),
+                    db_error=str(db_exc),
+                )
+            raise

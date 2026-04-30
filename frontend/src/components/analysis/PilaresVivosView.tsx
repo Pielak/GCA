@@ -6,6 +6,7 @@
  */
 
 import React, { useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
 import {
   Loader,
   AlertCircle,
@@ -21,10 +22,6 @@ import { usePilaresVivos } from '@/hooks/usePilaresVivos'
 import { exportarMarkdown, exportarPDF, copiarParaClipboard } from '@/lib/pilares-export'
 import { useToast } from '@/hooks/useToast'
 
-interface Props {
-  projectId: string
-}
-
 const PERSONAS_INFO = {
   P4_Arquiteto: { label: 'Arquiteto', color: 'emerald', icon: '🏗️' },
   P1_DBA: { label: 'DBA', color: 'blue', icon: '💾' },
@@ -37,7 +34,9 @@ const PERSONAS_INFO = {
 
 const PERSONAS_ORDER = ['P4_Arquiteto', 'P1_DBA', 'P2_Compliance', 'P3_Seguranca', 'P5_Dev', 'P6_Tester', 'P7_QA']
 
-export function PilaresVivosView({ projectId }: Props) {
+export function PilaresVivosView() {
+  const { id: projectId } = useParams<{ id: string }>()
+  if (!projectId) throw new Error('projectId is required')
   const { data, loading, error, inicializar, regenerar, jobStatus } = usePilaresVivos(projectId)
   const [selectedPersona, setSelectedPersona] = useState('P4_Arquiteto')
   const [expandedDTs, setExpandedDTs] = useState<Set<string>>(new Set())
@@ -157,10 +156,10 @@ export function PilaresVivosView({ projectId }: Props) {
             </p>
             <button
               onClick={handleRegenerar}
-              disabled={regenerando}
+              disabled={jobStatus && (jobStatus.status === 'queued' || jobStatus.status === 'processing')}
               className="mt-4 inline-flex items-center gap-2 px-6 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 disabled:opacity-50 text-sm font-medium transition-colors"
             >
-              {regenerando ? (
+              {jobStatus && (jobStatus.status === 'queued' || jobStatus.status === 'processing') ? (
                 <>
                   <Loader className="h-4 w-4 animate-spin" />
                   Gerando Pilares Vivos...
@@ -248,10 +247,10 @@ export function PilaresVivosView({ projectId }: Props) {
             {/* Botão Regenerar */}
             <button
               onClick={handleRegenerar}
-              disabled={regenerando}
+              disabled={jobStatus && (jobStatus.status === 'queued' || jobStatus.status === 'processing')}
               className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium transition-colors"
             >
-              {regenerando ? (
+              {jobStatus && (jobStatus.status === 'queued' || jobStatus.status === 'processing') ? (
                 <>
                   <Loader className="h-4 w-4 animate-spin" />
                   Regenerando...

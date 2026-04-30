@@ -165,7 +165,7 @@ export const router = createBrowserRouter([
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'technical-questionnaire', element: <RequireProjectSetup><TechnicalQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
-          { path: 'pilares-vivos', element: <RequireProjectSetup><PilaresVivosView projectId={projectId} /></RequireProjectSetup> },
+          { path: 'pilares-vivos', element: <RequireProjectSetup><PilaresVivosView /></RequireProjectSetup> },
           { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
           { path: 'applied-defaults', element: <RequireProjectSetup><AppliedDefaultsPage /></RequireProjectSetup> },
           { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },

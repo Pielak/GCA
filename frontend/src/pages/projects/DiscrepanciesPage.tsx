@@ -19,8 +19,8 @@ interface DocumentInfo {
 }
 
 export function DiscrepanciesPage() {
-  const { projectId, documentId } = useParams<{
-    projectId: string
+  const { id: projectId, documentId } = useParams<{
+    id: string
     documentId: string
   }>()
   const navigate = useNavigate()

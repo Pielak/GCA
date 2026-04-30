@@ -62,7 +62,7 @@ interface RefinementHistory {
 }
 
 export function AnalysisDashboardPage() {
-  const { projectId, documentId } = useParams<{ projectId: string; documentId: string }>()
+  const { id: projectId, documentId } = useParams<{ id: string; documentId: string }>()
   const [loading, setLoading] = useState(true)
   const [dashboard, setDashboard] = useState<AnalysisDashboard | null>(null)
   const [expandedPersona, setExpandedPersona] = useState<string | null>(null)

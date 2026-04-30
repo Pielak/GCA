@@ -5,7 +5,7 @@ import { TechnicalQuestionnaireForm } from '@/components/questionnaire/Technical
 import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
 
 export function TechnicalQuestionnairePage() {
-  const { projectId } = useParams<{ projectId: string }>()
+  const { id: projectId } = useParams<{ id: string }>()
   const [isSubmitted, setIsSubmitted] = useState(false)
   const [questionnaireId, setQuestionnaireId] = useState<string | null>(null)
 

@@ -211,18 +211,20 @@ export function usePilaresVivos(projectId: string) {
       })
 
       if (!response.ok) {
-        throw new Error('Erro ao obter histórico')
+        console.warn('Histórico não disponível:', response.status)
+        setHistoria([])
+        return []
       }
 
       const items = await response.json()
       setHistoria(items)
       return items
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Erro desconhecido'
-      toast.error(message)
-      throw err
+      console.warn('Erro ao obter histórico:', err)
+      setHistoria([])
+      return []
     }
-  }, [projectId, toast])
+  }, [projectId])
 
   // Buscar dados ao montar o component
   const inicializar = useCallback(async () => {

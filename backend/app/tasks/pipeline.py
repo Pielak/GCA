@@ -252,43 +252,63 @@ async def _run_analyze_async(document_id: str, project_id: str, file_type: str) 
     from app.services.ingestion_service import IngestionService
 
     async with AsyncSessionLocal() as db:
-        res = await db.execute(
-            select(IngestedDocument).where(IngestedDocument.id == UUID(document_id))
-        )
-        doc = res.scalar_one_or_none()
-        if not doc:
-            logger.warning("pipeline_ingest_task.doc_not_found", document_id=document_id)
-            return
-
-        if doc.arguider_status == "completed":
-            logger.info(
-                "pipeline_ingest_task.skip_already_completed",
-                document_id=document_id,
+        try:
+            res = await db.execute(
+                select(IngestedDocument).where(IngestedDocument.id == UUID(document_id))
             )
-            return
+            doc = res.scalar_one_or_none()
+            if not doc:
+                logger.warning("pipeline_ingest_task.doc_not_found", document_id=document_id)
+                return
 
-        # Lê bytes do storage (upload_document persistiu via write_ingested).
-        # Storage helper usa project_id + filename (o UUID-prefixed do upload).
-        from app.utils.ingested_storage import read_ingested
-        file_bytes = read_ingested(UUID(project_id), doc.filename)
-        if file_bytes is None:
-            logger.warning(
-                "pipeline_ingest_task.storage_missing",
-                document_id=document_id,
-                filename=doc.filename,
+            if doc.arguider_status == "completed":
+                logger.info(
+                    "pipeline_ingest_task.skip_already_completed",
+                    document_id=document_id,
+                )
+                return
+
+            # Lê bytes do storage (upload_document persistiu via write_ingested).
+            # Storage helper usa project_id + filename (o UUID-prefixed do upload).
+            from app.utils.ingested_storage import read_ingested
+            file_bytes = read_ingested(UUID(project_id), doc.filename)
+            if file_bytes is None:
+                logger.warning(
+                    "pipeline_ingest_task.storage_missing",
+                    document_id=document_id,
+                    filename=doc.filename,
+                )
+                doc.arguider_status = "error"
+                doc.arguider_error_message = f"storage não encontrado: {doc.filename}"
+                await db.commit()
+                return
+
+            svc = IngestionService(db)
+            await svc._analyze_async(
+                UUID(document_id),
+                UUID(project_id),
+                file_bytes,
+                file_type or doc.file_type,
             )
-            doc.arguider_status = "error"
-            doc.arguider_error_message = f"storage não encontrado: {doc.filename}"
-            await db.commit()
-            return
-
-        svc = IngestionService(db)
-        await svc._analyze_async(
-            UUID(document_id),
-            UUID(project_id),
-            file_bytes,
-            file_type or doc.file_type,
-        )
+        except Exception as exc:
+            logger.error(
+                "pipeline_ingest_task.analyze_failed",
+                document_id=document_id,
+                project_id=project_id,
+                error=str(exc),
+                exc_info=True,
+            )
+            # Marcar documento como erro para não ficar travado
+            res = await db.execute(
+                select(IngestedDocument).where(IngestedDocument.id == UUID(document_id))
+            )
+            doc = res.scalar_one_or_none()
+            if doc:
+                doc.arguider_status = "error"
+                doc.arguider_error_message = f"Análise falhou: {str(exc)[:500]}"
+                doc.arguider_stage = "failed"
+                await db.commit()
+            raise
 
 
 # ─── Fase 13.3b: propagate / regenerate_backlog / reevaluate_gatekeeper ──
