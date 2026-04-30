@@ -2438,3 +2438,82 @@ class OCGGlobal(Base):
         Index("idx_ocg_global_document", document_id),
         UniqueConstraint("document_id", name="uq_ocg_global_per_document"),
     )
+
+
+class PilaresVivos(Base):
+    """Documento consolidado vivo com análise de 7 personas sobre projeto.
+
+    Pilares Vivos substitui documentos estáticos por análise dinâmica regenerável.
+    Cada vez que ingestão ocorre, o documento é regenerado com novas análises das 7 personas.
+
+    Estrutura do documento: {
+      "P4_Arquiteto": {ocg_individual_json},
+      "P1_DBA": {ocg_individual_json},
+      "P2_Compliance": {ocg_individual_json},
+      "P3_Seguranca": {ocg_individual_json},
+      "P5_Dev": {ocg_individual_json},
+      "P6_Tester": {ocg_individual_json},
+      "P7_QA": {ocg_individual_json}
+    }
+    """
+    __tablename__ = "pilares_vivos"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Documento consolidado: análise de cada persona
+    documento = Column(JSONB, nullable=False, default={})
+
+    # Contexto usado para gerar
+    gatekeeper_summary = Column(JSONB, nullable=True, default=None)  # Resumo dos 87 Gatekeeper items
+    questionnaire_responses = Column(JSONB, nullable=True, default=None)  # Respostas do Questionário Técnico
+
+    # Rastreamento
+    gerado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gerado_em = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    regenerado_em = Column(DateTime(timezone=True), nullable=True)  # Data da última regeneração
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_pilares_vivos_project", project_id),
+        Index("idx_pilares_vivos_gerado_por", gerado_por),
+        Index("idx_pilares_vivos_gerado_em", gerado_em),
+    )
+
+
+class PilaresVivosHistory(Base):
+    """Histórico de versões anteriores de Pilares Vivos para rastreabilidade.
+
+    Armazena versões anteriores para que seja possível visualizar evolução
+    e comparar mudanças entre regenerações.
+    """
+    __tablename__ = "pilares_vivos_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    pilares_vivos_id = Column(UUID(as_uuid=True), ForeignKey("pilares_vivos.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Documento da versão anterior
+    documento = Column(JSONB, nullable=False, default={})
+
+    # Contexto usado
+    gatekeeper_summary = Column(JSONB, nullable=True, default=None)
+    questionnaire_responses = Column(JSONB, nullable=True, default=None)
+
+    # Rastreamento
+    gerado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gerado_em = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    archived_em = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Mudanças detectadas
+    personas_modificadas = Column(JSONB, nullable=True, default=[])  # ["P1_DBA", "P3_Seguranca"]
+    resumo_mudancas = Column(String(500), nullable=True)
+
+    __table_args__ = (
+        Index("idx_pilares_history_project", project_id),
+        Index("idx_pilares_history_current", pilares_vivos_id),
+        Index("idx_pilares_history_gerado_em", gerado_em),
+    )
