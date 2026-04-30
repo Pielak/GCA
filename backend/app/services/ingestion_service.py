@@ -640,11 +640,23 @@ class IngestionService:
             }
 
         # MVP 13 Fase 13.3b: upload dispara via Celery. Bytes já foram
-        # persistidos via write_ingested antes desta linha; task lê
+        # persistidos via write_ingested antes desta linha; task lé
         # via read_ingested. Timeout + error handling via retry policy
         # da task. Watchdog DT-073 continua como rede de segurança.
         from app.tasks.pipeline import pipeline_ingest_task
-        pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+        try:
+            pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+        except Exception as exc:
+            # Se enfileiramento falhar (Celery/Redis indisponível),
+            # registra erro explícito + watchdog (DT-073) reconsiliaará.
+            logger.error(
+                "ingestion.celery_enqueue_failed",
+                document_id=str(doc_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            # Continua mesmo que falhe — watchdog vai reprocessar
 
         logger.info(
             "ingestion.document_uploaded",
