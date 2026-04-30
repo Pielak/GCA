@@ -2,12 +2,12 @@
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, exists
+from sqlalchemy import select, exists, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.dependencies.require_action import require_action
-from app.models.base import Project, ProjectSettings, ProjectGitConfig, Questionnaire
+from app.models.base import Project, ProjectSettings, ProjectGitConfig, Questionnaire, TechnicalQuestionnaire
 
 router = APIRouter(tags=["Project Setup"])
 
@@ -34,15 +34,21 @@ async def _has_llm_configured(db: AsyncSession, project_id: UUID) -> bool:
 async def _questionnaire_state(db: AsyncSession, project_id: UUID) -> tuple[bool, bool]:
     """Retorna (submitted, approved) do questionário mais recente do projeto.
 
-    - submitted = existe Questionnaire com responses preenchidos.
-    - approved  = o Questionnaire mais recente passou na verificação
-      tecnológica (status OK + approved=True).
+    Suporta AMBOS:
+    - Questionnaire (modelo antigo, PDF-based com responses JSON em string)
+    - TechnicalQuestionnaire (modelo novo, dinâmico com responses JSONB)
+
+    Estados:
+      - submitted = existe Questionnaire/TechnicalQuestionnaire preenchido/submetido
+      - approved  = o Questionnaire passou na verificação (approved=True)
+                  OU TechnicalQuestionnaire tem status="submitted"
 
     A UI usa os dois para distinguir 3 estados no badge da aba:
       missing → ○ âmbar      (nunca submetido)
       submitted & !approved → ⚠ amarelo (submetido mas com bloqueadores)
       approved → ✓ emerald   (OK, OCG pode ser gerado)
     """
+    # Verificar Questionnaire antigo (PDF-based)
     result = await db.execute(
         select(Questionnaire)
         .where(
@@ -54,10 +60,31 @@ async def _questionnaire_state(db: AsyncSession, project_id: UUID) -> tuple[bool
         .order_by(Questionnaire.submitted_at.desc())
         .limit(1)
     )
-    q = result.scalar_one_or_none()
-    if q is None:
+    q_old = result.scalar_one_or_none()
+
+    # Verificar TechnicalQuestionnaire novo (dinâmico)
+    result = await db.execute(
+        select(TechnicalQuestionnaire)
+        .where(
+            TechnicalQuestionnaire.project_id == project_id,
+            TechnicalQuestionnaire.status == "submitted",
+        )
+        .order_by(TechnicalQuestionnaire.submitted_at.desc())
+        .limit(1)
+    )
+    q_new = result.scalar_one_or_none()
+
+    # Se nenhum dos dois foi submetido, retorna false/false
+    if q_old is None and q_new is None:
         return False, False
-    return True, bool(q.approved)
+
+    # Se algum foi submetido, submitted=True
+    submitted = q_old is not None or q_new is not None
+
+    # Approved se: Questionnaire antigo foi aprovado OU TechnicalQuestionnaire foi submetido
+    approved = (q_old is not None and q_old.approved) or (q_new is not None)
+
+    return submitted, approved
 
 
 async def _check_setup_status(db: AsyncSession, project_id: UUID) -> dict:
