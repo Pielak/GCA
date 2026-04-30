@@ -139,5 +139,6 @@ async def init_db() -> None:
 try:
     from app.models.document_route_map import DocumentRouteMap
     from app.models.auditor_output import AuditorOutput
+    from app.models.persona_response import PersonaResponse
 except ImportError:
     pass  # Models may not be created yet during initial setup
