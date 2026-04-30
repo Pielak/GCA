@@ -1,15 +1,19 @@
 """
 Celery tasks para Pilares Vivos — regeneração e notificações
 """
-from celery import shared_task
-import structlog
+import asyncio
 from uuid import UUID
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+import structlog
+from celery import shared_task
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
-from app.core.config import settings
+from app.db.database import engine as async_engine
+from app.models.base import ProjectMember
+from app.services.notification_inapp_service import InAppNotificationService
 from app.services.pilares_vivos_service import PilaresVivosService
-from app.db.database import get_session
 
 logger = structlog.get_logger(__name__)
 
@@ -34,13 +38,9 @@ def regenerar_pilares_apos_analise(
     - User clicar "Regenerar Análise" manualmente
     """
     try:
-        import asyncio
-        from app.db.database import async_engine
-
         project_uuid = UUID(project_id)
         user_uuid = UUID(user_id)
 
-        # Rodamos sincronamente pra não bloquear Celery
         asyncio.run(
             _regenerar_pilares_async(
                 project_uuid,
@@ -112,14 +112,11 @@ async def _verificar_e_notificar_bloqueantes(
     documento: dict,
 ) -> None:
     """Verifica se há DTs BLOCKER e notifica GPs. Também notifica conclusão geral."""
-    from app.models.base import ProjectMember
-    from sqlalchemy import select
-
     bloqueantes = []
     critical_count = 0
 
     # Verificar todas as personas
-    personas_lista = ["P4_Arquiteto", "P1_DBA", "P2_Compliance", "P3_Seguranca", "P5_Dev", "P6_Tester", "P7_QA"]
+    personas_lista = PilaresVivosService.PERSONAS_ORDER
 
     for persona_key in personas_lista:
         parecer = documento.get(persona_key)
@@ -149,8 +146,6 @@ async def _verificar_e_notificar_bloqueantes(
     gps = result.scalars().all()
 
     # Notificar cada GP via in-app notification
-    from app.services.notification_inapp_service import InAppNotificationService
-
     notification_service = InAppNotificationService(db)
 
     if bloqueantes:

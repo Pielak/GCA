@@ -75,19 +75,9 @@ async def upload_document(
     if sc >= 400:
         raise HTTPException(status_code=sc, detail=result.get("error", result.get("message", "")))
 
-    # Dispatch persona analysis tasks for successful ingestion
-    if sc == 200 and "document_id" in result:
-        from app.tasks.persona_tasks import analyze_document_with_persona
-        document_id = result.get("document_id")
-        # Dispatch 7 parallel persona tasks
-        for persona in ["IA_DBA", "IA_Compliance", "IA_Security", "IA_Arquiteto", "IA_Dev", "IA_Tester", "IA_QA"]:
-            analyze_document_with_persona.delay(
-                document_id=str(document_id),
-                project_id=str(project_id),
-                persona_type=persona,
-            )
-        logger.info("personas.analysis_dispatched", document_id=str(document_id), count=7)
-
+    # Fase 2 Simplificação: Personas da ingestão removidas.
+    # Pipeline agora: Questionário → 5 Personas (questionnaire.py) → OCG → Gatekeeper.
+    # A ingestão apenas armazena documentos para referência.
     return result
 
 
@@ -338,36 +328,21 @@ async def consolidate_personas_analysis(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Consolida análises de 7 personas e detecta conflitos.
+    """[REMOVIDO] Consolidação de OCG de personas removida.
 
-    Dispara após todas as personas completarem análise.
-    Consolida pareceres individuais em OCG Global.
-    Detecta automaticamente conflitos entre opiniões.
+    Fase 2 Simplificação: Personas da ingestão e OCGGlobal removidos.
+    Pipeline agora: Questionário → 5 Personas → OCG (legacy) → Gatekeeper.
     """
-    from app.services.ocg_consolidation_service import OCGConsolidationService
-
-    service = OCGConsolidationService(db)
-    try:
-        ocg_global, conflicts = await service.consolidate_and_detect_conflicts(
-            project_id=project_id,
-            document_id=document_id,
-        )
-
-        return {
-            "success": True,
-            "message": f"Consolidação completa. {len(conflicts)} conflitos detectados.",
-            "document_id": str(document_id),
-            "conflicts_count": len(conflicts),
-            "ocg_global": ocg_global,
-            "conflicts": conflicts,
-        }
-    except Exception as e:
-        logger.error(
-            "ingestion.consolidation_failed",
-            document_id=str(document_id),
-            error=str(e),
-        )
-        raise HTTPException(status_code=500, detail=f"Erro na consolidação: {str(e)}")
+    logger.warning(
+        "ingestion.consolidation_disabled",
+        document_id=str(document_id),
+        reason="Fase 2 Simplificação: personas da ingestão removidas",
+    )
+    return {
+        "success": False,
+        "message": "Consolidação de OCG de personas desabilitada após simplificação do pipeline.",
+        "document_id": str(document_id),
+    }
 
 
 @router.get("/projects/{project_id}/ingestion/{document_id}/follow-up-questions")
@@ -377,39 +352,16 @@ async def get_follow_up_questions(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Lista follow-up questions pendentes para um documento.
+    """[REMOVIDO] Follow-up questions eram do fluxo de personas da ingestão.
 
-    Retorna perguntas geradas por personas para clarificação.
+    Fase 2 Simplificação: Personas da ingestão removidas. Este endpoint
+    retorna lista vazia para compatibilidade com frontend.
     """
-    from app.models.base import PersonaFollowUpQuestion
-    from sqlalchemy import select
-
-    questions = await db.scalars(
-        select(PersonaFollowUpQuestion).where(
-            (PersonaFollowUpQuestion.project_id == project_id) &
-            (PersonaFollowUpQuestion.document_id == document_id) &
-            (PersonaFollowUpQuestion.status.in_(["pending", "answered"]))
-        )
-    )
-    questions_list = questions.all()
-
     return {
         "document_id": str(document_id),
-        "questions": [
-            {
-                "id": str(q.id),
-                "persona_name": q.persona_name,
-                "question_text": q.question_text,
-                "context": q.context,
-                "question_order": q.question_order,
-                "answer_text": q.answer_text,
-                "status": q.status,
-                "created_at": q.created_at.isoformat() if q.created_at else None,
-            }
-            for q in questions_list
-        ],
-        "total_questions": len(questions_list),
-        "answered_count": sum(1 for q in questions_list if q.status == "answered"),
+        "questions": [],
+        "total_questions": 0,
+        "answered_count": 0,
     }
 
 
@@ -426,50 +378,23 @@ async def submit_follow_up_answers(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Submete respostas às follow-up questions.
+    """[REMOVIDO] Submissão de follow-up questions removida.
 
-    Dispara re-análise (refinement) de cada persona.
+    Fase 2 Simplificação: Personas da ingestão removidas.
+    Endpoint mantido para compatibilidade, retorna sucesso vazio.
     """
-    from app.services.follow_up_service import FollowUpService
-
-    service = FollowUpService(db)
-
-    # Buscar OCG Individual para disparar refinement
-    from app.models.base import PersonaFollowUpQuestion
-    from sqlalchemy import select, func
-
-    question_result = await db.scalar(
-        select(PersonaFollowUpQuestion.ocg_individual_id).where(
-            (PersonaFollowUpQuestion.project_id == project_id) &
-            (PersonaFollowUpQuestion.document_id == document_id)
-        ).limit(1)
-    )
-
-    if not question_result:
-        raise HTTPException(status_code=404, detail="Nenhuma pergunta encontrada")
-
-    success = await service.submit_answers(
-        ocg_individual_id=question_result,
-        answers=request.answers,
-        answered_by=current_user_id,
-    )
-
-    if not success:
-        raise HTTPException(status_code=500, detail="Erro ao submeter respostas")
-
     logger.info(
-        "ingestion.follow_up_answers_submitted",
+        "ingestion.follow_up_answers_submitted_ignored",
         document_id=str(document_id),
         answer_count=len(request.answers),
-        submitted_by=str(current_user_id),
+        reason="Fase 2 Simplificação: personas da ingestão removidas",
     )
-
     return {
         "success": True,
-        "message": "Respostas submetidas. Personas estão refinando análises...",
+        "message": "Follow-up desabilitado após simplificação do pipeline.",
         "document_id": str(document_id),
-        "answer_count": len(request.answers),
     }
+
 
 
 @router.get("/projects/{project_id}/ingestion/{document_id}/content")

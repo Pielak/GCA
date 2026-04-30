@@ -1575,9 +1575,9 @@ class IngestionService:
                                     trigger_source="document_ingestion",
                                 )
 
-                                # DT-AUDITORIA-002: Novo status "awaiting_ocg"
-                                # significa que OCG não está pronto (personas ainda analisando).
-                                # Requeue o documento para retry em 30s.
+                                # DT-AUDITORIA-002: "awaiting_ocg" significa
+                                # que OCG (legacy, do questionário) não está
+                                # disponível. Requeue para retry em 30s.
                                 if update_result and update_result.get("status") == "awaiting_ocg":
                                     logger.info(
                                         "ingestion.awaiting_ocg",

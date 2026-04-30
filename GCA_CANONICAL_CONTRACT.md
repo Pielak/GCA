@@ -19,6 +19,19 @@ Ele existe para:
 
 Em caso de conflito, este documento prevalece sobre manual, tutorial, análises, mocks, README e demais documentos históricos.
 
+### 1.1 Pipeline canônico (referência)
+
+O fluxo de dados do pipeline está documentado em [`docs/PIPELINE_FLOW.md`](docs/PIPELINE_FLOW.md).
+Este documento define:
+- diagrama de fluxo canônico com dependências entre estágios;
+- guardrails (DT-AUDITORIA-002) em cada serviço;
+  - DT-AUDITORIA-003 removido na Simplificação Fase 2 (2026-05-01)
+    junto com OCGIndividual/OCGGlobal
+- race conditions conhecidas e seus comportamentos;
+- logging e alertas recomendados.
+
+O `PIPELINE_FLOW.md` é atualizado sempre que a arquitetura do pipeline muda.
+
 ---
 
 ## 2. Definição canônica do produto

@@ -191,6 +191,7 @@ services:
     working_dir: /app
     environment:
       VITE_APP_URL: http://localhost:5173
+      VITE_API_URL: http://gca-backend:8000
     volumes:
       - ./frontend:/app
       - /app/node_modules

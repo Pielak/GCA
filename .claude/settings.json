@@ -1,8 +1,8 @@
-{                                                                                                                                                           
+{
     "enabledPlugins": {
-      "figma@claude-plugins-official": true                                                                                                                   
-    },                                                   
+      "figma@claude-plugins-official": true
+    },
     "permissions": {
-      "defaultMode": "default"
-    }                                                                                                                                                         
+      "defaultMode": "auto"
+    }
 }

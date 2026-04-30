@@ -220,7 +220,7 @@ class DocumentExtractor:  # noqa: E302
             client = self.client  # Reutiliza client com chave do projeto
             b64 = base64.b64encode(image_bytes).decode("ascii")
             response = await client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+                model=self.model,  # Usa modelo do projeto, não hardcoded
                 max_tokens=2048,
                 messages=[{
                     "role": "user",
@@ -504,34 +504,16 @@ class ArguiderService:
     ) -> dict:
         """Executa análise completa do Arguidor para um documento.
 
+        Fase 2 Simplificação: Guardrail DT-AUDITORIA-003 removido porque
+        personas da ingestão (OCGIndividual) foram removidas. Pipeline agora
+        usa apenas OCG legacy do questionário.
+
         MVP 29: quando `canonical` (DocumentCanonical) é fornecido, o
         prompt é construído a partir da versão estruturada (3-5× menos
         tokens que texto bruto). `document_text` permanece aceito como
         fallback pra casos onde canonização não é possível (XLSX/IMAGE
         no MVP, ou falha na canonização).
         """
-        # DT-AUDITORIA-003: Validação de entrada — Arguidor recusa análise
-        # se OCG não tem todas as 7 análises de personas. Evita criar items
-        # fictícios sem base em dados reais.
-        from app.models.base import OCGIndividual
-        personas_count_result = await self.db.execute(
-            select(func.count(OCGIndividual.id)).where(
-                OCGIndividual.project_id == project_id
-            )
-        )
-        personas_count = personas_count_result.scalar() or 0
-        if personas_count < 7:
-            logger.warning(
-                "arguider.incomplete_ocg",
-                document_id=str(document_id),
-                project_id=str(project_id),
-                personas_completed=personas_count,
-                required=7,
-            )
-            raise ValueError(
-                f"OCG incompleto: {personas_count}/7 personas completaram análise. "
-                "Aguarde todas as personas terminarem antes de analisar ingestão."
-            )
 
         try:
             # Atualizar status

@@ -6,11 +6,12 @@ Cada ingestão dispara regeneração do documento com análises das 7 personas.
 
 Fluxo:
 1. resumir_gatekeeper_items() — transforma 87 items em summary
-2. chamar_persona_opus() — chama Opus 4.7 para cada persona (em paralelo)
+2. chamar_persona() — chama LLM para cada persona (em paralelo)
 3. consolidar_documento() — mescla os 7 resultados
 4. salvar_pilares() — persiste no BD + histórico
 """
 import json
+import time
 from typing import Optional, Dict, Any, List
 from uuid import UUID
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ from app.models.base import (
     User,
 )
 from app.services.ai_service import AIService, AIProvider
+from app.services.ai_key_resolver import AIKeyResolver
 from app.prompts.pilares_vivos_prompts import (
     PROMPT_ARQUITETO,
     PROMPT_DBA,
@@ -56,9 +58,10 @@ class PilaresVivosService:
         "P7_QA": PROMPT_QA,
     }
 
-    # Ordem de execução (Arquiteto primeiro, depois os 6 em paralelo)
-    PERSONAS_ORDEM = ["P4_Arquiteto"]
-    PERSONAS_PARALELO = ["P1_DBA", "P2_Compliance", "P3_Seguranca", "P5_Dev", "P6_Tester", "P7_QA"]
+    # 2026-05-01: Todas as 7 personas rodam em paralelo.
+    # A dependência do Arquiteto (sub_tasks) foi removida para eliminar
+    # o gargalo de 5min de chamadas LLM sequenciais.
+    PERSONAS_ORDER = ["P4_Arquiteto", "P1_DBA", "P2_Compliance", "P3_Seguranca", "P5_Dev", "P6_Tester", "P7_QA"]
 
     @staticmethod
     async def resumir_gatekeeper_items(db: AsyncSession, project_id: UUID) -> Dict[str, Any]:
@@ -90,16 +93,24 @@ class PilaresVivosService:
         items_resumo = []
 
         for item in items:
-            categoria = item.category or "indefinida"
+            categoria = item.item_type or "indefinida"
             por_categoria[categoria] = por_categoria.get(categoria, 0) + 1
+
+            # item_data é JSON — extrair campos disponíveis
+            dados = {}
+            if item.item_data:
+                try:
+                    dados = json.loads(item.item_data)
+                except (json.JSONDecodeError, TypeError):
+                    dados = {}
 
             items_resumo.append({
                 "id": str(item.id),
                 "categoria": categoria,
-                "titulo": item.title,
-                "descricao": item.description,
-                "impacto": item.impact or "não especificado",
-                "pilares": item.linked_pillars or [],
+                "titulo": dados.get("text", dados.get("title", "sem título")),
+                "descricao": dados.get("text", dados.get("description", "")),
+                "impacto": dados.get("impacto", dados.get("severity", "não especificado")),
+                "pilares": dados.get("linked_pillars", dados.get("pillars", [])),
             })
 
         return {
@@ -148,44 +159,79 @@ class PilaresVivosService:
         }
 
     @staticmethod
-    async def chamar_persona_opus(
+    async def chamar_persona(
         persona_name: str,
         prompt_template: str,
         contexto: Dict[str, Any],
+        provider_name: str = "deepseek",
+        model_name: str = "deepseek-chat",
     ) -> Dict[str, Any]:
-        """Chama Opus 4.7 para análise de uma persona.
+        """Chama IA para análise de uma persona.
 
         Args:
             persona_name: Nome da persona (ex: "P1_DBA")
-            prompt_template: Template do prompt (constante do pilares_vivos_prompts.py)
-            contexto: Dados de contexto (gatekeeper_summary, questionnaire, etc)
+            prompt_template: Template do prompt
+            contexto: Dados de contexto
+            provider_name: Provider LLM (do projeto)
+            model_name: Modelo específico
 
         Returns:
             {
               "persona": "P1_DBA",
               "status": "completo",
-              "parecer": {...},  # JSON estruturado com análise
-              "dts": [...],  # Discovery Tasks
-              "ai_model": "claude-opus-4-6",
+              "parecer": {...},
+              "dts": [...],
+              "ai_model": model_name,
             }
         """
         try:
-            # Montar prompt com contexto
-            prompt_final = prompt_template.format(
-                gatekeeper_summary=json.dumps(contexto.get("gatekeeper_summary", {}), ensure_ascii=False, indent=2),
-                questionnaire=json.dumps(contexto.get("questionnaire", {}), ensure_ascii=False, indent=2),
-                sub_tasks=contexto.get("sub_tasks", ""),
-                arquiteto_resultado=json.dumps(contexto.get("arquiteto_resultado", {}), ensure_ascii=False, indent=2),
-            )
+            gk = contexto.get("gatekeeper_summary", {})
+            qr = contexto.get("questionnaire", {})
+            por_cat = gk.get("por_categoria", {})
 
-            # Chamar Opus 4.7
-            success, response, error = await AIService.query(
-                prompt=prompt_final,
-                provider=AIProvider.ANTHROPIC,
-                model="claude-opus-4-6",
-                system_prompt="Você é um especialista em análise de requisitos e arquitetura de software. Retorne respostas estruturadas em JSON válido.",
-                temperature=0.5,
-                max_tokens=8000,
+            kwargs = {
+                "projeto_nome": qr.get("projeto_nome", contexto.get("project_name", "Projeto")),
+                "total_items": str(gk.get("total", 0)),
+                "visao_gp": qr.get("respostas", {}).get("visao_geral", qr.get("visao_gp", "Não informada")),
+                "show_stoppers_count": str(por_cat.get("show_stopper", 0)),
+                "show_stoppers_por_pillar": str(por_cat.get("show_stopper_por_pillar", "")),
+                "gaps_count": str(por_cat.get("gap", 0)),
+                "gaps_por_pillar": str(por_cat.get("gap_por_pillar", "")),
+                "poor_definitions_count": str(por_cat.get("poor_definition", 0)),
+                "poor_definitions_por_pillar": str(por_cat.get("poor_definition_por_pillar", "")),
+                "improvements_count": str(por_cat.get("improvement", 0)),
+                "improvements_por_pillar": str(por_cat.get("improvement_por_pillar", "")),
+                "decisao_arquiteto": contexto.get("decisao_arquiteto", "Pendente de definição arquitetural"),
+                "dominios": contexto.get("dominios", "Pendente de mapeamento de domínios"),
+                "fluxos_integracao": contexto.get("fluxos_integracao", "Pendente de definição de fluxos"),
+                "componentes_criticos": contexto.get("componentes_criticos", "Pendente"),
+                "dados_sensiveis": contexto.get("dados_sensiveis", "Pendente"),
+                # items_p1-p6 referenciados nos prompts das personas
+                "items_p1": gk.get("P1_Dados", ""),
+                "items_p2": gk.get("P2_Compliance", ""),
+                "items_p3": gk.get("P3_Seguranca", ""),
+                "items_p5": gk.get("P5_Dev", ""),
+                "items_p6": gk.get("P6_Tester", ""),
+                "subtarefa_dba": contexto.get("subtarefa_dba", ""),
+                "subtarefa_compliance": contexto.get("subtarefa_compliance", ""),
+                "subtarefa_seguranca": contexto.get("subtarefa_seguranca", ""),
+                "subtarefa_dev": contexto.get("subtarefa_dev", ""),
+                "subtarefa_tester": contexto.get("subtarefa_tester", ""),
+            }
+
+            prompt_final = prompt_template.format(**kwargs)
+
+            provider_enum = AIProvider(provider_name)
+            success, response, error = await asyncio.wait_for(
+                AIService.query(
+                    prompt=prompt_final,
+                    provider=provider_enum,
+                    model=model_name,
+                    system_prompt="Você é um especialista em análise de requisitos e arquitetura de software. Retorne respostas estruturadas em JSON válido.",
+                    temperature=0.3,
+                    max_tokens=5000,
+                ),
+                timeout=120.0,
             )
 
             if not success:
@@ -194,7 +240,7 @@ class PilaresVivosService:
                     "persona": persona_name,
                     "status": "erro",
                     "erro": error,
-                    "ai_model": "claude-opus-4-6",
+                    "ai_model": model_name,
                 }
 
             # Parse resposta como JSON
@@ -212,7 +258,7 @@ class PilaresVivosService:
                 "status": "completo",
                 "parecer": parecer,
                 "dts": parecer.get("dts", []),
-                "ai_model": "claude-opus-4-6",
+                "ai_model": model_name,
             }
 
         except Exception as e:
@@ -221,19 +267,17 @@ class PilaresVivosService:
                 "persona": persona_name,
                 "status": "erro",
                 "erro": str(e),
-                "ai_model": "claude-opus-4-6",
+                "ai_model": model_name,
             }
 
     @staticmethod
     async def consolidar_documento(
-        arquiteto_result: Dict[str, Any],
-        personas_results: Dict[str, Dict[str, Any]],
+        todos_resultados: Dict[str, Dict[str, Any]],
     ) -> Dict[str, Any]:
         """Mescla análises das 7 personas em documento consolidado.
 
         Args:
-            arquiteto_result: Resultado da análise do Arquiteto
-            personas_results: {"P1_DBA": {...}, "P2_Compliance": {...}, ...}
+            todos_resultados: {"P4_Arquiteto": {...}, "P1_DBA": {...}, ...}
 
         Returns:
             {
@@ -245,8 +289,7 @@ class PilaresVivosService:
             }
         """
         documento = {
-            "P4_Arquiteto": arquiteto_result,
-            **personas_results,
+            **todos_resultados,
             "consolidado_em": datetime.now(timezone.utc).isoformat(),
             "versao": 1,
         }
@@ -320,7 +363,7 @@ class PilaresVivosService:
         """Detecta quais personas mudaram entre versões."""
         mudancas = []
 
-        for persona in ["P4_Arquiteto", "P1_DBA", "P2_Compliance", "P3_Seguranca", "P5_Dev", "P6_Tester", "P7_QA"]:
+        for persona in PilaresVivosService.PERSONAS_ORDER:
             if documento_antigo.get(persona) != documento_novo.get(persona):
                 mudancas.append(persona)
 
@@ -332,15 +375,14 @@ class PilaresVivosService:
         project_id: UUID,
         user_id: UUID,
     ) -> Dict[str, Any]:
-        """Orquestra regeneração completa de Pilares Vivos.
+        """Orquestra regeneração completa de Pilares Vivos (paralelizado).
 
         Fluxo:
         1. Resumir Gatekeeper items
         2. Obter respostas Questionário
-        3. Chamar Arquiteto (hub central)
-        4. Chamar 6 personas em paralelo (com sub-tasks do Arquiteto)
-        5. Consolidar documento
-        6. Salvar BD + histórico
+        3. Chamar 7 personas EM PARALELO (sem dependência do Arquiteto)
+        4. Consolidar documento
+        5. Salvar BD + histórico
 
         Returns:
             {
@@ -350,7 +392,6 @@ class PilaresVivosService:
               "erros": [],
             }
         """
-        import time
         tempo_inicio = time.time()
 
         logger.info(f"pilares_vivos.regeneracao_iniciada", project_id=str(project_id))
@@ -369,52 +410,59 @@ class PilaresVivosService:
                 "questionnaire": questionnaire,
             }
 
-            # Step 3: Chamar Arquiteto (PRIMEIRO, sequencial)
-            logger.info(f"pilares_vivos.step3_chamando_arquiteto", project_id=str(project_id))
-            arquiteto_result = await PilaresVivosService.chamar_persona_opus(
-                "P4_Arquiteto",
-                PROMPT_ARQUITETO,
-                contexto_base,
+            # Resolver provider do projeto (ex: deepseek, configurado pelo GP)
+            provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
+            if provider_chain and isinstance(provider_chain[0], dict):
+                provider_name = provider_chain[0].get("provider", settings.DEFAULT_AI_PROVIDER)
+                model_name = provider_chain[0].get("model") or (
+                    "deepseek-chat" if provider_name == "deepseek" else f"{provider_name}-chat"
+                )
+            else:
+                provider_name = provider_chain[0] if provider_chain else settings.DEFAULT_AI_PROVIDER
+                model_name = "deepseek-chat" if provider_name == "deepseek" else f"{provider_name}-chat"
+
+            logger.info(
+                "pilares_vivos.provider_resolved",
+                project_id=str(project_id),
+                provider=provider_name,
+                model_name=model_name,
             )
 
-            if arquiteto_result["status"] == "erro":
-                logger.error(f"pilares_vivos.arquiteto_failed", project_id=str(project_id), erro=arquiteto_result["erro"])
-                return {
-                    "sucesso": False,
-                    "erro": f"Arquiteto falhou: {arquiteto_result['erro']}",
-                    "tempo_total": time.time() - tempo_inicio,
-                }
-
-            # Step 4: Chamar 6 personas em paralelo
-            logger.info(f"pilares_vivos.step4_chamando_personas_paralelo", project_id=str(project_id))
-            tasks = []
-
-            for persona_name in PilaresVivosService.PERSONAS_PARALELO:
-                contexto = contexto_base.copy()
-                contexto["arquiteto_resultado"] = arquiteto_result
-                contexto["sub_tasks"] = arquiteto_result.get("parecer", {}).get("distribuir_para", {}).get(persona_name, "")
-
-                task = PilaresVivosService.chamar_persona_opus(
+            # Step 3: Chamar TODAS as 7 personas em paralelo
+            logger.info(f"pilares_vivos.step3_chamando_7_personas_paralelo", project_id=str(project_id))
+            tasks = [
+                PilaresVivosService.chamar_persona(
                     persona_name,
                     PilaresVivosService.PERSONAS[persona_name],
-                    contexto,
+                    contexto_base,
+                    provider_name=provider_name,
+                    model_name=model_name,
                 )
-                tasks.append(task)
+                for persona_name in PilaresVivosService.PERSONAS_ORDER
+            ]
 
-            personas_results = await asyncio.gather(*tasks)
+            resultados = await asyncio.gather(*tasks, return_exceptions=True)
 
-            # Converter lista em dict
-            personas_dict = {result["persona"]: result for result in personas_results}
+            # Log cada resultado
+            for r in resultados:
+                if isinstance(r, Exception):
+                    logger.error(f"pilares_vivos.persona_exception", erro=str(r))
+                else:
+                    logger.info(f"pilares_vivos.persona_concluida", persona=r.get("persona"), status=r.get("status"))
 
-            # Step 5: Consolidar
-            logger.info(f"pilares_vivos.step5_consolidando", project_id=str(project_id))
-            documento = await PilaresVivosService.consolidar_documento(
-                arquiteto_result,
-                personas_dict,
-            )
+            # Converter lista em dict (ignorando exceções)
+            personas_dict = {}
+            for r in resultados:
+                if isinstance(r, Exception):
+                    continue
+                personas_dict[r["persona"]] = r
 
-            # Step 6: Salvar
-            logger.info(f"pilares_vivos.step6_salvando", project_id=str(project_id))
+            # Step 4: Consolidar
+            logger.info(f"pilares_vivos.step4_consolidando", project_id=str(project_id))
+            documento = await PilaresVivosService.consolidar_documento(personas_dict)
+
+            # Step 5: Salvar
+            logger.info(f"pilares_vivos.step5_salvando", project_id=str(project_id))
             pilares = await PilaresVivosService.salvar_pilares(
                 db,
                 project_id,

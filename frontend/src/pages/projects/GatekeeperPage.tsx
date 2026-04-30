@@ -130,6 +130,7 @@ export function GatekeeperPage() {
             <HelpTooltip text="O Gatekeeper é o controle de qualidade automático do GCA. Antes de qualquer módulo ser commitado no repositório do projeto, o código gerado passa por avaliação simultânea nos 7 Pilares de qualidade. Cada pilar recebe um score de 0 a 100. O pilar P1 (Conformidade) é bloqueante: score < 60 impede aprovação automática e manual. Os demais pilares apenas geram avisos e recomendações." />
           </div>
           <p className="text-slate-500 text-sm mt-0.5">Avaliação dos 7 pilares com scoring formal</p>
+          <p className="text-slate-600 text-xs mt-1">Portão de Qualidade — libera/bloqueia módulos para CodeGen. Nota do pipeline simplificado: Questionário → 5 Personas → OCG → Gatekeeper → Backlog → CodeGen.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${
