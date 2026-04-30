@@ -14,8 +14,12 @@ import {
   AlertTriangle,
   ChevronDown,
   ChevronUp,
+  Download,
+  Copy,
 } from 'lucide-react'
 import { usePilaresVivos } from '@/hooks/usePilaresVivos'
+import { exportarMarkdown, exportarPDF, copiarParaClipboard } from '@/lib/pilares-export'
+import { useToast } from '@/hooks/useToast'
 
 interface Props {
   projectId: string
@@ -38,6 +42,8 @@ export function PilaresVivosView({ projectId }: Props) {
   const [regenerando, setRegenerando] = useState(false)
   const [selectedPersona, setSelectedPersona] = useState('P4_Arquiteto')
   const [expandedDTs, setExpandedDTs] = useState<Set<string>>(new Set())
+  const [exportOpen, setExportOpen] = useState(false)
+  const toast = useToast()
 
   useEffect(() => {
     inicializar()
@@ -60,6 +66,27 @@ export function PilaresVivosView({ projectId }: Props) {
       newExpanded.add(dtId)
     }
     setExpandedDTs(newExpanded)
+  }
+
+  const handleExportMarkdown = () => {
+    if (!data) return
+    exportarMarkdown(data, 'Projeto')
+    toast.success('Markdown exportado com sucesso')
+    setExportOpen(false)
+  }
+
+  const handleExportPDF = () => {
+    if (!data) return
+    exportarPDF(data, 'Projeto')
+    toast.success('PDF aberto para impressão')
+    setExportOpen(false)
+  }
+
+  const handleCopyClipboard = () => {
+    if (!data) return
+    copiarParaClipboard(data, 'Projeto')
+    toast.success('Copiado para clipboard')
+    setExportOpen(false)
   }
 
   if (loading && !data) {
@@ -151,23 +178,60 @@ export function PilaresVivosView({ projectId }: Props) {
               </p>
             )}
           </div>
-          <button
-            onClick={handleRegenerar}
-            disabled={regenerando}
-            className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium transition-colors"
-          >
-            {regenerando ? (
-              <>
-                <Loader className="h-4 w-4 animate-spin" />
-                Regenerando...
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-4 w-4" />
-                Regenerar Análise
-              </>
-            )}
-          </button>
+          <div className="flex gap-3">
+            {/* Menu de Export */}
+            <div className="relative">
+              <button
+                onClick={() => setExportOpen(!exportOpen)}
+                className="inline-flex items-center gap-2 px-4 py-3 bg-white border border-emerald-200 text-emerald-600 rounded-lg hover:bg-emerald-50 font-medium transition-colors"
+              >
+                <Download className="h-4 w-4" />
+                Exportar
+              </button>
+              {exportOpen && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-gray-200 z-10">
+                  <button
+                    onClick={handleExportMarkdown}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors first:rounded-t-lg"
+                  >
+                    📄 Exportar como Markdown
+                  </button>
+                  <button
+                    onClick={handleExportPDF}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+                  >
+                    🖨️ Exportar como PDF
+                  </button>
+                  <button
+                    onClick={handleCopyClipboard}
+                    className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 transition-colors last:rounded-b-lg"
+                  >
+                    <Copy className="h-4 w-4 inline mr-2" />
+                    Copiar para Clipboard
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Botão Regenerar */}
+            <button
+              onClick={handleRegenerar}
+              disabled={regenerando}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 disabled:opacity-50 font-medium transition-colors"
+            >
+              {regenerando ? (
+                <>
+                  <Loader className="h-4 w-4 animate-spin" />
+                  Regenerando...
+                </>
+              ) : (
+                <>
+                  <RefreshCw className="h-4 w-4" />
+                  Regenerar Análise
+                </>
+              )}
+            </button>
+          </div>
         </div>
 
         {/* Estatísticas */}
