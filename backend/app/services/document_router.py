@@ -174,14 +174,14 @@ class DocumentRouter:
         return (last.version + 1) if last else 1
 
     def _detect_project_size(self, project_id: UUID) -> str:
-        """solo / small / large baseado em humanos declarados."""
-        from app.models.project_member import ProjectMember
+        """solo / small / large baseado em membros ativos integrados."""
+        from app.models.base import ProjectMember
         members_count = (
             self.db.query(ProjectMember)
             .filter(
                 ProjectMember.project_id == project_id,
-                ProjectMember.is_human == True,
                 ProjectMember.is_active == True,
+                ProjectMember.joined_at.isnot(None),
             )
             .count()
         )
