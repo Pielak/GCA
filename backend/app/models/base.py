@@ -1060,6 +1060,7 @@ class IngestedDocument(Base):
 
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])
+    route_maps = relationship("DocumentRouteMap", back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_ingested_docs_project", project_id),

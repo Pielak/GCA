@@ -12,7 +12,7 @@ class DocumentRouteMap(Base):
     __tablename__ = "document_route_maps"
 
     id = Column(PgUUID(as_uuid=True), primary_key=True, default=uuid4)
-    document_id = Column(PgUUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(PgUUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False)
     version = Column(Integer, nullable=False, server_default="1")
 
     llm_provider = Column(String(50), nullable=False)
@@ -26,7 +26,7 @@ class DocumentRouteMap(Base):
     created_by = Column(PgUUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
 
     # Relations
-    document = relationship("Document", back_populates="route_maps")
+    document = relationship("IngestedDocument", back_populates="route_maps")
     auditor_output = relationship("AuditorOutput", back_populates="route_map", uselist=False)
 
     def __repr__(self):
