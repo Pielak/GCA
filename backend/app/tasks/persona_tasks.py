@@ -9,7 +9,6 @@ import json
 
 from app.celery_app import celery_app
 from app.db.database import AsyncSessionLocal
-from app.core.config import settings
 from app.models.base import User
 
 logger = structlog.get_logger(__name__)
@@ -188,22 +187,55 @@ async def _analyze_document_async(
         prompt = PERSONA_PROMPTS[persona_type]
         full_prompt = f"{prompt}\n\n---DOCUMENTO---\n{document.original_filename}\n\n{document_content}\n\n---INSTRUÇÃO---\nGere um parecer estruturado em JSON com os campos especificados acima."
 
-        try:
-            # Import LLM service
-            from app.services.llm_service import LLMServiceFactory, LLMProvider
-            from app.core.config import settings
+        # Resolver provider e chave do projeto (não hardcoded Anthropic)
+        from app.services.ai_key_resolver import AIKeyResolver
+        from app.services.llm_service import LLMServiceFactory, LLMProvider
 
-            # Get API key for Anthropic
-            api_key = settings.ANTHROPIC_API_KEY
-            client = LLMServiceFactory.create_client(LLMProvider.ANTHROPIC, api_key)
+        provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
+        ai_provider_used = "deepseek"
+        ai_model_used = "deepseek-chat"
+        response = None
 
-            # Call LLM
-            response = await client.generate(
-                prompt=full_prompt,
-                max_tokens=2000,
-                temperature=0.5,
+        if provider_chain:
+            for entry in provider_chain:
+                prov = entry.get("provider", "deepseek")
+                model = entry.get("model") or "deepseek-chat"
+                api_key = await AIKeyResolver.get_project_key(db, project_id, provider=prov)
+                if not api_key:
+                    continue
+                try:
+                    prov_enum = LLMProvider(prov.lower())
+                    client = LLMServiceFactory.create_client(prov_enum, api_key)
+                    response = await client.generate(
+                        prompt=full_prompt,
+                        max_tokens=2000,
+                        temperature=0.5,
+                    )
+                    ai_provider_used = prov
+                    ai_model_used = model
+                    break
+                except Exception as chain_exc:
+                    logger.warning(
+                        "persona.provider_fallback",
+                        persona=persona_type,
+                        provider=prov,
+                        error=str(chain_exc),
+                    )
+                    continue
+
+        if not response:
+            logger.error(
+                "persona.llm_call_failed",
+                persona=persona_type,
+                document_id=str(document_id),
+                error="Nenhum provider da cadeia funcionou",
             )
-
+            parecer = {
+                "titulo": f"Análise {persona_type}",
+                "parecer": "Erro na análise: nenhum provedor LLM configurado ou disponível",
+                "criticidade": "MEDIA",
+            }
+        else:
             # Parse LLM response (esperando JSON)
             import re
             json_match = re.search(r"\{.*\}", response, re.DOTALL)
@@ -216,19 +248,6 @@ async def _analyze_document_async(
                     "criticidade": "MEDIA",
                 }
 
-        except Exception as e:
-            logger.error(
-                "persona.llm_call_failed",
-                persona=persona_type,
-                document_id=str(document_id),
-                error=str(e),
-            )
-            parecer = {
-                "titulo": f"Análise {persona_type}",
-                "parecer": f"Erro na análise: {str(e)}",
-                "criticidade": "MEDIA",
-            }
-
         # 4. Store OCG Individual
         from app.models.base import OCGIndividual
         from datetime import datetime, timezone
@@ -240,8 +259,8 @@ async def _analyze_document_async(
             persona_name=persona_name,
             parecer=parecer,
             status="completed",
-            ai_provider="anthropic",
-            ai_model="claude-opus-4-7",
+            ai_provider=ai_provider_used,
+            ai_model=ai_model_used,
             started_at=datetime.now(timezone.utc),
             completed_at=datetime.now(timezone.utc),
         )
@@ -328,9 +347,6 @@ async def _refine_ocg_async(ocg_individual_id: UUID, answered_by: UUID):
         PersonaFollowUpQuestion,
         OCGIndividualRefined,
     )
-    from app.services.llm_service import LLMServiceFactory, LLMProvider
-    from app.core.config import settings
-
     async with AsyncSessionLocal() as db:
         # 1. Buscar OCG original
         ocg = await db.get(OCGIndividual, ocg_individual_id)
@@ -371,18 +387,41 @@ Destaque quais campos mudaram e por quê.
 Retorne JSON: {{ "parecer_refined": {{...}}, "changed_fields": [...], "change_summary": "..." }}"""
 
         try:
-            api_key = settings.ANTHROPIC_API_KEY
-            client = LLMServiceFactory.create_client(LLMProvider.ANTHROPIC, api_key)
+            from app.services.ai_key_resolver import AIKeyResolver
+            provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, ocg.project_id)
+            refinement_response = None
 
-            response = await client.generate(
-                prompt=prompt,
-                max_tokens=2000,
-                temperature=0.5,
-            )
+            if provider_chain:
+                for entry in provider_chain:
+                    prov = entry.get("provider", "deepseek")
+                    api_key = await AIKeyResolver.get_project_key(db, ocg.project_id, provider=prov)
+                    if not api_key:
+                        continue
+                    try:
+                        prov_enum = LLMProvider(prov.lower())
+                        client = LLMServiceFactory.create_client(prov_enum, api_key)
+                        refinement_response = await client.generate(
+                            prompt=prompt,
+                            max_tokens=2000,
+                            temperature=0.5,
+                        )
+                        break
+                    except Exception as chain_exc:
+                        logger.warning(
+                            "persona.refinement_provider_fallback",
+                            ocg_id=str(ocg_individual_id),
+                            provider=prov,
+                            error=str(chain_exc),
+                        )
+                        continue
+
+            if not refinement_response:
+                logger.warning("persona.invalid_refinement_response", ocg_id=str(ocg_individual_id))
+                return
 
             # Parse resposta
             import re
-            json_match = re.search(r"\{.*\}", response, re.DOTALL)
+            json_match = re.search(r"\{.*\}", refinement_response, re.DOTALL)
             if not json_match:
                 logger.warning("persona.invalid_refinement_response", ocg_id=str(ocg_individual_id))
                 return
