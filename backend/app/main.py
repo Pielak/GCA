@@ -45,6 +45,7 @@ from app.routers.release_router import (
 )
 from app.routers.iterative_questionnaire_router import router as iterative_questionnaire_router
 from app.routers.applied_defaults_router import router as applied_defaults_router
+from app.routers.pilares_vivos_router import router as pilares_vivos_router
 
 logger = structlog.get_logger(__name__)
 
@@ -268,6 +269,7 @@ app.include_router(initial_questionnaire_router, prefix=f"{settings.API_PREFIX}"
 app.include_router(technical_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["technical-questionnaire"])
 app.include_router(applied_defaults_router, prefix=f"{settings.API_PREFIX}", tags=["applied-defaults"])
 app.include_router(metrics_router, tags=["metrics"])
+app.include_router(pilares_vivos_router, prefix=f"{settings.API_PREFIX}", tags=["pilares-vivos"])
 
 
 @app.get("/health")
