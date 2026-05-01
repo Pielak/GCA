@@ -1,6 +1,7 @@
 """Endpoints para execução de Personas no Gatekeeper (Phase B)."""
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from uuid import UUID
 import structlog
 
@@ -29,21 +30,23 @@ router = APIRouter(prefix="/gatekeeper", tags=["gatekeeper"])
 @router.post("/passada-1", response_model=Passada1Response)
 async def run_passada_1(
     request: Passada1Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> Passada1Response:
     """Executa Passada 1 (análise tentativa com perguntas para validador humano)."""
 
     # Fetch route_map and auditor_output
-    route_map = db.query(DocumentRouteMap).filter(
-        DocumentRouteMap.id == request.route_map_id
-    ).first()
+    result = await db.execute(
+        select(DocumentRouteMap).where(DocumentRouteMap.id == request.route_map_id)
+    )
+    route_map = result.scalars().first()
 
     if not route_map:
         raise HTTPException(status_code=404, detail="DocumentRouteMap não encontrado")
 
-    auditor_output = db.query(AuditorOutput).filter(
-        AuditorOutput.route_map_id == request.route_map_id
-    ).first()
+    result = await db.execute(
+        select(AuditorOutput).where(AuditorOutput.route_map_id == request.route_map_id)
+    )
+    auditor_output = result.scalars().first()
 
     if not auditor_output:
         raise HTTPException(status_code=404, detail="AuditorOutput não encontrado")
@@ -75,17 +78,20 @@ async def run_passada_1(
 async def get_personas_board(
     route_map_id: UUID,
     passada: int = 1,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> PersonasBoardResponse:
     """Obtém o board visual com status de todas as personas para uma rota."""
 
     from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
 
     # Fetch all responses for this route_map
-    responses = db.query(GatekeeperPersonaResponse).filter(
-        GatekeeperPersonaResponse.route_map_id == route_map_id,
-        GatekeeperPersonaResponse.passada == passada,
-    ).all()
+    result = await db.execute(
+        select(GatekeeperPersonaResponse).where(
+            (GatekeeperPersonaResponse.route_map_id == route_map_id) &
+            (GatekeeperPersonaResponse.passada == passada)
+        )
+    )
+    responses = result.scalars().all()
 
     if not responses:
         raise HTTPException(status_code=404, detail="Nenhuma resposta de persona encontrada")
@@ -122,14 +128,15 @@ async def get_personas_board(
 @router.post("/human-answers")
 async def store_human_answers(
     request: Passada2Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Armazena respostas humanas às perguntas das personas."""
 
     # Check route_map exists
-    route_map = db.query(DocumentRouteMap).filter(
-        DocumentRouteMap.id == request.route_map_id
-    ).first()
+    result = await db.execute(
+        select(DocumentRouteMap).where(DocumentRouteMap.id == request.route_map_id)
+    )
+    route_map = result.scalars().first()
 
     if not route_map:
         raise HTTPException(status_code=404, detail="DocumentRouteMap não encontrado")
@@ -144,7 +151,7 @@ async def store_human_answers(
         )
         db.add(answer)
 
-    db.commit()
+    await db.commit()
 
     return {
         "route_map_id": str(request.route_map_id),
@@ -155,21 +162,23 @@ async def store_human_answers(
 @router.post("/passada-2", response_model=Passada2Response)
 async def run_passada_2(
     request: Passada2Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_db),
 ) -> Passada2Response:
     """Executa Passada 2 (análise final com respostas humanas integradas)."""
 
     # Fetch route_map and auditor_output
-    route_map = db.query(DocumentRouteMap).filter(
-        DocumentRouteMap.id == request.route_map_id
-    ).first()
+    result = await db.execute(
+        select(DocumentRouteMap).where(DocumentRouteMap.id == request.route_map_id)
+    )
+    route_map = result.scalars().first()
 
     if not route_map:
         raise HTTPException(status_code=404, detail="DocumentRouteMap não encontrado")
 
-    auditor_output = db.query(AuditorOutput).filter(
-        AuditorOutput.route_map_id == request.route_map_id
-    ).first()
+    result = await db.execute(
+        select(AuditorOutput).where(AuditorOutput.route_map_id == request.route_map_id)
+    )
+    auditor_output = result.scalars().first()
 
     if not auditor_output:
         raise HTTPException(status_code=404, detail="AuditorOutput não encontrado")

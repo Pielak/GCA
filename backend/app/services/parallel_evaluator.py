@@ -3,7 +3,7 @@ import asyncio
 import time
 from uuid import UUID
 import structlog
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.document_route_map import DocumentRouteMap
 from app.models.auditor_output import AuditorOutput
@@ -36,7 +36,7 @@ class ParallelEvaluator:
         "ui": UIPersona,
     }
 
-    def __init__(self, llm_client: LLMClient, db: Session):
+    def __init__(self, llm_client: LLMClient, db: AsyncSession):
         self.llm = llm_client
         self.db = db
 
@@ -115,7 +115,7 @@ class ParallelEvaluator:
             self.db.add(response_model)
             responses[persona_tag] = response_model
 
-        self.db.commit()
+        await self.db.commit()
 
         logger.info("Passada 1 complete", extra={
             "elapsed_sec": f"{elapsed_sec:.1f}",
@@ -203,7 +203,7 @@ class ParallelEvaluator:
             self.db.add(response_model)
             responses[persona_tag] = response_model
 
-        self.db.commit()
+        await self.db.commit()
 
         logger.info("Passada 2 complete", extra={
             "elapsed_sec": f"{elapsed_sec:.1f}",
