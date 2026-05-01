@@ -279,8 +279,9 @@ class OCGUpdaterService:
         version_from = ocg.version
         current_ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
 
-        # 2. Chamar o LLM (DT-033: agora usa chave DO PROJETO, não do admin —
-        # ingestão reativa é Camada Projeto, contrato §6.6 Contexto B).
+        # 2. Tentar chamar LLM para atualizar OCG.
+        # Se falhar, usar scores das personas como fallback (provider-agnóstico).
+        llm_result = None
         try:
             llm_result = await self._call_llm(current_ocg_data, arguider_analysis, project_id)
         except Exception as exc:
@@ -289,15 +290,34 @@ class OCGUpdaterService:
                 project_id=str(project_id),
                 error=str(exc),
             )
-            await self._mark_ocg_pending(ocg)
-            await self.db.commit()
-            return {
-                "ocg_id": str(ocg.id),
-                "version_from": version_from,
-                "version_to": version_from,
-                "status": "ocg_pending",
-                "error": str(exc),
-            }
+
+        if llm_result is None:
+            # Fallback: usar scores das personas gatekeeper_persona_responses
+            logger.info("ocg_updater.using_persona_fallback", project_id=str(project_id))
+            persona_scores = await self._load_persona_scores(project_id)
+            if persona_scores:
+                # Aplicar scores das personas diretamente no OCG
+                current_ocg_data.update(persona_scores)
+                llm_result = {
+                    "updated_ocg": current_ocg_data,
+                    "changes": [{"field": k, "new": v} for k, v in persona_scores.items()],
+                    "change_type": "persona_fallback",
+                    "context_health": {},
+                }
+            else:
+                logger.warning(
+                    "ocg_updater.no_persona_scores",
+                    project_id=str(project_id),
+                )
+                await self._mark_ocg_pending(ocg)
+                await self.db.commit()
+                return {
+                    "ocg_id": str(ocg.id),
+                    "version_from": version_from,
+                    "version_to": version_from,
+                    "status": "ocg_pending",
+                    "error": "LLM call failed and no persona scores available",
+                }
 
         # 3. Parse da resposta (formato delta)
         deltas, change_type, context_health = self._parse_llm_response(llm_result)
@@ -619,6 +639,74 @@ class OCGUpdaterService:
         # "awaiting_ocg" para retry automático.
         return None
 
+    async def _load_persona_scores(self, project_id: UUID) -> dict:
+        """Carrega scores das gatekeeper_persona_responses como fallback.
+
+        Usado quando o LLM do OCG updater falha. Extrai os scores médios
+        das personas e retorna como dict no formato Pillar S cores.
+        Provider-agnóstico: funciona independentemente do modelo.
+        """
+        from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
+        from app.models.document_route_map import DocumentRouteMap
+
+        try:
+            stmt = select(GatekeeperPersonaResponse).join(
+                DocumentRouteMap,
+                GatekeeperPersonaResponse.route_map_id == DocumentRouteMap.id,
+            ).where(
+                DocumentRouteMap.project_id == project_id,
+            ).order_by(GatekeeperPersonaResponse.created_at.desc())
+
+            result = await self.db.execute(stmt)
+            responses = result.scalars().all()
+
+            if not responses:
+                return {}
+
+            # Agrupar scores por pillar
+            # Mapeamento persona_tag → pillar
+            from app.services.ocg_consolidator_service import PERSONA_TO_PILLAR
+
+            pillar_scores: dict[int, list[float]] = {}
+            for resp in responses:
+                persona_tag = resp.persona_tag
+                if persona_tag not in PERSONA_TO_PILLAR:
+                    continue
+                pillars = PERSONA_TO_PILLAR[persona_tag]
+                scores = resp.scores or {}
+                # Cada persona contribui para múltiplos pillars
+                for pillar_num in pillars:
+                    score = scores.get("overall", scores.get(pillar_num, 50))
+                    if not isinstance(score, (int, float)):
+                        score = 50
+                    pillar_scores.setdefault(pillar_num, []).append(float(score))
+
+            if not pillar_scores:
+                return {}
+
+            # Calcular média por pillar
+            result_data = {}
+            for pillar_num, scores_list in pillar_scores.items():
+                avg = sum(scores_list) / len(scores_list)
+                result_data[f"P{pillar_num}"] = {"score": round(avg, 1)}
+
+            # Calcular overall
+            all_scores = [v["score"] for v in result_data.values()]
+            if all_scores:
+                result_data["overall_score"] = round(sum(all_scores) / len(all_scores), 1)
+
+            logger.info(
+                "ocg_updater.persona_scores_loaded",
+                project_id=str(project_id),
+                pillars=len(result_data),
+                persona_responses=len(responses),
+            )
+            return result_data
+
+        except Exception as e:
+            logger.exception("ocg_updater.load_persona_scores_failed")
+            return {}
+
     async def _call_llm(
         self,
         current_ocg_data: Dict[str, Any],
@@ -710,12 +798,12 @@ class OCGUpdaterService:
         _default_models = {
             "anthropic": "claude-opus-4-6",
             "openai": "gpt-4o",
-            "deepseek": "deepseek-chat",
+            "deepseek": "deepseek-v4-flash",
             "grok": "grok-2",
             "gemini": "gemini-2.0-flash",
             "ollama": "llama3.1:8b",
         }
-        model = model or _default_models.get(provider, "deepseek-chat")
+        model = model or _default_models.get(provider, "deepseek-v4-flash")
 
         system_prompt = self._build_system_prompt()
         user_prompt = self._build_user_prompt(current_ocg_data, arguider_analysis)
