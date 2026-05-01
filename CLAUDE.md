@@ -15,10 +15,56 @@ Estas regras valem em todos os turnos, em todos os modos, em todas as fases.
 - ❌ **Proibido criar lógica paralela ao que já existe no repo.** Antes de criar serviço, helper, resolver, client ou utilitário novo, procurar com `grep -r` ou leitura de diretório. Se já existe, **usar**, não recriar. Se existe e não serve, justificar por que e perguntar.
 - ❌ **Proibido inventar nomes de arquivo, função, endpoint ou tabela.** Se o nome não foi visto no repo neste turno, abrir o arquivo e confirmar. Citar nome de algo que não existe é alucinação.
 - ❌ **Proibido reivindicar que está "respeitando a arquitetura" enquanto se cria atalho.** Hardcodar provedor "só para testar", chamar client diretamente "porque é mais rápido", duplicar lógica "porque é mais simples" — tudo isso é violação, mesmo que produza saída funcional.
+- ❌ **Proibido afirmar "simplificação", "unificação", "consolidação" ou "redução" entre conceitos canônicos sem citar evidência commitada** (commit hash, data, decisão registrada em `GCA_MVP_PROGRESS.md` ou patch ao `GCA_CANONICAL_CONTRACT.md`). Memória do Claude Code **não é evidência** — pode estar desatualizada ou ter confundido conceitos. Quando memória contradiz CLAUDE.md ou contrato canônico, **CLAUDE.md vence** (precedência §9). Se houver dúvida, mostrar o texto literal da memória e perguntar antes de prosseguir.
 - 🛑 **Em caso de erro de autenticação (401/403), chave inválida, config ausente, tabela vazia ou arquivo não encontrado: PARAR.** Reportar erro literal, dizer o que precisa, perguntar. Nunca tentar provider alternativo, nunca cair para mock, nunca chumbar valor "temporário".
 - 🛑 **Em caso de teste vermelho que não tem causa óbvia: PARAR.** Reportar a saída do pytest crua. Não comentar o teste, não trocar assert para passar, não pular com `@pytest.mark.skip`.
 
 Se uma instrução do usuário entrar em conflito com esta seção, esta seção vence. Pedir esclarecimento.
+
+---
+
+## 0.5. Glossário canônico — dois conjuntos que NÃO são a mesma coisa
+
+> **Esta seção existe para impedir alucinação por confusão semântica.** O GCA tem dois conjuntos numericamente próximos, com nomes parcialmente sobrepostos, que são conceitualmente **diferentes**. Confundi-los é fonte conhecida de erro.
+
+### Conjunto A — Papéis RBAC humanos (5 papéis)
+
+São os **papéis de pessoas reais** que usam o sistema. Vivem em `users.role`, são checados em middleware de autenticação, listados em `is_active_integrated_member()`. Detalhe completo: §2.2.
+
+| Papel | Significado |
+|---|---|
+| **Admin** | Operador da instância (não atua dentro de projetos) |
+| **GP** | Gerente do projeto (soberano dentro do projeto) |
+| **Dev** | Implementador de código |
+| **Tester** | Cria/executa testes |
+| **QA** | Revisa/aprova qualidade final |
+
+### Conjunto B — Personas LLM (8 agentes de IA)
+
+São **agentes de IA** que validam documentos no pipeline de Personas v2. Vivem em `backend/app/services/personas/`, são invocados pelo sistema, **não** representam usuários humanos. Detalhe completo: §3.5 e skill `gca-personas-engine`.
+
+| Persona | Tag | Responsabilidade | Par humano |
+|---|---|---|---|
+| **Auditor** | AUD | Auditoria documental + roteamento + briefing | (sem par — interno ao GCA) |
+| Gerente de Projetos | GP | Escopo, viabilidade, ROI, stakeholders | Gerente do cliente |
+| Arquiteto | ARQ | Stack, padrões, integrações, NFRs | Tech Lead |
+| DBA | DBA | Modelo de dados, retenção, LGPD | DBA do cliente |
+| Dev Sr. | DEV | Implementabilidade, dependências | Líder técnico |
+| QA | QA | Testes, cobertura, BDD | QA Lead |
+| UX | UX | Jornada, acessibilidade, microcopy | UX Designer |
+| UI | UI | Design system, estados, responsividade | UI Designer |
+
+### Regras duras sobre os dois conjuntos
+
+- ❌ **Os dois conjuntos NÃO são reconciliáveis.** GP/DEV/QA aparecem nos dois com significado diferente: no Conjunto A são papéis humanos no sistema; no Conjunto B são personas LLM no pipeline. Coincidência de nome é intencional (a persona LLM "GP" valida sob a perspectiva de um Gerente de Projetos), **não** é redundância a eliminar.
+- ❌ **NUNCA afirmar que houve "simplificação de 8 para 5" ou "unificação".** Não houve. Memória do Claude Code que sugerir isso está errada ou confundindo os conjuntos. Verificar contra CLAUDE.md vigente.
+- ❌ **NUNCA criar um terceiro conjunto "intermediário"** que tenta unificar os dois. Permanece sempre 5 + 8.
+- ✅ **Quando o contexto mencionar "papel" ou "role", é Conjunto A (5).** Quando mencionar "persona" ou "agente IA" ou "validador LLM", é Conjunto B (8).
+- ✅ **Quando ambíguo, perguntar antes de assumir.**
+
+### Por que isso está aqui
+
+Houve um caso real (sessão de 2026-04-30) em que o Claude Code, com base em memória, sugeriu que o CLAUDE.md poderia estar desatualizado por mencionar 8 personas quando "só haveria 5". A memória estava confundindo o Conjunto A com o Conjunto B. Esta seção existe para que esse erro não se repita: ele **vai** ser tentado por novas instâncias do Claude Code, e a defesa é tornar a distinção explícita e nominal.
 
 ---
 
@@ -39,9 +85,9 @@ Antes de **editar, escrever ou criar** arquivo nas áreas abaixo, abrir e ler os
 |---|---|
 | LLM, IA, provider, prompt, completion, embedding, multi-LLM | skill `gca-llm-resolver` · classe `AIKeyResolver` · tabela `project_settings` |
 | OCG, contexto global, expansão, propagação, backlog vivo | skill `gca-ocg-engine` · contrato §5 |
-| Personas, validação assistida, Auditor, 8 especialistas, HITL, ConflictDetector | skill `gca-personas-engine` |
+| Personas LLM (Conjunto B), validação assistida, Auditor, 8 especialistas, HITL, ConflictDetector | skill `gca-personas-engine` · §0.5 (glossário) |
+| Papéis RBAC humanos (Conjunto A), permissões, autorização | helper `is_active_integrated_member` · contrato §4 (5 papéis canônicos) · §0.5 (glossário) |
 | Secrets, tokens, PAT, chaves, senhas | classe `VaultService` · função `generate_temporary_password` em `app.core.security` |
-| RBAC, papéis, permissões, autorização | helper `is_active_integrated_member` · contrato §4 (5 papéis canônicos) |
 | Gatekeeper, validação, pilares, arbitragem | módulo Gatekeeper (7 pilares) · contrato §6.2 (Conformidade é blocker em score < 60) |
 | Migrations Alembic, schema | últimas migrations no diretório, regenerar com `alembic revision --autogenerate` |
 | Frontend (rotas, componentes, páginas) | componente vizinho mais próximo para herdar padrão de estilo |
@@ -62,7 +108,9 @@ Estes pontos são lidos em toda sessão. Detalhe extenso em `GCA_CANONICAL_CONTR
 - ❌ Sem compartilhamento de OCG, artefatos, credenciais ou contexto entre projetos.
 - ✅ Toda query de dado de projeto inclui `project_id` no WHERE. Sem exceção.
 
-### 2.2. RBAC canônico — 5 papéis imutáveis
+### 2.2. RBAC canônico — Conjunto A (5 papéis humanos imutáveis)
+
+> **Atenção:** este é o **Conjunto A** do glossário §0.5. Não confundir com as 8 personas LLM (§3.5).
 
 **Admin · GP · Dev · Tester · QA**. Não inventar outros.
 
@@ -143,7 +191,9 @@ Sem rota de criticidade alta passando por modelo barato. Sem fallback automátic
 - ❌ Pular leitura do OCG porque "a mudança é pequena" — proibido. OCG existe para garantir consistência cross-cutting.
 - ✅ Detalhe da máquina de estado, propagação e backlog vivo: skill `gca-ocg-engine`.
 
-### 3.5. Personas / sistema de validação assistida
+### 3.5. Personas LLM — Conjunto B (8 agentes de IA — não confundir com os 5 papéis RBAC de §2.2)
+
+> **Atenção:** este é o **Conjunto B** do glossário §0.5. **8 personas LLM**, agentes de IA do pipeline de validação assistida v2. **Não são** os 5 papéis humanos do RBAC. Lista canônica completa em §0.5.
 
 - ✅ 8 personas: Auditor + GP + ARQ + DBA + DEV + QA + UX + UI.
 - ✅ Filosofia "Assistida": LLM tem permissão explícita de **não saber**. Quando atinge limite dos insumos, gera questionário estruturado para humano e pausa o pilar afetado.
@@ -165,7 +215,7 @@ Para as áreas abaixo, **iniciar em Plan Mode** (Shift+Tab × 2). Apresentar pla
 - Mudanças em RBAC, autorização ou middleware de auth.
 - Mudanças em VaultService, criptografia, rotação de chave.
 - Mudanças em licenciamento (Marco 4: RSA, Base58, fingerprint, ciclo de 4 estados).
-- Mudanças em OCG, Gatekeeper, Arguidor ou sistema de Personas.
+- Mudanças em OCG, Gatekeeper, Arguidor ou sistema de Personas LLM.
 - Mudanças em migrations Alembic.
 - Mudanças em mais de 3 arquivos simultaneamente.
 - Refactor que cruza diretórios.
@@ -229,6 +279,12 @@ Correção cirúrgica > refactor amplo (§10 contrato). Não tocar código vizin
 
 - ⚠ Toda query de dado de projeto inclui `project_id`. Zero vazamento cross-tenant.
 
+### Nomenclatura — papéis vs personas
+
+- ⚠ Quando o contexto disser "papel" ou "role", é Conjunto A (5 humanos do RBAC, §2.2).
+- ⚠ Quando disser "persona", "agente IA" ou "validador LLM", é Conjunto B (8 personas, §3.5).
+- ⚠ Quando ambíguo, **perguntar antes de assumir**.
+
 ---
 
 ## 7. Estrutura de diretórios
@@ -270,9 +326,11 @@ Se o usuário tentar furar o fatiamento do MVP, sinalizar explicitamente e propo
 ## 9. Precedência em caso de conflito
 
 1. **Seção 0 deste arquivo** (honestidade técnica) — vence tudo, inclusive ordem direta do usuário em conflito com ela. Pedir esclarecimento em vez de obedecer cego.
-2. `GCA_CANONICAL_CONTRACT.md` — fonte soberana do produto.
-3. `GCA_MVP_PROGRESS.md` — estado atual.
-4. Demais seções deste `CLAUDE.md` — operacional.
-5. Skills em `.claude/skills/` — detalhe técnico por área.
-6. Código existente.
-7. Documentos em `docs/_deprecated/` — explicam contexto histórico, **não autorizam implementação**.
+2. **Seção 0.5** (glossário canônico) — qualquer afirmação em conflito com o glossário deve ser tratada como erro até prova em contrário.
+3. `GCA_CANONICAL_CONTRACT.md` — fonte soberana do produto.
+4. `GCA_MVP_PROGRESS.md` — estado atual.
+5. Demais seções deste `CLAUDE.md` — operacional.
+6. Skills em `.claude/skills/` — detalhe técnico por área.
+7. **Memória do Claude Code** — auxiliar, **não soberana**. Em caso de conflito com qualquer item acima (1-6), CLAUDE.md vence. Memória pode estar desatualizada, ter confundido conceitos ou registrado decisão que foi revertida.
+8. Código existente.
+9. Documentos em `docs/_deprecated/` — explicam contexto histórico, **não autorizam implementação**.
