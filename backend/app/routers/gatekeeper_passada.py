@@ -4,13 +4,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from uuid import UUID
 import structlog
+from typing import Optional, Literal
 
 from app.db.database import get_db
 from app.models.document_route_map import DocumentRouteMap
 from app.models.auditor_output import AuditorOutput
 from app.models.human_answer import HumanAnswer
+from app.models.base import IngestedDocument
 from app.services.parallel_evaluator import ParallelEvaluator
-from app.services.llm_client import AnthropicLLMClient
+from app.services.ai_key_resolver import AIKeyResolver
+from app.services.llm_service import LLMServiceFactory, LLMProvider, BaseLLMClient
+from app.services.llm_client import LLMClient, LLMUsage, LLMResponse
 from app.schemas.gatekeeper import (
     Passada1Request,
     Passada1Response,
@@ -25,6 +29,145 @@ from app.schemas.chunk import Chunk
 
 logger = structlog.get_logger(__name__)
 router = APIRouter(prefix="/gatekeeper", tags=["gatekeeper"])
+
+
+class LLMClientAdapter(LLMClient):
+    """Adapta BaseLLMClient (de llm_service.py) para interface LLMClient esperada pelas personas."""
+
+    def __init__(self, base_client: BaseLLMClient):
+        self.base_client = base_client
+        self.provider_name = getattr(base_client, 'provider_name', base_client.__class__.__name__.replace('Client', '').lower())
+        self.model_name = getattr(base_client, 'model', 'unknown')
+
+    async def complete(
+        self,
+        system: Optional[str],
+        user: str,
+        cacheable_system: Optional[str] = None,
+        response_format: Optional[Literal["json", "text"]] = None,
+        max_output_tokens: int = 4000,
+        temperature: float = 0.2,
+    ) -> LLMResponse:
+        """Adapts BaseLLMClient.generate() to LLMClient.complete() interface."""
+        # Combine system prompts
+        full_system = ""
+        if cacheable_system:
+            full_system += cacheable_system + "\n"
+        if system:
+            full_system += system
+
+        # Build full prompt
+        full_prompt = user
+        if full_system:
+            full_prompt = full_system + "\n\n" + user
+
+        # Call base client
+        content = await self.base_client.generate(
+            prompt=full_prompt,
+            max_tokens=max_output_tokens,
+            temperature=temperature,
+        )
+
+        # Return in expected format
+        return LLMResponse(
+            content=content,
+            usage=LLMUsage(
+                input_tokens=0,  # Not tracked by base client
+                output_tokens=0,  # Not tracked by base client
+            ),
+            finish_reason="stop",
+        )
+
+
+async def resolve_llm_client_for_route_map(
+    db: AsyncSession,
+    route_map: DocumentRouteMap,
+) -> LLMClient:
+    """Resolve LLM client respecting project_settings (Settings > IA).
+
+    Returns an LLMClient adapter wrapping the configured provider,
+    or raises HTTPException if not configured.
+    """
+    # Get project_id via IngestedDocument
+    result = await db.execute(
+        select(IngestedDocument).where(IngestedDocument.id == route_map.document_id)
+    )
+    doc = result.scalars().first()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="IngestedDocument não encontrado")
+
+    project_id = doc.project_id
+
+    # Get configured provider chain
+    provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
+
+    if not provider_chain:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum provedor de IA configurado. Abra Settings > Provedor IA para configurar.",
+        )
+
+    # Try each provider in chain
+    for provider_config in provider_chain:
+        provider_name = provider_config.get("provider", "").lower()
+
+        try:
+            # Get API key for this provider
+            api_key = await AIKeyResolver.get_project_key(db, project_id, provider_name)
+
+            if not api_key:
+                logger.warning(
+                    "llm.provider_skipped_no_key",
+                    provider=provider_name,
+                    project_id=str(project_id),
+                )
+                continue
+
+            # Map provider string to LLMProvider enum
+            provider_enum = LLMProvider(provider_name.lower())
+
+            # Get model from config, with fallback
+            model = provider_config.get("model")
+
+            # Create base client from llm_service.py
+            base_client = LLMServiceFactory.create_client(provider_enum, api_key)
+
+            # Update model if provided
+            if model and hasattr(base_client, 'model'):
+                base_client.model = model
+
+            # Wrap in adapter for personas interface
+            adapted_client = LLMClientAdapter(base_client)
+
+            logger.info(
+                "llm.client_resolved",
+                provider=provider_name,
+                model=model or getattr(base_client, 'model', 'unknown'),
+                project_id=str(project_id),
+            )
+            return adapted_client
+
+        except ValueError as e:
+            logger.warning(
+                "llm.provider_enum_error",
+                provider=provider_name,
+                error=str(e),
+            )
+            continue
+        except Exception as e:
+            logger.warning(
+                "llm.provider_creation_error",
+                provider=provider_name,
+                error=str(e),
+            )
+            continue
+
+    # If we get here, all providers in chain failed
+    raise HTTPException(
+        status_code=500,
+        detail="Nenhum provedor de IA conseguiu ser inicializado. Configure pelo menos um em Settings > Provedor IA com chave válida.",
+    )
 
 
 @router.post("/passada-1", response_model=Passada1Response)
@@ -51,8 +194,8 @@ async def run_passada_1(
     if not auditor_output:
         raise HTTPException(status_code=404, detail="AuditorOutput não encontrado")
 
-    # Run Passada 1 with all 7 personas in parallel
-    llm = AnthropicLLMClient()
+    # Resolve LLM client respecting project_settings
+    llm = await resolve_llm_client_for_route_map(db, route_map)
     evaluator = ParallelEvaluator(llm, db)
 
     persona_responses = await evaluator.run_passada_1(route_map, auditor_output)
@@ -191,8 +334,8 @@ async def run_passada_2(
         key = f"{answer_input.persona_tag}:{answer_input.question_id}"
         human_answers[key] = answer_input.answer_text
 
-    # Run Passada 2 with all 7 personas in parallel
-    llm = AnthropicLLMClient()
+    # Resolve LLM client respecting project_settings
+    llm = await resolve_llm_client_for_route_map(db, route_map)
     evaluator = ParallelEvaluator(llm, db)
 
     persona_responses = await evaluator.run_passada_2(route_map, auditor_output, human_answers)
@@ -230,10 +373,12 @@ def _build_personas_board(
     approved_count = 0
 
     for persona_tag, response in persona_responses.items():
+        # Handle scores that might be a dict or dataclass
+        scores_data = response.scores if isinstance(response.scores, dict) else response.scores.__dict__
         personas_dict[persona_tag] = PersonaResponseDetail(
             persona_tag=response.persona_tag,
             passada=response.passada,
-            scores=PersonaScoreResponse(**response.scores.__dict__),
+            scores=PersonaScoreResponse(**scores_data),
             approved=response.approved,
             tentative=response.tentative,
             issues=[i.__dict__ if hasattr(i, '__dict__') else dict(i) for i in response.issues],
