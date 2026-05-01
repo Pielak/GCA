@@ -1615,28 +1615,15 @@ class IngestionService:
 
                                 # DT-AUDITORIA-002: "awaiting_ocg" significa
                                 # que OCG (legacy, do questionário) não está
-                                # disponível. Requeue para retry em 30s.
+                                # disponível. Isso é ok — em Phase B (personas
+                                # diretas via documento), pode não haver OCG.
+                                # Log e continua (não bloqueia completion).
                                 if update_result and update_result.get("status") == "awaiting_ocg":
                                     logger.info(
                                         "ingestion.awaiting_ocg",
                                         document_id=str(document_id),
                                         project_id=str(project_id),
                                         retry_at=update_result.get("retry_at"),
-                                    )
-                                    # Marcar documento como pending (retry automático)
-                                    _d = await db.get(IngestedDocument, document_id)
-                                    if _d:
-                                        _d.arguider_status = "pending"
-                                        _d.arguider_started_at = None
-                                        _d.arguider_error_message = (
-                                            "OCG ainda não disponível. Personas analisando. "
-                                            "Retry automático em 30 segundos."
-                                        )
-                                        await db.commit()
-                                    # Requeue a task (Celery retry)
-                                    raise RuntimeError(
-                                        "OCG não disponível. Aguardando análise de personas. "
-                                        "Documento será reprocessado em breve."
                                     )
 
                                 ocg_successful_provider = ocg_provider

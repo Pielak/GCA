@@ -66,9 +66,9 @@ export function ExtractionReportCard({ projectId, documentId, enabled = true }: 
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-slate-800/40"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-200">Relatório de extração</span>
-          <span className="text-[10px] text-slate-500">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-medium text-slate-200 truncate">Relatório de extração</span>
+          <span className="text-[10px] text-slate-500 truncate">
             (o que o GCA entendeu do documento)
           </span>
         </div>

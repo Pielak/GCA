@@ -87,9 +87,9 @@ export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-slate-800/40"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-200">Impacto no OCG</span>
-          <span className="text-[10px] text-slate-500">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-medium text-slate-200 truncate">Impacto no OCG</span>
+          <span className="text-[10px] text-slate-500 truncate">
             (antes × depois por pilar)
           </span>
           {open && hasDelta && overallDelta !== null && (
