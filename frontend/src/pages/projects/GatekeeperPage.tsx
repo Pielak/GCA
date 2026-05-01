@@ -201,12 +201,7 @@ export function GatekeeperPage() {
             <span className="flex items-center gap-1 text-amber-400"><AlertTriangle className="w-3.5 h-3.5" />{warnings.length} warning{warnings.length !== 1 ? 's' : ''}</span>
           </div>
           {!isBlocked && (
-            <button
-              onClick={() => navigate(`/projects/${id}/codegen`)}
-              className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-medium transition-colors"
-            >
-              Gerar Código
-            </button>
+            <p className="mt-4 text-emerald-500/70 text-xs text-center">Score liberado para geração de código. Use a aba CodeGen.</p>
           )}
           {isBlocked && (
             <p className="mt-4 text-red-400 text-xs text-center">Segurança insuficiente. Corrija os findings de P7 antes de gerar código.</p>
