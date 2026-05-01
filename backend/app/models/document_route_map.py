@@ -27,7 +27,7 @@ class DocumentRouteMap(Base):
 
     # Relations
     document = relationship("IngestedDocument", back_populates="route_maps")
-    auditor_output = relationship("AuditorOutput", back_populates="route_map", uselist=False)
+    auditor_output = relationship("AuditorOutput", back_populates="route_map", uselist=False, cascade="all, delete-orphan")
     gatekeeper_persona_responses = relationship("GatekeeperPersonaResponse", back_populates="route_map", cascade="all, delete-orphan")
 
     def __repr__(self):
