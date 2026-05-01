@@ -4,6 +4,7 @@ import time
 import structlog
 from typing import Optional
 
+from app.utils.json_repair import safe_parse_llm_json
 from app.services.personas.base import Persona, PersonaOutput, PersonaScore, PersonaIssue, PersonaQuestion
 from app.services.llm_client import LLMClient
 from app.schemas.chunk import Chunk
@@ -113,18 +114,18 @@ class DevPersona(Persona):
                 temperature=0.2,
             )
         except Exception as e:
-            logger.error(f"DEV LLM call failed: {e}")
-            # Fallback
+            logger.exception("dev.llm_call_failed", error=str(e))
             return self._fallback_output(passada=passada)
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
 
-        # Parse response
-        try:
-            data = json.loads(response.content)
-        except json.JSONDecodeError as e:
-            logger.error(f"DEV: JSON parse failed: {str(e)[:200]}")
+        # Parse response (provider-agnostic hardening)
+        data, meta = safe_parse_llm_json(response.content)
+        if meta.total_failure or meta.level >= 1:
+            logger.error("dev.parse_failed", level=meta.level, warnings=meta.warnings)
             return self._fallback_output(passada=passada)
+        if meta.level > 0:
+            logger.warning("dev.parse_repaired", level=meta.level, warnings=meta.warnings)
 
         # Extract fields
         scores = PersonaScore(

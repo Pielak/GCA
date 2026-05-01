@@ -7,6 +7,7 @@ import structlog
 
 from app.services.llm_client import LLMClient
 from app.schemas.chunk import Chunk
+from app.utils.json_repair import normalize_llm_json  # provider-agnostic JSON hardening
 
 
 logger = structlog.get_logger(__name__)
@@ -69,23 +70,8 @@ class PersonaOutput:
     llm_model: Optional[str] = None
 
 
-def normalize_llm_json(data: dict) -> dict:
-    """Corrige strings que deveriam ser objetos/arrays no JSON do LLM."""
-    if not isinstance(data, dict):
-        return data
-    _dict_keys = {"scores", "highlights", "chunk_tags", "audit_findings"}
-    _list_keys = {"issues", "questions", "backlog_to_specialists",
-                  "questionnaire_to_human", "requirementsFound",
-                  "risks", "gaps", "detectedTopics"}
-    for key, value in data.items():
-        if isinstance(value, str):
-            if key in _dict_keys:
-                data[key] = {}
-            elif key in _list_keys:
-                data[key] = []
-        elif isinstance(value, dict):
-            data[key] = normalize_llm_json(value)
-    return data
+# normalize_llm_json re-exportado de app.utils.json_repair (EH-01 hardening)
+# Mantido neste módulo para compatibilidade com callers existentes (auditor.py, etc).
 
 
 class Persona(ABC):
