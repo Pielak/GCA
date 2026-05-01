@@ -121,3 +121,102 @@ def get_llm_client() -> LLMClient:
     else:
         # Default to Anthropic if provider not recognized
         return AnthropicLLMClient()
+
+
+class DeepSeekLLMClient(LLMClient):
+    """DeepSeek API client for Phase A personas."""
+
+    def __init__(self, api_key: str, model: str = "deepseek-chat"):
+        self.api_key = api_key
+        self.provider_name = "deepseek"
+        self.model_name = model
+
+    async def complete(
+        self,
+        system: Optional[str],
+        user: str,
+        cacheable_system: Optional[str] = None,
+        response_format: Optional[Literal["json", "text"]] = None,
+        max_output_tokens: int = 4000,
+        temperature: float = 0.2,
+    ) -> LLMResponse:
+        """Call DeepSeek API."""
+        try:
+            from openai import AsyncOpenAI
+
+            client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url="https://api.deepseek.com",
+            )
+
+            # Construir sistema + user
+            system_content = ""
+            if cacheable_system:
+                system_content += cacheable_system + "\n\n"
+            if system:
+                system_content += system
+
+            messages = []
+            if system_content:
+                messages.append({"role": "system", "content": system_content})
+            messages.append({"role": "user", "content": user})
+
+            kwargs = {
+                "model": self.model_name,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_output_tokens,
+            }
+            # DeepSeek não suporta response_format=json_object da forma que OpenAI suporta.
+            # O prompt já pede JSON explicitamente, então não precisamos forçar aqui.
+
+            resp = await client.chat.completions.create(**kwargs)
+
+            usage = LLMUsage(
+                input_tokens=resp.usage.prompt_tokens,
+                output_tokens=resp.usage.completion_tokens,
+                cached_input_tokens=0,
+            )
+
+            return LLMResponse(
+                content=resp.choices[0].message.content,
+                usage=usage,
+                finish_reason=resp.choices[0].finish_reason,
+            )
+        except Exception as e:
+            logger.error(f"DeepSeek API call failed: {e}")
+            raise
+
+
+def create_llm_client(
+    provider: str,
+    api_key: str,
+    model: Optional[str] = None,
+    base_url: Optional[str] = None,
+) -> LLMClient:
+    """Factory to create LLM client from provider name and credentials.
+
+    Args:
+        provider: Provider name (anthropic, deepseek, openai, grok, ollama)
+        api_key: API key for the provider
+        model: Model name (optional, uses defaults if not provided)
+        base_url: Base URL for local providers like Ollama
+
+    Returns:
+        Appropriate LLMClient concrete implementation.
+
+    Raises:
+        ValueError: If provider is not supported or key is missing.
+    """
+    provider_lower = (provider or "anthropic").lower()
+
+    if provider_lower == "anthropic":
+        return AnthropicLLMClient(api_key=api_key)
+    elif provider_lower == "deepseek":
+        return DeepSeekLLMClient(api_key=api_key, model=model or "deepseek-chat")
+    else:
+        # Proibido contorno silencioso (§0 CLAUDE.md)
+        raise ValueError(
+            f"Provider '{provider}' não implementado. "
+            f"Suportados: anthropic, deepseek"
+        )

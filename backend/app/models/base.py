@@ -2404,3 +2404,60 @@ class PilaresVivosJob(Base):
         Index("idx_pilares_vivos_jobs_status", status),
         Index("idx_pilares_vivos_jobs_created", "criado_em"),
     )
+
+
+class ConflictPendingReview(Base):
+    """Conflito entre personas aguardando decisão humana (HITL — Human-In-The-Loop)."""
+    __tablename__ = "conflicts_pending_review"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    route_map_id = Column(UUID(as_uuid=True), ForeignKey("document_route_maps.id", ondelete="CASCADE"), nullable=False)
+
+    # O que as personas discordam
+    field_name = Column(String(255), nullable=False)  # ex: "p1_business_score", "architecture_recommendation"
+    personas_involved = Column(JSONB, nullable=False)  # list[str] ex: ["gp", "arq", "dev"]
+    values_by_persona = Column(JSONB, nullable=False)  # {persona_tag: value} ex: {"gp": 80, "arq": 60, "dev": 70}
+    conflict_reason = Column(Text, nullable=True)  # Por que discordam?
+
+    # Status da resolução
+    status = Column(String(20), nullable=False, default="pending")  # pending, resolved
+    resolved_value = Column(JSONB, nullable=True)  # Valor escolhido pelo usuário
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_justification = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_conflict_project", project_id),
+        Index("idx_conflict_status", status),
+        Index("idx_conflict_document", document_id),
+    )
+
+
+class ChunkErrorPendingReview(Base):
+    """Chunk com erro durante auditoria — aguardando revisão humana (HITL)."""
+    __tablename__ = "chunk_errors_pending_review"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    chunk_id = Column(String(64), nullable=False)  # "chunk_001", "chunk_123", etc
+    error_type = Column(String(30), nullable=False)  # json_invalid, timeout, llm_refusal, schema_validation, unknown
+    error_message = Column(Text, nullable=False)
+    retry_count = Column(Integer, nullable=False, default=0)
+    recovery_attempted = Column(Boolean, nullable=False, default=False)
+    suggested_fallback = Column(Text, nullable=True)  # Sugestão de fallback (conteúdo padrão / omitir chunk)
+    status = Column(String(20), nullable=False, default="pending")  # pending, resolved, escalated
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_chunk_error_project", project_id),
+        Index("idx_chunk_error_document", document_id),
+        Index("idx_chunk_error_status", status),
+    )

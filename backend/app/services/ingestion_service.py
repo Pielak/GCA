@@ -1419,54 +1419,37 @@ class IngestionService:
                                 model=model or "(default)")
 
                     try:
-                        # DT-065 — Checkpoint: se a análise do Arguidor já
-                        # foi gravada em tentativa anterior (mesmo provider
-                        # ou outro), pular o call LLM e ir direto pro OCG.
-                        # Evita re-custear a mesma inferência quando o
-                        # fallback é acionado no OCG updater e não no
-                        # próprio Arguidor.
-                        existing_analysis = (await db.execute(
-                            select(ArguiderAnalysis).where(
-                                ArguiderAnalysis.document_id == document_id
-                            )
-                        )).scalar_one_or_none()
+                        # FASE 1 Refactor — AuditorOrchestratorService
+                        # Replace Arguidor with new orchestrator pipeline:
+                        # 1. Chunk documento → DocumentRouteMap
+                        # 2. Auditor análise inicial → AuditorOutput
+                        # 3. 7 personas em paralelo → personas_responses
+                        # 4. OCGConsolidator → OCG updates + conflicts
+                        from app.services.auditor_orchestrator_service import AuditorOrchestratorService
+                        from app.services.llm_client import create_llm_client
 
-                        arguider = ArguiderService(
-                            db,
-                            project_api_key=project_api_key,
+                        await IngestionService._update_stage(db, document_id, "analyzing")
+
+                        llm_client = create_llm_client(
                             provider=provider,
+                            api_key=project_api_key,
                             model=model,
                             base_url=base_url,
                         )
-                        if existing_analysis is not None:
-                            # Preserva análise anterior — apenas marca o
-                            # documento como completed (se já não está) e
-                            # avança pro OCG updater.
-                            logger.info(
-                                "ingestion.analysis_reused_from_previous_attempt",
-                                document_id=str(document_id),
-                                provider=provider,
-                                previous_analysis_id=str(existing_analysis.id),
+
+                        orchestrator = AuditorOrchestratorService(db, llm_client)
+                        orchestration_result = await orchestrator.orchestrate(
+                            document_id=document_id,
+                            project_id=project_id,
+                            document_text=doc_text,
+                            file_type=file_type,
+                        )
+
+                        if not orchestration_result.get("success"):
+                            raise RuntimeError(
+                                f"Orchestration failed: {orchestration_result.get('error')}"
                             )
-                            _d = await db.get(IngestedDocument, document_id)
-                            if _d and _d.arguider_status != "completed":
-                                _d.arguider_status = "completed"
-                                await db.commit()
-                            # Pula direto pro estágio updating_ocg (70%)
-                            await IngestionService._update_stage(
-                                db, document_id, "updating_ocg", percent=70,
-                            )
-                        else:
-                            # MVP 8 Fase 1 — marcar estágio "analyzing"
-                            await IngestionService._update_stage(db, document_id, "analyzing")
-                            await arguider.analyze_document(
-                                document_id=document_id,
-                                project_id=project_id,
-                                document_text=doc_text,
-                                current_ocg=_current_ocg,
-                                previous_analyses=_prev_analyses,
-                                canonical=doc_canonical,  # MVP 29 Fase 3
-                            )
+
                         successful_provider = provider
                         if idx > 0:
                             logger.warning(

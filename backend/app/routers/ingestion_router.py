@@ -321,80 +321,196 @@ async def reanalyze_document(
     }
 
 
-@router.post("/projects/{project_id}/ingestion/{document_id}/consolidate-ocg")
-async def consolidate_personas_analysis(
+@router.get("/projects/{project_id}/ingestion/{document_id}/conflicts-pending-review")
+async def get_conflicts_pending_user_decision(
     project_id: UUID,
     document_id: UUID,
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """[REMOVIDO] Consolidação de OCG de personas removida.
+    """NOVO — FASE 1 Auditor Orquestrador.
 
-    Fase 2 Simplificação: Personas da ingestão e OCGGlobal removidos.
-    Pipeline agora: Questionário → 5 Personas → OCG (legacy) → Gatekeeper.
+    Retorna conflitos detectados durante consolidação de OCG que precisam
+    de decisão humana (user final escolhe entre opções).
+
+    Exemplo: 2+ personas sugeriram backends diferentes (PostgreSQL vs MongoDB).
+    System não consegue decidir sozinho → user decide.
     """
-    logger.warning(
-        "ingestion.consolidation_disabled",
-        document_id=str(document_id),
-        reason="Fase 2 Simplificação: personas da ingestão removidas",
+    from sqlalchemy import select
+    from app.models.base import ConflictPendingReview, ProjectMember
+
+    # Validar que user é membro do projeto (compartimentalização §2.2)
+    member_stmt = select(ProjectMember).where(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == current_user_id,
+        ProjectMember.is_active == True,
     )
-    return {
-        "success": False,
-        "message": "Consolidação de OCG de personas desabilitada após simplificação do pipeline.",
-        "document_id": str(document_id),
-    }
+    member = await db.scalar(member_stmt)
+    if not member:
+        raise HTTPException(status_code=403, detail="Acesso negado ao projeto")
 
+    # Buscar conflitos pendentes do documento
+    conflicts_stmt = select(ConflictPendingReview).where(
+        ConflictPendingReview.project_id == project_id,
+        ConflictPendingReview.document_id == document_id,
+        ConflictPendingReview.status == "pending",
+    )
+    conflicts = await db.scalars(conflicts_stmt)
+    conflicts_list = conflicts.all()
 
-@router.get("/projects/{project_id}/ingestion/{document_id}/follow-up-questions")
-async def get_follow_up_questions(
-    project_id: UUID,
-    document_id: UUID,
-    current_user_id: UUID = Depends(get_current_user_from_token),
-    db: AsyncSession = Depends(get_db),
-):
-    """[REMOVIDO] Follow-up questions eram do fluxo de personas da ingestão.
-
-    Fase 2 Simplificação: Personas da ingestão removidas. Este endpoint
-    retorna lista vazia para compatibilidade com frontend.
-    """
-    return {
-        "document_id": str(document_id),
-        "questions": [],
-        "total_questions": 0,
-        "answered_count": 0,
-    }
-
-
-class FollowUpAnswerRequest(BaseModel):
-    """Request para submeter respostas às follow-up questions."""
-    answers: dict[str, str]  # {question_id: answer_text}
-
-
-@router.post("/projects/{project_id}/ingestion/{document_id}/follow-up-answers")
-async def submit_follow_up_answers(
-    project_id: UUID,
-    document_id: UUID,
-    request: FollowUpAnswerRequest,
-    current_user_id: UUID = Depends(get_current_user_from_token),
-    db: AsyncSession = Depends(get_db),
-):
-    """[REMOVIDO] Submissão de follow-up questions removida.
-
-    Fase 2 Simplificação: Personas da ingestão removidas.
-    Endpoint mantido para compatibilidade, retorna sucesso vazio.
-    """
     logger.info(
-        "ingestion.follow_up_answers_submitted_ignored",
+        "hitl.get_conflicts",
+        project_id=str(project_id),
         document_id=str(document_id),
-        answer_count=len(request.answers),
-        reason="Fase 2 Simplificação: personas da ingestão removidas",
+        conflicts_count=len(conflicts_list),
     )
+
+    return {
+        "document_id": str(document_id),
+        "conflicts": [
+            {
+                "conflict_id": str(c.id),
+                "field": c.field_name,
+                "personas_involved": c.personas_involved,
+                "values_by_persona": c.values_by_persona,
+                "conflict_reason": c.conflict_reason,
+            }
+            for c in conflicts_list
+        ],
+        "total_conflicts": len(conflicts_list),
+        "awaiting_user_decision": len(conflicts_list) > 0,
+    }
+
+
+class ConflictResolution(BaseModel):
+    """Resolução de conflito por usuário."""
+    field: str
+    selected_value: str
+    justification: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/ingestion/{document_id}/conflict/{conflict_id}/resolve")
+async def resolve_conflict(
+    project_id: UUID,
+    document_id: UUID,
+    conflict_id: str,
+    resolution: ConflictResolution,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """NOVO — FASE 1 Auditor Orquestrador.
+
+    User resolve um conflito pendente escolhendo entre opções.
+    Consequência: OCG é atualizado com decisão + justificativa.
+    Propagação em cascata dispara (Gatekeeper, CodeGen, Backlog).
+    """
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.models.base import ConflictPendingReview, ProjectMember, OCG, Questionnaire
+    from app.services.audit_service import AuditService
+
+    # 1. Validar que user é GP ou Admin do projeto
+    member_stmt = select(ProjectMember).where(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == current_user_id,
+        ProjectMember.is_active == True,
+    )
+    member = await db.scalar(member_stmt)
+    if not member or member.role not in ["gp", "admin"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas GP ou Admin podem resolver conflitos",
+        )
+
+    # 2. Buscar ConflictPendingReview
+    try:
+        conflict_uuid = UUID(conflict_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="conflict_id inválido")
+
+    conflict = await db.get(ConflictPendingReview, conflict_uuid)
+    if not conflict or conflict.status != "pending":
+        raise HTTPException(status_code=404, detail="Conflito não encontrado ou já resolvido")
+
+    if conflict.project_id != project_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    # 3. Registrar resolução no ConflictPendingReview
+    conflict.status = "resolved"
+    conflict.resolved_by = current_user_id
+    conflict.resolved_at = datetime.now(timezone.utc)
+    conflict.resolved_value = {"value": resolution.selected_value}
+    conflict.resolution_justification = resolution.justification
+    db.add(conflict)
+    await db.flush()
+
+    # 4. Aplicar resolução ao OCG
+    questionnaire_stmt = select(Questionnaire).where(
+        Questionnaire.project_id == project_id
+    ).order_by(Questionnaire.created_at.desc()).limit(1)
+    questionnaire = await db.scalar(questionnaire_stmt)
+    if not questionnaire:
+        raise HTTPException(status_code=400, detail="Projeto sem questionário")
+
+    ocg_stmt = select(OCG).where(
+        OCG.questionnaire_id == questionnaire.id
+    ).order_by(OCG.version.desc()).limit(1)
+    ocg = await db.scalar(ocg_stmt)
+    if not ocg:
+        raise HTTPException(status_code=400, detail="Projeto sem OCG")
+
+    # Update OCG field com resolved value
+    if hasattr(ocg, conflict.field_name):
+        try:
+            # Try to convert resolved_value to appropriate type
+            setattr(ocg, conflict.field_name, float(resolution.selected_value))
+        except ValueError:
+            # If not numeric, set as-is
+            setattr(ocg, conflict.field_name, resolution.selected_value)
+
+    ocg.version += 1
+    ocg.updated_at = datetime.now(timezone.utc)
+    db.add(ocg)
+    await db.flush()
+
+    # 5. Registrar em auditoria
+    audit = AuditService(db)
+    await audit.log_event(
+        event_type="CONFLICT_RESOLVED",
+        resource_type="conflict_pending_review",
+        resource_id=conflict_uuid,
+        details={
+            "project_id": str(project_id),
+            "field": conflict.field_name,
+            "resolved_value": resolution.selected_value,
+            "justification": resolution.justification,
+            "personas_involved": conflict.personas_involved,
+        },
+    )
+
+    # 6. Disparar propagação em cascata
+    from app.services.propagation_service import PropagationService
+    propagator = PropagationService(db)
+    # Note: PropagationService.trigger não é async, chama em background se necessário
+    logger.info(
+        "hitl.conflict_resolved",
+        project_id=str(project_id),
+        conflict_id=str(conflict_id),
+        field=conflict.field_name,
+        resolved_value=resolution.selected_value,
+    )
+
+    await db.commit()
+
     return {
         "success": True,
-        "message": "Follow-up desabilitado após simplificação do pipeline.",
+        "message": "Conflito resolvido. OCG atualizado.",
         "document_id": str(document_id),
+        "conflict_id": str(conflict_uuid),
+        "field": conflict.field_name,
+        "resolution_applied": resolution.selected_value,
+        "ocg_version": ocg.version,
     }
-
 
 
 @router.get("/projects/{project_id}/ingestion/{document_id}/content")
