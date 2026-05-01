@@ -291,12 +291,16 @@ class OCGUpdaterService:
                 error=str(exc),
             )
 
-        if llm_result is None:
-            # Fallback: usar scores das personas gatekeeper_persona_responses
-            logger.info("ocg_updater.using_persona_fallback", project_id=str(project_id))
+        # Fallback: se LLM não produziu dados, usar scores das personas
+        # (provider-agnóstico: funciona com DeepSeek, Ollama, Gemma, etc.)
+        if llm_result is None or not llm_result.get("updated_ocg") or not llm_result.get("changes"):
+            logger.info(
+                "ocg_updater.using_persona_fallback",
+                project_id=str(project_id),
+                llm_result_status="empty" if llm_result is None else "no_changes",
+            )
             persona_scores = await self._load_persona_scores(project_id)
             if persona_scores:
-                # Aplicar scores das personas diretamente no OCG
                 current_ocg_data.update(persona_scores)
                 llm_result = {
                     "updated_ocg": current_ocg_data,
@@ -316,7 +320,7 @@ class OCGUpdaterService:
                     "version_from": version_from,
                     "version_to": version_from,
                     "status": "ocg_pending",
-                    "error": "LLM call failed and no persona scores available",
+                    "error": "LLM call returned no data and no persona scores available",
                 }
 
         # 3. Parse da resposta (formato delta)
