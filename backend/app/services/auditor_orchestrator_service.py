@@ -231,6 +231,21 @@ class AuditorOrchestratorService:
                 for rc in raw_chunks
             ]
 
+            # Truncar chunks conforme capacidade do modelo
+            provider_chain = await AIKeyResolver.resolve_project_provider_chain(self.db, project_id)
+            model_name = provider_chain[0].get("model", "") if provider_chain else ""
+            cap = get_model_capability(model_name)
+            max_chunk_chars = cap["recommended_chunk_size"]
+            if max_chunk_chars < 2000:
+                for c in chunks:
+                    c.text = c.text[:max_chunk_chars] if c.text else ""
+                logger.info(
+                    "orchestrator.chunks_truncated",
+                    model=model_name or "unknown",
+                    max_chunk_chars=max_chunk_chars,
+                    total_chunks=len(chunks),
+                )
+
             # Criar DocumentRouteMap
             route_map = DocumentRouteMap(
                 document_id=document_id,
@@ -264,19 +279,7 @@ class AuditorOrchestratorService:
             await update_stage("auditor_analysis", 20)
             logger.info("orchestrator.phase_auditor_bigpicture_start", document_id=str(document_id))
 
-            # Resolver capacidades do modelo para ajustar max_tokens e estratégia
-            provider_chain = await AIKeyResolver.resolve_project_provider_chain(self.db, project_id)
-            model_name = provider_chain[0].get("model", "") if provider_chain else ""
-            cap = get_model_capability(model_name)
             use_summary = not cap["supports_long_prompts"] and len(chunks) > 30
-            logger.info(
-                "orchestrator.model_capability",
-                model=model_name or "unknown",
-                max_output=cap["max_output"],
-                supports_long=cap["supports_long_prompts"],
-                use_summary=use_summary,
-                chunk_count=len(chunks),
-            )
 
             auditor = AuditorPersona(self.llm)
             project_size_mode = await self._detect_project_size_async(project_id)
