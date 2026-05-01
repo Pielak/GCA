@@ -18,6 +18,7 @@ from app.schemas.chunk import Chunk, TECHNICAL_TAGS
 from app.schemas.auditor_output import (
     AuditorOutput, BacklogItem, QuestionForHuman,
 )
+from app.services.personas.base import normalize_llm_json
 
 
 class GCAError(Exception):
@@ -143,6 +144,7 @@ class AuditorPersona:
         # Parse JSON
         try:
             data = json.loads(response.content)
+            data = normalize_llm_json(data)
         except json.JSONDecodeError as e:
             logger.error("Auditor: JSON inválido", extra={"raw": response.content[:500]})
             raise GCAError(
@@ -159,15 +161,26 @@ class AuditorPersona:
         backlog_max = 10
         backlog = data.get("backlog_to_specialists", [])[:backlog_max]
 
+        # Guard: LLM pode retornar "" em vez de {} para campos de objeto
+        raw_chunk_tags = data.get("chunk_tags", {})
+        raw_highlights = data.get("highlights", {})
+        raw_findings = data.get("audit_findings", {})
+        if not isinstance(raw_chunk_tags, dict):
+            raw_chunk_tags = {}
+        if not isinstance(raw_highlights, dict):
+            raw_highlights = {}
+        if not isinstance(raw_findings, dict):
+            raw_findings = {}
+
         try:
             output = AuditorOutput(
-                summary=data.get("summary", ""),
-                summary_token_count=int(len(data.get("summary", "").split()) * 1.4),
-                chunk_tags=data.get("chunk_tags", {}),
-                highlights=data.get("highlights", {}),
-                audit_findings=data.get("audit_findings", {}),
-                backlog_to_specialists=[BacklogItem(**b) for b in backlog],
-                questionnaire_to_human=[QuestionForHuman(**q) for q in questionnaire],
+                summary=data.get("summary", "") or "",
+                summary_token_count=int(len((data.get("summary") or "").split()) * 1.4),
+                chunk_tags=raw_chunk_tags,
+                highlights=raw_highlights,
+                audit_findings=raw_findings,
+                backlog_to_specialists=[BacklogItem(**b) for b in backlog if isinstance(b, dict)],
+                questionnaire_to_human=[QuestionForHuman(**q) for q in questionnaire if isinstance(q, dict)],
                 project_size_mode=project_size_mode,
                 consolidation_applied=(project_size_mode == "solo"),
                 error_code=None,
