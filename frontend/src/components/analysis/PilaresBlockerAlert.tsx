@@ -99,12 +99,6 @@ export function PilaresBlockerAlert({ projectId, show = true, onDismiss }: Props
               Há {blockers.count} DT(s) bloqueante(s) em {blockers.personas.join(', ')} que precisam ser
               resolvidas antes de prosseguir com a geração de código.
             </p>
-            <a
-              href={`/projects/${projectId}/pilares-vivos`}
-              className="text-sm text-red-600 hover:text-red-700 font-medium mt-2 inline-block"
-            >
-              → Ir para Pilares Vivos para resolver
-            </a>
           </div>
         </div>
         <button
