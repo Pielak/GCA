@@ -26,11 +26,13 @@ from app.services.chunkers.docx_chunker import DocxChunker
 from app.services.chunkers.markdown_chunker import MarkdownChunker
 from app.services.chunkers.pdf_chunker import PdfChunker
 from app.services.llm_client import LLMClient
+from app.services.ai_key_resolver import AIKeyResolver
 from app.models.base import IngestedDocument, OCG, ChunkErrorPendingReview
 from app.models.document_route_map import DocumentRouteMap
 from app.models.auditor_output import AuditorOutput
 from app.schemas.chunk import Chunk
 from app.utils.ingested_storage import ingested_path
+from app.data.model_capabilities import get_model_capability
 
 logger = structlog.get_logger(__name__)
 
@@ -262,11 +264,27 @@ class AuditorOrchestratorService:
             await update_stage("auditor_analysis", 20)
             logger.info("orchestrator.phase_auditor_bigpicture_start", document_id=str(document_id))
 
+            # Resolver capacidades do modelo para ajustar max_tokens e estratégia
+            provider_chain = await AIKeyResolver.resolve_project_provider_chain(self.db, project_id)
+            model_name = provider_chain[0].get("model", "") if provider_chain else ""
+            cap = get_model_capability(model_name)
+            use_summary = not cap["supports_long_prompts"] and len(chunks) > 30
+            logger.info(
+                "orchestrator.model_capability",
+                model=model_name or "unknown",
+                max_output=cap["max_output"],
+                supports_long=cap["supports_long_prompts"],
+                use_summary=use_summary,
+                chunk_count=len(chunks),
+            )
+
             auditor = AuditorPersona(self.llm)
             project_size_mode = await self._detect_project_size_async(project_id)
             try:
                 auditor_output = await auditor.analyze(
                     chunks=chunks,
+                    max_output_tokens=cap["max_output"],
+                    use_summary=use_summary,
                     project_size_mode=project_size_mode,
                 )
                 logger.info(

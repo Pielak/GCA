@@ -18,7 +18,7 @@ from app.schemas.chunk import Chunk, TECHNICAL_TAGS
 from app.schemas.auditor_output import (
     AuditorOutput, BacklogItem, QuestionForHuman,
 )
-from app.services.personas.base import normalize_llm_json
+from app.utils.json_repair import safe_parse_llm_json
 
 
 class GCAError(Exception):
@@ -98,19 +98,37 @@ class AuditorPersona:
         self,
         chunks: list[Chunk],
         project_size_mode: str,
+        max_output_tokens: int = 6000,
+        use_summary: bool = False,
     ) -> AuditorOutput:
-        """Executa análise do Auditor com tratamento de erros estruturado."""
+        """Executa análise do Auditor com tratamento de erros estruturado.
+
+        Args:
+            chunks: lista de chunks do documento
+            project_size_mode: "solo" | "small" | "large"
+            max_output_tokens: limite de tokens de saída (ajustável por modelo)
+            use_summary: se True, envia preview dos chunks em vez do texto
+                         completo (para modelos com contexto pequeno)
+        """
 
         chunks_payload = [
             {
                 "id": c.id,
                 "heading_path": c.heading_path,
                 "type": c.chunk_type,
-                "text": c.text[:2000],
+                "text": (c.text[:200] if use_summary else c.text[:2000]),
                 "token_count": c.token_count,
+                "char_count": len(c.text or ""),
             }
             for c in chunks
         ]
+
+        if use_summary:
+            logger.info(
+                "auditor.using_chunk_summary",
+                total_chunks=len(chunks),
+                total_chars=sum(c.get("char_count", 0) for c in chunks_payload),
+            )
 
         user_input = json.dumps({
             "project_size_mode": project_size_mode,
@@ -126,7 +144,7 @@ class AuditorPersona:
                 system=None,
                 user=user_input,
                 response_format="json",
-                max_output_tokens=6000,
+                max_output_tokens=max_output_tokens,
                 temperature=0.1,
             )
         except Exception as e:
@@ -141,19 +159,28 @@ class AuditorPersona:
 
         elapsed_ms = int((time.perf_counter() - start) * 1000)
 
-        # Parse JSON
-        try:
-            data = json.loads(response.content)
-            data = normalize_llm_json(data)
-        except json.JSONDecodeError as e:
-            logger.error("Auditor: JSON inválido", extra={"raw": response.content[:500]})
+        # Parse JSON (provider-agnostic hardening)
+        data, meta = safe_parse_llm_json(response.content)
+        if meta.total_failure:
+            logger.error(
+                "auditor.json_parse_failed",
+                level=meta.level,
+                warnings=meta.warnings,
+                preview=response.content[:500],
+            )
             raise GCAError(
                 code="AUD_002_JSON_MALFORMED",
-                technical_message=f"JSON parse failed: {e}",
+                technical_message=f"JSON parse failed after {meta.level} strategies: {meta.warnings}",
                 user_message="O Auditor não conseguiu organizar a resposta.",
                 suggested_action="Tentando novamente automaticamente.",
-                fallback_attempted=False,
-            ) from e
+                fallback_attempted=meta.level > 1,
+            )
+        if meta.level > 0:
+            logger.warning(
+                "auditor.json_repaired",
+                level=meta.level,
+                warnings=meta.warnings,
+            )
 
         # Aplica limites do modo solo
         max_questions = {"solo": 5, "small": 8, "large": 10}.get(project_size_mode, 8)
