@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2 } from 'lucide-react'
+import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2, AlertCircle } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
@@ -40,6 +40,7 @@ export function GatekeeperPage() {
   const { user } = useAuthStore()
   const [data, setData] = useState<GatekeeperData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [showOverride, setShowOverride] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
   // Índice do pilar com detalhes expandidos; -1 = nenhum aberto.
@@ -48,6 +49,8 @@ export function GatekeeperPage() {
   useEffect(() => {
     const load = async () => {
       try {
+        setLoading(true)
+        setError(null)
         const res = await apiClient.get(`/projects/${id}/gatekeeper`)
         const raw = res.data
 
@@ -74,7 +77,9 @@ export function GatekeeperPage() {
           module_candidates: raw.module_candidates,
           ocg_health: raw.ocg?.health || {},
         } as unknown as GatekeeperData)
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Erro ao carregar Gatekeeper'
+        setError(msg)
         setData(null)
       } finally {
         setLoading(false)
@@ -83,7 +88,36 @@ export function GatekeeperPage() {
     if (id) load()
   }, [id])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center h-32 bg-red-950/20 border border-red-800/40 rounded-xl">
+          <div className="text-center">
+            <XCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+            <p className="text-red-300 text-sm">Erro ao carregar Gatekeeper</p>
+            <p className="text-red-400/70 text-xs mt-1">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-3 px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-6 h-6 text-violet-400 animate-spin mx-auto mb-2" />
+          <p className="text-slate-400 text-sm">Carregando Gatekeeper...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!data || !data.pillars || data.pillars.length === 0) {
     return (

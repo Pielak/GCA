@@ -40,6 +40,9 @@ export function usePilaresVivos(projectId: string) {
   const [error, setError] = useState<string | null>(null)
   const [jobStatus, setJobStatus] = useState<JobStatus | null>(null)
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const pollTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const pollAttemptsRef = useRef(0)
+  const MAX_POLL_ATTEMPTS = 120  // 120 × 2s = 4 minutos máximo
   const toast = useToast()
 
   const obterStatusJob = useCallback(
@@ -80,46 +83,68 @@ export function usePilaresVivos(projectId: string) {
     [projectId]
   )
 
+  const limparPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
+    }
+    if (pollTimeoutRef.current) {
+      clearTimeout(pollTimeoutRef.current)
+      pollTimeoutRef.current = null
+    }
+    pollAttemptsRef.current = 0
+  }, [])
+
   const sondagemJob = useCallback(
     async (jobId: string) => {
       try {
+        pollAttemptsRef.current += 1
+
+        // Timeout: após 4 minutos ou 120 tentativas, parar
+        if (pollAttemptsRef.current > MAX_POLL_ATTEMPTS) {
+          limparPolling()
+          const msg = 'Tempo limite excedido (4 min). Verifique o status do job no backend.'
+          setError(msg)
+          toast.error(msg)
+          setLoading(false)
+          return
+        }
+
         const status = await obterStatusJob(jobId)
         setJobStatus(status)
 
         if (status.status === 'completed') {
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current)
-            pollIntervalRef.current = null
-          }
-
+          limparPolling()
           await atualizarComResultado(status.resultado_json || {})
           const tempo = status.tempo_total_segundos?.toFixed(1) || '?'
           toast.success(`Pilares Vivos regenerados em ${tempo}s`)
           setLoading(false)
         } else if (status.status === 'failed') {
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current)
-            pollIntervalRef.current = null
-          }
-
+          limparPolling()
           const msg = status.erro_mensagem || 'Erro desconhecido'
           setError(msg)
           toast.error(`Falha ao regenerar: ${msg}`)
           setLoading(false)
         }
+        // Se 'queued' ou 'processing', continua polando (será chamado novamente em 2s)
       } catch (err) {
-        if (pollIntervalRef.current) {
-          clearInterval(pollIntervalRef.current)
-          pollIntervalRef.current = null
+        pollAttemptsRef.current += 1
+
+        // Para na 10ª tentativa falhada (20 segundos)
+        if (pollAttemptsRef.current > 10) {
+          limparPolling()
+          const message = err instanceof Error ? err.message : 'Erro ao sondar job'
+          setError(`${message} (após 10 tentativas)`)
+          toast.error(`Erro persistente: ${message}`)
+          setLoading(false)
+          return
         }
 
-        const message = err instanceof Error ? err.message : 'Erro ao sondagem do job'
-        setError(message)
-        toast.error(message)
-        setLoading(false)
+        // Continua tentando se falhar no meio
+        console.warn(`Tentativa ${pollAttemptsRef.current}: ${err}`)
       }
     },
-    [obterStatusJob, atualizarComResultado, toast]
+    [obterStatusJob, atualizarComResultado, toast, limparPolling]
   )
 
   const regenerar = useCallback(async () => {
@@ -157,9 +182,8 @@ export function usePilaresVivos(projectId: string) {
 
       toast.info('Regeneração iniciada... aguardando conclusão')
 
-      if (pollIntervalRef.current) {
-        clearInterval(pollIntervalRef.current)
-      }
+      limparPolling()
+      pollAttemptsRef.current = 0
 
       pollIntervalRef.current = setInterval(() => {
         sondagemJob(jobId)
@@ -173,7 +197,7 @@ export function usePilaresVivos(projectId: string) {
       setLoading(false)
       throw err
     }
-  }, [projectId, toast, sondagemJob])
+  }, [projectId, toast, sondagemJob, limparPolling])
 
   const obter = useCallback(async () => {
     try {
