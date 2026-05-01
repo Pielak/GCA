@@ -118,7 +118,7 @@ services:
       - ./backend:/app
       - gca-uploads-storage:/tmp/gca-storage
       - gca-backups:/var/gca-backups
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=2
+    command: celery -A app.celery_app worker --loglevel=info --concurrency=1
     # MVP 17 Fase 17.1 (DT-078): healthcheck usa CMD-SHELL pra interpolar
     # $HOSTNAME no runtime — o hostname real do container é o ID curto do
     # docker (ex: `982577f2232a`), não o `container_name` do compose. O
