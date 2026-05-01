@@ -139,13 +139,15 @@ Podem existir como:
 
 O **OCG** é a fonte única de verdade do projeto.
 
-Regras obrigatórias:
+Regras obrigatórias (atualizadas em 2026-04-30 — substituem versão anterior):
 - o OCG nasce do questionário aprovado;
 - o OCG é evolutivo e auditável;
-- boa ingestão expande contexto;
-- ingestão ruim ou conflitante contrai confiança;
+- **o OCG só expande quando recebe informação de valor; nunca contrai**;
+- ingestão ruim ou conflitante: documento vai para **quarentena** e **não afeta o OCG** (não há mais "contração de confiança" como behavior do motor);
 - módulos não podem assumir defaults invisíveis quando o OCG estiver incompleto;
 - toda mudança relevante deve gerar versionamento e trilha de auditoria.
+
+Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine` em `.claude/skills/gca-ocg-engine/SKILL.md`.
 
 ---
 

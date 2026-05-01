@@ -1,3 +1,18 @@
+> ⚠️ **DOCUMENTO HISTÓRICO / DEPRECADO — NÃO USAR COMO REFERÊNCIA OPERACIONAL.**
+>
+> Arquivado em 2026-04-30 pela consolidação documental do GCA (opção C — contrato + skills).
+>
+> Para regras vigentes, consultar:
+> - `CLAUDE.md` na raiz — regras operacionais do Claude Code
+> - `GCA_CANONICAL_CONTRACT.md` — contrato soberano do produto
+> - `.claude/skills/gca-ocg-engine/SKILL.md` — máquina de estado do OCG (regra atual: só expande, nunca contrai)
+> - `.claude/skills/gca-personas-engine/SKILL.md` — sistema de Personas v2 + HITL
+> - `.claude/skills/gca-llm-resolver/SKILL.md` — porta única para invocação de LLM
+>
+> Este arquivo é mantido apenas para contexto histórico e auditoria. Suas regras NÃO autorizam implementação.
+
+---
+
 # OCG — Objeto de Contexto Global
 
 > ⚠️ **DOCUMENTO DE REFERÊNCIA — precede o contrato canônico.**

@@ -1,7 +1,6 @@
 # CLAUDE.md
 
-Operacional do Claude no GCA. Para contrato formal do produto, ver `GCA_CANONICAL_CONTRACT.md`.
-Para estado atual do MVP, ver `GCA_MVP_PROGRESS.md`. Para histórico, ver `docs/mvp_archive/`.
+Operacional do Claude Code no GCA. Para contrato formal do produto (extenso), ver `GCA_CANONICAL_CONTRACT.md`. Para estado atual do MVP, ver `GCA_MVP_PROGRESS.md`. Para histórico, ver `docs/_deprecated/`.
 
 > **Atenção ao reler este arquivo:** as regras com `❌`, `🛑` e `⚠` são vinculantes em ordem decrescente — `❌` é proibição absoluta, `🛑` é parada obrigatória, `⚠` é alerta. Não há regra "soft" aqui. Se uma seção parece restritiva, é intencional.
 
@@ -9,14 +8,14 @@ Para estado atual do MVP, ver `GCA_MVP_PROGRESS.md`. Para histórico, ver `docs/
 
 ## 0. Honestidade técnica (precede tudo)
 
-Estas regras valem em todos os turnos, em todos os modos, em todas as fases. Elas vêm antes de qualquer outra seção porque o custo da violação delas é o usuário perder confiança no Claude e desperdiçar tokens em retrabalho.
+Estas regras valem em todos os turnos, em todos os modos, em todas as fases.
 
 - ❌ **Proibido afirmar que algo "funciona", "está 100%", "está pronto" ou "passa nos testes" sem ter executado o comando que prova.** Se não rodou, dizer: "implementado, ainda não testado". Se rodou e falhou, dizer que falhou.
-- ❌ **Proibido contorno silencioso.** Se o caminho planejado falhou e há tentação de tomar outro (fallback de provider, mock, heurística, dado fictício, comentário "TODO"), **parar antes** e avisar o usuário no MESMO turno, com o erro original e a alternativa proposta. Esperar autorização.
+- ❌ **Proibido contorno silencioso.** Se o caminho planejado falhou e há tentação de tomar outro (fallback de provider, mock, heurística, dado fictício, comentário "TODO"), **parar antes** e avisar no MESMO turno, com o erro original e a alternativa proposta. Esperar autorização.
 - ❌ **Proibido criar lógica paralela ao que já existe no repo.** Antes de criar serviço, helper, resolver, client ou utilitário novo, procurar com `grep -r` ou leitura de diretório. Se já existe, **usar**, não recriar. Se existe e não serve, justificar por que e perguntar.
 - ❌ **Proibido inventar nomes de arquivo, função, endpoint ou tabela.** Se o nome não foi visto no repo neste turno, abrir o arquivo e confirmar. Citar nome de algo que não existe é alucinação.
 - ❌ **Proibido reivindicar que está "respeitando a arquitetura" enquanto se cria atalho.** Hardcodar provedor "só para testar", chamar client diretamente "porque é mais rápido", duplicar lógica "porque é mais simples" — tudo isso é violação, mesmo que produza saída funcional.
-- 🛑 **Em caso de erro de autenticação (401/403), chave inválida, config ausente, tabela vazia ou arquivo não encontrado: PARAR.** Reportar erro literal, dizer o que precisa, e perguntar. Nunca tentar provider alternativo, nunca cair para mock, nunca chumbar valor "temporário".
+- 🛑 **Em caso de erro de autenticação (401/403), chave inválida, config ausente, tabela vazia ou arquivo não encontrado: PARAR.** Reportar erro literal, dizer o que precisa, perguntar. Nunca tentar provider alternativo, nunca cair para mock, nunca chumbar valor "temporário".
 - 🛑 **Em caso de teste vermelho que não tem causa óbvia: PARAR.** Reportar a saída do pytest crua. Não comentar o teste, não trocar assert para passar, não pular com `@pytest.mark.skip`.
 
 Se uma instrução do usuário entrar em conflito com esta seção, esta seção vence. Pedir esclarecimento.
@@ -34,17 +33,16 @@ Se uma instrução do usuário entrar em conflito com esta seção, esta seção
 
 ### 1.2. Protocolo de leitura obrigatória por área
 
-Antes de **editar, escrever ou criar** arquivo nas áreas abaixo, abrir e ler os símbolos canônicos correspondentes. Se o símbolo não existir no repo, **PARAR e perguntar** — não inventar substituto.
+Antes de **editar, escrever ou criar** arquivo nas áreas abaixo, abrir e ler os símbolos canônicos correspondentes. Se o símbolo não existir no repo, **PARAR e perguntar** — não inventar substituto. Skills listadas em `.claude/skills/` são lidas sob demanda pelo próprio Claude Code quando o contexto bate com a `description` da skill.
 
-| Área tocada | Ler obrigatoriamente antes |
+| Área tocada | Skill / símbolos canônicos |
 |---|---|
-| LLM, IA, provider, prompt, completion, embedding | classe `AIKeyResolver` (grep no repo), tabela `project_settings`, contrato §6 (criticidade) |
-| Secrets, tokens, PAT, chaves, senhas | classe `VaultService`, função `generate_temporary_password` em `app.core.security` |
-| RBAC, papéis, permissões, autorização | helper `is_active_integrated_member`, contrato §RBAC, lista canônica de 5 papéis |
-| OCG, contexto global, decisão arquitetural | módulo OCG, contrato §OCG (ler antes, atualizar depois — não opcional) |
-| Gatekeeper, validação, pilares, arbitragem | módulo Gatekeeper (7 pilares), contrato §6.2 (Conformidade é blocker em score < 60) |
-| Arguidor, classificação de documento | módulo Arguidor |
-| CodeGen, LiveDocs, MergeEngine | módulos respectivos antes de tocar fluxo de geração |
+| LLM, IA, provider, prompt, completion, embedding, multi-LLM | skill `gca-llm-resolver` · classe `AIKeyResolver` · tabela `project_settings` |
+| OCG, contexto global, expansão, propagação, backlog vivo | skill `gca-ocg-engine` · contrato §5 |
+| Personas, validação assistida, Auditor, 8 especialistas, HITL, ConflictDetector | skill `gca-personas-engine` |
+| Secrets, tokens, PAT, chaves, senhas | classe `VaultService` · função `generate_temporary_password` em `app.core.security` |
+| RBAC, papéis, permissões, autorização | helper `is_active_integrated_member` · contrato §4 (5 papéis canônicos) |
+| Gatekeeper, validação, pilares, arbitragem | módulo Gatekeeper (7 pilares) · contrato §6.2 (Conformidade é blocker em score < 60) |
 | Migrations Alembic, schema | últimas migrations no diretório, regenerar com `alembic revision --autogenerate` |
 | Frontend (rotas, componentes, páginas) | componente vizinho mais próximo para herdar padrão de estilo |
 
@@ -52,75 +50,131 @@ A regra é: **se você não leu o símbolo canônico antes, não escreve código
 
 ---
 
-## 2. Pontos arquiteturais com símbolos canônicos
+## 2. Invariantes do produto (do contrato canônico — inline neste arquivo)
 
-Cada ponto crítico do GCA tem **uma porta de entrada única**. Tudo o mais é caminho errado.
+Estes pontos são lidos em toda sessão. Detalhe extenso em `GCA_CANONICAL_CONTRACT.md`.
 
-### 2.1. Resolução de provider de IA
+### 2.1. Modelo de deployment e isolamento
+
+- ✅ GCA é **instalável por cliente** (on-premises). Uma instância por cliente.
+- ❌ Não é SaaS multi-tenant compartilhado. `gca.code-auditor.com.br` é **dogfood**, não prova de SaaS.
+- ✅ Isolamento principal **por projeto** dentro da instância.
+- ❌ Sem compartilhamento de OCG, artefatos, credenciais ou contexto entre projetos.
+- ✅ Toda query de dado de projeto inclui `project_id` no WHERE. Sem exceção.
+
+### 2.2. RBAC canônico — 5 papéis imutáveis
+
+**Admin · GP · Dev · Tester · QA**. Não inventar outros.
+
+- **Admin**: opera a instância, configura provedores/políticas/SMTP, aprova projetos. Não atua dentro de projetos. Não escreve código.
+- **GP**: soberano do projeto (emenda 2026-04-19). Acima de Dev/Tester/QA dentro do projeto, com acesso a todas as funcionalidades. Pode operar CodeGen, pipeline e testes. Análogo: GP está para o projeto assim como Admin está para a instância.
+- **Dev**: implementa código. Opera ingestão, Arguidor, CodeGen e commits. Não aprova módulo no Gatekeeper.
+- **Tester**: cria/edita/executa testes. Registra evidências.
+- **QA**: revisa/aprova resultados. Valida qualidade final. Não edita conteúdo de teste.
+
+**Não canônicos nesta versão** (podem aparecer em docs históricos, **não implementar como roles**): Tech Lead, Compliance, Stakeholder, Viewer, Dev Sênior/Pleno como roles distintos.
+
+### 2.3. Modelo de IA — provider configurável por cliente
+
+- ✅ Cliente final usa suas próprias chaves, provedores e modelos.
+- ✅ Sistema oferece análise de adequação antes de fixar default.
+- ❌ Nenhum provedor é "melhor universal".
+- ✅ Modo híbrido por tipo de tarefa permitido, desde que configurável e auditável.
+- **Porta única para resolução**: `AIKeyResolver.resolve_project_provider_chain(db, project_id)`. Detalhe em skill `gca-llm-resolver`.
+
+### 2.4. OCG — fonte única de verdade do projeto
+
+> **REGRA ATUAL** (substitui versão anterior):
+
+- ✅ OCG nasce do questionário aprovado.
+- ✅ OCG é evolutivo e auditável.
+- ✅ **OCG só expande quando recebe informação de valor**. Nunca contrai.
+- ✅ Ingestão ruim ou conflitante: documento vai para **quarentena** e **não afeta o OCG**. Não há mais "contração de confiança" como behavior do motor.
+- ✅ Módulos não podem assumir defaults invisíveis quando o OCG estiver incompleto: bloquear ou exigir complementação.
+- ✅ Toda mudança gera versionamento e trilha de auditoria.
+
+Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine`.
+
+### 2.5. Política de criticidade de IA (3 níveis)
+
+- **Baixa**: local/barato (Ollama ou modelo econômico).
+- **Média**: qualquer provider configurado.
+- **Alta**: premium obrigatório (OCG consolidação, arbitragem, compliance crítico, codegen crítico).
+
+Sem rota de criticidade alta passando por modelo barato. Sem fallback automático para modelo inferior.
+
+### 2.6. Fluxo de MVP
+
+- ✅ Cada fase de MVP exige autorização explícita do GP antes de codar (§7.0 contrato).
+- ❌ Nada executa em bloco sem luz verde.
+- ✅ Fixes descobertos em dogfood viram commit `fix:`, não MVP novo. MVP é reservado para escopo novo planejado.
+
+---
+
+## 3. Pontos arquiteturais com porta de entrada única
+
+### 3.1. Resolução de provider de IA
 
 - ✅ Porta única: `AIKeyResolver.resolve_project_provider_chain(db, project_id)`.
 - ✅ Configuração: tabela `project_settings`, `setting_type='llm'`. UI em **Settings > IA**.
 - ❌ Proibido instanciar `AnthropicLLMClient`, `OpenAIClient`, `DeepSeekClient`, `GeminiClient` ou `OllamaClient` diretamente em rotas, services ou personas.
 - ❌ Proibido `provider = "anthropic"` chumbado em código.
-- ❌ Proibido fallback automático entre providers em caso de falha de auth. Falhou auth → 🛑 §0.
+- ❌ Proibido fallback automático entre providers em caso de falha de auth. Falhou auth → §0 §🛑.
 - ✅ Se `resolve_project_provider_chain` retornar vazio: `raise HTTPException(400, "Projeto sem LLM configurado. Abra Settings > IA")`.
-- ✅ Critério de provider segue contrato §6.2 (criticidade baixa/média/alta). Não inventar critério próprio.
+- ✅ Critério de provider segue §2.5 (criticidade). Não inventar critério próprio.
 
-**Por quê:** o GCA é on-premises por cliente. Cada cliente escolhe seu provider. Hardcode quebra o produto.
+### 3.2. Secrets e tokens
 
-### 2.2. Secrets e tokens
-
-- ✅ Porta única para guardar secret: `VaultService.store_secret`. Para ler: `VaultService.get_secret`.
+- ✅ Porta única para guardar: `VaultService.store_secret`. Para ler: `VaultService.get_secret`.
 - ⚠ `VaultService.store_secret` commita internamente — testes que o chamam dentro de `session.begin()` quebram. Use sessões separadas.
 - ✅ PAT do Git é cifrado com Fernet (M03). Master key em `/var/lib/gca/secrets/fernet.key`. Prefixo obrigatório: `fernet:v1:`.
 - ✅ Senhas temporárias para convite: `generate_temporary_password()` de `app.core.security` (RF-001: 10 chars, 1 maiúscula, 1 dígito, 1 especial).
 - ❌ Proibido `secrets.token_urlsafe(12)` para senha canônica. Não atende RF-001.
 - ❌ Proibido logar valor de secret, mesmo em DEBUG. Nem em comentário, nem em mensagem de erro, nem em response body.
 
-### 2.3. RBAC e papéis
+### 3.3. RBAC — listagem de membros
 
-- ✅ Lista canônica imutável: **Admin · GP · Dev · Tester · QA**. 5 papéis. Não inventar outros.
-- ✅ Listagem de membros filtra `is_active AND joined_at IS NOT NULL`. Use `is_active_integrated_member()`.
-- ❌ Proibido filtrar só por `is_active` — inclui convite pendente como membro ativo, vaza dado.
-- ❌ Proibido criar role temporário para resolver feature. Se a feature precisa de role novo, levantar antes em PR de discussão, não em commit.
+- ✅ Listagem filtra `is_active AND joined_at IS NOT NULL`. Use `is_active_integrated_member()`.
+- ❌ Filtrar só por `is_active` inclui convite pendente como membro ativo, vaza dado.
 
-### 2.4. OCG (Objeto de Contexto Global)
+### 3.4. OCG (Objeto de Contexto Global)
 
 - ✅ Toda decisão arquitetural, funcional ou de código **lê o OCG antes** e **atualiza depois**. Não é sugestão.
-- ❌ Proibido pular leitura do OCG porque "a mudança é pequena". OCG existe para garantir consistência cross-cutting; "pequeno" é o que mais quebra.
+- ❌ Pular leitura do OCG porque "a mudança é pequena" — proibido. OCG existe para garantir consistência cross-cutting.
+- ✅ Detalhe da máquina de estado, propagação e backlog vivo: skill `gca-ocg-engine`.
 
-### 2.5. Compartimentalização por projeto
+### 3.5. Personas / sistema de validação assistida
 
-- ✅ Toda query de dado de projeto inclui `project_id` no WHERE. Sem exceção.
-- ❌ Proibido endpoint que aceita só `id` sem cruzar com `project_id` da sessão do usuário.
-- **Por quê:** isolamento principal do GCA é por projeto. Vazamento cross-tenant é incidente de segurança, não bug.
+- ✅ 8 personas: Auditor + GP + ARQ + DBA + DEV + QA + UX + UI.
+- ✅ Filosofia "Assistida": LLM tem permissão explícita de **não saber**. Quando atinge limite dos insumos, gera questionário estruturado para humano e pausa o pilar afetado.
+- ✅ Detalhe da arquitetura em 4 camadas, HITL, ConflictDetector, KPIs: skill `gca-personas-engine`.
 
-### 2.6. Banco de testes
+### 3.6. Banco de testes
 
 - ✅ Pytest do GCA roda contra `gca_test`, nunca contra `gca`. `conftest.py` força — não passe por cima.
 - ✅ Se schema mudou: `pg_dump gca --schema-only | psql gca_test` após recreate.
-- ❌ Proibido criar dados no banco de produção (`gca`) sem autorização explícita. É dogfood; mock vira ruído real.
+- ❌ Criar dados no banco de produção (`gca`) sem autorização explícita — proibido. É dogfood; mock vira ruído real.
 
 ---
 
-## 3. Plan Mode obrigatório
+## 4. Plan Mode obrigatório
 
 Para as áreas abaixo, **iniciar em Plan Mode** (Shift+Tab × 2). Apresentar plano, esperar aprovação, só então executar.
 
-- Mudanças em resolução de provider de IA (§2.1).
+- Mudanças em resolução de provider de IA (§3.1).
 - Mudanças em RBAC, autorização ou middleware de auth.
 - Mudanças em VaultService, criptografia, rotação de chave.
 - Mudanças em licenciamento (Marco 4: RSA, Base58, fingerprint, ciclo de 4 estados).
-- Mudanças em OCG, Gatekeeper ou Arguidor.
+- Mudanças em OCG, Gatekeeper, Arguidor ou sistema de Personas.
 - Mudanças em migrations Alembic.
 - Mudanças em mais de 3 arquivos simultaneamente.
-- Refactor que cruza diretórios (`backend/services/` → `backend/routes/`, etc.).
+- Refactor que cruza diretórios.
 
 Plan Mode não é "modo lento". É a versão barata do retrabalho — corrigir um plano custa segundos; corrigir código já implementado custa tokens, contexto e revisão humana.
 
 ---
 
-## 4. Estratégia de trabalho
+## 5. Estratégia de trabalho
 
 A ordem importa. Pular passo é fonte conhecida de retrabalho.
 
@@ -129,32 +183,19 @@ A ordem importa. Pular passo é fonte conhecida de retrabalho.
 3. **Classificar dívida** se encontrar inconsistência. Não tentar corrigir tudo no mesmo PR.
 4. **Corrigir blocker/critical primeiro**, depois revalidar com pytest contra `gca_test`.
 5. **Só então** expandir para feature nova.
-6. Fixes descobertos em dogfood viram commit `fix:`, não MVP novo. MVP é reservado para escopo novo planejado.
+6. Fixes descobertos em dogfood viram commit `fix:`, não MVP novo.
 
-Correção cirúrgica > refactor amplo (§10 contrato). Não tocar código vizinho que está funcionando, mesmo que pareça "melhorável".
-
----
-
-## 5. Invariantes do produto (do contrato)
-
-- **RBAC imutável**: 5 papéis canônicos — Admin · GP · Dev · Tester · QA. Não inventar outros.
-- **OCG obrigatório**: toda decisão arquitetural, funcional ou de código lê o OCG antes e atualiza depois.
-- **Modo on-premises**: uma instância por cliente. Sem SaaS multi-tenant. Isolamento principal por projeto.
-- **IA configurável por cliente**: não hardcodar provedor. Admin e cliente escolhem — Anthropic / OpenAI / Gemini / Ollama local. Ver §2.1 para mecânica.
-- **Criticidade em 3 níveis** (§6.2 contrato): baixa→local/barato; média→qualquer; alta→premium obrigatório (OCG consolidação, arbitragem, compliance crítico, codegen crítico).
-- **Fluxo de MVP**: fase individual exige autorização explícita do stakeholder (§7.0). Nada executa em bloco sem luz verde.
+Correção cirúrgica > refactor amplo (§10 contrato). Não tocar código vizinho funcionando, mesmo que pareça "melhorável".
 
 ---
 
 ## 6. Gotchas operacionais
 
-Se esquecer destes, quebra o dogfood ou perde minutos confuso.
-
 ### Banco e migrations
 
-- ❌ `pytest` do GCA sempre contra `gca_test`, nunca `gca`. Conftest já força — não passe por cima.
+- ❌ `pytest` do GCA sempre contra `gca_test`, nunca `gca`. Conftest já força.
 - ❌ Schema mudou? `pg_dump gca --schema-only | psql gca_test` após recreate. Antes disso, pytest mente.
-- ❌ Não criar dados no DB de produção sem autorização explícita. É dogfood; dado mock vira ruído real.
+- ❌ Não criar dados no DB de produção sem autorização explícita.
 
 ### Docker e build
 
@@ -164,17 +205,17 @@ Se esquecer destes, quebra o dogfood ou perde minutos confuso.
 ### Vault e secrets
 
 - ❌ `VaultService.store_secret` commita internamente. Testes que o chamam dentro de `session.begin()` quebram — use sessões separadas.
-- ❌ `secrets.token_urlsafe(12)` não é senha canônica. Para convites, `generate_temporary_password()` de `app.core.security`.
+- ❌ `secrets.token_urlsafe(12)` não é senha canônica. Use `generate_temporary_password()` de `app.core.security`.
 
 ### Membros e RBAC
 
-- ❌ Listagem de membros filtra `is_active AND joined_at IS NOT NULL`. Filtro só `is_active` inclui convite pendente. Use `is_active_integrated_member()`.
+- ❌ Listagem de membros filtra `is_active AND joined_at IS NOT NULL`. Use `is_active_integrated_member()`.
 
 ### MVP e contrato
 
 - ⚠ MVP de integração entrega **backend + UI juntos**. Backend registrado sem endpoint/painel gera fix 2h depois.
 - ⚠ `feedback_gca_binary_language`: escreva "tem / não tem", "deve / não deve". Nunca "pode", "poderia", "talvez". Zero ambiguidade.
-- ⚠ §10 contrato: correção cirúrgica > refactor amplo. Não tocar código vizinho funcionando.
+- ⚠ §10 contrato: correção cirúrgica > refactor amplo.
 
 ### Imagem e assets (frontend)
 
@@ -186,21 +227,26 @@ Se esquecer destes, quebra o dogfood ou perde minutos confuso.
 
 ### Compartimentalização
 
-- ⚠ Toda query de dado de projeto inclui `project_id`. Zero vazamento cross-tenant. Ver §2.5.
+- ⚠ Toda query de dado de projeto inclui `project_id`. Zero vazamento cross-tenant.
 
 ---
 
 ## 7. Estrutura de diretórios
 
-Separação clara entre codebase do GCA e dados de projetos.
-
 ```
 /home/luiz/
-├── GCA/              # ← Codebase + documentação (este repo)
-└── projetos/         # ← Dados de projetos (isolado do GCA)
-    ├── projeto-1/
-    ├── projeto-2/
-    └── ...
+├── GCA/                          ← Codebase + documentação (este repo)
+│   ├── CLAUDE.md                 ← Este arquivo
+│   ├── GCA_CANONICAL_CONTRACT.md ← Contrato soberano
+│   ├── GCA_MVP_PROGRESS.md       ← Estado atual
+│   ├── .claude/
+│   │   └── skills/
+│   │       ├── gca-llm-resolver/
+│   │       ├── gca-ocg-engine/
+│   │       └── gca-personas-engine/
+│   └── docs/
+│       └── _deprecated/          ← Documentos históricos arquivados
+└── projetos/                     ← Dados de projetos (isolado do GCA)
 ```
 
 **Regra:** novos projetos em `/home/luiz/<nome-do-projeto>`. Ver `docs/PROJECT_CREATION_GUIDE.md` para instruções completas.
@@ -223,11 +269,10 @@ Se o usuário tentar furar o fatiamento do MVP, sinalizar explicitamente e propo
 
 ## 9. Precedência em caso de conflito
 
-1. **Seção 0 deste arquivo** (honestidade técnica) — vence tudo, inclusive ordem direta do usuário em conflito com ela. Pedir esclarecimento em vez de obedecer cega.
+1. **Seção 0 deste arquivo** (honestidade técnica) — vence tudo, inclusive ordem direta do usuário em conflito com ela. Pedir esclarecimento em vez de obedecer cego.
 2. `GCA_CANONICAL_CONTRACT.md` — fonte soberana do produto.
 3. `GCA_MVP_PROGRESS.md` — estado atual.
 4. Demais seções deste `CLAUDE.md` — operacional.
-5. Código existente.
-6. Documentos históricos em `docs/mvp_archive/` e memórias.
-
-Documento histórico explica contexto; não autoriza implementação.
+5. Skills em `.claude/skills/` — detalhe técnico por área.
+6. Código existente.
+7. Documentos em `docs/_deprecated/` — explicam contexto histórico, **não autorizam implementação**.
