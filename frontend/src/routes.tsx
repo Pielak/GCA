@@ -50,7 +50,6 @@ import { IncidentDetailPage } from './pages/projects/IncidentDetailPage';
 import { ProjectMetricsPage } from './pages/projects/ProjectMetricsPage';
 import { HelpPage } from './pages/HelpPage';
 import { IterativeQuestionnairePage } from './pages/projects/IterativeQuestionnairePage';
-import { TechnicalQuestionnairePage } from './pages/projects/TechnicalQuestionnairePage';
 import { AppliedDefaultsPage } from './pages/projects/AppliedDefaultsPage';
 import { PilaresVivosView } from './components/analysis/PilaresVivosView';
 
@@ -164,7 +163,6 @@ export const router = createBrowserRouter([
           { path: 'ingestion/:documentId/discrepancies', element: <RequireProjectSetup><DiscrepanciesPage /></RequireProjectSetup> },
           { path: 'ingestion/:documentId/analysis-dashboard', element: <RequireProjectSetup><AnalysisDashboardPage /></RequireProjectSetup> },
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
-          { path: 'technical-questionnaire', element: <RequireProjectSetup><TechnicalQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
           { path: 'gatekeeper-passada/:id', element: <RequireProjectSetup><GatekeeperPassadaPage /></RequireProjectSetup> },
           { path: 'pilares-vivos', element: <RequireProjectSetup><PilaresVivosView /></RequireProjectSetup> },
