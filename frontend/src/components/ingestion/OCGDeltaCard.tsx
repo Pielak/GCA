@@ -19,6 +19,8 @@ interface Props {
   projectId: string
   documentId: string
   enabled?: boolean
+  docStatus?: string
+  ocgUpdated?: boolean
 }
 
 const PILLAR_LABELS: Record<number, string> = {
@@ -63,12 +65,13 @@ function PillarRow({ p }: { p: OCGPillarDelta }) {
   )
 }
 
-export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
+export function OCGDeltaCard({ projectId, documentId, enabled = true, docStatus, ocgUpdated }: Props) {
   const [open, setOpen] = useState(false)
   const { data, isLoading, error } = useOCGDeltaForDocument(projectId, documentId, enabled && open)
 
   const hasDelta = data?.has_delta === true
   const overallDelta = data?.overall_delta ?? null
+  const isComplete = docStatus === 'completed'
 
   const borderClass = !open
     ? 'border-slate-700'
@@ -115,7 +118,12 @@ export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
 
           {!isLoading && !error && data && !hasDelta && (
             <div className="text-xs text-slate-400 py-3 leading-relaxed">
-              {data.message ?? 'O OCG ainda não foi atualizado com base neste documento.'}
+              {isComplete
+                ? (ocgUpdated
+                    ? 'Documento processado. O OCG foi atualizado (consulte o painel OCG para detalhes).'
+                    : 'Documento processado. Nenhum impacto detectado no OCG para este documento.'
+                  )
+                : (data.message ?? 'O OCG ainda não foi atualizado com base neste documento.')}
             </div>
           )}
 
