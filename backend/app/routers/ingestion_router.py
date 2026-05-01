@@ -14,6 +14,14 @@ from app.middleware.auth import get_current_user_from_token
 from app.dependencies.require_project_setup import require_project_setup_complete
 from pydantic import BaseModel
 
+from app.core.exceptions import NotFoundError
+from app.routers.pipeline_questions_router import (
+    router as pipeline_questions_router,
+    get_pipeline_questions,
+    submit_pipeline_answers,
+    AnswersRequest,
+)
+
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["ingestion"])
 
@@ -869,3 +877,55 @@ async def generate_m01_questionnaire(
     except Exception as e:
         logger.error(f"Erro ao gerar M01 questionnaire: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao gerar questionnaire: {str(e)}")
+
+
+# ─── Follow-up Questions (Legacy) ───
+# MVP-XX: Pontes para os novos endpoints pipeline-questions.
+# O componente FollowUpQuestionnaire.tsx chama estas rotas.
+# Redirecionam a lógica para o pipeline_questions_router.
+
+
+@router.get(
+    "/projects/{project_id}/ingestion/{document_id}/follow-up-questions",
+)
+async def legacy_follow_up_questions(
+    project_id: UUID,
+    document_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_from_token),
+):
+    """Legacy: retorna perguntas de follow-up para um documento.
+
+    Redireciona para o endpoint pipeline-questions filtrando pelo
+    documento. Mantido para compatibilidade com FollowUpQuestionnaire.tsx.
+    """
+    result = await get_pipeline_questions(project_id, db, current_user)
+    # Filtrar pelo document_id específico
+    pending = [
+        q for q in result.pending_questions
+        if q.document_id == str(document_id)
+    ]
+    answered = [
+        q for q in result.answered_questions
+        if q.document_id == str(document_id)
+    ]
+    return {"pending_questions": pending, "answered_questions": answered, "document_id": str(document_id)}
+
+
+@router.post(
+    "/projects/{project_id}/ingestion/{document_id}/follow-up-answers",
+)
+async def legacy_follow_up_answers(
+    project_id: UUID,
+    document_id: UUID,
+    req: AnswersRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_from_token),
+):
+    """Legacy: submete respostas de follow-up para um documento.
+
+    Redireciona para o novo endpoint pipeline-questions/answers.
+    Mantido para compatibilidade com FollowUpQuestionnaire.tsx.
+    """
+    result = await submit_pipeline_answers(project_id, req, db, current_user)
+    return {"document_id": str(document_id), "stored": result.stored, "reprocessed": result.documents_reprocessed}
