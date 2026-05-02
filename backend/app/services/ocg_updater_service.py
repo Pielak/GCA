@@ -38,6 +38,10 @@ logger = structlog.get_logger(__name__)
 # Evento de auditoria dedicado ao updater
 OCG_UPDATED = "OCG_UPDATED"
 
+# Trigger sources canônicos (constantes — não usar literais em chamadas)
+TRIGGER_N8N = "document_ingestion_n8n"
+TRIGGER_CELERY = "document_ingestion"  # mantém backward compat com o caminho Celery existente
+
 # Pesos canônicos dos 7 pilares (skill gca-ocg-engine; soma = 1.00).
 _PILLAR_WEIGHTS: Dict[int, float] = {
     1: 0.10, 2: 0.15, 3: 0.20, 4: 0.20, 5: 0.15, 6: 0.10, 7: 0.10,

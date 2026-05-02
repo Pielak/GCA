@@ -10,6 +10,7 @@ import hmac
 import hashlib
 
 from app.db.database import get_db
+from app.services.ocg_updater_service import OCGUpdaterService, TRIGGER_N8N
 
 logger = structlog.get_logger(__name__)
 
@@ -363,12 +364,15 @@ async def ingestion_complete(
     )
 
     from sqlalchemy import text
+    from datetime import datetime, timezone
+    from uuid import UUID as _UUID
 
     try:
         doc_id = payload.ingestion_id
         project_id = payload.project_id
 
         if payload.status in ("completed", "partial"):
+            # --- Atualizar status do documento ---
             await db.execute(text("""
                 UPDATE ingested_documents SET
                     arguider_status = :status,
@@ -380,32 +384,186 @@ async def ingestion_complete(
                 WHERE id = :doc_id
             """), {"doc_id": doc_id, "status": "completed"})
 
-            ocg_data = json.dumps({
+            # --- Persistir histórico imutável por persona (ocg_individual) ---
+            # Upsert idempotente: ON CONFLICT garante re-tentativas seguras
+            for persona_tag, persona_output in (payload.ocg_individual or {}).items():
+                failed = persona_tag in (payload.personas_failed or [])
+                persona_status = "failed" if failed else "completed"
+                error_msg = persona_output.get("error_message") if failed else None
+                # persona_name: pega do output ou usa a tag como fallback
+                persona_name = persona_output.get("persona_name") or persona_output.get("name") or persona_tag
+                # parecer: o objeto completo da persona (sem o campo error_message isolado)
+                parecer = {k: v for k, v in persona_output.items() if k != "error_message"}
+
+                await db.execute(text("""
+                    INSERT INTO ocg_individual
+                        (id, project_id, document_id, persona_id, persona_name,
+                         parecer, status, error_message, completed_at, created_at)
+                    VALUES
+                        (gen_random_uuid(), :project_id, :document_id, :persona_id,
+                         :persona_name, cast(:parecer as jsonb), :status, :error_message,
+                         NOW(), NOW())
+                    ON CONFLICT (document_id, persona_id) DO UPDATE SET
+                        parecer        = EXCLUDED.parecer,
+                        status         = EXCLUDED.status,
+                        error_message  = EXCLUDED.error_message,
+                        completed_at   = EXCLUDED.completed_at
+                """), {
+                    "project_id": project_id,
+                    "document_id": doc_id,
+                    "persona_id": persona_tag,
+                    "persona_name": persona_name,
+                    "parecer": json.dumps(parecer, ensure_ascii=False),
+                    "status": persona_status,
+                    "error_message": error_msg,
+                })
+
+            # --- Persistir parecer consolidado (ocg_global) ---
+            ocg_global_payload = {
                 "overall_score": payload.overall_score,
                 "blocked": payload.blocked,
                 "blocking_reason": payload.blocking_reason,
                 "personas_executed": payload.personas_executed,
-                "ocg_individual": payload.ocg_individual,
+                "personas_failed": payload.personas_failed,
                 "ocg_global_delta": payload.ocg_global_delta,
                 "consolidated_findings": payload.consolidated_findings,
+                "consolidated_recommendations": payload.consolidated_recommendations,
                 "execution_summary": payload.execution_summary,
-            }, ensure_ascii=False)
-
+            }
             await db.execute(text("""
-                UPDATE ocg SET
-                    ocg_data = :ocg_data,
-                    overall_score = :score,
-                    status = CASE WHEN :blocked THEN 'blocked' ELSE 'active' END,
-                    version = version + 1,
-                    change_type = 'EXPAND',
-                    updated_at = NOW()
-                WHERE project_id = :project_id
+                INSERT INTO ocg_global
+                    (id, project_id, document_id, parecer_consolidated,
+                     consensus_fields, conflicting_fields, voting_results,
+                     consolidated_at, created_at)
+                VALUES
+                    (gen_random_uuid(), :project_id, :document_id,
+                     cast(:parecer_consolidated as jsonb),
+                     cast(:consensus_fields as jsonb),
+                     cast(:conflicting_fields as jsonb),
+                     cast(:voting_results as jsonb),
+                     NOW(), NOW())
+                ON CONFLICT (document_id) DO UPDATE SET
+                    parecer_consolidated = EXCLUDED.parecer_consolidated,
+                    consensus_fields     = EXCLUDED.consensus_fields,
+                    conflicting_fields   = EXCLUDED.conflicting_fields,
+                    voting_results       = EXCLUDED.voting_results,
+                    consolidated_at      = EXCLUDED.consolidated_at
             """), {
-                "ocg_data": ocg_data,
-                "score": payload.overall_score,
-                "blocked": payload.blocked,
                 "project_id": project_id,
+                "document_id": doc_id,
+                "parecer_consolidated": json.dumps(ocg_global_payload, ensure_ascii=False),
+                # Campos de votação/conflito serão expandidos na Fase 31.3 (HITL)
+                "consensus_fields": json.dumps({}, ensure_ascii=False),
+                "conflicting_fields": json.dumps({}, ensure_ascii=False),
+                "voting_results": json.dumps({}, ensure_ascii=False),
             })
+
+            # --- Política de maioria falhou: não chamar o updater ---
+            # Se ≥50% das personas falharam, não há dados confiáveis para mesclar ao OCG.
+            # ocg_individual já foi populado para auditoria mesmo assim.
+            # Lógica de contagem:
+            #   1. n_total = len(ocg_individual) — inclui OK e falhados
+            #   2. Fallback: len(personas_executed) se ocg_individual estiver vazio
+            #   3. Caso-degenerado: personas_executed vazio E personas_failed > 0 → tudo falhou
+            n_total = len(payload.ocg_individual or {})
+            n_failed = len(payload.personas_failed or [])
+            n_executed = len(payload.personas_executed or [])
+            if n_total == 0:
+                n_total = n_executed
+            # Caso-degenerado: nenhuma executada com sucesso e há falhas → tudo falhou
+            if n_total == 0 and n_failed > 0:
+                majority_failed = True
+            else:
+                # Maioria = ≥50% das personas falharam
+                majority_failed = n_failed > 0 and n_total > 0 and (n_failed * 2 >= n_total)
+
+            if majority_failed:
+                logger.warning(
+                    "webhook.ingestion_complete_majority_failed",
+                    ingestion_id=str(doc_id),
+                    project_id=str(project_id),
+                    n_failed=n_failed,
+                    n_executed=n_executed,
+                )
+                await db.execute(text("""
+                    UPDATE ingested_documents SET
+                        arguider_status = 'partial',
+                        updated_at = NOW()
+                    WHERE id = :doc_id
+                """), {"doc_id": doc_id})
+                await db.commit()
+                logger.info(
+                    "webhook.ingestion_complete_processed",
+                    ingestion_id=doc_id,
+                    status="partial_skipped_updater",
+                )
+                return {"status": "processed", "ingestion_id": doc_id}
+
+            # --- Adapter n8n → formato arguider_analysis esperado pelo OCGUpdaterService ---
+            arguider_analysis = {
+                "overall_score": payload.overall_score,
+                "blocked": payload.blocked,
+                "blocking_reason": payload.blocking_reason,
+                "personas_executed": payload.personas_executed,
+                "personas_failed": payload.personas_failed,
+                "ocg_individual": payload.ocg_individual,
+                "ocg_global_delta": payload.ocg_global_delta,
+                # Mapeamento sugerido pelo Gate 2 (CR-2): findings consolidados → categorias
+                # análogas ao Arguidor antigo (gaps/show_stoppers/recommendations).
+                "gaps": [
+                    f for f in (payload.consolidated_findings or [])
+                    if f.get("type") == "gap"
+                ],
+                "show_stoppers": [
+                    f for f in (payload.consolidated_findings or [])
+                    if f.get("type") == "blocker"
+                ],
+                "recommendations": payload.consolidated_recommendations or [],
+            }
+
+            # Resolver actor_id a partir do documento (uploaded_by)
+            # Fallback explícito: None (acordado no Gate 1, refinement #3)
+            actor_id_row = (await db.execute(
+                text("SELECT uploaded_by FROM ingested_documents WHERE id = :doc_id"),
+                {"doc_id": doc_id},
+            )).first()
+            actor_id = actor_id_row[0] if actor_id_row else None
+
+            # Commit do histórico antes de chamar o updater (que usa lock próprio)
+            await db.commit()
+
+            # --- Delegar ao OCGUpdaterService ---
+            updater = OCGUpdaterService(db)
+            update_result = await updater.update_ocg_from_arguider(
+                project_id=_UUID(project_id),
+                arguider_analysis=arguider_analysis,
+                document_id=_UUID(doc_id),
+                actor_id=actor_id,
+                trigger_source=TRIGGER_N8N,
+            )
+
+            # awaiting_ocg: OCG ainda não existe — tratar como warn (igual caminho Celery)
+            if update_result and update_result.get("status") == "awaiting_ocg":
+                logger.info(
+                    "webhook.ingestion_complete.awaiting_ocg",
+                    ingestion_id=str(doc_id),
+                    project_id=str(project_id),
+                    retry_at=update_result.get("retry_at"),
+                )
+
+            # Falha de LLM no updater → marca ocg_pending (não corrompe OCG)
+            if update_result and update_result.get("status") == "ocg_pending":
+                await db.execute(text("""
+                    UPDATE ingested_documents SET
+                        arguider_status = 'ocg_pending',
+                        arguider_error_message = :error,
+                        updated_at = NOW()
+                    WHERE id = :doc_id
+                """), {
+                    "doc_id": doc_id,
+                    "error": update_result.get("error", "OCG update failed"),
+                })
+                await db.commit()
 
         else:
             await db.execute(text("""
@@ -419,8 +577,7 @@ async def ingestion_complete(
                 "doc_id": doc_id,
                 "error": f"Pipeline n8n: {payload.status}. Failed: {payload.personas_failed}",
             })
-
-        await db.commit()
+            await db.commit()
 
         logger.info(
             "webhook.ingestion_complete_processed",
