@@ -546,15 +546,53 @@ class PipelineLogEntry(BaseModel):
 
 @router.post("/internal/pipeline-log")
 async def pipeline_log(entries: List[PipelineLogEntry] | PipelineLogEntry):
-    """Recebe log entries do pipeline n8n e appenda no arquivo rotativo."""
+    """Recebe log entries do pipeline n8n e appenda no arquivo rotativo.
+
+    Formato humanly-readable:
+    [DD/MM/YYYY HH:MM:SS] [WORKFLOW/NODE] EVENT (persona) ingestion=ID — detalhe
+    """
     pl = _get_pipeline_logger()
     if isinstance(entries, PipelineLogEntry):
         entries = [entries]
+
+    EVENT_ICONS = {
+        "started": "▶",
+        "completed": "✓",
+        "success": "✓",
+        "failed": "✗",
+        "error": "✗",
+        "gate_passed": "✓",
+        "gate_failed": "✗",
+        "dispatched": "→",
+        "callback_sent": "↩",
+        "persona_result_received": "←",
+    }
+
     for entry in entries:
-        if not entry.ts:
-            entry.ts = datetime.utcnow().isoformat() + "Z"
-        line = json.dumps(entry.dict(exclude_none=True), ensure_ascii=False)
-        pl.info(line)
+        # Parse timestamp ISO → DD/MM/YYYY HH:MM:SS local
+        ts_str = entry.ts or datetime.utcnow().isoformat() + "Z"
+        try:
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            ts_human = dt.strftime("%d/%m/%Y %H:%M:%S")
+        except (ValueError, TypeError):
+            ts_human = ts_str
+
+        icon = EVENT_ICONS.get(entry.event, "•")
+        wf = entry.workflow or "?"
+        node = entry.node or "?"
+        persona = f" [{entry.persona_tag}]" if entry.persona_tag else ""
+        ingestion = f" ingestion={entry.ingestion_id}" if entry.ingestion_id else ""
+        duration = f" ({entry.duration_ms}ms)" if entry.duration_ms else ""
+
+        # Linha principal
+        msg = f"[{ts_human}] {icon} {wf}/{node}{persona} {entry.event.upper()}{ingestion}{duration}"
+        if entry.detail:
+            msg += f" — {entry.detail}"
+        if entry.error:
+            msg += f" | ERROR: {entry.error}"
+
+        pl.info(msg)
+
     return {"logged": len(entries)}
 
 
