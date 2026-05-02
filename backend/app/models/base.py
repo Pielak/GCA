@@ -1384,6 +1384,120 @@ class OCGDeltaLog(Base):
     )
 
 
+class OCGIndividual(Base):
+    """Parecer individual de uma persona LLM para um documento ingerido.
+
+    Gerado pelo pipeline n8n (fan-out de 12 personas). Uma linha por
+    combinação (document_id, persona_id). persona_id é a tag canônica
+    da persona (ex: "AUD", "GP", "ARQ") — não é FK para users.id.
+
+    MVP 31 Fase 31.1 — substituiu UUID FK→users pelo VARCHAR(20) tag.
+    """
+    __tablename__ = "ocg_individual"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id = Column(
+        UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ", "DBA", "DEV", etc.)
+    # VARCHAR(20) — NÃO é FK para users.id (Conjunto B, §0.5 do CLAUDE.md)
+    persona_id = Column(String(20), nullable=False)
+    persona_name = Column(String(100), nullable=False)  # Nome exibível da persona
+    parecer = Column(JSONB, nullable=False)  # Estrutura: {titulo, analise, riscos, recomendacoes, criticidade}
+    status = Column(String(20), nullable=False)  # pending, processing, completed, error
+    error_message = Column(Text, nullable=True)
+    ai_provider = Column(String(50), nullable=True)  # Provedor de IA usado (auditoria)
+    ai_model = Column(String(100), nullable=True)  # Modelo exato usado (auditoria)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "persona_id", name="uq_ocg_individual_per_document_persona"),
+        Index("idx_ocg_individual_project", project_id),
+        Index("idx_ocg_individual_document", document_id),
+        Index("idx_ocg_individual_persona", persona_id),
+        Index("idx_ocg_individual_status", status),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCGIndividual document={self.document_id} persona={self.persona_id} status={self.status}>"
+
+
+class OCGGlobal(Base):
+    """Parecer consolidado de todas as personas para um documento ingerido.
+
+    Gerado pelo Consolidador n8n após receber todos os pareceres
+    individuais via Redis accumulator. Uma linha por document_id.
+
+    MVP 31 Fase 31.1 — modelo ORM espelhando schema pós-migration 062.
+    """
+    __tablename__ = "ocg_global"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id = Column(
+        UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    parecer_consolidated = Column(JSONB, nullable=False)  # Parecer unificado após votação
+    consensus_fields = Column(JSONB, nullable=False)  # Campos com consenso entre personas
+    conflicting_fields = Column(JSONB, nullable=False)  # Campos com divergência (entrada p/ HITL)
+    voting_results = Column(JSONB, nullable=False)  # Resultado da votação por campo
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    consolidated_at = Column(DateTime(timezone=True), nullable=True)
+    consolidated_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_ocg_global_per_document"),
+        Index("idx_ocg_global_project", project_id),
+        Index("idx_ocg_global_document", document_id),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCGGlobal document={self.document_id} project={self.project_id}>"
+
+
+class OCGIndividualRefined(Base):
+    """Refinamento humano do parecer individual de uma persona (HITL).
+
+    DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
+    Por ora apenas espelha o schema da tabela para que o ORM não quebre.
+    """
+    __tablename__ = "ocg_individual_refined"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ocg_individual_id = Column(
+        UUID(as_uuid=True), ForeignKey("ocg_individual.id", ondelete="CASCADE"), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCGIndividualRefined ocg_individual={self.ocg_individual_id}>"
+
+
+class PersonaFollowUpQuestion(Base):
+    """Pergunta de follow-up gerada por persona LLM para complementação humana (HITL).
+
+    DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
+    Por ora apenas espelha o schema da tabela para que o ORM não quebre.
+    """
+    __tablename__ = "persona_follow_up_questions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<PersonaFollowUpQuestion project={self.project_id}>"
+
+
 class AppPreviewSession(Base):
     """G4 (2026-04-25) — Sessão de preview do app gerado pelo owner.
 
