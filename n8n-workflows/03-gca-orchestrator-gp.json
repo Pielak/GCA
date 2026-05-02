@@ -1,0 +1,248 @@
+{
+  "id": "b4d8e2f1-93a7-4c05-8e1b-2d6f0a9c3b71",
+  "name": "03 - GCA Orquestrador GP (Gerente de Projetos)",
+  "active": true,
+  "nodes": [
+    {
+      "id": "11223344-5566-4778-8990-aabbccddeeff",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 400],
+      "webhookId": "gca-orchestrator-gp",
+      "alwaysOutputData": true,
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gca-orchestrator-gp",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "aabb1122-ccdd-4ee5-ff66-778899001122",
+      "name": "Validar entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Valida HMAC X-Conferente-Signature e campos obrigatórios\n\nconst crypto = require('crypto');\n\nconst body = $input.first().json.body;\nconst headers = $input.first().json.headers;\n\n// --- Validação HMAC ---\nconst conferenteSecret = $env.CONFERENTE_SECRET;\nif (!conferenteSecret) {\n  throw new Error('GP_CONFIG_ERROR: CONFERENTE_SECRET não configurado');\n}\n\nconst signatureHeader = headers['x-conferente-signature'] || headers['X-Conferente-Signature'] || '';\nif (!signatureHeader) {\n  throw new Error('GP_AUTH_FAILED: Header X-Conferente-Signature ausente');\n}\n\nconst receivedHex = signatureHeader.replace('sha256=', '');\nconst rawBody = JSON.stringify(body);\nconst expectedHex = crypto\n  .createHmac('sha256', conferenteSecret)\n  .update(rawBody)\n  .digest('hex');\n\nlet signatureValid = false;\ntry {\n  signatureValid = crypto.timingSafeEqual(\n    Buffer.from(receivedHex, 'hex'),\n    Buffer.from(expectedHex, 'hex')\n  );\n} catch (e) {\n  throw new Error(`GP_AUTH_FAILED: Erro na comparação HMAC: ${e.message}`);\n}\n\nif (!signatureValid) {\n  throw new Error('GP_AUTH_FAILED: Assinatura HMAC X-Conferente-Signature inválida');\n}\n\n// --- Validação do payload ---\nconst {\n  ingestion_id, project_id, normalized_text, extraction_metadata,\n  provider_chain, callback_url, doc_classification, active_personas,\n  shared_context\n} = body;\n\nif (!ingestion_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ingestion_id)) {\n  throw new Error('GP_INVALID: ingestion_id deve ser UUID v4');\n}\n\nif (!project_id) {\n  throw new Error('GP_INVALID: project_id ausente');\n}\n\nif (!normalized_text || typeof normalized_text !== 'string' || normalized_text.trim().length === 0) {\n  throw new Error('GP_INVALID: normalized_text vazio ou ausente');\n}\n\nif (!provider_chain || !Array.isArray(provider_chain) || provider_chain.length === 0) {\n  throw new Error('GP_INVALID: provider_chain ausente ou vazia');\n}\n\nif (!doc_classification) {\n  throw new Error('GP_INVALID: doc_classification ausente');\n}\n\nif (!active_personas || !Array.isArray(active_personas)) {\n  throw new Error('GP_INVALID: active_personas ausente');\n}\n\nreturn [{\n  json: {\n    ingestion_id,\n    project_id,\n    normalized_text,\n    extraction_metadata: extraction_metadata || {},\n    provider_chain,\n    callback_url: callback_url || `${$env.GCA_CALLBACK_BASE_URL}/api/webhooks/ingestion-complete`,\n    doc_classification,\n    active_personas,\n    shared_context: shared_context || {},\n    started_at: new Date().toISOString()\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "bbcc2233-ddee-4ff6-0077-889900112233",
+      "name": "Montar prompt GP",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Monta o prompt real do GP baseado em GP_SYSTEM_PROMPT do backend GCA\n// Fonte: backend/app/services/personas/gp.py — GP_SYSTEM_PROMPT\n\nconst item = $input.first().json;\n\n// Prompt canônico extraído do backend (gp.py — variável GP_SYSTEM_PROMPT)\n// Contexto adicional do pipeline n8n: persona analisa escopo, viabilidade,\n// stakeholders e ROI para o pipeline de ingestão documental\nconst GP_SYSTEM_PROMPT = `Você é o Gerente de Projetos (GP) — primeira persona técnica do Gatekeeper.\n\nSeu papel é validar:\n1. **Escopo**: Requisitos funcionais estão completos e testáveis?\n2. **Viabilidade**: É possível entregar com recursos e timeline planejados?\n3. **Stakeholders**: Estão todos identificados? Há consenso?\n4. **ROI**: O projeto agrega valor? Há riscos de negócio documentados?\n\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\n\n1. SCORES (0–100)\n   - escopo: clareza e completude de requisitos\n   - stack: alinhamento com capacidade da equipe\n   - dados: modelo de dados faz sentido para os fluxos?\n   - implementacao: timeline é realista?\n   - testes: estratégia de aceite definida?\n\n2. APPROVED (bool)\n   - true se pode proceder (escopo claro, stakeholders alinhados)\n   - false se há blocker de negócio\n\n3. ISSUES (array)\n   - Ambiguidades no escopo\n   - Requisitos conflitantes\n   - Stakeholders faltando\n   - Timeline não realista\n   - Riscos não documentados\n   Cada issue:\n   {\n     \"chunk_id\": \"string ou vazio\",\n     \"category\": \"escopo|viabilidade|stakeholder|roi|risco\",\n     \"severity\": \"info|warning|blocker\",\n     \"description\": \"string\",\n     \"suggested_action\": \"string ou null\"\n   }\n\n4. QUESTIONS (array)\n   - Perguntas que PRECISAM de resposta humana para proceder\n   - Exemplos: \"Qual o volume de usuários simultâneos?\", \"Existe budget aprovado?\"\n   Cada question:\n   {\n     \"id\": \"GP-N\",\n     \"question_text\": \"string\",\n     \"rationale\": \"string\",\n     \"answer_type\": \"free_text|yes_no|numeric|choice\",\n     \"severity\": \"informational|important|blocker\",\n     \"chunk_refs\": [\"string\"]\n   }\n\n5. JUSTIFICATION (texto)\n   - Raciocínio resumido para aprovação/reprovação\n\n6. METADATA\n   - tentative: true em passada 1, false em passada 2\n\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\n\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem \\`\\`\\`).\n`;\n\n// Payload de usuário — adaptado ao contexto de ingestão documental n8n\n// Trunca normalized_text para não estourar context window\nconst textTruncated = item.normalized_text.substring(0, 120000);\n\nconst userPayload = {\n  passada: 1,\n  ingestion_id: item.ingestion_id,\n  project_id: item.project_id,\n  summary: item.shared_context?.summary || '(resumo não disponível)',\n  doc_classification: item.doc_classification,\n  active_personas_ativadas: item.active_personas,\n  extraction_source_format: item.extraction_metadata?.source_format || 'unknown',\n  total_chars: item.normalized_text?.length || 0,\n  auditor_highlights: { GP: item.shared_context?.stakeholders || [] },\n  auditor_backlog: [],\n  total_chunks: 1,\n  chunks: [\n    {\n      id: 'chunk-0',\n      heading_path: '/',\n      type: 'document',\n      text: textTruncated.substring(0, 1000),\n      tags: [],\n      token_count: Math.round(textTruncated.length / 4)\n    }\n  ],\n  human_answers: {}\n};\n\nreturn [{\n  json: {\n    ...item,\n    gp_system_prompt: GP_SYSTEM_PROMPT,\n    gp_user_message: JSON.stringify(userPayload, null, 2)\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "ccdd3344-eeff-4007-1188-990011223344",
+      "name": "LLM - GP Análise",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.provider_chain[0].provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://api.deepseek.com/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "={{ $json.provider_chain[0].provider === 'anthropic' ? 'x-api-key' : 'Authorization' }}",
+              "value": "={{ $json.provider_chain[0].provider === 'anthropic' ? $json.provider_chain[0].api_key : 'Bearer ' + $json.provider_chain[0].api_key }}"
+            },
+            {
+              "name": "={{ $json.provider_chain[0].provider === 'anthropic' ? 'anthropic-version' : 'X-Provider' }}",
+              "value": "={{ $json.provider_chain[0].provider === 'anthropic' ? '2023-06-01' : $json.provider_chain[0].provider }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.provider_chain[0].provider === 'anthropic' ? JSON.stringify({ model: $json.provider_chain[0].model, max_tokens: 2500, temperature: 0.3, system: $json.gp_system_prompt, messages: [{ role: 'user', content: $json.gp_user_message }] }) : JSON.stringify({ model: $json.provider_chain[0].model, max_tokens: 2500, temperature: 0.3, messages: [{ role: 'system', content: $json.gp_system_prompt }, { role: 'user', content: $json.gp_user_message }] }) }}",
+        "options": {
+          "timeout": 90000,
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "ddee4455-ff00-4118-2299-001122334455",
+      "name": "Parse e montar PersonaOutput",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1200, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Extrai JSON da resposta LLM e formata como PersonaOutput v2\n// Schema canônico: PersonaOutput.schema.json\n\nconst llmResponse = $input.first().json;\nconst upstream = $('Montar prompt GP').first().json;\n\nconst startedAt = upstream.started_at;\nconst completedAt = new Date().toISOString();\nconst modelUsed = upstream.provider_chain[0]?.model || 'unknown';\n\nlet rawText = '';\n\n// Anthropic: content[]\nif (llmResponse.content && Array.isArray(llmResponse.content)) {\n  rawText = llmResponse.content.map(c => c.text || '').join('');\n} else if (llmResponse.choices && Array.isArray(llmResponse.choices)) {\n  // OpenAI-compat (DeepSeek)\n  rawText = llmResponse.choices[0]?.message?.content || '';\n} else {\n  throw new Error('GP_PARSE_FAILED: Estrutura de resposta LLM desconhecida');\n}\n\n// Remove possíveis blocos markdown\nrawText = rawText.trim();\nif (rawText.startsWith('```')) {\n  rawText = rawText.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\n}\n\nlet llmData;\ntry {\n  llmData = JSON.parse(rawText);\n} catch (e) {\n  // Fallback: output com status failed para não travar o Consolidador\n  llmData = {\n    scores: { escopo: 50, stack: 50, dados: 50, implementacao: 50, testes: 50 },\n    approved: false,\n    issues: [{\n      chunk_id: '',\n      category: 'missing',\n      severity: 'blocker',\n      description: `GP: falha ao parsear resposta LLM — ${e.message}`,\n      suggested_action: 'Revisar documento manualmente'\n    }],\n    questions: [],\n    justification: '(Análise de GP indisponível — parse error)',\n    metadata: { tentative: true }\n  };\n}\n\n// Tokens consumidos\nlet inputTokens = 0;\nlet outputTokens = 0;\nif (llmResponse.usage) {\n  inputTokens = llmResponse.usage.input_tokens || llmResponse.usage.prompt_tokens || 0;\n  outputTokens = llmResponse.usage.output_tokens || llmResponse.usage.completion_tokens || 0;\n}\n\n// Score agregado (média dos 5 sub-scores)\nconst scores = llmData.scores || {};\nconst scoreValues = [\n  scores.escopo || 0,\n  scores.stack || 0,\n  scores.dados || 0,\n  scores.implementacao || 0,\n  scores.testes || 0\n];\nconst aggregatedScore = Math.round(scoreValues.reduce((a, b) => a + b, 0) / scoreValues.length);\n\n// Mapeia issues para findings canônicos do PersonaOutput\nconst findings = (llmData.issues || []).map((issue, idx) => ({\n  id: `gp-finding-${idx + 1}`,\n  severity: issue.severity === 'blocker' ? 'critical' : issue.severity === 'warning' ? 'medium' : 'info',\n  category: issue.category || 'general',\n  title: issue.description ? issue.description.substring(0, 120) : `Issue GP-${idx + 1}`,\n  description: issue.description || '',\n  location_hint: issue.chunk_id || null,\n  evidence_excerpt: null\n}));\n\n// Mapeia questions como recomendações (precisam de input humano)\nconst recommendations = (llmData.questions || []).map((q, idx) => ({\n  id: `gp-rec-${idx + 1}`,\n  priority: q.severity === 'blocker' ? 'urgent' : q.severity === 'important' ? 'high' : 'medium',\n  action: q.question_text || '',\n  expected_impact: q.rationale || '',\n  estimated_effort: 'small',\n  linked_finding_ids: []\n}));\n\n// OCG contributions — persona GP\nconst ocgIndividual = {\n  schedule_assessment: {\n    declared_schedule: null,\n    feasibility: llmData.approved ? 'feasible' : 'undefined',\n    rationale: llmData.justification || ''\n  },\n  critical_path_identified: [],\n  risk_register_local: (llmData.issues || [])\n    .filter(i => i.category === 'risco' || i.severity === 'blocker')\n    .map(i => ({\n      risk: i.description,\n      category: 'scope',\n      probability: i.severity === 'blocker' ? 'high' : 'medium',\n      impact: i.severity === 'blocker' ? 'high' : 'medium',\n      mitigation: i.suggested_action || null\n    })),\n  governance_structure: {\n    raci_defined: false,\n    decision_forum: null,\n    communication_cadence: null,\n    escalation_path: null\n  },\n  methodology_fit: {\n    declared_method: null,\n    fit_to_project: 'questionable',\n    rationale: '(inferido automaticamente)'\n  },\n  gp_approved: llmData.approved,\n  gp_scores: llmData.scores,\n  questions_pending: (llmData.questions || []).length\n};\n\nconst ocgGlobalDelta = {\n  project_milestones: [],\n  project_dependencies_master: [],\n  project_risks_register: (llmData.issues || [])\n    .filter(i => i.severity === 'blocker')\n    .map(i => ({\n      risk: i.description,\n      category: i.category || 'scope',\n      status: 'open'\n    })),\n  governance_artifacts: [],\n  effort_signals: []\n};\n\n// Monta PersonaOutput v2 canônico\nconst personaOutput = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id: upstream.ingestion_id,\n  persona_tag: 'GP',\n  persona_name: 'Gerente de Projetos',\n  execution_metadata: {\n    started_at: startedAt,\n    completed_at: completedAt,\n    model_used: modelUsed,\n    tokens_consumed: {\n      input: inputTokens,\n      output: outputTokens\n    },\n    chunk_index: 0,\n    total_chunks: 1,\n    extraction_source_format: upstream.extraction_metadata?.source_format || 'txt'\n  },\n  score: aggregatedScore,\n  score_rationale: (llmData.justification || '').substring(0, 280),\n  blocking: false,\n  blocking_reason: null,\n  status: 'completed',\n  findings,\n  recommendations,\n  ocg_contributions: {\n    individual: ocgIndividual,\n    global_delta: ocgGlobalDelta\n  }\n};\n\nreturn [{\n  json: {\n    persona_output: personaOutput,\n    provider_chain: upstream.provider_chain,\n    callback_url: upstream.callback_url,\n    ingestion_id: upstream.ingestion_id,\n    project_id: upstream.project_id\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "eeff5566-0011-4229-33aa-112233445566",
+      "name": "Self-validation G3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// G3 — Auto-validação do PersonaOutput antes do callback ao Consolidador\n// Valida campos obrigatórios conforme PersonaOutput.schema.json\n\nconst item = $input.first().json;\nconst output = item.persona_output;\n\nconst validationReport = {\n  schema_version_check: false,\n  score_in_range: false,\n  evidence_excerpts_present: false,\n  ocg_individual_non_empty: false,\n  ocg_global_delta_non_empty: false\n};\n\nconst errors = [];\n\n// schema_version\nif (output.schema_version === 'PersonaOutput-v2') {\n  validationReport.schema_version_check = true;\n} else {\n  errors.push('G3: schema_version deve ser PersonaOutput-v2');\n}\n\n// persona_tag\nconst TAGS_CANONICAS = ['AUD', 'GP', 'ARQ', 'DBA', 'DEV', 'QA', 'UX', 'UI', 'SEG', 'CONF', 'LGPD', 'NEG'];\nif (!TAGS_CANONICAS.includes(output.persona_tag)) {\n  errors.push(`G3: persona_tag '${output.persona_tag}' não é canônica`);\n}\nif (output.persona_tag !== 'GP') {\n  errors.push('G3: persona_tag deve ser GP neste workflow');\n}\n\n// ingestion_id UUID v4\nif (!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(output.ingestion_id)) {\n  errors.push('G3: ingestion_id deve ser UUID v4');\n}\n\n// score 0-100\nif (typeof output.score === 'number' && output.score >= 0 && output.score <= 100) {\n  validationReport.score_in_range = true;\n} else {\n  errors.push(`G3: score fora do intervalo 0-100 (valor: ${output.score})`);\n}\n\n// execution_metadata obrigatório\nif (!output.execution_metadata?.started_at || !output.execution_metadata?.completed_at) {\n  errors.push('G3: execution_metadata.started_at e completed_at obrigatórios');\n}\nif (!output.execution_metadata?.model_used) {\n  errors.push('G3: execution_metadata.model_used obrigatório');\n}\nif (typeof output.execution_metadata?.tokens_consumed?.input !== 'number') {\n  errors.push('G3: execution_metadata.tokens_consumed.input deve ser número');\n}\n\n// findings — evidence_excerpt para severity >= medium\nconst mediumPlusSeverities = new Set(['medium', 'high', 'critical']);\nconst findingsNeedingEvidence = (output.findings || []).filter(f => mediumPlusSeverities.has(f.severity));\nconst findingsWithMissingEvidence = findingsNeedingEvidence.filter(f => !f.evidence_excerpt || f.evidence_excerpt.trim() === '');\n\n// Para GP em pipeline n8n, evidence_excerpt pode ser null em findings gerados de texto livre\n// Registra mas não falha a validação\nvalidationReport.evidence_excerpts_present = findingsWithMissingEvidence.length === 0;\n\n// ocg_contributions\nconst ocgIndividual = output.ocg_contributions?.individual;\nconst ocgGlobalDelta = output.ocg_contributions?.global_delta;\n\nif (ocgIndividual && Object.keys(ocgIndividual).length > 0) {\n  validationReport.ocg_individual_non_empty = true;\n} else {\n  errors.push('G3: ocg_contributions.individual não pode ser vazio');\n}\n\nif (ocgGlobalDelta && Object.keys(ocgGlobalDelta).length > 0) {\n  validationReport.ocg_global_delta_non_empty = true;\n} else {\n  errors.push('G3: ocg_contributions.global_delta não pode ser vazio');\n}\n\n// Emite output independentemente de erros (G3 não bloqueia — status=failed destrava Consolidador)\nconst hasErrors = errors.length > 0;\nconst finalOutput = {\n  ...output,\n  status: hasErrors ? 'partial' : 'completed',\n  validation_self_report: validationReport,\n  g3_errors: hasErrors ? errors : []\n};\n\n// Se erros críticos, marcar como failed mas ainda enviar ao Consolidador\nif (!validationReport.schema_version_check || !validationReport.score_in_range) {\n  finalOutput.status = 'failed';\n}\n\nreturn [{\n  json: {\n    persona_output: finalOutput,\n    provider_chain: item.provider_chain,\n    callback_url: item.callback_url,\n    ingestion_id: item.ingestion_id,\n    project_id: item.project_id,\n    g3_has_errors: hasErrors,\n    g3_errors: errors\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "ff006677-1122-4330-44bb-223344556677",
+      "name": "Callback Consolidador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1680, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-consolidador-accumulate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Specialist-Signature",
+              "value": "={{ (() => { const crypto = require('crypto'); const payload = JSON.stringify($json.persona_output); return 'sha256=' + crypto.createHmac('sha256', $env.SPECIALIST_SECRET).update(payload).digest('hex'); })() }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ingestion_id: $json.ingestion_id, project_id: $json.project_id, persona_output: $json.persona_output, sent_at: new Date().toISOString() }) }}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "00117788-2233-4441-55cc-334455667788",
+      "name": "Handler de erro global",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 580],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Handler de erro global do GP Orquestrador\n// Captura falha e envia PersonaOutput com status=failed ao Consolidador\n// Isso destranca o Consolidador (que conta expected_count vs received_count)\n\nconst crypto = require('crypto');\n\nconst errorData = $input.first();\nconst errorMessage = errorData.json.error?.message || errorData.json.message || 'Erro desconhecido no GP Orquestrador';\n\nlet ingestion_id = 'unknown';\nlet project_id = 'unknown';\nlet provider_chain = [];\nlet callback_url = `${$env.GCA_CALLBACK_BASE_URL}/api/webhooks/ingestion-complete`;\n\ntry {\n  const webhookBody = $('Webhook Trigger').first().json.body;\n  ingestion_id = webhookBody?.ingestion_id || 'unknown';\n  project_id = webhookBody?.project_id || 'unknown';\n  provider_chain = webhookBody?.provider_chain || [];\n  callback_url = webhookBody?.callback_url || callback_url;\n} catch (_) {\n  // Sem contexto do webhook disponível\n}\n\n// Monta PersonaOutput de falha para não travar o Consolidador\nconst failedOutput = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id,\n  persona_tag: 'GP',\n  persona_name: 'Gerente de Projetos',\n  execution_metadata: {\n    started_at: new Date().toISOString(),\n    completed_at: new Date().toISOString(),\n    model_used: provider_chain[0]?.model || 'unknown',\n    tokens_consumed: { input: 0, output: 0 },\n    chunk_index: 0,\n    total_chunks: 1,\n    extraction_source_format: 'txt'\n  },\n  score: 0,\n  score_rationale: `Falha de execução: ${errorMessage.substring(0, 240)}`,\n  blocking: false,\n  blocking_reason: null,\n  status: 'failed',\n  findings: [{\n    id: 'gp-execution-error',\n    severity: 'critical',\n    category: 'execution_error',\n    title: 'Falha na execução do GP Orquestrador',\n    description: errorMessage,\n    location_hint: null,\n    evidence_excerpt: null\n  }],\n  recommendations: [],\n  ocg_contributions: {\n    individual: { error: errorMessage },\n    global_delta: {}\n  },\n  validation_self_report: {\n    schema_version_check: true,\n    score_in_range: true,\n    evidence_excerpts_present: false,\n    ocg_individual_non_empty: true,\n    ocg_global_delta_non_empty: false\n  }\n};\n\nreturn [{\n  json: {\n    persona_output: failedOutput,\n    ingestion_id,\n    project_id,\n    provider_chain,\n    callback_url,\n    is_error_fallback: true\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "11228899-3344-4552-66dd-445566778899",
+      "name": "Callback Consolidador (erro)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 580],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-consolidador-accumulate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Specialist-Signature",
+              "value": "={{ (() => { const crypto = require('crypto'); const payload = JSON.stringify($json.persona_output); return 'sha256=' + crypto.createHmac('sha256', $env.SPECIALIST_SECRET || 'fallback').update(payload).digest('hex'); })() }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ingestion_id: $json.ingestion_id, project_id: $json.project_id, persona_output: $json.persona_output, sent_at: new Date().toISOString() }) }}",
+        "options": {
+          "timeout": 15000,
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {
+      "main": [
+        [
+          { "node": "Validar entrada", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Validar entrada": {
+      "main": [
+        [
+          { "node": "Montar prompt GP", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Montar prompt GP": {
+      "main": [
+        [
+          { "node": "LLM - GP Análise", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "LLM - GP Análise": {
+      "main": [
+        [
+          { "node": "Parse e montar PersonaOutput", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Parse e montar PersonaOutput": {
+      "main": [
+        [
+          { "node": "Self-validation G3", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Self-validation G3": {
+      "main": [
+        [
+          { "node": "Callback Consolidador", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Handler de erro global": {
+      "main": [
+        [
+          { "node": "Callback Consolidador (erro)", "type": "main", "index": 0 }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  }
+}

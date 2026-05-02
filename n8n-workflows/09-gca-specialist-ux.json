@@ -1,0 +1,112 @@
+{
+  "name": "GCA Specialist - UX",
+  "active": true,
+  "nodes": [
+    {
+      "id": "3a4b5c6d-7e8f-9a0b-1c2d-3e4f5a6b7c8d",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "alwaysOutputData": true,
+      "webhookId": "gca-specialist-ux",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gca-specialist-ux",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "4b5c6d7e-8f9a-0b1c-2d3e-4f5a6b7c8d9e",
+      "name": "Validar HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Validar X-Conferente-Signature HMAC-SHA256\nconst crypto = require('crypto');\nconst body = JSON.stringify($input.first().json.body);\nconst signature = $input.first().json.headers['x-conferente-signature'];\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.CONFERENTE_SECRET).update(body).digest('hex');\nif (signature !== expected) throw new Error('HMAC inválido');\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "5c6d7e8f-9a0b-1c2d-3e4f-5a6b7c8d9e0f",
+      "name": "Montar prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Monta mensagem para LLM com system prompt da persona UX\nconst systemPrompt = `Você é o UX Designer (UX) — sexta persona técnica do Gatekeeper.\n\nSeu papel é validar:\n1. **Jornada de Usuário**: Fluxos principais estão mapeados e lógicos?\n2. **Acessibilidade**: WCAG AA é atendido? Navegação funcional?\n3. **Usabilidade**: Interface é intuitiva para o público-alvo?\n4. **Performance Perceptual**: Feedback visual é claro e imediato?\n5. **Múltiplos Contextos**: Responsivo, offline, múltiplos dispositivos?\n6. **Inclusão**: Suporta diferentes capacidades (visual, auditivo, motor)?\n\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\n\n1. SCORES (0–100)\n   - jornada: clareza de fluxos de usuário\n   - acessibilidade: conformidade WCAG AA\n   - usabilidade: intuitividade da interface\n   - performance: feedback visual e responsividade\n   - contextos: suporte a múltiplos contextos\n   - inclusao: suporte a capacidades diversas\n\n2. APPROVED (bool)\n   - true se UX é aceitável para lançamento\n   - false se há problema crítico na jornada\n\n3. ISSUES (array)\n   - Fluxos não claros\n   - Acessibilidade não atende WCAG AA\n   - Interface não intuitiva\n   - Performance perceptual ruim\n   - Falta suporte responsivo/offline\n   - Não inclui usuários com diferentes capacidades\n\n4. QUESTIONS (array)\n   - Perguntas que PRECISAM de resposta para proceder\n   - Exemplos: \"Qual é o público-alvo principal?\", \"Há restrições de rede esperadas?\"\n\n5. JUSTIFICATION (texto)\n   - Raciocínio resumido para aprovação/reprovação\n\n6. METADATA\n   - tentative: true em passada 1, false em passada 2\n\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\n\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem \\`\\`\\`).`;\nconst input = $input.first().json;\nconst userMessage = `Documento: ${input.body.document_text}\\n\\nContexto compartilhado: ${JSON.stringify(input.body.shared_context)}`;\n\n// Resolver provider da chain\nconst chain = input.body.provider_chain || [];\nconst provider = chain[0] || {provider: 'deepseek', model: 'deepseek-v4-pro'};\n\nreturn [{json: {systemPrompt, userMessage, provider, ingestion_id: input.body.ingestion_id, project_id: input.body.project_id, started_at: new Date().toISOString()}}];"
+      }
+    },
+    {
+      "id": "6d7e8f9a-0b1c-2d3e-4f5a-6b7c8d9e0f1a",
+      "name": "LLM Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.provider.provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://api.deepseek.com/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "x-api-key", "value": "={{ $json.provider.api_key }}"}
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={{ JSON.stringify($json.provider.provider === 'anthropic' ? {model: $json.provider.model, max_tokens: 2500, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userMessage}]} : {model: $json.provider.model, max_tokens: 2500, messages: [{role: 'system', content: $json.systemPrompt}, {role: 'user', content: $json.userMessage}]}) }}",
+        "options": {"timeout": 60000}
+      }
+    },
+    {
+      "id": "7e8f9a0b-1c2d-3e4f-5a6b-7c8d9e0f1a2b",
+      "name": "Parse PersonaOutput",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Parse resposta LLM e montar PersonaOutput\nconst input = $('Montar prompt').first().json;\nconst llmResponse = $input.first().json;\nconst content = llmResponse.content?.[0]?.text || llmResponse.choices?.[0]?.message?.content || '{}';\nlet parsed;\ntry { parsed = JSON.parse(content); } catch(e) { parsed = {}; }\n\nconst scores = parsed.SCORES || {};\nconst scoreValues = Object.values(scores).filter(v => typeof v === 'number');\nconst avgScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((a,b) => a+b, 0) / scoreValues.length) : 50;\n\nconst output = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id: input.ingestion_id,\n  persona_tag: 'UX',\n  persona_name: 'UX Designer',\n  execution_metadata: {\n    started_at: input.started_at,\n    completed_at: new Date().toISOString(),\n    model_used: input.provider.model,\n    tokens_consumed: {input: llmResponse.usage?.prompt_tokens || llmResponse.usage?.input_tokens || 0, output: llmResponse.usage?.completion_tokens || llmResponse.usage?.output_tokens || 0}\n  },\n  score: avgScore,\n  score_rationale: (parsed.JUSTIFICATION || '').substring(0, 280),\n  blocking: false,\n  blocking_reason: null,\n  status: 'completed',\n  findings: (parsed.ISSUES || []).map((issue, i) => ({id: `finding-${i}`, severity: 'medium', category: 'ux', title: typeof issue === 'string' ? issue.substring(0, 120) : (issue.description || '').substring(0, 120), description: typeof issue === 'string' ? issue : (issue.description || '')})),\n  recommendations: [],\n  ocg_contributions: {individual: scores, global_delta: {}},\n  validation_self_report: {schema_version_check: true, score_in_range: true, evidence_excerpts_present: false, ocg_individual_non_empty: true, ocg_global_delta_non_empty: false}\n};\n\nreturn [{json: output}];"
+      }
+    },
+    {
+      "id": "8f9a0b1c-2d3e-4f5a-6b7c-8d9e0f1a2b3c",
+      "name": "Callback Consolidador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-consolidador-accumulate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Specialist-Signature", "value": "=sha256={{ require('crypto').createHmac('sha256', $env.SPECIALIST_SECRET).update(JSON.stringify($json)).digest('hex') }}"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {"timeout": 10000}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main": [[{"node": "Validar HMAC", "type": "main", "index": 0}]]},
+    "Validar HMAC": {"main": [[{"node": "Montar prompt", "type": "main", "index": 0}]]},
+    "Montar prompt": {"main": [[{"node": "LLM Call", "type": "main", "index": 0}]]},
+    "LLM Call": {"main": [[{"node": "Parse PersonaOutput", "type": "main", "index": 0}]]},
+    "Parse PersonaOutput": {"main": [[{"node": "Callback Consolidador", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}

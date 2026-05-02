@@ -1,0 +1,112 @@
+{
+  "name": "GCA Specialist - DBA",
+  "active": true,
+  "nodes": [
+    {
+      "id": "a1a2a3a4-b5b6-c7c8-d9d0-e1e2e3e4e5e6",
+      "name": "Webhook Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300],
+      "alwaysOutputData": true,
+      "webhookId": "gca-specialist-dba",
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "gca-specialist-dba",
+        "responseMode": "onReceived",
+        "options": {}
+      }
+    },
+    {
+      "id": "b1b2b3b4-c5c6-d7d8-e9e0-f1f2f3f4f5f6",
+      "name": "Validar HMAC",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Validar X-Conferente-Signature HMAC-SHA256\nconst crypto = require('crypto');\nconst body = JSON.stringify($input.first().json.body);\nconst signature = $input.first().json.headers['x-conferente-signature'];\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.CONFERENTE_SECRET).update(body).digest('hex');\nif (signature !== expected) throw new Error('HMAC inválido');\nreturn $input.all();"
+      }
+    },
+    {
+      "id": "c1c2c3c4-d5d6-e7e8-f9f0-a1a2a3a4a5a6",
+      "name": "Montar prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [750, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Monta mensagem para LLM com system prompt da persona DBA\nconst systemPrompt = `Você é o Data Engineer (DBA) — terceira persona técnica do Gatekeeper.\n\nSeu papel é validar:\n1. **Schema**: Modelo de dados faz sentido para os fluxos?\n2. **Performance**: Índices estão bem dimensionados? Há N+1 queries?\n3. **Migração**: Scripts de migração são idempotentes e reversíveis?\n4. **Retenção**: Política de limpeza de dados está clara?\n5. **Compliance**: Conformidade com LGPD, regulamentações, backup/recovery?\n6. **Escalabilidade**: Banco é escalável (sharding, replicação)?\n\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\n\n1. SCORES (0–100)\n   - dados: qualidade do modelo de dados\n   - performance: otimização de índices e queries\n   - migracao: clareza de scripts de migração\n   - compliance: conformidade com regulamentações\n   - escalabilidade: capacidade de crescimento\n\n2. APPROVED (bool)\n   - true se o schema é viável\n   - false se há problema crítico nos dados\n\n3. ISSUES (array)\n   - Schema inadequado para fluxos\n   - Falta de índices críticos\n   - Scripts de migração não reversíveis\n   - Política de retenção não definida\n   - Compliance ou backup não cobertos\n\n4. QUESTIONS (array)\n   - Perguntas que PRECISAM de resposta para proceder\n   - Exemplos: \"Qual SLA de RPO/RTO?\", \"Quais dados são PII?\"\n\n5. JUSTIFICATION (texto)\n   - Raciocínio resumido para aprovação/reprovação\n\n6. METADATA\n   - tentative: true em passada 1, false em passada 2\n\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\n\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem \\`\\`\\`).`;\nconst input = $input.first().json;\nconst userMessage = `Documento: ${input.body.document_text}\\n\\nContexto compartilhado: ${JSON.stringify(input.body.shared_context)}`;\n\n// Resolver provider da chain\nconst chain = input.body.provider_chain || [];\nconst provider = chain[0] || {provider: 'deepseek', model: 'deepseek-v4-pro'};\n\nreturn [{json: {systemPrompt, userMessage, provider, ingestion_id: input.body.ingestion_id, project_id: input.body.project_id, started_at: new Date().toISOString()}}];"
+      }
+    },
+    {
+      "id": "d1d2d3d4-e5e6-f7f8-a9a0-b1b2b3b4b5b6",
+      "name": "LLM Call",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1000, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.provider.provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://api.deepseek.com/chat/completions' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}"},
+            {"name": "anthropic-version", "value": "2023-06-01"},
+            {"name": "x-api-key", "value": "={{ $json.provider.api_key }}"}
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": []
+        },
+        "jsonBody": "={{ JSON.stringify($json.provider.provider === 'anthropic' ? {model: $json.provider.model, max_tokens: 2500, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userMessage}]} : {model: $json.provider.model, max_tokens: 2500, messages: [{role: 'system', content: $json.systemPrompt}, {role: 'user', content: $json.userMessage}]}) }}",
+        "options": {"timeout": 60000}
+      }
+    },
+    {
+      "id": "e1e2e3e4-f5f6-a7a8-b9b0-c1c2c3c4c5c6",
+      "name": "Parse PersonaOutput",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1250, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Parse resposta LLM e montar PersonaOutput\nconst input = $('Montar prompt').first().json;\nconst llmResponse = $input.first().json;\nconst content = llmResponse.content?.[0]?.text || llmResponse.choices?.[0]?.message?.content || '{}';\nlet parsed;\ntry { parsed = JSON.parse(content); } catch(e) { parsed = {}; }\n\nconst scores = parsed.SCORES || {};\nconst scoreValues = Object.values(scores).filter(v => typeof v === 'number');\nconst avgScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((a,b) => a+b, 0) / scoreValues.length) : 50;\n\nconst output = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id: input.ingestion_id,\n  persona_tag: 'DBA',\n  persona_name: 'Data Engineer',\n  execution_metadata: {\n    started_at: input.started_at,\n    completed_at: new Date().toISOString(),\n    model_used: input.provider.model,\n    tokens_consumed: {input: llmResponse.usage?.prompt_tokens || llmResponse.usage?.input_tokens || 0, output: llmResponse.usage?.completion_tokens || llmResponse.usage?.output_tokens || 0}\n  },\n  score: avgScore,\n  score_rationale: (parsed.JUSTIFICATION || '').substring(0, 280),\n  blocking: false,\n  blocking_reason: null,\n  status: 'completed',\n  findings: (parsed.ISSUES || []).map((issue, i) => ({id: `finding-${i}`, severity: 'medium', category: 'dados', title: typeof issue === 'string' ? issue.substring(0, 120) : (issue.description || '').substring(0, 120), description: typeof issue === 'string' ? issue : (issue.description || '')})),\n  recommendations: [],\n  ocg_contributions: {individual: scores, global_delta: {}},\n  validation_self_report: {schema_version_check: true, score_in_range: true, evidence_excerpts_present: false, ocg_individual_non_empty: true, ocg_global_delta_non_empty: false}\n};\n\nreturn [{json: output}];"
+      }
+    },
+    {
+      "id": "f1f2f3f4-a5a6-b7b8-c9c0-d1d2d3d4d5d6",
+      "name": "Callback Consolidador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1500, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-consolidador-accumulate",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {"name": "Content-Type", "value": "application/json"},
+            {"name": "X-Specialist-Signature", "value": "=sha256={{ require('crypto').createHmac('sha256', $env.SPECIALIST_SECRET).update(JSON.stringify($json)).digest('hex') }}"}
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {"timeout": 10000}
+      }
+    }
+  ],
+  "connections": {
+    "Webhook Trigger": {"main": [[{"node": "Validar HMAC", "type": "main", "index": 0}]]},
+    "Validar HMAC": {"main": [[{"node": "Montar prompt", "type": "main", "index": 0}]]},
+    "Montar prompt": {"main": [[{"node": "LLM Call", "type": "main", "index": 0}]]},
+    "LLM Call": {"main": [[{"node": "Parse PersonaOutput", "type": "main", "index": 0}]]},
+    "Parse PersonaOutput": {"main": [[{"node": "Callback Consolidador", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"}
+}

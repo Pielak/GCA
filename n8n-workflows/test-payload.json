@@ -1,0 +1,23 @@
+{
+  "ingestion_id": "550e8400-e29b-41d4-a716-446655440000",
+  "project_id": "24bf72c3-2ee8-45fd-b879-d3a00b347c39",
+  "document_bytes_base64": "",
+  "document_metadata": {
+    "filename": "teste-ingestao.txt",
+    "mime_type": "text/plain",
+    "size_bytes": 150,
+    "uploaded_by": "admin@gca.com",
+    "uploaded_by_role": "GP",
+    "declared_purpose": "Teste do pipeline n8n"
+  },
+  "provider_chain": [
+    {
+      "provider": "deepseek",
+      "model": "deepseek-v4-pro",
+      "api_key": "sk-test-placeholder",
+      "is_default": true
+    }
+  ],
+  "callback_url": "https://gca.code-auditor.com.br/api/webhooks/ingestion-complete",
+  "timestamp": "2026-05-02T00:00:00Z"
+}
