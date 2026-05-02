@@ -70,6 +70,13 @@ services:
       POSTGRES_DB: gca
       POSTGRES_USER: gca
       POSTGRES_PASSWORD: gca_secret
+      INGESTION_VIA_N8N: ${INGESTION_VIA_N8N:-false}
+      N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
+      GCA_CALLBACK_BASE_URL: ${GCA_CALLBACK_BASE_URL:-http://gca-backend:8000}
+      GCA_WEBHOOK_SECRET: ${GCA_WEBHOOK_SECRET:-}
+      N8N_CALLBACK_SECRET: ${N8N_CALLBACK_SECRET:-}
+      REDIS_HOST: redis
+      N8N_REDIS_DB: "2"
     depends_on:
       postgres:
         condition: service_healthy

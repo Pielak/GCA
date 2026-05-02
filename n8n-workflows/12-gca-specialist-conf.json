@@ -7,7 +7,10 @@
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [250, 300],
+      "position": [
+        250,
+        300
+      ],
       "alwaysOutputData": true,
       "webhookId": "gca-specialist-conf",
       "parameters": {
@@ -22,7 +25,10 @@
       "name": "Validar HMAC",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [500, 300],
+      "position": [
+        500,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Validar X-Conferente-Signature HMAC-SHA256\nconst crypto = require('crypto');\nconst body = JSON.stringify($input.first().json.body);\nconst signature = $input.first().json.headers['x-conferente-signature'];\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.CONFERENTE_SECRET).update(body).digest('hex');\nif (signature !== expected) throw new Error('HMAC inválido');\nreturn $input.all();"
@@ -33,7 +39,10 @@
       "name": "Montar prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [750, 300],
+      "position": [
+        750,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Monta mensagem para LLM com system prompt da persona CONF\n// SUBSTITUIR pelo prompt real da v1 (gca-personas-system-prompts.md §3.3 — conformidade)\n// ATENÇÃO: CONF é pilar BLOQUEANTE — blocking=true quando score < 60\nconst systemPrompt = `PROMPT_CONFORMIDADE\n\nVocê é o especialista em Conformidade Regulatória (CONF) do pipeline GCA.\n\nATENÇÃO: Você é o ÚNICO pilar BLOQUEANTE do sistema. Se detectar não-conformidade crítica (score < 60), emita blocking=true com razão explícita.\n\nSeu papel é analisar o documento sob a ótica de conformidade:\n1. **Regulatório**: Conformidade com normas do setor (ISO 27001, SOC 2, PCI-DSS, HIPAA, etc.)?\n2. **Contratual**: Obrigações contratuais e SLAs atendidos?\n3. **Auditabilidade**: Trilha de auditoria e rastreabilidade implementadas?\n4. **Controles internos**: Segregação de funções, aprovações, revisões?\n5. **Política corporativa**: Aderência a políticas internas da organização?\n6. **Riscos regulatórios**: Penalidades e multas potenciais mapeadas?\n\nSEUS OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\n\n1. SCORES (0–100)\n   - regulatorio: aderência a normas do setor\n   - contratual: cumprimento de obrigações contratuais\n   - auditabilidade: qualidade da trilha de auditoria\n   - controles: maturidade de controles internos\n   - riscos: identificação de riscos regulatórios\n\n2. APPROVED (bool): true apenas se score >= 60 em TODOS os critérios\n\n3. BLOCKING (bool): true se score geral < 60 (pilar bloqueante)\n\n4. BLOCKING_REASON (string|null): razão detalhada quando blocking=true\n\n5. ISSUES (array): não-conformidades detectadas com referência normativa\n\n6. QUESTIONS (array): perguntas necessárias para avaliação completa\n\n7. JUSTIFICATION (texto): raciocínio resumido\n\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\n\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem \\`\\`\\`).`;\nconst input = $input.first().json;\nconst userMessage = `Documento: ${input.body.document_text}\\n\\nContexto compartilhado: ${JSON.stringify(input.body.shared_context)}`;\n\n// Resolver provider da chain\nconst chain = input.body.provider_chain || [];\nconst provider = chain[0] || {provider: 'deepseek', model: 'deepseek-v4-pro'};\n\nreturn [{json: {systemPrompt, userMessage, provider, ingestion_id: input.body.ingestion_id, project_id: input.body.project_id, started_at: new Date().toISOString()}}];"
@@ -44,7 +53,10 @@
       "name": "LLM Call",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1000, 300],
+      "position": [
+        1000,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -52,10 +64,22 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {"name": "Content-Type", "value": "application/json"},
-            {"name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}"},
-            {"name": "anthropic-version", "value": "2023-06-01"},
-            {"name": "x-api-key", "value": "={{ $json.provider.api_key }}"}
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.provider.api_key }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.provider.api_key }}"
+            }
           ]
         },
         "sendBody": true,
@@ -63,7 +87,9 @@
           "parameters": []
         },
         "jsonBody": "={{ JSON.stringify($json.provider.provider === 'anthropic' ? {model: $json.provider.model, max_tokens: 2500, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userMessage}]} : {model: $json.provider.model, max_tokens: 2500, messages: [{role: 'system', content: $json.systemPrompt}, {role: 'user', content: $json.userMessage}]}) }}",
-        "options": {"timeout": 60000}
+        "options": {
+          "timeout": 60000
+        }
       }
     },
     {
@@ -71,7 +97,10 @@
       "name": "Parse PersonaOutput",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1250, 300],
+      "position": [
+        1250,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Parse resposta LLM e montar PersonaOutput\n// CONF é pilar BLOQUEANTE: blocking=true quando score < 60\nconst input = $('Montar prompt').first().json;\nconst llmResponse = $input.first().json;\nconst content = llmResponse.content?.[0]?.text || llmResponse.choices?.[0]?.message?.content || '{}';\nlet parsed;\ntry { parsed = JSON.parse(content); } catch(e) { parsed = {}; }\n\nconst scores = parsed.SCORES || {};\nconst scoreValues = Object.values(scores).filter(v => typeof v === 'number');\nconst avgScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((a,b) => a+b, 0) / scoreValues.length) : 50;\n\n// Lógica de bloqueio: CONF bloqueia quando score < 60\nconst isBlocking = avgScore < 60;\nconst blockingReason = isBlocking\n  ? (parsed.BLOCKING_REASON || `Score de conformidade ${avgScore}/100 está abaixo do mínimo obrigatório de 60. Não-conformidade detectada.`)\n  : null;\n\nconst output = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id: input.ingestion_id,\n  persona_tag: 'CONF',\n  persona_name: 'Conformidade',\n  execution_metadata: {\n    started_at: input.started_at,\n    completed_at: new Date().toISOString(),\n    model_used: input.provider.model,\n    tokens_consumed: {input: llmResponse.usage?.prompt_tokens || llmResponse.usage?.input_tokens || 0, output: llmResponse.usage?.completion_tokens || llmResponse.usage?.output_tokens || 0}\n  },\n  score: avgScore,\n  score_rationale: (parsed.JUSTIFICATION || '').substring(0, 280),\n  blocking: isBlocking,\n  blocking_reason: blockingReason,\n  status: 'completed',\n  findings: (parsed.ISSUES || []).map((issue, i) => ({id: `finding-${i}`, severity: 'high', category: 'conformidade', title: typeof issue === 'string' ? issue.substring(0, 120) : (issue.description || '').substring(0, 120), description: typeof issue === 'string' ? issue : (issue.description || ''), regulatory_reference: typeof issue === 'object' ? (issue.regulatory_reference || null) : null})).filter(f => f.title),\n  recommendations: [],\n  ocg_contributions: {individual: scores, global_delta: {}},\n  validation_self_report: {schema_version_check: true, score_in_range: true, evidence_excerpts_present: false, ocg_individual_non_empty: true, ocg_global_delta_non_empty: false}\n};\n\nreturn [{json: output}];"
@@ -82,7 +111,10 @@
       "name": "Callback Consolidador",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1500, 300],
+      "position": [
+        1500,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -90,23 +122,84 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {"name": "Content-Type", "value": "application/json"},
-            {"name": "X-Specialist-Signature", "value": "=sha256={{ require('crypto').createHmac('sha256', $env.SPECIALIST_SECRET).update(JSON.stringify($json)).digest('hex') }}"}
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-Specialist-Signature",
+              "value": "=sha256={{ require('crypto').createHmac('sha256', $env.SPECIALIST_SECRET).update(JSON.stringify($json)).digest('hex') }}"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {"timeout": 10000}
+        "options": {
+          "timeout": 10000
+        }
       }
     }
   ],
   "connections": {
-    "Webhook Trigger": {"main": [[{"node": "Validar HMAC", "type": "main", "index": 0}]]},
-    "Validar HMAC": {"main": [[{"node": "Montar prompt", "type": "main", "index": 0}]]},
-    "Montar prompt": {"main": [[{"node": "LLM Call", "type": "main", "index": 0}]]},
-    "LLM Call": {"main": [[{"node": "Parse PersonaOutput", "type": "main", "index": 0}]]},
-    "Parse PersonaOutput": {"main": [[{"node": "Callback Consolidador", "type": "main", "index": 0}]]}
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validar HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar HMAC": {
+      "main": [
+        [
+          {
+            "node": "Montar prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar prompt": {
+      "main": [
+        [
+          {
+            "node": "LLM Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Call": {
+      "main": [
+        [
+          {
+            "node": "Parse PersonaOutput",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PersonaOutput": {
+      "main": [
+        [
+          {
+            "node": "Callback Consolidador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": {"executionOrder": "v1"}
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "gca-specialist-conf"
 }

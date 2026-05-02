@@ -7,7 +7,10 @@
       "name": "Webhook Accumulate",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [250, 300],
+      "position": [
+        250,
+        300
+      ],
       "alwaysOutputData": true,
       "webhookId": "gca-consolidador-accumulate",
       "parameters": {
@@ -22,7 +25,10 @@
       "name": "Validar HMAC",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [500, 300],
+      "position": [
+        500,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "const crypto = require('crypto');\nconst body = JSON.stringify($input.first().json.body);\nconst signature = $input.first().json.headers['x-specialist-signature'];\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.SPECIALIST_SECRET).update(body).digest('hex');\nif (signature !== expected) throw new Error('HMAC inválido — specialist signature');\nreturn $input.all();"
@@ -33,7 +39,10 @@
       "name": "G4 - Validar PersonaOutput",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [750, 300],
+      "position": [
+        750,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// G4 — Validação pré-merge do PersonaOutput recebido\nconst result = $input.first().json.body || $input.first().json;\nconst validTags = ['AUD','GP','ARQ','DBA','DEV','QA','UX','UI','SEG','CONF','LGPD','NEG'];\nconst errors = [];\n\nif (result.schema_version !== 'PersonaOutput-v2') errors.push('schema_version inválido');\nif (!validTags.includes(result.persona_tag)) errors.push(`persona_tag '${result.persona_tag}' não canônica`);\nif (typeof result.score !== 'number' || result.score < 0 || result.score > 100) errors.push('score fora de 0-100');\nif (!result.ocg_contributions?.individual) errors.push('ocg_contributions.individual ausente');\nif (!result.ocg_contributions?.global_delta) errors.push('ocg_contributions.global_delta ausente');\n\nconst valid = errors.length === 0;\nconst ingestion_id = result.ingestion_id;\n\nreturn [{json: {result, valid, errors, ingestion_id, persona_tag: result.persona_tag}}];"
@@ -44,7 +53,10 @@
       "name": "Accumulate Redis",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1000, 300],
+      "position": [
+        1000,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Simula Redis accumulator via HTTP ao GCA Backend\n// Em produção, substituir por nó Redis nativo ou endpoint interno\nconst input = $input.first().json;\nconst ingestion_id = input.ingestion_id;\n\n// RPUSH resultado (válido ou failed)\nconst resultToStore = input.valid ? input.result : {persona_tag: input.persona_tag, status: 'failed', errors: input.errors};\n\n// Incrementar received_count e verificar se todos chegaram\n// Nesta implementação, usamos o GCA Backend como intermediário Redis\nconst response = await $helpers.httpRequest({\n  method: 'POST',\n  url: `${$env.GCA_CALLBACK_BASE_URL}/api/internal/ingestion/${ingestion_id}/accumulate`,\n  headers: {'Content-Type': 'application/json'},\n  body: JSON.stringify({\n    persona_result: resultToStore,\n    persona_tag: input.persona_tag,\n    valid: input.valid\n  }),\n  timeout: 10000\n});\n\nconst allReceived = response.all_received || false;\nconst receivedCount = response.received_count || 0;\nconst expectedCount = response.expected_count || 0;\nconst allResults = response.all_results || [];\n\nreturn [{json: {ingestion_id, allReceived, receivedCount, expectedCount, allResults, project_id: response.project_id}}];"
@@ -55,17 +67,27 @@
       "name": "Todos chegaram?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [1250, 300],
+      "position": [
+        1250,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "conditions": {
-          "options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict"},
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
           "conditions": [
             {
               "id": "a1234567-b890-c123-d456-e78901234567",
               "leftValue": "={{ $json.allReceived }}",
               "rightValue": true,
-              "operator": {"type": "boolean", "operation": "equals"}
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
             }
           ],
           "combinator": "and"
@@ -77,7 +99,10 @@
       "name": "Calcular scores e merge",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1500, 200],
+      "position": [
+        1500,
+        200
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Merge de todos os resultados dos especialistas\nconst input = $input.first().json;\nconst results = input.allResults || [];\n\n// Pesos por persona (spec v2 §6.4)\nconst weights = {CONF: 1.5, SEG: 1.3, LGPD: 1.3, AUD: 1.0, ARQ: 1.0, DBA: 1.0, DEV: 0.9, QA: 1.1, GP: 1.0, NEG: 1.0, UX: 0.8, UI: 0.7};\n\nlet weightedSum = 0;\nlet totalWeight = 0;\nlet blocked = false;\nlet blockingReason = null;\nconst personasExecuted = [];\nconst personasFailed = [];\nconst mergedIndividual = {};\nconst mergedGlobalDelta = {};\nconst allFindings = [];\nconst allRecommendations = [];\nconst conflicts = [];\n\nfor (const r of results) {\n  if (r.status === 'failed') {\n    personasFailed.push(r.persona_tag);\n    continue;\n  }\n  personasExecuted.push(r.persona_tag);\n  const w = weights[r.persona_tag] || 1.0;\n  weightedSum += r.score * w;\n  totalWeight += w;\n  \n  // Check blocking\n  if (r.blocking) {\n    blocked = true;\n    blockingReason = `${r.persona_tag}: ${r.blocking_reason || 'score < 60'}`;\n  }\n  \n  // Merge OCG\n  mergedIndividual[r.persona_tag] = r.ocg_contributions?.individual || {};\n  const delta = r.ocg_contributions?.global_delta || {};\n  for (const [k, v] of Object.entries(delta)) {\n    if (!mergedGlobalDelta[k]) mergedGlobalDelta[k] = v;\n    else if (Array.isArray(v)) mergedGlobalDelta[k] = [...(mergedGlobalDelta[k] || []), ...v];\n  }\n  \n  // Collect findings/recommendations\n  allFindings.push(...(r.findings || []).map(f => ({...f, source_persona: r.persona_tag})));\n  allRecommendations.push(...(r.recommendations || []).map(rec => ({...rec, source_persona: r.persona_tag})));\n}\n\nconst overallScore = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;\n\n// G5 — validação pós-merge\nconst g5Errors = [];\nif (Object.keys(mergedIndividual).length === 0) g5Errors.push('ocg_individual vazio');\nif (overallScore === 0 && personasExecuted.length > 0) g5Errors.push('overall_score zerado com personas executadas');\n\nconst finalResult = {\n  ingestion_id: input.ingestion_id,\n  project_id: input.project_id,\n  status: g5Errors.length > 0 ? 'partial' : (personasFailed.length > 0 ? 'partial' : 'completed'),\n  overall_score: overallScore,\n  blocked,\n  blocking_reason: blockingReason,\n  personas_executed: personasExecuted,\n  personas_failed: personasFailed,\n  ocg_individual: mergedIndividual,\n  ocg_global_delta: mergedGlobalDelta,\n  conflicts_resolved: conflicts,\n  consolidated_findings: allFindings,\n  consolidated_recommendations: allRecommendations,\n  execution_summary: {\n    total_duration_ms: 0,\n    total_tokens: {input: 0, output: 0},\n    estimated_cost_usd: 0.0,\n    personas_count: personasExecuted.length,\n    personas_failed_count: personasFailed.length\n  }\n};\n\nreturn [{json: finalResult}];"
@@ -88,7 +113,10 @@
       "name": "Callback GCA",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1750, 200],
+      "position": [
+        1750,
+        200
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -96,29 +124,100 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {"name": "Content-Type", "value": "application/json"},
-            {"name": "X-N8N-Signature", "value": "=sha256={{ require('crypto').createHmac('sha256', $env.N8N_CALLBACK_SECRET).update(JSON.stringify($json)).digest('hex') }}"}
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "X-N8N-Signature",
+              "value": "=sha256={{ require('crypto').createHmac('sha256', $env.N8N_CALLBACK_SECRET).update(JSON.stringify($json)).digest('hex') }}"
+            }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {"timeout": 10000, "retry": {"maxRetries": 3, "retryInterval": 2000}}
+        "options": {
+          "timeout": 10000,
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          }
+        }
       }
     }
   ],
   "connections": {
-    "Webhook Accumulate": {"main": [[{"node": "Validar HMAC", "type": "main", "index": 0}]]},
-    "Validar HMAC": {"main": [[{"node": "G4 - Validar PersonaOutput", "type": "main", "index": 0}]]},
-    "G4 - Validar PersonaOutput": {"main": [[{"node": "Accumulate Redis", "type": "main", "index": 0}]]},
-    "Accumulate Redis": {"main": [[{"node": "Todos chegaram?", "type": "main", "index": 0}]]},
+    "Webhook Accumulate": {
+      "main": [
+        [
+          {
+            "node": "Validar HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar HMAC": {
+      "main": [
+        [
+          {
+            "node": "G4 - Validar PersonaOutput",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "G4 - Validar PersonaOutput": {
+      "main": [
+        [
+          {
+            "node": "Accumulate Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Accumulate Redis": {
+      "main": [
+        [
+          {
+            "node": "Todos chegaram?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Todos chegaram?": {
       "main": [
-        [{"node": "Calcular scores e merge", "type": "main", "index": 0}],
+        [
+          {
+            "node": "Calcular scores e merge",
+            "type": "main",
+            "index": 0
+          }
+        ],
         []
       ]
     },
-    "Calcular scores e merge": {"main": [[{"node": "Callback GCA", "type": "main", "index": 0}]]}
+    "Calcular scores e merge": {
+      "main": [
+        [
+          {
+            "node": "Callback GCA",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   },
-  "settings": {"executionOrder": "v1"}
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "id": "gca-consolidador"
 }
