@@ -478,6 +478,8 @@ async def accumulate_persona_result(
         all_received=all_received,
     )
 
+    callback_url = (r.get(f"gca:ingestion:{ingestion_id}:callback_url") or b"").decode()
+
     all_results = []
     if all_received:
         raw_results = r.lrange(f"gca:ingestion:{ingestion_id}:results", 0, -1)
@@ -488,14 +490,17 @@ async def accumulate_persona_result(
             f"gca:ingestion:{ingestion_id}:expected_count",
             f"gca:ingestion:{ingestion_id}:project_id",
             f"gca:ingestion:{ingestion_id}:shared_context",
+            f"gca:ingestion:{ingestion_id}:callback_url",
         )
 
     return {
+        "ingestion_id": ingestion_id,
         "received_count": received,
         "expected_count": expected,
         "all_received": all_received,
         "all_results": all_results,
         "project_id": project_id,
+        "callback_url": callback_url,
     }
 
 

@@ -305,6 +305,78 @@ class IngestionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _dispatch_to_n8n(self, doc_id, project_id, file_type, file_bytes):
+        """Dispara o pipeline de ingestão via webhook n8n (feature flag INGESTION_VIA_N8N)."""
+        import base64
+        import json as _json
+        import hmac
+        import hashlib
+        import httpx
+        from datetime import datetime, timezone
+        from app.core.config import settings
+        from app.services.ai_key_resolver import AIKeyResolver
+        from app.services.personas.prompts_registry import PERSONA_PROMPTS
+
+        provider_chain = await AIKeyResolver.resolve_project_provider_chain(
+            self.db, project_id, include_api_key=True
+        )
+        chain_data = [
+            {"provider": p.get("provider", ""), "model": p.get("model", ""), "api_key": p.get("api_key", "")}
+            for p in (provider_chain or [])
+        ]
+
+        # Pegar metadata do doc recém-criado
+        from app.models.base import IngestedDocument
+        doc = await self.db.get(IngestedDocument, doc_id)
+
+        # Mime type a partir do file_type
+        mime_map = {
+            "pdf": "application/pdf",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "markdown": "text/markdown",
+            "text": "text/plain",
+            "code": "text/plain",
+        }
+        mime_type = mime_map.get(file_type, "application/octet-stream")
+
+        n8n_payload = {
+            "ingestion_id": str(doc_id),
+            "project_id": str(project_id),
+            "document_bytes_base64": base64.b64encode(file_bytes).decode() if file_bytes else "",
+            "document_metadata": {
+                "filename": (doc.original_filename if doc else "") or (doc.filename if doc else ""),
+                "mime_type": mime_type,
+                "size_bytes": len(file_bytes) if file_bytes else 0,
+                "uploaded_by": str(doc.uploaded_by) if doc else "",
+                "uploaded_by_role": "GP",
+                "declared_purpose": "upload",
+            },
+            "provider_chain": chain_data,
+            "persona_prompts": dict(PERSONA_PROMPTS),
+            "callback_url": f"{getattr(settings, 'GCA_CALLBACK_BASE_URL', 'http://gca-backend:8000')}/api/v1/webhooks/ingestion-complete",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        n8n_url = getattr(settings, "N8N_BASE_URL", "http://n8n:5678")
+        webhook_secret = getattr(settings, "GCA_WEBHOOK_SECRET", "")
+        body_bytes = _json.dumps(n8n_payload).encode()
+        sig = "sha256=" + hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+
+        # Marcar status processing
+        doc.arguider_status = "processing"
+        doc.arguider_stage = "n8n_pipeline"
+        await self.db.commit()
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{n8n_url}/webhook/gca-normalizer",
+                content=body_bytes,
+                headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+            )
+            if resp.status_code not in (200, 202):
+                logger.error("ingestion.n8n_dispatch_failed", status=resp.status_code, body=resp.text[:200])
+                raise RuntimeError(f"n8n dispatch falhou: {resp.status_code}")
+
     async def upload_document(
         self,
         project_id: UUID,
@@ -643,6 +715,7 @@ class IngestionService:
         # Enfileira APENAS se não há outro documento em processamento no projeto.
         # Reduz tokens (análise paralela pesada) + risco de alucinação.
         from app.tasks.pipeline import pipeline_ingest_task
+        from app.core.config import settings
 
         # Checar se há outro doc em processamento neste projeto
         processing_count = await self.db.scalar(
@@ -654,15 +727,21 @@ class IngestionService:
             )
         )
 
+        use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
+
         try:
-            # Se nenhum em processamento, enfileira este
+            # Se nenhum em processamento, dispara pipeline (n8n ou Celery)
             if processing_count == 0:
-                pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+                if use_n8n:
+                    await self._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
+                else:
+                    pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
                 logger.info(
                     "ingestion.document_enqueued",
                     document_id=str(doc_id),
                     project_id=str(project_id),
                     position="first",
+                    pipeline="n8n" if use_n8n else "celery",
                 )
             else:
                 # Há outro em processamento — este ficará na fila (pending) até callback do anterior
