@@ -39,32 +39,36 @@ São os **papéis de pessoas reais** que usam o sistema. Vivem em `users.role`, 
 | **Tester** | Cria/executa testes |
 | **QA** | Revisa/aprova qualidade final |
 
-### Conjunto B — Personas LLM (8 agentes de IA)
+### Conjunto B — Personas LLM (12 agentes de IA)
 
-São **agentes de IA** que validam documentos no pipeline de Personas v2. Vivem em `backend/app/services/personas/`, são invocados pelo sistema, **não** representam usuários humanos. Detalhe completo: §3.5 e skill `gca-personas-engine`.
+São **agentes de IA** que validam documentos no pipeline de Personas v2. Orquestrados via **n8n** (fan-out paralelo + Redis accumulator), **não** dentro do FastAPI. Vivem como workflows n8n independentes + código de referência em `backend/app/services/personas/`. **Não** representam usuários humanos. Detalhe completo: §3.5 e skill `gca-personas-engine`.
 
-| Persona | Tag | Responsabilidade | Par humano |
-|---|---|---|---|
-| **Auditor** | AUD | Auditoria documental + roteamento + briefing | (sem par — interno ao GCA) |
-| Gerente de Projetos | GP | Escopo, viabilidade, ROI, stakeholders | Gerente do cliente |
-| Arquiteto | ARQ | Stack, padrões, integrações, NFRs | Tech Lead |
-| DBA | DBA | Modelo de dados, retenção, LGPD | DBA do cliente |
-| Dev Sr. | DEV | Implementabilidade, dependências | Líder técnico |
-| QA | QA | Testes, cobertura, BDD | QA Lead |
-| UX | UX | Jornada, acessibilidade, microcopy | UX Designer |
-| UI | UI | Design system, estados, responsividade | UI Designer |
+| Persona | Tag | Tipo | Responsabilidade | Par humano |
+|---|---|---|---|---|
+| **Auditor** | AUD | Router | Classificação documental + roteamento + briefing | (sem par — interno ao GCA) |
+| **Gerente de Projetos** | GP | **Orquestrador** | Supervisiona equipe, valida escopo, viabilidade, ROI | Gerente do cliente |
+| Arquiteto | ARQ | Especialista | Stack, padrões, integrações, NFRs | Tech Lead |
+| DBA | DBA | Especialista | Modelo de dados, retenção, queries | DBA do cliente |
+| Dev Sr. | DEV | Especialista | Implementabilidade, dependências | Líder técnico |
+| QA | QA | Especialista | Testes, cobertura, BDD | QA Lead |
+| UX | UX | Especialista | Jornada, acessibilidade, WCAG, microcopy | UX Designer |
+| UI | UI | Especialista | Design system, estados, responsividade | UI Designer |
+| Segurança | SEG | Especialista | OWASP, AuthN/Z, secrets, superfície de ataque | Security Engineer |
+| **Conformidade** | CONF | Especialista **BLOQUEANTE** | Aderência regulatória — score <60 bloqueia ingestão | Compliance Officer |
+| Proteção de Dados | LGPD | Especialista | Dados pessoais, base legal, consentimento, retenção | DPO |
+| Negócio | NEG | Especialista | Valor, alinhamento estratégico, risco operacional | Product Owner |
 
 ### Regras duras sobre os dois conjuntos
 
 - ❌ **Os dois conjuntos NÃO são reconciliáveis.** GP/DEV/QA aparecem nos dois com significado diferente: no Conjunto A são papéis humanos no sistema; no Conjunto B são personas LLM no pipeline. Coincidência de nome é intencional (a persona LLM "GP" valida sob a perspectiva de um Gerente de Projetos), **não** é redundância a eliminar.
-- ❌ **NUNCA afirmar que houve "simplificação de 8 para 5" ou "unificação".** Não houve. Memória do Claude Code que sugerir isso está errada ou confundindo os conjuntos. Verificar contra CLAUDE.md vigente.
-- ❌ **NUNCA criar um terceiro conjunto "intermediário"** que tenta unificar os dois. Permanece sempre 5 + 8.
-- ✅ **Quando o contexto mencionar "papel" ou "role", é Conjunto A (5).** Quando mencionar "persona" ou "agente IA" ou "validador LLM", é Conjunto B (8).
+- ❌ **NUNCA afirmar que houve "simplificação de 12 para 5" ou "unificação".** Não houve. Memória do Claude Code que sugerir isso está errada ou confundindo os conjuntos. Verificar contra CLAUDE.md vigente.
+- ❌ **NUNCA criar um terceiro conjunto "intermediário"** que tenta unificar os dois. Permanece sempre 5 + 12.
+- ✅ **Quando o contexto mencionar "papel" ou "role", é Conjunto A (5).** Quando mencionar "persona" ou "agente IA" ou "validador LLM", é Conjunto B (12).
 - ✅ **Quando ambíguo, perguntar antes de assumir.**
 
 ### Por que isso está aqui
 
-Houve um caso real (sessão de 2026-04-30) em que o Claude Code, com base em memória, sugeriu que o CLAUDE.md poderia estar desatualizado por mencionar 8 personas quando "só haveria 5". A memória estava confundindo o Conjunto A com o Conjunto B. Esta seção existe para que esse erro não se repita: ele **vai** ser tentado por novas instâncias do Claude Code, e a defesa é tornar a distinção explícita e nominal.
+Houve um caso real (sessão de 2026-04-30) em que o Claude Code, com base em memória, sugeriu que o CLAUDE.md poderia estar desatualizado por mencionar 8 personas quando "só haveria 5". A memória estava confundindo o Conjunto A com o Conjunto B. Em 2026-05-02, o Conjunto B foi expandido de 8 para 12 personas (adição de SEG, CONF, LGPD, NEG + GP promovido a orquestrador). Esta seção existe para que esse erro não se repita.
 
 ---
 
@@ -85,7 +89,7 @@ Antes de **editar, escrever ou criar** arquivo nas áreas abaixo, abrir e ler os
 |---|---|
 | LLM, IA, provider, prompt, completion, embedding, multi-LLM | skill `gca-llm-resolver` · classe `AIKeyResolver` · tabela `project_settings` |
 | OCG, contexto global, expansão, propagação, backlog vivo | skill `gca-ocg-engine` · contrato §5 |
-| Personas LLM (Conjunto B), validação assistida, Auditor, 8 especialistas, HITL, ConflictDetector | skill `gca-personas-engine` · §0.5 (glossário) |
+| Personas LLM (Conjunto B), validação assistida, Auditor, 12 agentes, HITL, ConflictDetector | skill `gca-personas-engine` · §0.5 (glossário) |
 | Papéis RBAC humanos (Conjunto A), permissões, autorização | helper `is_active_integrated_member` · contrato §4 (5 papéis canônicos) · §0.5 (glossário) |
 | Secrets, tokens, PAT, chaves, senhas | classe `VaultService` · função `generate_temporary_password` em `app.core.security` |
 | Gatekeeper, validação, pilares, arbitragem | módulo Gatekeeper (7 pilares) · contrato §6.2 (Conformidade é blocker em score < 60) |
@@ -191,11 +195,14 @@ Sem rota de criticidade alta passando por modelo barato. Sem fallback automátic
 - ❌ Pular leitura do OCG porque "a mudança é pequena" — proibido. OCG existe para garantir consistência cross-cutting.
 - ✅ Detalhe da máquina de estado, propagação e backlog vivo: skill `gca-ocg-engine`.
 
-### 3.5. Personas LLM — Conjunto B (8 agentes de IA — não confundir com os 5 papéis RBAC de §2.2)
+### 3.5. Personas LLM — Conjunto B (12 agentes de IA — não confundir com os 5 papéis RBAC de §2.2)
 
-> **Atenção:** este é o **Conjunto B** do glossário §0.5. **8 personas LLM**, agentes de IA do pipeline de validação assistida v2. **Não são** os 5 papéis humanos do RBAC. Lista canônica completa em §0.5.
+> **Atenção:** este é o **Conjunto B** do glossário §0.5. **12 personas LLM**, agentes de IA do pipeline de validação. **Não são** os 5 papéis humanos do RBAC. Lista canônica completa em §0.5.
 
-- ✅ 8 personas: Auditor + GP + ARQ + DBA + DEV + QA + UX + UI.
+- ✅ 12 personas: AUD (router) + GP (orquestrador) + 10 especialistas (ARQ, DBA, DEV, QA, UX, UI, SEG, CONF, LGPD, NEG).
+- ✅ **Orquestração via n8n** — cada especialista é um workflow independente com webhook próprio. Conferente (AUD) faz fan-out paralelo. Consolidador agrega via Redis accumulator.
+- ✅ **CONF é bloqueante** — score <60 bloqueia a ingestão (§6.2 do contrato).
+- ✅ **GP é orquestrador** — supervisiona o resultado da equipe de especialistas, como um gerente com sua equipe.
 - ✅ Filosofia "Assistida": LLM tem permissão explícita de **não saber**. Quando atinge limite dos insumos, gera questionário estruturado para humano e pausa o pilar afetado.
 - ✅ Detalhe da arquitetura em 4 camadas, HITL, ConflictDetector, KPIs: skill `gca-personas-engine`.
 
@@ -282,7 +289,7 @@ Correção cirúrgica > refactor amplo (§10 contrato). Não tocar código vizin
 ### Nomenclatura — papéis vs personas
 
 - ⚠ Quando o contexto disser "papel" ou "role", é Conjunto A (5 humanos do RBAC, §2.2).
-- ⚠ Quando disser "persona", "agente IA" ou "validador LLM", é Conjunto B (8 personas, §3.5).
+- ⚠ Quando disser "persona", "agente IA" ou "validador LLM", é Conjunto B (12 personas, §3.5).
 - ⚠ Quando ambíguo, **perguntar antes de assumir**.
 
 ---
