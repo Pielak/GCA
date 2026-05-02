@@ -51,26 +51,50 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 
 **Entrega:** Modelos ORM `OCGIndividual` e `OCGGlobal` em `base.py`, migration de stamp no Alembic, `webhooks.py:ingestion_complete` populando as 2 tabelas a cada documento via n8n.
 
-**Tarefas (revisadas pelo Gate 2 — 2026-05-02):**
+**Tarefas (revisadas pelo Gate 3 — 2026-05-02):**
 
-1. **Migration de consolidação** (decisão do Arquiteto: opção b, **não** stamp). Tabelas estão vazias (0 rows confirmado) — custo zero para alteração de tipo. Script:
-   ```python
-   # backend/alembic/versions/<id>_mvp31_consolidate_ocg_tables.py
-   def upgrade():
-       # 1. Drop FK de persona_id (uuid → users) — divergente de ocg_delta_log
-       op.drop_constraint('ocg_individual_persona_id_fkey', 'ocg_individual', type_='foreignkey')
-       op.drop_index('idx_ocg_individual_persona', table_name='ocg_individual')
-       # 2. Alterar tipo: uuid → VARCHAR(20) com tag canônica ("AUD", "GP", etc.)
-       op.alter_column(
-           'ocg_individual', 'persona_id',
-           existing_type=sa.dialects.postgresql.UUID(),
-           type_=sa.String(20),
-           postgresql_using='persona_id::text',
-           nullable=False,
-       )
-       op.create_index('idx_ocg_individual_persona', 'ocg_individual', ['persona_id'])
-       # 3. Stub para Alembic reconhecer existência das tabelas filha (não cria modelos completos — DT-080)
-       # ocg_individual_refined e persona_follow_up_questions ficam como dívida parcial endereçada
+**Achado crítico do DBA**: Projeto **não usa Alembic** como toolchain ativo — usa SQL plain numerado em `backend/migrations/` (último arquivo: `065_create_pilares_vivos.sql`). Script do Gate 2 em formato Python Alembic foi reescrito como SQL plain.
+
+1. **Migration `066_mvp31_consolidate_ocg_tables.sql`** (SQL plain, não Alembic). Tabelas vazias (0 rows) — custo zero. Inclui também CO-DB-02, CO-DB-03 e CR-DB-03 do Gate 3:
+   ```sql
+   -- 066_mvp31_consolidate_ocg_tables.sql
+   -- MVP 31 Fase 31.1 — schema consolidation + integridade + perf
+
+   BEGIN;
+
+   -- 1. ocg_individual.persona_id: uuid REFERENCES users(id) → VARCHAR(20) (tag canônica)
+   ALTER TABLE ocg_individual DROP CONSTRAINT ocg_individual_persona_id_fkey;
+   DROP INDEX IF EXISTS idx_ocg_individual_persona;
+   ALTER TABLE ocg_individual
+       ALTER COLUMN persona_id TYPE VARCHAR(20) USING persona_id::text;
+   CREATE INDEX idx_ocg_individual_persona ON ocg_individual(persona_id);
+
+   -- 2. Drop índices duplicados (ORM autogen + manual): 3 em ocg_individual + 7 em ocg
+   DROP INDEX IF EXISTS ix_ocg_individual_project_id;
+   DROP INDEX IF EXISTS ix_ocg_individual_document_id;
+   DROP INDEX IF EXISTS ix_ocg_individual_persona_id;
+   DROP INDEX IF EXISTS ix_ocg_project_id;
+   DROP INDEX IF EXISTS ix_ocg_questionnaire_id;
+   DROP INDEX IF EXISTS ix_ocg_status;
+   DROP INDEX IF EXISTS ix_ocg_is_blocking;
+   DROP INDEX IF EXISTS ix_ocg_overall_score;
+   DROP INDEX IF EXISTS ix_ocg_generated_at;
+   DROP INDEX IF EXISTS ix_ocg_created_at;
+
+   -- 3. Integridade do version do OCG (CO-DB-02)
+   ALTER TABLE ocg ALTER COLUMN version SET NOT NULL;
+   ALTER TABLE ocg ADD CONSTRAINT chk_ocg_version_positive CHECK (version > 0);
+
+   -- 4. ON DELETE explícito em persona_follow_up_questions.answered_by (CO-DB-03)
+   ALTER TABLE persona_follow_up_questions
+       DROP CONSTRAINT persona_follow_up_questions_answered_by_fkey,
+       ADD CONSTRAINT persona_follow_up_questions_answered_by_fkey
+           FOREIGN KEY (answered_by) REFERENCES users(id) ON DELETE SET NULL;
+
+   -- 5. Índice composto para gate de CodeGen (CR-DB-03 — index-only scan)
+   CREATE INDEX idx_ocg_project_version ON ocg(project_id, version DESC);
+
+   COMMIT;
    ```
 2. **Modelos SQLAlchemy** em `backend/app/models/base.py`:
    - `OCGIndividual` com `persona_id = Column(String(20), nullable=False)` (espelhando schema pós-migration)
@@ -253,12 +277,30 @@ Veredito: **Aprovado com ressalvas** (arquiteto-projetos, 2026-05-02). Decisões
 7. **CR-3**: `trigger_source = TRIGGER_N8N` constante, não literal. Sugestão acatada para Fase 31.2.
 8. **CR-4**: lock `asyncio.Lock` per-project é in-process. Aceitável para uvicorn single-worker atual. DT futura quando escalar para multi-worker.
 
-## 12. Próximo passo
+## 13. Refinamentos do Gate 3 (aplicados em 2026-05-02)
 
-**Gate 3 — DBA** com mandato específico:
+Veredito: **Aprovado com ressalvas** (DBA, 2026-05-02). Decisões críticas:
 
-- Validar custo de escrita por documento (15 ops: 12 INSERTs em `ocg_individual` + 1 INSERT em `ocg_global` + 1 UPDATE versionado em `ocg` + 1 INSERT em `ocg_delta_log`). Throughput de 50+ docs/dia por projeto.
-- Confirmar script da migration de consolidação (Fase 31.1, decisão do Arquiteto). Verificar se drop da FK `ocg_individual_persona_id_fkey` não quebra constraints indiretas.
-- Validar índice `uq_ocg_individual_per_document_persona` pós-mudança de tipo (UNIQUE em `String(20)` + `uuid`).
-- Recomendar configuração de `include_tables`/`exclude_tables` no `env.py` do Alembic enquanto modelos completos das tabelas filha (`ocg_individual_refined`, `persona_follow_up_questions`) não existem.
-- Política de retenção: cresce indefinidamente em `ocg_individual` e `ocg_global`. Recomendar política de archive/purge para projetos antigos (ou confirmar que LGPD não exige retenção limitada para análise documental).
+1. **Achado bloqueador**: projeto **não usa Alembic** — usa SQL plain numerado em `backend/migrations/`. Script do Gate 2 reescrito como `066_mvp31_consolidate_ocg_tables.sql` (acima na Fase 31.1).
+2. **Custo de escrita** validado: 15 ops/doc viável para 50+ docs/dia/projeto. Lock per-project pode causar fila de até 25min em burst (50 docs simultâneos do mesmo projeto) — DT já aceita pelo Gate 2 (CR-4).
+3. **6 índices duplicados** detectados em `ocg_individual` + 7 pares em `ocg` (ORM autogen vs SQL manual). Drop incluído na migration 066.
+4. **`ocg.version`** sem NOT NULL e sem CHECK — incluído na migration 066 (CO-DB-02).
+5. **`persona_follow_up_questions.answered_by`** sem `ON DELETE` declarado — incluído como `SET NULL` na migration 066 (CO-DB-03).
+6. **Índice composto** `idx_ocg_project_version` para o gate de CodeGen (Fase 31.4) — incluído na migration 066 (CR-DB-03). Garante index-only scan.
+7. **Retenção**: nenhuma política de archive/purge atual. Risco LGPD baixo (parecer técnico, base legal: legítimo interesse Art. 7º IX). Sugestão: prazo = vida do projeto + 5 anos. Documentar em produção, não bloqueia MVP 31.
+8. **`ocg_delta_log.ocg_snapshot`** cresce sem limite — DT futura para particionamento/TTL.
+9. **`ocg_individual.status`** sem CHECK constraint — DT futura (CR-DB-02).
+
+## 14. Próximo passo
+
+**Gate 4 — Dev Sênior** com mandato específico:
+
+- Implementar Fases 31.1–31.4 conforme plano consolidado (Gates 1+2+3).
+- Criar `backend/migrations/066_mvp31_consolidate_ocg_tables.sql` (SQL plain) e aplicar em `gca_test` antes de qualquer ORM.
+- Criar modelos ORM `OCGIndividual`, `OCGGlobal` em `backend/app/models/base.py` com `persona_id = String(20)`. Stubs `OCGIndividualRefined` e `PersonaFollowUpQuestion` apenas com `__tablename__` e PK.
+- Criar `backend/app/services/ocg_gate.py` com helper `_check_ocg_maturity_gate(project_id, db)` retornando `None` ou `HTTPException(409, ...)` estruturado.
+- Aplicar gate nos 6 entry points listados na Fase 31.4 — **antes** dos pontos hardcoded de provider Anthropic (DT-079) para não agravar.
+- Adapter n8n→updater em `webhooks.py:ingestion_complete` mapeando `consolidated_findings` → `gaps`/`show_stoppers`/`recommendations`.
+- Constante `TRIGGER_N8N = "document_ingestion_n8n"` em `ocg_updater_service.py` (não literal).
+- Smoke test E2E (135s) deve continuar verde após cada fase entregue (não-regressão).
+- Pipeline n8n permanece intocado.
