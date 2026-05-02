@@ -54,6 +54,9 @@ class Settings(BaseSettings):
     N8N_BASE_URL: str = "http://localhost:5678"
     GCA_CALLBACK_BASE_URL: str = "http://localhost:8000"
     GCA_WEBHOOK_SECRET: str = ""
+    NORMALIZER_SECRET: str = ""
+    CONFERENTE_SECRET: str = ""
+    SPECIALIST_SECRET: str = ""
     N8N_CALLBACK_SECRET: str = ""
 
     # JWT RS256

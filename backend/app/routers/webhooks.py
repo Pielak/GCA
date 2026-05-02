@@ -492,3 +492,137 @@ async def accumulate_persona_result(
         "all_results": all_results,
         "project_id": project_id,
     }
+
+
+# ============================================================================
+# Endpoints internos para n8n — HMAC, Redis, Logging
+# ============================================================================
+
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+from datetime import datetime
+
+_pipeline_log_handler = None
+
+def _get_pipeline_logger():
+    global _pipeline_log_handler
+    pl = logging.getLogger("gca.pipeline")
+    if not _pipeline_log_handler:
+        log_dir = Path("/home/luiz/GCA/logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        _pipeline_log_handler = TimedRotatingFileHandler(
+            log_dir / "pipeline.log",
+            when="D",
+            interval=1,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        _pipeline_log_handler.setFormatter(
+            logging.Formatter("%(message)s")
+        )
+        pl.addHandler(_pipeline_log_handler)
+        pl.setLevel(logging.INFO)
+    return pl
+
+
+class PipelineLogEntry(BaseModel):
+    ts: Optional[str] = None
+    ingestion_id: Optional[str] = None
+    workflow: Optional[str] = None
+    node: Optional[str] = None
+    event: str  # success|error|gate_passed|gate_failed|dispatched|callback_sent|started|completed
+    persona_tag: Optional[str] = None
+    duration_ms: Optional[int] = None
+    detail: Optional[str] = None
+    error: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
+
+
+@router.post("/internal/pipeline-log")
+async def pipeline_log(entries: List[PipelineLogEntry] | PipelineLogEntry):
+    """Recebe log entries do pipeline n8n e appenda no arquivo rotativo."""
+    pl = _get_pipeline_logger()
+    if isinstance(entries, PipelineLogEntry):
+        entries = [entries]
+    for entry in entries:
+        if not entry.ts:
+            entry.ts = datetime.utcnow().isoformat() + "Z"
+        line = json.dumps(entry.dict(exclude_none=True), ensure_ascii=False)
+        pl.info(line)
+    return {"logged": len(entries)}
+
+
+class HmacVerifyRequest(BaseModel):
+    body_raw: str
+    signature: str
+    secret_name: str  # GCA_WEBHOOK_SECRET|NORMALIZER_SECRET|CONFERENTE_SECRET|SPECIALIST_SECRET|N8N_CALLBACK_SECRET
+
+
+class HmacSignRequest(BaseModel):
+    body_raw: str
+    secret_name: str
+
+
+_SECRETS_MAP = None
+
+def _load_secrets():
+    global _SECRETS_MAP
+    if _SECRETS_MAP is None:
+        from app.core.config import settings
+        _SECRETS_MAP = {
+            "GCA_WEBHOOK_SECRET": getattr(settings, "GCA_WEBHOOK_SECRET", ""),
+            "NORMALIZER_SECRET": getattr(settings, "NORMALIZER_SECRET", ""),
+            "CONFERENTE_SECRET": getattr(settings, "CONFERENTE_SECRET", ""),
+            "SPECIALIST_SECRET": getattr(settings, "SPECIALIST_SECRET", ""),
+            "N8N_CALLBACK_SECRET": getattr(settings, "N8N_CALLBACK_SECRET", ""),
+        }
+    return _SECRETS_MAP
+
+
+@router.post("/internal/hmac/verify")
+async def hmac_verify(req: HmacVerifyRequest):
+    """Verifica HMAC sem que o n8n precise de crypto ou $env."""
+    secrets = _load_secrets()
+    secret = secrets.get(req.secret_name, "")
+    if not secret:
+        return {"valid": False, "error": f"Secret '{req.secret_name}' não configurado"}
+    expected = "sha256=" + hmac.new(
+        secret.encode(), req.body_raw.encode(), hashlib.sha256
+    ).hexdigest()
+    valid = hmac.compare_digest(expected, req.signature or "")
+    return {"valid": valid}
+
+
+@router.post("/internal/hmac/sign")
+async def hmac_sign(req: HmacSignRequest):
+    """Assina body com HMAC sem que o n8n precise de crypto ou $env."""
+    secrets = _load_secrets()
+    secret = secrets.get(req.secret_name, "")
+    if not secret:
+        raise HTTPException(status_code=400, detail=f"Secret '{req.secret_name}' não configurado")
+    sig = "sha256=" + hmac.new(
+        secret.encode(), req.body_raw.encode(), hashlib.sha256
+    ).hexdigest()
+    return {"signature": sig}
+
+
+class RedisBulkSetRequest(BaseModel):
+    keys: Dict[str, str]
+    ttl_seconds: int = 3600
+
+
+@router.post("/internal/redis/bulk-set")
+async def redis_bulk_set(req: RedisBulkSetRequest):
+    """Seta múltiplas chaves no Redis (para Conferente setar expected_count, etc.)."""
+    import redis as redis_lib
+    from app.core.config import settings
+
+    r = redis_lib.Redis(
+        host=getattr(settings, "REDIS_HOST", "redis"),
+        port=int(getattr(settings, "REDIS_PORT", 6379)),
+        db=int(getattr(settings, "N8N_REDIS_DB", 2)),
+    )
+    for key, value in req.keys.items():
+        r.setex(key, req.ttl_seconds, value)
+    return {"set": len(req.keys), "ttl": req.ttl_seconds}

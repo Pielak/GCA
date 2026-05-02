@@ -70,11 +70,14 @@ services:
       POSTGRES_DB: gca
       POSTGRES_USER: gca
       POSTGRES_PASSWORD: gca_secret
-      INGESTION_VIA_N8N: ${INGESTION_VIA_N8N:-false}
+      INGESTION_VIA_N8N: "true"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
       GCA_CALLBACK_BASE_URL: ${GCA_CALLBACK_BASE_URL:-http://gca-backend:8000}
-      GCA_WEBHOOK_SECRET: ${GCA_WEBHOOK_SECRET:-}
-      N8N_CALLBACK_SECRET: ${N8N_CALLBACK_SECRET:-}
+      GCA_WEBHOOK_SECRET: "45b64e16b5653718023408419aade9a9a35ab244d1897bccebf51270f3b1cb6b"
+      NORMALIZER_SECRET: "d74ac09664abc7957cfc16ba3efbc068a08fcb3af9b84d055ca940a6afb377b0"
+      CONFERENTE_SECRET: "a1a181c0d85c328777be4eb42e1c60c1b2584913645199b0453d58961a5a3456"
+      SPECIALIST_SECRET: "413a72e9401f1977c4e6ec16dabf9ea6e36862f391d274c681e9e650bb367649"
+      N8N_CALLBACK_SECRET: "2fb3334dcee25cdb3d234879a76fb4f0190e837d17856187c7a7084e2b210e5a"
       REDIS_HOST: redis
       N8N_REDIS_DB: "2"
     depends_on:
@@ -84,6 +87,7 @@ services:
         condition: service_healthy
     volumes:
       - ./backend:/app
+      - ./logs:/home/luiz/GCA/logs
       # DT-030: uploads de Ingestão persistem entre restarts do container.
       # Antes: STORAGE_PATH=/tmp/gca-storage dentro do container, sem mount
       # → todo restart apagava os bytes (DB mantinha registro, arquivo sumia).
