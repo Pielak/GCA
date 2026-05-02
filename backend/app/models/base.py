@@ -1485,7 +1485,10 @@ class PersonaFollowUpQuestion(Base):
     """Pergunta de follow-up gerada por persona LLM para complementação humana (HITL).
 
     DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
-    Por ora apenas espelha o schema da tabela para que o ORM não quebre.
+    Por ora apenas espelha o schema mínimo para que o ORM não quebre.
+
+    Migration 067 corrigiu persona_id: era uuid FK → users.id (errado).
+    Agora é VARCHAR(20) com tag canônica da persona LLM ("AUD", "GP", etc.).
     """
     __tablename__ = "persona_follow_up_questions"
 
@@ -1493,6 +1496,9 @@ class PersonaFollowUpQuestion(Base):
     project_id = Column(
         UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
     )
+    # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ") — não FK para users
+    # Migration 067 converteu uuid → VARCHAR(20). Corrige gap da migration 066.
+    persona_id = Column(String(20), nullable=False)  # tag canônica (AUD, GP, etc.) — não FK
 
     def __repr__(self) -> str:
         return f"<PersonaFollowUpQuestion project={self.project_id}>"

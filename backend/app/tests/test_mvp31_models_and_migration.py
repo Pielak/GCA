@@ -1,4 +1,13 @@
-"""MVP 31 Fase 31.1 — Testes de schema + modelos ORM pós-migration 066.
+"""Testes da Fase 31.1 do MVP 31 — modelos ORM + migration 066/067.
+
+Como rodar:
+    docker compose exec backend bash -c "cd /app && \\
+      TEST_DATABASE_URL=postgresql+asyncpg://gca:gca_secret@postgres:5432/gca_test \\
+      DATABASE_URL=postgresql+asyncpg://gca:gca_secret@postgres:5432/gca_test \\
+      pytest app/tests/test_mvp31_models_and_migration.py -v"
+
+O conftest.py hardcoda localhost:5432 (pré-existente, dívida MVP futuro).
+Sem o override de TEST_DATABASE_URL/DATABASE_URL, falha com OSError de conexão.
 
 Cobre:
   - OCGIndividual.persona_id aceita tag canônica (string "AUD", "GP", etc.)
@@ -7,6 +16,7 @@ Cobre:
   - CHECK constraint version > 0 em ocg
   - Índice composto idx_ocg_project_version existe e está ativo
   - Importação dos 4 novos modelos sem erro
+  - persona_follow_up_questions.persona_id é VARCHAR(20) sem FK para users (migration 067)
 
 Banco alvo: gca_test (conftest.py força — DT-034)
 """
@@ -343,4 +353,65 @@ async def test_ocg_ix_indices_duplicados_removidos(db_session):
     count = result.scalar()
     assert count == 0, (
         f"Ainda existem {count} índice(s) ix_ em ocg_individual — migration 066 incompleta?"
+    )
+
+
+# =============================================================================
+# Testes — Migration 067: persona_follow_up_questions.persona_id como string
+# =============================================================================
+
+@pytest.mark.asyncio
+async def test_persona_follow_up_questions_persona_id_is_string(db_session):
+    """Após migration 067, persona_id deve ser VARCHAR(20) sem FK para users.
+
+    Análogo a test_ocg_individual_sem_fk_para_users: confirma que a migration
+    067 corrigiu o gap deixado pela 066, convertendo persona_id de uuid (FK
+    para users.id) para VARCHAR(20) com tag canônica da persona LLM.
+    """
+    # Verifica tipo da coluna no catálogo do PostgreSQL
+    result = await db_session.execute(
+        text(
+            "SELECT data_type, character_maximum_length "
+            "FROM information_schema.columns "
+            "WHERE table_name = 'persona_follow_up_questions' "
+            "AND column_name = 'persona_id'"
+        )
+    )
+    row = result.fetchone()
+    assert row is not None, "Coluna persona_id não encontrada em persona_follow_up_questions"
+    data_type, max_length = row
+    assert data_type == "character varying", (
+        f"persona_id deveria ser character varying, encontrado: {data_type}"
+    )
+    assert max_length == 20, (
+        f"persona_id deveria ter VARCHAR(20), encontrado: VARCHAR({max_length})"
+    )
+
+    # Confirma ausência da FK para users.id
+    result_fk = await db_session.execute(
+        text(
+            "SELECT conname FROM pg_constraint "
+            "WHERE conrelid = 'persona_follow_up_questions'::regclass "
+            "AND contype = 'f' "
+            "AND conname = 'persona_follow_up_questions_persona_id_fkey'"
+        )
+    )
+    row_fk = result_fk.fetchone()
+    assert row_fk is None, (
+        "FK persona_follow_up_questions_persona_id_fkey ainda existe — "
+        "migration 067 não foi aplicada?"
+    )
+
+    # Confirma que índice correto foi criado
+    result_idx = await db_session.execute(
+        text(
+            "SELECT indexname FROM pg_indexes "
+            "WHERE tablename = 'persona_follow_up_questions' "
+            "AND indexname = 'idx_persona_follow_up_questions_persona'"
+        )
+    )
+    row_idx = result_idx.fetchone()
+    assert row_idx is not None, (
+        "Índice idx_persona_follow_up_questions_persona não encontrado — "
+        "migration 067 não criou índice?"
     )
