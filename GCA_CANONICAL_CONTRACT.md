@@ -262,6 +262,39 @@ Regras duras:
 6. Numeração é monotônica crescente. Não há renumeração retroativa.
 7. Releases do produto amarram-se a uma lista de MVPs fechados e tickets (MVP 6) entregues — ver MVP 7.
 
+### 7.31 MVP 31 — OCG Cumulativo + CodeGen Gate
+
+**Estado:** Definido — não iniciado (Gate 1 aprovado com ressalvas em 2026-05-02 por gerente-projetos-ti).
+**Plano completo:** [`docs/MVP_31_OCG_CUMULATIVO_PLAN.md`](docs/MVP_31_OCG_CUMULATIVO_PLAN.md).
+
+**Em escopo (MUST entregar):**
+- Caminho `n8n → backend` (handler `webhooks.py:ingestion_complete`) deixa de fazer UPDATE cru no `ocg` e passa a delegar ao `OCGUpdaterService.update_ocg_from_arguider` — mesmas invariantes do caminho Celery (não-contrai, `_filter_negative_score_deltas`, `hash_chain` em `ocg_delta_log`).
+- Modelos SQLAlchemy `OCGIndividual` e `OCGGlobal` em `backend/app/models/base.py` espelhando schema vivo + migration Alembic (stamp ou consolidação).
+- Tabelas `ocg_individual` (1 row por persona/doc) e `ocg_global` (1 row consolidada/doc) populadas a cada documento ingerido via n8n.
+- "Lixo descartado": PersonaOutput inválido (G4 reprovou) **não entra** no merge cumulativo, mas fica registrado em `ocg_individual` com `status='failed'` para auditoria.
+- CodeGen ganha gate de maturidade do OCG em 3 níveis:
+  - `is_blocking=true` → 409 `block_level=hard_block`
+  - `overall_score < 60` → 409 `block_level=insufficient`
+  - `overall_score < 95` → 409 `block_level=immature` (precisa amadurecer ingerindo mais docs)
+- Cláusula explícita em §5 deste contrato: *"no caminho n8n, handler `/ingestion-complete` delega ao `OCGUpdaterService`"* (atualizada na Fase 31.5).
+
+**Fora de escopo (não entregar neste MVP):**
+- Refatorar o `OCGUpdaterService` (reusa como está).
+- Adicionar novas personas LLM (12 estáveis no Conjunto B §0.5).
+- Mudar formato do PersonaOutput v2.
+- Implementar revogação manual de score por owner (parked).
+- Migrar caminho Celery (já correto). Continua funcional como fallback.
+- **Corrigir hardcode de provider Anthropic em `module_codegen_service.py:164-165`** — registrado como nova DT no `GCA_MVP_PROGRESS.md §3` para próximo MVP.
+- **Adicionar `audit_log` no CodeGen** — DT já listada em `GCA_MVP_PROGRESS.md §3.0`, fora deste escopo.
+
+**Princípios canônicos reafirmados pelo GP em 2026-05-02:**
+- *"O OCG não sobrescreve, não contrai. Só cresce com informação útil. Informação inútil é descartada. OCG fica estático e só cresce com informação útil."*
+- *"CodeGen só é liberado para gerar código quando OCG está maduro, com >=95% de contexto."*
+
+**Estimativa:** ~6 dias (Gate 1 revisou de 5 para 6 por dívida ORM/migration descoberta na Fase 31.1).
+
+**Próximo gate:** arquiteto-projetos (Gate 2) com mandato específico definido em §11 do plano.
+
 ## MVP Registry — histórico arquivado
 
 MVPs 1-15 fechados. Detalhes completos em `docs/mvp_archive/`.

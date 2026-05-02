@@ -9,7 +9,20 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
+**MVP 31 — OCG Cumulativo + CodeGen Gate** — DEFINIDO (não iniciado), 2026-05-02. Gate 1 (gerente-projetos-ti) **Aprovado com ressalvas**. Aguardando formalização atômica nos docs canônicos antes de prosseguir para Gate 2 (arquiteto-projetos). Plano completo em [`docs/MVP_31_OCG_CUMULATIVO_PLAN.md`](docs/MVP_31_OCG_CUMULATIVO_PLAN.md).
+
+**Escopo:** Caminho n8n → backend deixa de fazer UPDATE cru no `ocg` e passa a delegar ao `OCGUpdaterService` (que já respeita as invariantes canônicas: não-contrai, filter_negative_score_deltas, hash_chain). Tabelas `ocg_individual` e `ocg_global` ganham modelo ORM e populam por doc. CodeGen ganha gate de maturidade do OCG em 3 níveis: hard_block (CONF/is_blocking), insufficient (overall_score<60), immature (<95).
+
+**Princípios canônicos reafirmados pelo GP em 2026-05-02:**
+- *"O OCG não sobrescreve, não contrai. Só cresce com informação útil. Informação inútil é descartada. OCG fica estático e só cresce com informação útil."*
+- *"CodeGen só é liberado para gerar código quando OCG está maduro, com >=95% de contexto."*
+
+**Estimativa:** ~6d (revisado pelo Gate 1 — Fase 31.1 saiu de 1d para 2d por dívida ORM/migration).
+
+**Próxima ação:** Gate 2 (arquiteto-projetos) com mandato específico — investigar dívida ORM em `ocg_individual`/`ocg_global`, mapear formato `arguider_analysis`, decidir sobre R6 (hardcode Anthropic em `module_codegen_service.py`).
+
+### MVP anterior fechado
+**MVP 30 — Pipeline n8n Persona Prompts Canônicos** — ENTREGUE 2026-05-02 (não formalizado como MVP no momento da entrega; documentado retroativamente). Pipeline n8n end-to-end funcional em 135s com DeepSeek, 12 personas executando seu prompt canônico (4 personas novas: LGPD/Lei 13.709, NEG/BABOK v3, SEG/OWASP+ASVS, CONF/ISO 27001+31000). Registry canônico (`prompts_registry.py`) com fail-fast em tag inválida. 10 bugs estruturais corrigidos nos workflows n8n. Doc operacional em `docs/n8n-pipeline/PIPELINE_OPERACIONAL.md`. PR #2 mergeado em master.
 
 ### MVP anterior fechado
 **MVP 29 — Hardening Celery (fila persistente + idempotência auditada)** — FECHADO 2026-04-28. Solução estrutural da DT-075 que o fix do watchdog resolveu no sintoma. Implementou `acks_late=True` + `task_reject_on_worker_lost=True` (broker redistribui tasks de worker morto) e adicionou guards de idempotência em cada Celery task — task redistribuída não duplica efeito.

@@ -43,22 +43,34 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 
 ## 5. Faseamento (5 fases — agile)
 
-### Fase 31.1 — Persistir histórico individual e consolidado (~1d)
+### Fase 31.1 — Modelar tabelas + persistir histórico individual e consolidado (~2d, revisada pelo Gate 1)
 
-**Entrega:** `ocg_individual` e `ocg_global` populados corretamente a cada documento ingerido via n8n.
+**Achado do Gate 1 (2026-05-02):** As tabelas `ocg_individual` e `ocg_global` **existem no banco** (verificado via `\d` no postgres) **mas não têm modelo SQLAlchemy** em `backend/app/models/base.py` e **não há migration Alembic** que as crie. São dívida estrutural — foram criadas por SQL manual em algum ponto. A fase precisa fechar esse gap antes de qualquer INSERT.
+
+**Decisão de schema para `persona_id`** (resolvido pelo Gate 1): seguir o padrão de `ocg_delta_log.persona_id` que usa `Column(String(20))` armazenando a tag canônica (`"AUD"`, `"GP"`, etc.). **Não** criar persona-pseudo-users. **Não** FK. As tabelas existentes precisam ser auditadas — se hoje têm FK para `users(id)`, virar dívida pré-MVP a corrigir ou aceitar e adaptar (decisão fica com o Arquiteto no Gate 2).
+
+**Entrega:** Modelos ORM `OCGIndividual` e `OCGGlobal` em `base.py`, migration de stamp no Alembic, `webhooks.py:ingestion_complete` populando as 2 tabelas a cada documento via n8n.
 
 **Tarefas:**
-- Em `webhooks.py:ingestion_complete`, antes do UPDATE atual:
-  1. Para cada `(persona_tag, persona_output)` em `payload.ocg_individual`:
-     - `INSERT INTO ocg_individual (project_id, document_id, persona_id, persona_name, parecer, status, ai_provider, ai_model, started_at, completed_at)` com upsert por `(document_id, persona_id)`.
-  2. `INSERT INTO ocg_global (project_id, document_id, parecer_consolidated, consensus_fields, conflicting_fields, voting_results, consolidated_at)` com upsert por `document_id`.
-- Persona ID precisa ser resolvido. Hoje a tabela referencia `users(id)` — verificar se há "persona pseudo-user" ou se precisa criar tabela `personas` (descobrir antes de implementar; pode ser dívida pré-existente).
+1. Auditar schema vivo das tabelas `ocg_individual` e `ocg_global` (já documentado em chat session 37 — `persona_id uuid` referencia `users(id)`, **divergente do padrão `ocg_delta_log`**). Decidir no Gate 2: alterar coluna ou aceitar e mapear.
+2. Criar modelos SQLAlchemy `OCGIndividual` e `OCGGlobal` em `base.py` espelhando o schema vivo (após decisão do passo 1).
+3. Migration Alembic — escolha entre:
+   - **(a)** `alembic stamp` se schema vivo já está OK
+   - **(b)** Migration "consolidação" que valida estrutura via `op.get_bind().execute(...)` e ajusta divergências (ex: alterar `persona_id` de `uuid FK` para `String(20)`)
+4. Em `webhooks.py:ingestion_complete`, antes do UPDATE atual:
+   - Para cada `(persona_tag, persona_output)` em `payload.ocg_individual`: upsert em `ocg_individual` por `(document_id, persona_id)`.
+   - Upsert em `ocg_global` por `document_id`.
+5. Pseudo-rows OK por persona, idempotência garantida pelo unique constraint.
 
 **Critério de aceite:**
+- Modelos `OCGIndividual` e `OCGGlobal` importáveis via `from app.models.base import OCGIndividual, OCGGlobal`.
+- Migration aplica sem erro em `gca_test` (banco de testes recriado do zero).
 - Smoke test: upload de 1 doc → 9 rows em `ocg_individual` (8 especialistas + GP) + 1 row em `ocg_global`.
 - Upload de 2 docs no mesmo projeto → 18 rows em `ocg_individual` + 2 rows em `ocg_global`. **Nenhuma row apagada/sobrescrita.**
+- `pytest backend/app/tests/test_ocg_individual_persists_per_doc.py` passa em `gca_test`.
 
-**Risco:** Se `persona_id` referenciar `users(id)`, criar persona pseudo-users de uma vez ou abrir gap como dívida pré-MVP.
+**Riscos remanescentes:**
+- Schema vivo de `ocg_individual` tem `persona_id uuid REFERENCES users(id)` — incompatível com tag string. Decisão do DBA (Gate 3): alterar coluna (impactando dados eventuais já lá) ou criar pseudo-users idempotentes (12 rows) e mapear tag→uuid no service.
 
 ### Fase 31.2 — Substituir UPDATE cru por chamada ao OCGUpdaterService (~1.5d)
 
@@ -153,7 +165,7 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 
 ## 6. Estimativa total
 
-**~4-4.5 dias de implementação** + 0.5d de revisão de aceite = **5d** (1 sprint pequeno).
+**~5-6 dias de implementação** (revisado pelo Gate 1 — Fase 31.1 saiu de 1d para 2d por causa da dívida ORM/migration descoberta) + 0.5d de revisão de aceite = **6d**.
 
 ## 7. Gates do fluxo Gatekeeper para este MVP
 
@@ -166,14 +178,17 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 | 5 | tester-qa | Validar fase 31.5 |
 | skill `preparar-release` | — | Checklist final antes de merge |
 
-## 8. Riscos identificados
+## 8. Riscos identificados (revisados pelo Gate 1 em 2026-05-02)
 
-| Risco | Probabilidade | Mitigação |
-|---|---|---|
-| `persona_id` em `ocg_individual` referencia `users(id)` — sem persona-user, INSERT falha | Alta | Investigar na Fase 31.1 antes de codar; criar persona pseudo-users (12 rows, idempotente) ou abrir gap como dívida |
-| Formato `arguider_analysis` esperado pelo `OCGUpdaterService` não bate com payload do consolidador n8n | Média | Investigar antes de codar a Fase 31.2; pode requerer adaptação de payload (não refator do updater) |
-| `OCGUpdaterService` chama LLM (custa tokens). Cada doc ingerido via n8n vai gerar 1 chamada extra. | Média | Documentar custo em §8 do contrato (já tem política de criticidade); usar provider de criticidade média (não premium) na chamada do updater |
-| Smoke test E2E com 3 docs precisa de 3 docs reais em projeto com LLM configurado | Baixa | Reusar projeto `24bf72c3-...` que já tem DeepSeek validado |
+| # | Risco | Probabilidade | Mitigação |
+|---|---|---|---|
+| R1 | Tabelas `ocg_individual` e `ocg_global` existem no banco mas **não têm modelo ORM nem migration** — Fase 31.1 precisa fechar essa dívida estrutural primeiro | Alta | Decisão do Gate 2: stamp Alembic se schema OK, ou migration de consolidação se houver divergência |
+| R2 | Schema vivo de `ocg_individual.persona_id` é `uuid REFERENCES users(id)` — incompatível com tag `String(20)` do padrão `ocg_delta_log` | Alta | Decisão do Gate 3 (DBA): alterar coluna ou criar pseudo-users idempotentes (12 rows, FK válida) e mapear tag→uuid no service |
+| R3 | Formato `arguider_analysis` esperado pelo `OCGUpdaterService._build_user_prompt` (linha 813) não bate com payload do Consolidador n8n | Média | Investigar antes de codar a Fase 31.2; pode requerer adaptador de payload (não refator do updater) |
+| R4 | `OCGUpdaterService` chama LLM (custa tokens). Cada doc ingerido via n8n gera 1 chamada extra. | Média | Política de criticidade §2.5 — provider de criticidade média (não premium) |
+| R5 | Smoke test E2E com 3 docs precisa de 3 docs reais em projeto com LLM configurado | Baixa | Reusar projeto `24bf72c3-...` (DeepSeek validado) |
+| R6 | `module_codegen_service.py:164-165` tem hardcode de provider Anthropic — viola §3.1 do contrato (`AIKeyResolver` é porta única) | Média | **NÃO corrigir neste MVP** (fora do escopo). Registrar como nova DT no `GCA_MVP_PROGRESS.md §3` para próximo MVP. Dev tocando Fase 31.4 deve **não agravar**. |
+| R7 | Falta de `audit_log` no CodeGen (DT já listada em `GCA_MVP_PROGRESS.md §3.0`) | Baixa | Não bloqueia MVP 31 mas Fase 31.4 não deve fechar essa DT silenciosamente |
 
 ## 9. Compatibilidade backward
 
@@ -182,6 +197,22 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 - Tabelas `ocg_individual`, `ocg_global`, `ocg_delta_log` ganham mais rows mas mesmo schema.
 - Endpoints de codegen ganham resposta 409 nova; clientes que tratam erros HTTP já caem no fluxo correto.
 
-## 10. Próximo passo
+## 10. Refinamentos do Gate 1 (aplicados em 2026-05-02)
 
-Aprovação do GP via Gate 1 (gerente-projetos-ti) com este doc como input. Depois disso o Arquiteto investiga as 2 incertezas (persona_id, arguider_analysis format) e dá go/no-go pra Fase 31.1.
+Veredito: **Aprovado com ressalvas** (gerente-projetos-ti, 2026-05-02). Refinamentos exigidos antes do Gate 2:
+
+1. **Limiar 95% confirmado pelo GP em chat** (2026-05-02) como critério de negócio. Não é mais SHOULD — está consolidado.
+2. **Não-regressão E2E após cada fase**: o smoke test de 135s do pipeline n8n deve continuar verde após cada fase. Critério de aceite explícito da Fase 31.5.
+3. **`actor_id` fallback explícito**: se `ingested_documents.uploaded_by` for nulo ou doc não encontrado, passar `actor_id=None` ao `OCGUpdaterService` (suportado pela assinatura). Documentar como escolha intencional.
+4. **§5 do contrato canônico** atualizado pela Fase 31.5 com cláusula explícita: *"no caminho n8n, handler `/ingestion-complete` delega ao `OCGUpdaterService.update_ocg_from_arguider`"* — verificar via grep no critério de aceite.
+5. **R6 (hardcode Anthropic em `module_codegen_service.py`)**: registrar como nova DT em `GCA_MVP_PROGRESS.md §3` antes do dev tocar a Fase 31.4. Não corrigir neste MVP.
+
+## 11. Próximo passo
+
+Após formalização atômica (este doc + `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`):
+
+**Gate 2 — arquiteto-projetos** (mandato canalizado pelo Gate 1):
+- Investigar schema vivo de `ocg_individual` e `ocg_global` (especialmente FK de `persona_id`).
+- Decidir entre stamp Alembic OU migration de consolidação para Fase 31.1.
+- Mapear compatibilidade do formato `arguider_analysis` entre `OCGUpdaterService._build_user_prompt` (linha 813) e payload do Consolidador n8n (`PIPELINE_OPERACIONAL.md §2.5`).
+- Go/no-go sobre R6 (hardcode Anthropic) — confirmar que **não** será corrigido neste MVP, apenas registrado como DT.
