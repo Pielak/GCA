@@ -69,16 +69,12 @@
               "value": "application/json"
             },
             {
-              "name": "Authorization",
-              "value": "=Bearer {{ $json.provider.api_key }}"
+              "name": "=={{ $json.provider.provider === 'anthropic' ? 'x-api-key' : 'Authorization' }}",
+              "value": "={{ $json.provider.provider === 'anthropic' ? $json.provider.api_key : 'Bearer ' + $json.provider.api_key }}"
             },
             {
               "name": "anthropic-version",
               "value": "2023-06-01"
-            },
-            {
-              "name": "x-api-key",
-              "value": "={{ $json.provider.api_key }}"
             }
           ]
         },

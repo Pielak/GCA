@@ -8,7 +8,10 @@
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [240, 400],
+      "position": [
+        240,
+        400
+      ],
       "webhookId": "gca-conferente",
       "alwaysOutputData": true,
       "parameters": {
@@ -23,7 +26,10 @@
       "name": "G1 - Validar entrada",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [480, 400],
+      "position": [
+        480,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// G1 — Validação de entrada do Conferente\n// Valida HMAC X-Normalizer-Signature, normalized_text e extraction_metadata\n\nconst crypto = require('crypto');\n\nconst body = $input.first().json.body;\nconst headers = $input.first().json.headers;\n\n// --- Validação HMAC ---\nconst normalizerSecret = $env.NORMALIZER_SECRET;\nif (!normalizerSecret) {\n  throw new Error('G1_CONFIG_ERROR: NORMALIZER_SECRET não configurado');\n}\n\nconst signatureHeader = headers['x-normalizer-signature'] || headers['X-Normalizer-Signature'] || '';\nif (!signatureHeader) {\n  throw new Error('G1_AUTH_FAILED: Header X-Normalizer-Signature ausente');\n}\n\n// Formato esperado: sha256=<hex>\nconst receivedHex = signatureHeader.replace('sha256=', '');\nconst rawBody = JSON.stringify(body);\nconst expectedHex = crypto\n  .createHmac('sha256', normalizerSecret)\n  .update(rawBody)\n  .digest('hex');\n\nconst signatureValid = crypto.timingSafeEqual(\n  Buffer.from(receivedHex, 'hex'),\n  Buffer.from(expectedHex, 'hex')\n);\n\nif (!signatureValid) {\n  throw new Error('G1_AUTH_FAILED: Assinatura HMAC inválida');\n}\n\n// --- Validação do payload ---\nconst { ingestion_id, project_id, normalized_text, extraction_metadata, provider_chain, callback_url } = body;\n\nif (!ingestion_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(ingestion_id)) {\n  throw new Error('G1_INVALID: ingestion_id deve ser UUID v4');\n}\n\nif (!project_id) {\n  throw new Error('G1_INVALID: project_id ausente');\n}\n\nif (!normalized_text || typeof normalized_text !== 'string' || normalized_text.trim().length === 0) {\n  throw new Error('G1_INVALID: normalized_text vazio ou ausente');\n}\n\nconst MAX_CHARS = parseInt($env.MAX_NORMALIZED_CHARS || '200000', 10);\nif (normalized_text.length > MAX_CHARS) {\n  throw new Error(`G1_INVALID: normalized_text excede limite de ${MAX_CHARS} chars (recebido: ${normalized_text.length})`);\n}\n\n// Verificar encoding UTF-8 válido (Node.js trata strings como UTF-16; validar via Buffer)\ntry {\n  Buffer.from(normalized_text, 'utf8').toString('utf8');\n} catch (e) {\n  throw new Error('G1_INVALID: normalized_text não é UTF-8 válido');\n}\n\n// extraction_metadata obrigatório\nif (!extraction_metadata || typeof extraction_metadata !== 'object') {\n  throw new Error('G1_INVALID: extraction_metadata ausente');\n}\n\nconst requiredMetaFields = ['source_format', 'original_size_bytes', 'normalized_char_count', 'extraction_method'];\nfor (const field of requiredMetaFields) {\n  if (extraction_metadata[field] === undefined || extraction_metadata[field] === null) {\n    throw new Error(`G1_INVALID: extraction_metadata.${field} ausente`);\n  }\n}\n\nif (!provider_chain || !Array.isArray(provider_chain) || provider_chain.length === 0) {\n  throw new Error('G1_INVALID: provider_chain ausente ou vazia');\n}\n\nif (!callback_url) {\n  throw new Error('G1_INVALID: callback_url ausente');\n}\n\nreturn [{\n  json: {\n    ingestion_id,\n    project_id,\n    normalized_text,\n    extraction_metadata,\n    provider_chain,\n    callback_url,\n    g1_validated_at: new Date().toISOString()\n  }\n}];\n"
@@ -34,7 +40,10 @@
       "name": "Montar prompt Conferente",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [720, 400],
+      "position": [
+        720,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Monta o prompt para o LLM classificar o documento e decidir quais personas ativar\n\nconst item = $input.first().json;\n\nconst CONFERENTE_SYSTEM_PROMPT = `Você é o Conferente (AUD) do pipeline de ingestão do GCA.\nClassifique o documento recebido e decida quais especialistas devem analisá-lo.\n\nTags canônicas disponíveis: AUD, ARQ, DBA, DEV, QA, UX, UI, SEG, CONF, LGPD, NEG\n(GP não é especialista — é o orquestrador, sempre ativado automaticamente)\n\nRetorne JSON estrito:\n{\n  \"doc_classification\": {\n    \"primary_type\": \"string\",\n    \"secondary_types\": [\"string\"],\n    \"sensitivity\": \"public|internal|confidential|regulated\"\n  },\n  \"active_personas\": [\"AUD\", \"ARQ\", ...],\n  \"shared_context\": {\n    \"summary\": \"string\",\n    \"stakeholders\": [\"string\"],\n    \"systems_referenced\": [\"string\"],\n    \"critical_dates\": [\"string\"]\n  },\n  \"chunking_strategy\": \"single|section_split\"\n}\n\nESPECIALISTAS DISPONÍVEIS (12 tags canônicas):\n- AUD — auditoria de qualidade documental\n- GP — gestão de projeto, prazos, riscos\n- ARQ — arquitetura, padrões, perf arquitetural\n- DBA — modelagem de dados, queries, perf de banco\n- DEV — qualidade de código, SOLID, perf de código\n- QA — testes, cobertura, automação CI/CD\n- UX — jornada, heurísticas Nielsen, fluxo\n- UI — design tokens, componentes, contraste\n- SEG — OWASP, secrets, AuthN/AuthZ\n- CONF — conformidade regulatória (PILAR BLOQUEANTE)\n- LGPD — DPO, base legal, retenção\n- NEG — valor, ROI, alinhamento estratégico\n\nREGRAS:\n- CONF (Conformidade) é SEMPRE ativado — pilar bloqueante\n- AUD (Auditor) é SEMPRE ativado — qualidade documental\n- Ative apenas personas relevantes ao conteúdo\n- Documento de código → ARQ, DEV, QA, SEG; adicione DBA se houver persistência; UI/UX se houver interface\n- Documento jurídico/contratual → CONF, LGPD, NEG, GP\n- Política interna de TI/segurança → SEG, CONF, LGPD\n- Especificação funcional → ARQ, DEV, QA, UX, UI, NEG, GP\n- Plano de projeto → GP, NEG, ARQ\n- Modelo de dados → DBA, ARQ, SEG, LGPD\n- Mockup / design system → UI, UX, NEG\n- Se o documento não tem conteúdo técnico (código, stack), não ative ARQ/DBA/DEV\n- Se não tem interface de usuário, não ative UX/UI\n- Documento puramente comercial: ative NEG, CONF, GP (mínimo)\n- NUNCA ative menos de 3 especialistas\n- Em DÚVIDA, ative MAIS especialistas — falso negativo de roteamento custa mais que análise extra\n- Retorne APENAS JSON válido (sem markdown, sem blocos de código)`;\n\n// Trunca o texto para não estourar context window (primeiros 150k chars)\nconst textForClassification = item.normalized_text.substring(0, 150000);\n\nconst userMessage = JSON.stringify({\n  ingestion_id: item.ingestion_id,\n  source_format: item.extraction_metadata.source_format,\n  char_count: item.extraction_metadata.normalized_char_count,\n  extraction_warnings: item.extraction_metadata.extraction_warnings || [],\n  document_text: textForClassification\n}, null, 2);\n\nreturn [{\n  json: {\n    ...item,\n    conferente_system_prompt: CONFERENTE_SYSTEM_PROMPT,\n    conferente_user_message: userMessage\n  }\n}];\n"
@@ -45,7 +54,10 @@
       "name": "LLM - Classificar",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [960, 400],
+      "position": [
+        960,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -85,7 +97,10 @@
       "name": "Parse resposta LLM",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 400],
+      "position": [
+        1200,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Extrai JSON da resposta LLM (suporta Anthropic e DeepSeek/OpenAI-compat)\n\nconst llmResponse = $input.first().json;\nconst upstream = $('Montar prompt Conferente').first().json;\n\nlet rawText = '';\n\n// Anthropic: choices inexistente, usa content[]\nif (llmResponse.content && Array.isArray(llmResponse.content)) {\n  rawText = llmResponse.content.map(c => c.text || '').join('');\n} else if (llmResponse.choices && Array.isArray(llmResponse.choices)) {\n  // OpenAI-compat (DeepSeek)\n  rawText = llmResponse.choices[0]?.message?.content || '';\n} else {\n  throw new Error('PARSE_FAILED: Estrutura de resposta LLM desconhecida');\n}\n\n// Remove possíveis blocos markdown ```json ... ```\nrawText = rawText.trim();\nif (rawText.startsWith('```')) {\n  rawText = rawText.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  throw new Error(`PARSE_FAILED: JSON inválido na resposta do Conferente: ${e.message}. Trecho: ${rawText.substring(0, 200)}`);\n}\n\n// Tokens consumidos\nlet tokensConsumed = { input: 0, output: 0 };\nif (llmResponse.usage) {\n  tokensConsumed = {\n    input: llmResponse.usage.input_tokens || llmResponse.usage.prompt_tokens || 0,\n    output: llmResponse.usage.output_tokens || llmResponse.usage.completion_tokens || 0\n  };\n}\n\nreturn [{\n  json: {\n    ingestion_id: upstream.ingestion_id,\n    project_id: upstream.project_id,\n    normalized_text: upstream.normalized_text,\n    extraction_metadata: upstream.extraction_metadata,\n    provider_chain: upstream.provider_chain,\n    callback_url: upstream.callback_url,\n    doc_classification: parsed.doc_classification,\n    active_personas: parsed.active_personas,\n    shared_context: parsed.shared_context,\n    chunking_strategy: parsed.chunking_strategy || 'single',\n    tokens_consumed: tokensConsumed,\n    parsed_at: new Date().toISOString()\n  }\n}];\n"
@@ -96,7 +111,10 @@
       "name": "G2 - Validar roteamento",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1440, 400],
+      "position": [
+        1440,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// G2 — Valida que o roteamento produzido pelo LLM é coerente\n\nconst item = $input.first().json;\n\nconst TAGS_CANONICAS = new Set(['AUD', 'GP', 'ARQ', 'DBA', 'DEV', 'QA', 'UX', 'UI', 'SEG', 'CONF', 'LGPD', 'NEG']);\nconst CHUNK_STRATEGIES_VALIDAS = new Set(['single', 'section_split', 'hierarchical']);\n\nconst { active_personas, doc_classification, shared_context, chunking_strategy } = item;\n\nif (!Array.isArray(active_personas) || active_personas.length === 0) {\n  throw new Error('G2_INVALID: active_personas ausente ou vazio');\n}\n\n// Verifica que todas as tags são canônicas\nconst tagsInvalidas = active_personas.filter(t => !TAGS_CANONICAS.has(t));\nif (tagsInvalidas.length > 0) {\n  throw new Error(`G2_INVALID: Tags não-canônicas em active_personas: ${tagsInvalidas.join(', ')}`);\n}\n\nif (active_personas.length < 3) {\n  throw new Error(`G2_INVALID: active_personas deve ter no mínimo 3 (recebido: ${active_personas.length})`);\n}\n\n// CONF e AUD são obrigatórios\nif (!active_personas.includes('CONF')) {\n  throw new Error('G2_INVALID: CONF (pilar bloqueante) deve estar sempre em active_personas');\n}\nif (!active_personas.includes('AUD')) {\n  throw new Error('G2_INVALID: AUD (qualidade documental) deve estar sempre em active_personas');\n}\n\nif (!CHUNK_STRATEGIES_VALIDAS.has(chunking_strategy)) {\n  throw new Error(`G2_INVALID: chunking_strategy inválido: ${chunking_strategy}`);\n}\n\nif (!doc_classification || !doc_classification.primary_type || !doc_classification.sensitivity) {\n  throw new Error('G2_INVALID: doc_classification incompleto (primary_type ou sensitivity ausente)');\n}\n\nif (!shared_context || !shared_context.summary) {\n  throw new Error('G2_INVALID: shared_context.summary ausente');\n}\n\n// GP é sempre ativado como orquestrador (não entra em active_personas mas é despachado)\n// Remover GP de active_personas caso LLM o tenha incluído (ele tem workflow próprio)\nconst activePersonasFiltered = active_personas.filter(t => t !== 'GP');\n\nreturn [{\n  json: {\n    ...item,\n    active_personas: activePersonasFiltered,\n    g2_validated_at: new Date().toISOString()\n  }\n}];\n"
@@ -107,7 +125,10 @@
       "name": "Setar Redis",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1680, 400],
+      "position": [
+        1680,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Persiste metadados da ingestão no Redis via API HTTP do GCA Backend\n// O GCA Backend expõe /api/internal/redis/set para o n8n (rede interna)\n\nconst item = $input.first().json;\nconst { ingestion_id, project_id, active_personas, shared_context, callback_url } = item;\n\n// Monta o conjunto de chaves a persistir\nconst redisKeys = [\n  {\n    key: `gca:ingestion:${ingestion_id}:expected_count`,\n    value: String(active_personas.length),\n    ttl: 3600\n  },\n  {\n    key: `gca:ingestion:${ingestion_id}:shared_context`,\n    value: JSON.stringify(shared_context),\n    ttl: 3600\n  },\n  {\n    key: `gca:ingestion:${ingestion_id}:project_id`,\n    value: project_id,\n    ttl: 3600\n  },\n  {\n    key: `gca:ingestion:${ingestion_id}:active_personas`,\n    value: JSON.stringify(active_personas),\n    ttl: 3600\n  },\n  {\n    key: `gca:ingestion:${ingestion_id}:callback_url`,\n    value: callback_url,\n    ttl: 3600\n  }\n];\n\n// Passa as chaves adiante para o nó HTTP que fará o SET no Redis\n// O nó HTTP Request seguinte lida com a persistência real\nreturn [{\n  json: {\n    ...item,\n    redis_keys_to_set: redisKeys,\n    redis_base_url: `${$env.GCA_CALLBACK_BASE_URL}/api/internal/redis`,\n    expected_count: active_personas.length\n  }\n}];\n"
@@ -118,7 +139,10 @@
       "name": "HTTP - Persistir Redis",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1920, 400],
+      "position": [
+        1920,
+        400
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -154,10 +178,13 @@
       "name": "Despachar especialistas",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2160, 300],
+      "position": [
+        2160,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Despacha cada persona especialista via HTTP fire-and-forget\n// Cada POST é independente — falha de um não cancela os outros\n\nconst crypto = require('crypto');\n\nconst upstream = $('G2 - Validar roteamento').first().json;\nconst { ingestion_id, project_id, normalized_text, extraction_metadata, provider_chain, callback_url, active_personas, shared_context, doc_classification, chunking_strategy } = upstream;\n\nconst conferenteSecret = $env.CONFERENTE_SECRET;\nconst n8nBaseUrl = $env.N8N_BASE_URL || 'https://n8n-pipeline.mockn8n.com';\n\nconst dispatched = [];\nconst errors = [];\n\nfor (const tag of active_personas) {\n  const tagLower = tag.toLowerCase();\n  const webhookUrl = `${n8nBaseUrl}/webhook/gca-specialist-${tagLower}`;\n\n  const payload = {\n    ingestion_id,\n    project_id,\n    normalized_text,\n    extraction_metadata,\n    provider_chain,\n    callback_url,\n    shared_context,\n    doc_classification,\n    chunking_strategy,\n    persona_tag: tag,\n    dispatched_at: new Date().toISOString()\n  };\n\n  const payloadStr = JSON.stringify(payload);\n  const hmac = crypto\n    .createHmac('sha256', conferenteSecret)\n    .update(payloadStr)\n    .digest('hex');\n\n  try {\n    // Fire-and-forget: não aguarda resposta\n    // Em produção, usar nó HTTP Request em paralelo ou $helpers.httpRequest\n    dispatched.push({\n      tag,\n      webhook_url: webhookUrl,\n      hmac_signature: `sha256=${hmac}`,\n      payload_size: payloadStr.length\n    });\n  } catch (e) {\n    errors.push({ tag, error: e.message });\n  }\n}\n\nreturn [{\n  json: {\n    ingestion_id,\n    project_id,\n    active_personas,\n    dispatched_specialists: dispatched,\n    dispatch_errors: errors,\n    dispatch_prepared_at: new Date().toISOString(),\n    // Passa adiante para o nó HTTP que fará os POSTs\n    conferente_secret: conferenteSecret,\n    n8n_base_url: n8nBaseUrl,\n    normalized_text,\n    extraction_metadata,\n    provider_chain,\n    callback_url,\n    shared_context,\n    doc_classification,\n    chunking_strategy\n  }\n}];\n"
+        "jsCode": "// Emite 1 item por persona — HTTP Request seguinte itera sobre todos\nconst crypto = require('crypto');\nconst upstream = $('G2 - Validar roteamento').first().json;\nconst { ingestion_id, project_id, normalized_text, extraction_metadata, provider_chain, callback_url, active_personas, shared_context, doc_classification, chunking_strategy } = upstream;\nconst conferenteSecret = $env.CONFERENTE_SECRET;\nconst n8nBaseUrl = $env.N8N_BASE_URL || 'https://n8n-pipeline.mockn8n.com';\n\nconst items = [];\nfor (const tag of active_personas) {\n  const tagLower = tag.toLowerCase();\n  const webhookUrl = `${n8nBaseUrl}/webhook/gca-specialist-${tagLower}`;\n  const payload = {\n    ingestion_id, project_id, normalized_text, extraction_metadata,\n    provider_chain, callback_url, shared_context, doc_classification,\n    chunking_strategy, persona_tag: tag, dispatched_at: new Date().toISOString()\n  };\n  const payloadStr = JSON.stringify(payload);\n  const hmac = 'sha256=' + crypto.createHmac('sha256', conferenteSecret).update(payloadStr).digest('hex');\n  items.push({json: {webhook_url: webhookUrl, hmac_signature: hmac, payload: payloadStr}});\n}\nreturn items;\n"
       }
     },
     {
@@ -165,11 +192,14 @@
       "name": "HTTP - Despachar cada especialista",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2400, 300],
+      "position": [
+        2400,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.n8n_base_url }}/webhook/gca-specialist-{{ $json.dispatched_specialists[0].tag.toLowerCase() }}",
+        "url": "={{ $json.webhook_url }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -179,13 +209,12 @@
             },
             {
               "name": "X-Conferente-Signature",
-              "value": "={{ $json.dispatched_specialists[0].hmac_signature }}"
+              "value": "={{ $json.hmac_signature }}"
             }
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ ingestion_id: $json.ingestion_id, project_id: $json.project_id, normalized_text: $json.normalized_text, extraction_metadata: $json.extraction_metadata, provider_chain: $json.provider_chain, callback_url: $json.callback_url, shared_context: $json.shared_context, doc_classification: $json.doc_classification, chunking_strategy: $json.chunking_strategy, persona_tag: $json.dispatched_specialists[0].tag, dispatched_at: new Date().toISOString() }) }}",
+        "specifyBody": "string",
         "options": {
           "timeout": 5000,
           "response": {
@@ -193,7 +222,8 @@
               "fullResponse": false
             }
           }
-        }
+        },
+        "body": "={{ $json.payload }}"
       }
     },
     {
@@ -201,7 +231,10 @@
       "name": "Despachar GP orquestrador",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [2400, 500],
+      "position": [
+        2400,
+        500
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Despacha o GP Orquestrador com o resultado da classificação\n// GP sempre é ativado, independente de estar em active_personas\n\nconst crypto = require('crypto');\n\nconst upstream = $('G2 - Validar roteamento').first().json;\nconst conferenteSecret = $env.CONFERENTE_SECRET;\nconst n8nBaseUrl = $env.N8N_BASE_URL || 'https://n8n-pipeline.mockn8n.com';\n\nconst payload = {\n  ingestion_id: upstream.ingestion_id,\n  project_id: upstream.project_id,\n  normalized_text: upstream.normalized_text,\n  extraction_metadata: upstream.extraction_metadata,\n  provider_chain: upstream.provider_chain,\n  callback_url: upstream.callback_url,\n  doc_classification: upstream.doc_classification,\n  active_personas: upstream.active_personas,\n  shared_context: upstream.shared_context,\n  chunking_strategy: upstream.chunking_strategy,\n  dispatched_at: new Date().toISOString()\n};\n\nconst payloadStr = JSON.stringify(payload);\nconst hmac = crypto\n  .createHmac('sha256', conferenteSecret)\n  .update(payloadStr)\n  .digest('hex');\n\nreturn [{\n  json: {\n    gp_webhook_url: `${n8nBaseUrl}/webhook/gca-orchestrator-gp`,\n    gp_hmac: `sha256=${hmac}`,\n    gp_payload: payload\n  }\n}];\n"
@@ -212,7 +245,10 @@
       "name": "HTTP - Despachar GP",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2640, 500],
+      "position": [
+        2640,
+        500
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -248,7 +284,10 @@
       "name": "Callback erro ao GCA",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1440, 600],
+      "position": [
+        1440,
+        600
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -279,7 +318,10 @@
       "name": "Handler de erro global",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1200, 600],
+      "position": [
+        1200,
+        600
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "// Handler global de erro — captura falhas dos nós anteriores\n// Preserva ingestion_id e project_id se disponíveis na cadeia\n\nconst errorData = $input.first();\nconst errorMessage = errorData.json.error?.message || errorData.json.message || 'Erro desconhecido no workflow Conferente';\n\n// Tenta recuperar contexto de qualquer nó anterior que teve sucesso\nlet ingestion_id = 'unknown';\nlet project_id = 'unknown';\n\ntry {\n  const webhookData = $('Webhook Trigger').first().json;\n  ingestion_id = webhookData.body?.ingestion_id || 'unknown';\n  project_id = webhookData.body?.project_id || 'unknown';\n} catch (_) {\n  // Sem contexto disponível\n}\n\nreturn [{\n  json: {\n    ingestion_id,\n    project_id,\n    error: { message: errorMessage },\n    failed_at: new Date().toISOString()\n  }\n}];\n"
@@ -290,78 +332,126 @@
     "Webhook Trigger": {
       "main": [
         [
-          { "node": "G1 - Validar entrada", "type": "main", "index": 0 }
+          {
+            "node": "G1 - Validar entrada",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "G1 - Validar entrada": {
       "main": [
         [
-          { "node": "Montar prompt Conferente", "type": "main", "index": 0 }
+          {
+            "node": "Montar prompt Conferente",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Montar prompt Conferente": {
       "main": [
         [
-          { "node": "LLM - Classificar", "type": "main", "index": 0 }
+          {
+            "node": "LLM - Classificar",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "LLM - Classificar": {
       "main": [
         [
-          { "node": "Parse resposta LLM", "type": "main", "index": 0 }
+          {
+            "node": "Parse resposta LLM",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Parse resposta LLM": {
       "main": [
         [
-          { "node": "G2 - Validar roteamento", "type": "main", "index": 0 }
+          {
+            "node": "G2 - Validar roteamento",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "G2 - Validar roteamento": {
       "main": [
         [
-          { "node": "Setar Redis", "type": "main", "index": 0 }
+          {
+            "node": "Setar Redis",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Setar Redis": {
       "main": [
         [
-          { "node": "HTTP - Persistir Redis", "type": "main", "index": 0 }
+          {
+            "node": "HTTP - Persistir Redis",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "HTTP - Persistir Redis": {
       "main": [
         [
-          { "node": "Despachar especialistas", "type": "main", "index": 0 },
-          { "node": "Despachar GP orquestrador", "type": "main", "index": 0 }
+          {
+            "node": "Despachar especialistas",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Despachar GP orquestrador",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Despachar especialistas": {
       "main": [
         [
-          { "node": "HTTP - Despachar cada especialista", "type": "main", "index": 0 }
+          {
+            "node": "HTTP - Despachar cada especialista",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Despachar GP orquestrador": {
       "main": [
         [
-          { "node": "HTTP - Despachar GP", "type": "main", "index": 0 }
+          {
+            "node": "HTTP - Despachar GP",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     },
     "Handler de erro global": {
       "main": [
         [
-          { "node": "Callback erro ao GCA", "type": "main", "index": 0 }
+          {
+            "node": "Callback erro ao GCA",
+            "type": "main",
+            "index": 0
+          }
         ]
       ]
     }
