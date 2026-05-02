@@ -1,9 +1,15 @@
 """Webhooks Router — n8n Integration"""
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+from uuid import UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 import json
+import hmac
+import hashlib
+
+from app.db.database import get_db
 
 logger = structlog.get_logger(__name__)
 
@@ -293,3 +299,196 @@ async def ocg_result_callback(payload: Dict[str, Any]) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao processar resultado OCG: {str(e)}",
         )
+
+
+# ============================================================================
+# n8n Pipeline v2 — Ingestão via Personas distribuídas
+# ============================================================================
+
+def _verify_hmac(body: bytes, signature: str, secret: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature or "")
+
+
+class IngestionCompletePayload(BaseModel):
+    ingestion_id: str
+    project_id: str
+    status: str  # completed|failed|partial
+    overall_score: Optional[int] = None
+    blocked: bool = False
+    blocking_reason: Optional[str] = None
+    personas_executed: List[str] = []
+    personas_failed: List[str] = []
+    ocg_individual: Dict[str, Any] = {}
+    ocg_global_delta: Dict[str, Any] = {}
+    conflicts_resolved: List[Dict[str, Any]] = []
+    consolidated_findings: List[Dict[str, Any]] = []
+    consolidated_recommendations: List[Dict[str, Any]] = []
+    execution_summary: Dict[str, Any] = {}
+
+
+@router.post("/ingestion-complete")
+async def ingestion_complete(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback do Consolidador n8n — recebe resultado final da ingestão."""
+    from app.core.config import settings
+    body = await request.body()
+    signature = request.headers.get("x-n8n-signature", "")
+    secret = getattr(settings, "N8N_CALLBACK_SECRET", "")
+
+    if secret and not _verify_hmac(body, signature, secret):
+        logger.warning("webhook.ingestion_complete_hmac_failed")
+        raise HTTPException(status_code=401, detail="HMAC inválido")
+
+    payload = IngestionCompletePayload(**json.loads(body))
+
+    logger.info(
+        "webhook.ingestion_complete",
+        ingestion_id=payload.ingestion_id,
+        project_id=payload.project_id,
+        status=payload.status,
+        overall_score=payload.overall_score,
+        personas_ok=len(payload.personas_executed),
+        personas_failed=len(payload.personas_failed),
+        blocked=payload.blocked,
+    )
+
+    from sqlalchemy import text
+
+    try:
+        doc_id = payload.ingestion_id
+        project_id = payload.project_id
+
+        if payload.status in ("completed", "partial"):
+            await db.execute(text("""
+                UPDATE ingested_documents SET
+                    arguider_status = :status,
+                    arguider_stage = 'completed',
+                    arguider_progress_percent = 100,
+                    arguider_completed_at = NOW(),
+                    ocg_updated = TRUE,
+                    updated_at = NOW()
+                WHERE id = :doc_id
+            """), {"doc_id": doc_id, "status": "completed"})
+
+            ocg_data = json.dumps({
+                "overall_score": payload.overall_score,
+                "blocked": payload.blocked,
+                "blocking_reason": payload.blocking_reason,
+                "personas_executed": payload.personas_executed,
+                "ocg_individual": payload.ocg_individual,
+                "ocg_global_delta": payload.ocg_global_delta,
+                "consolidated_findings": payload.consolidated_findings,
+                "execution_summary": payload.execution_summary,
+            }, ensure_ascii=False)
+
+            await db.execute(text("""
+                UPDATE ocg SET
+                    ocg_data = :ocg_data,
+                    overall_score = :score,
+                    status = CASE WHEN :blocked THEN 'blocked' ELSE 'active' END,
+                    version = version + 1,
+                    change_type = 'EXPAND',
+                    updated_at = NOW()
+                WHERE project_id = :project_id
+            """), {
+                "ocg_data": ocg_data,
+                "score": payload.overall_score,
+                "blocked": payload.blocked,
+                "project_id": project_id,
+            })
+
+        else:
+            await db.execute(text("""
+                UPDATE ingested_documents SET
+                    arguider_status = 'error',
+                    arguider_stage = 'failed',
+                    arguider_error_message = :error,
+                    updated_at = NOW()
+                WHERE id = :doc_id
+            """), {
+                "doc_id": doc_id,
+                "error": f"Pipeline n8n: {payload.status}. Failed: {payload.personas_failed}",
+            })
+
+        await db.commit()
+
+        logger.info(
+            "webhook.ingestion_complete_processed",
+            ingestion_id=doc_id,
+            status=payload.status,
+        )
+
+        return {"status": "processed", "ingestion_id": doc_id}
+
+    except Exception as e:
+        logger.error("webhook.ingestion_complete_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AccumulatePayload(BaseModel):
+    persona_result: Dict[str, Any]
+    persona_tag: str
+    valid: bool
+
+
+@router.post("/internal/ingestion/{ingestion_id}/accumulate")
+async def accumulate_persona_result(
+    ingestion_id: str,
+    payload: AccumulatePayload,
+    db: AsyncSession = Depends(get_db),
+):
+    """Accumulator para resultados de personas — usado pelo Consolidador n8n.
+
+    Armazena resultado no Redis, incrementa contador, retorna se todos chegaram.
+    """
+    import redis
+    from app.core.config import settings
+
+    r = redis.Redis(
+        host=getattr(settings, "REDIS_HOST", "redis"),
+        port=int(getattr(settings, "REDIS_PORT", 6379)),
+        db=int(getattr(settings, "N8N_REDIS_DB", 2)),
+    )
+
+    result_json = json.dumps(payload.persona_result, ensure_ascii=False)
+    r.rpush(f"gca:ingestion:{ingestion_id}:results", result_json)
+    received = r.incr(f"gca:ingestion:{ingestion_id}:received_count")
+    expected = int(r.get(f"gca:ingestion:{ingestion_id}:expected_count") or 0)
+    project_id = (r.get(f"gca:ingestion:{ingestion_id}:project_id") or b"").decode()
+
+    all_received = received >= expected and expected > 0
+
+    logger.info(
+        "webhook.accumulate",
+        ingestion_id=ingestion_id,
+        persona_tag=payload.persona_tag,
+        valid=payload.valid,
+        received=received,
+        expected=expected,
+        all_received=all_received,
+    )
+
+    all_results = []
+    if all_received:
+        raw_results = r.lrange(f"gca:ingestion:{ingestion_id}:results", 0, -1)
+        all_results = [json.loads(rr) for rr in raw_results]
+        r.delete(
+            f"gca:ingestion:{ingestion_id}:results",
+            f"gca:ingestion:{ingestion_id}:received_count",
+            f"gca:ingestion:{ingestion_id}:expected_count",
+            f"gca:ingestion:{ingestion_id}:project_id",
+            f"gca:ingestion:{ingestion_id}:shared_context",
+        )
+
+    return {
+        "received_count": received,
+        "expected_count": expected,
+        "all_received": all_received,
+        "all_results": all_results,
+        "project_id": project_id,
+    }

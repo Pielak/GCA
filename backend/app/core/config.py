@@ -47,6 +47,14 @@ class Settings(BaseSettings):
     REDIS_PORT: int = 6379
     REDIS_URL: str = "redis://localhost:6379/0"
     REDIS_DECODE_RESPONSES: bool = True
+    N8N_REDIS_DB: int = 2
+
+    # n8n Pipeline v2
+    INGESTION_VIA_N8N: bool = False
+    N8N_BASE_URL: str = "http://localhost:5678"
+    GCA_CALLBACK_BASE_URL: str = "http://localhost:8000"
+    GCA_WEBHOOK_SECRET: str = ""
+    N8N_CALLBACK_SECRET: str = ""
 
     # JWT RS256
     JWT_PRIVATE_KEY_PATH: Optional[str] = None

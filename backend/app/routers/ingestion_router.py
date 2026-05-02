@@ -305,15 +305,69 @@ async def reanalyze_document(
     doc.ocg_updated = False
     await db.commit()
 
-    # MVP 13 Fase 13.3a — dispara via Celery (persiste no broker se
-    # worker cair; retry bounded via task config). Watchdog DT-073
-    # continua cobrindo até 13.3b/c migrarem os demais 7 pontos.
-    from app.tasks.pipeline import pipeline_ingest_task
-    pipeline_ingest_task.delay(
-        str(document_id),
-        str(project_id),
-        doc.file_type or "",
-    )
+    # Feature flag: INGESTION_VIA_N8N migra orquestração para n8n
+    from app.core.config import settings
+    use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
+
+    if use_n8n:
+        import httpx
+        import base64
+        from app.services.ai_key_resolver import AIKeyResolver
+
+        provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
+        chain_data = []
+        for p in (provider_chain or []):
+            chain_data.append({
+                "provider": p.get("provider", ""),
+                "model": p.get("model", ""),
+                "api_key": p.get("api_key", ""),
+                "is_default": p.get("is_default", False),
+            })
+
+        n8n_payload = {
+            "ingestion_id": str(document_id),
+            "project_id": str(project_id),
+            "document_bytes_base64": base64.b64encode(file_bytes).decode() if file_bytes else "",
+            "document_metadata": {
+                "filename": doc.original_filename or doc.filename,
+                "mime_type": doc.file_type or "application/octet-stream",
+                "size_bytes": doc.file_size_bytes or 0,
+                "uploaded_by": str(doc.uploaded_by or ""),
+                "uploaded_by_role": "GP",
+                "declared_purpose": "reanalyze",
+            },
+            "provider_chain": chain_data,
+            "callback_url": f"{getattr(settings, 'GCA_CALLBACK_BASE_URL', 'http://localhost:8000')}/api/v1/webhooks/ingestion-complete",
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        }
+
+        n8n_url = getattr(settings, "N8N_BASE_URL", "http://localhost:5678")
+        webhook_secret = getattr(settings, "GCA_WEBHOOK_SECRET", "")
+        body_bytes = __import__("json").dumps(n8n_payload).encode()
+        sig = "sha256=" + __import__("hmac").new(
+            webhook_secret.encode(), body_bytes, __import__("hashlib").sha256
+        ).hexdigest()
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{n8n_url}/webhook/gca-normalizer",
+                content=body_bytes,
+                headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+            )
+            if resp.status_code not in (200, 202):
+                logger.error("ingestion.n8n_dispatch_failed", status=resp.status_code, body=resp.text[:200])
+                raise HTTPException(status_code=502, detail=f"n8n dispatch falhou: {resp.status_code}")
+
+        doc.arguider_status = "processing"
+        doc.arguider_stage = "n8n_pipeline"
+        await db.commit()
+    else:
+        from app.tasks.pipeline import pipeline_ingest_task
+        pipeline_ingest_task.delay(
+            str(document_id),
+            str(project_id),
+            doc.file_type or "",
+        )
 
     logger.info(
         "ingestion.reanalyze_dispatched",
