@@ -10,17 +10,19 @@
 
 Conforme reafirmado pelo GP em 2026-05-02:
 
-> *"O OCG não sobrescreve, não contrai. Só cresce com informação útil. Informação inútil é descartada. CodeGen fica estático e só cresce com informação útil."*
+> *"O OCG não sobrescreve, não contrai. Só cresce com informação útil. Informação inútil é descartada. OCG fica estático e só cresce com informação útil."*
+
+E sobre o CodeGen, o critério de liberação é a **maturidade do OCG**: o CodeGen só é liberado para gerar código quando o OCG tem **≥95% de contexto** acumulado. Abaixo disso, o GCA não tem insumo suficiente para produzir código válido.
 
 **Estado atual:**
 - O caminho de ingestão antigo (Celery, `ingestion_service.py:1672`) **respeita** essa regra — chama `OCGUpdaterService.update_ocg_from_arguider` que tem o helper canônico `_filter_negative_score_deltas` e versionamento via `ocg_delta_log` com `hash_chain`.
 - O caminho novo (n8n, handler `/ingestion-complete` em `webhooks.py:332`) **viola** essa regra — faz `UPDATE ocg SET ocg_data=..., overall_score=..., status=...` direto, sobrescrevendo a cada documento.
 - As tabelas `ocg_individual` (por persona/doc), `ocg_global` (consolidado/doc) e `ocg_delta_log` (versão+hash chain) **existem** mas não são populadas pelo caminho n8n.
-- O CodeGen (`module_codegen_service.py`, `codegen_prompt_builder.py`) **não consulta** `ocg.is_blocking` — gera código mesmo com OCG bloqueado.
+- O CodeGen (`module_codegen_service.py`, `codegen_prompt_builder.py`) **não consulta** `ocg.is_blocking` nem `ocg.overall_score` — gera código mesmo com OCG bloqueado ou imaturo.
 
 ## 2. Objetivo
 
-Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem reescrever o `OCGUpdaterService`** (reusar). Adicionar gate explícito no CodeGen que recusa geração quando OCG está bloqueado, com motivo legível.
+Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem reescrever o `OCGUpdaterService`** (reusar). Adicionar gate explícito no CodeGen que recusa geração até o OCG estar maduro (`overall_score >= 95` e `is_blocking=false`), com motivo legível em cada nível de bloqueio.
 
 ## 3. Invariantes a preservar (não negociáveis)
 
@@ -28,7 +30,7 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 2. **Não sobrescreve.** Cada doc gera **delta** que é mesclado ao estado anterior, não substitui.
 3. **Histórico imutável.** Cada doc deixa rastro em `ocg_individual` (uma row por persona) e `ocg_global` (uma row consolidada). Anti-tamper via `ocg_delta_log.hash_chain`.
 4. **Lixo é descartado, não armazenado.** Quando uma persona retorna PersonaOutput inválido (G4 reprova), o resultado **não entra** no OCG cumulativo. Vai para histórico marcado `status='failed'` em `ocg_individual` apenas.
-5. **CodeGen é estático.** Geração de código **só** roda quando `ocg.is_blocking=false` E `ocg.overall_score >= 60` (mesmo limiar do CONF). Caso contrário, recusa com motivo.
+5. **CodeGen liberado por maturidade do OCG.** Geração de código **só** roda quando o OCG está maduro: `ocg.is_blocking=false` E `ocg.overall_score >= 95` (limiar de maturidade — abaixo disso o contexto é insuficiente para código válido). Score `< 60` permanece hard-block via CONF (regra existente). Recusa com motivo legível em ambos os casos.
 6. **Pipeline n8n permanece funcional.** Nenhuma mudança no n8n side. Toda a lógica fica no backend.
 
 ## 4. Não-objetivos (fora do escopo deste MVP)
@@ -99,19 +101,36 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 - Doc com 1 persona falha (ex: SEG retornou JSON inválido): 8 rows OK + 1 row failed em `ocg_individual`. OCG mestre cresce só com as 8.
 - Doc com 5+ personas falhas: nenhum delta aplicado ao OCG mestre. Status doc = `partial` com erro descritivo.
 
-### Fase 31.4 — CodeGen Gate (~0.5d)
+### Fase 31.4 — CodeGen Gate por maturidade do OCG (~0.5d)
 
-**Entrega:** Geração de código consulta `ocg.is_blocking` antes de gerar.
+**Entrega:** Geração de código consulta maturidade do OCG antes de gerar.
+
+**Conceito:** CodeGen é liberado quando OCG está **maduro** (`overall_score >= 95`). Abaixo de 95, contexto insuficiente — pode rodar mais ingestões para amadurecer. Abaixo de 60 ou com `is_blocking=true` (CONF), é hard-block.
 
 **Tarefas:**
-- Em `module_codegen_service.py`: na entrada do método de geração, ler `ocg.is_blocking` e `ocg.overall_score` do projeto.
-- Se `is_blocking=true` OU `overall_score < 60`: levantar `HTTPException(409, detail="OCG bloqueado: <motivo>. Codegen exige overall_score>=60 e is_blocking=false.")`.
+- Em `module_codegen_service.py`: na entrada do método de geração, ler `ocg.is_blocking`, `ocg.overall_score` e `ocg.context_health` do projeto.
+- Aplicar 3 níveis de gate:
+  - `is_blocking=true` → `HTTPException(409, "OCG bloqueado: <blocking_reason>. CodeGen recusa enquanto bloqueio não for resolvido.")`
+  - `overall_score < 60` → `HTTPException(409, "OCG insuficiente (score=<n>). Score mínimo absoluto: 60. Continue ingerindo documentos.")`
+  - `overall_score < 95` → `HTTPException(409, "OCG imaturo (score=<n>). CodeGen exige score >= 95 (contexto >= 95%) para gerar código válido. Continue ingerindo documentos para amadurecer o OCG.")`
 - Mesma checagem em `codegen_prompt_builder.py` se houver entry point separado.
-- Endpoints de codegen no router devolvem 409 com payload estruturado: `{ "blocked": true, "overall_score": ..., "blocking_reason": ..., "personas_blocking": [...] }`.
+- Endpoints de codegen devolvem 409 com payload estruturado:
+  ```json
+  {
+    "blocked": true,
+    "block_level": "hard_block|insufficient|immature",
+    "overall_score": <n>,
+    "score_required": 95,
+    "blocking_reason": "...",
+    "personas_blocking": [...]
+  }
+  ```
 
 **Critério de aceite:**
-- Smoke test: ingerir doc fraco que deixe CONF<60 → tentar `/code-generation/scaffold/plan` → 409 com motivo.
-- Ingerir doc sólido depois (overall sobe acima de 60, is_blocking=false) → mesmo endpoint passa.
+- Doc fraco (CONF blocking) → 409 com `block_level=hard_block`
+- OCG com score 50 → 409 com `block_level=insufficient`
+- OCG com score 80 → 409 com `block_level=immature` (mensagem orientando ingerir mais docs)
+- OCG com score 96 e `is_blocking=false` → endpoint passa, código gerado
 
 ### Fase 31.5 — Testes + doc + observabilidade (~1d)
 
