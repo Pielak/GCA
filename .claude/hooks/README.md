@@ -7,8 +7,10 @@ Hooks que enforçam regras do `CLAUDE.md` no nível de execução, não só de l
 | Hook | Quando dispara | Comportamento |
 |---|---|---|
 | `pre-edit.sh` | Antes de Edit/Write | **Bloqueia** (exit 2) se tentar criar símbolo canônico que já existe (AIKeyResolver, VaultService, is_active_integrated_member, generate_temporary_password). Cita onde o original mora. |
+| `pre-edit-readcheck.sh` | Antes de Edit/Write | **Bloqueia** (exit 2) se o arquivo está em hot-path do GCA (`backend/app/services/personas/`, `backend/app/routers/`, `n8n/`) e não houve `Read` do mesmo arquivo nos últimos 3600s. Bypass: `GCA_SKIP_READCHECK=1`. |
 | `post-edit.sh` | Depois de Edit/Write | Roda pytest **só** do `test_<nome>.py` correspondente. **Warning** (exit 1) se vermelho. Saída do pytest vai para o contexto do modelo. |
 | `pre-bash.sh` | Antes de qualquer Bash | **Bloqueia** (exit 2) se tentar rodar pytest e `DATABASE_URL` efetivo apontar para `gca` (produção) em vez de `gca_test`. |
+| `audit-logger.sh` | Depois de Read/Edit/Write/Bash | **Não bloqueia.** Append em `.claude/audit.log`: `[ts] tool=X file=Y` ou `cmd="..."`. Trilha forense para detectar padrões de tentativa-e-erro. Rotaciona em 10MB. |
 | `on-stop.sh` | Ao encerrar sessão | **Warning** se houver mudanças não commitadas em arquivos críticos (CLAUDE.md, contrato, migrations). |
 
 ## Pré-requisitos
@@ -96,6 +98,33 @@ echo "Exit code: $?"
 echo '{}' | bash .claude/hooks/on-stop.sh
 echo "Exit code: $?"
 # Esperado: exit 1 + lista se há .md/migrations modificados sem commit; exit 0 caso contrário
+```
+
+### Test 5 — audit-logger (registro forense)
+
+```bash
+echo '{"tool_name":"Read","tool_input":{"file_path":"/home/luiz/GCA/foo.py"}}' | bash .claude/hooks/audit-logger.sh
+tail -1 .claude/audit.log
+# Esperado: linha "[ts] tool=Read file=foo.py", exit 0
+```
+
+### Test 6 — pre-edit-readcheck (leitura prévia em hot-path)
+
+```bash
+# (a) Cold path: passa
+echo '{"tool_input":{"file_path":"/home/luiz/GCA/CHANGELOG.md"}}' | bash .claude/hooks/pre-edit-readcheck.sh
+echo "Exit: $?"
+# Esperado: 0
+
+# (b) Hot path sem Read prévio: bloqueia
+echo '{"tool_input":{"file_path":"/home/luiz/GCA/backend/app/routers/foo.py"}}' | bash .claude/hooks/pre-edit-readcheck.sh
+echo "Exit: $?"
+# Esperado: 2 + mensagem orientando Read antes de Edit
+
+# (c) Bypass legítimo
+echo '{"tool_input":{"file_path":"/home/luiz/GCA/n8n/workflow.json"}}' | GCA_SKIP_READCHECK=1 bash .claude/hooks/pre-edit-readcheck.sh
+echo "Exit: $?"
+# Esperado: 0 + warning no stderr + linha BYPASS no audit.log
 ```
 
 ## Manutenção
