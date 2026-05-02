@@ -157,12 +157,15 @@ JSON esperado:
 
         try:
             # Construir prompt para o chunk
+            # Truncar texto do chunk para caber no contexto (DeepSeek V4: 1M contexto)
+            # mas manter o suficiente para análise de qualidade
+            chunk_text = chunk.text[:6000] if len(chunk.text) > 6000 else chunk.text
             user_input = json.dumps(
                 {
                     "documentId": str(document_id),
                     "chunkId": chunk.id,
                     "chunkPosition": chunk.position,
-                    "chunkText": chunk.text[:3000],  # Truncar para respeitar token limit
+                    "chunkText": chunk_text,
                 },
                 ensure_ascii=False,
                 indent=2,
@@ -182,7 +185,7 @@ JSON esperado:
                 system=None,
                 user=user_input,
                 response_format="json",
-                max_output_tokens=2000,
+                max_output_tokens=4096,
                 temperature=0.1,
             )
 

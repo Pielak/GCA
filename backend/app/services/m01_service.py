@@ -147,7 +147,7 @@ class M01Service:
             defaults = {
                 "anthropic": "claude-sonnet-4-6-20250514",
                 "openai": "gpt-4o",
-                "deepseek": "deepseek-chat",
+                "deepseek": "deepseek-v4-flash",
             }
             model = defaults.get(self.provider, "claude-sonnet-4-6-20250514")
 

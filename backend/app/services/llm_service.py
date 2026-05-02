@@ -228,7 +228,7 @@ class GrokClient(BaseLLMClient):
 class DeepSeekClient(BaseLLMClient):
     """DeepSeek client"""
 
-    def __init__(self, api_key: str, model: str = "deepseek-chat"):
+    def __init__(self, api_key: str, model: str = "deepseek-v4-flash"):
         self.api_key = api_key
         self.model = model
 

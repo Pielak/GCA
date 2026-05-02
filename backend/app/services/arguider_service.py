@@ -392,12 +392,12 @@ class ArguiderService:
         _default_models = {
             "anthropic": "claude-haiku-4-5-20251001",
             "openai": "gpt-4o-mini",
-            "deepseek": "deepseek-chat",
+            "deepseek": "deepseek-v4-flash",
             "grok": "grok-2",
             "gemini": "gemini-2.0-flash",
             "ollama": "llama3.1:8b",
         }
-        self.model = model or _default_models.get(self.provider, "deepseek-chat")
+        self.model = model or _default_models.get(self.provider, "deepseek-v4-flash")
         # Client Anthropic só quando for o provider — para o resto, httpx.
         self.client = AsyncAnthropic(api_key=project_api_key) if self.provider == "anthropic" else None
         # DocumentExtractor ainda recebe o client Anthropic por compatibilidade

@@ -41,7 +41,7 @@ CLOUD_READ_TIMEOUT_SECONDS = 60
 _LOW_CRITICALITY_DEFAULT_MODELS: dict[str, str] = {
     "anthropic": "claude-haiku-4-5-20251001",
     "openai": "gpt-4o-mini",
-    "deepseek": "deepseek-chat",
+    "deepseek": "deepseek-v4-flash",
     "grok": "grok-2",
     "gemini": "gemini-2.0-flash",
     "ollama": "qwen2.5-coder:7b",
@@ -63,6 +63,8 @@ MAX_TOKENS_BY_MODEL: dict[str, int] = {
     "gpt-4o": 16384,
     "gpt-4o-mini": 16384,
     # DeepSeek
+    "deepseek-v4-pro": 131072,
+    "deepseek-v4-flash": 65536,
     "deepseek-chat": 8192,
     "deepseek-reasoner": 8192,
     # Grok

@@ -120,18 +120,64 @@ class OCGConsolidatorService:
             )
             raise
 
-    async def _get_or_create_questionnaire(self, project_id: UUID) -> Questionnaire:
-        """Busca questionário aprovado do projeto (ou mais recente)."""
+    async def _get_or_create_questionnaire(self, project_id: UUID):
+        """Busca questionário do projeto: primeiro questionnaires, depois technical_questionnaires."""
+        from sqlalchemy import text
         stmt = select(Questionnaire).where(
             Questionnaire.project_id == project_id
         ).order_by(Questionnaire.created_at.desc()).limit(1)
         result = await self.db.execute(stmt)
         questionnaire = result.scalars().first()
 
-        if not questionnaire:
-            raise ValueError(f"Nenhum questionnaire encontrado para projeto {project_id}")
+        if questionnaire:
+            return questionnaire
 
-        return questionnaire
+        # Fallback: technical_questionnaires com status 'submitted'
+        stmt2 = text(
+            "SELECT id, project_id, status, created_at FROM technical_questionnaires "
+            "WHERE project_id = :pid AND status = 'submitted' "
+            "ORDER BY created_at DESC LIMIT 1"
+        )
+        result2 = await self.db.execute(stmt2, {"pid": str(project_id)})
+        tech_row = result2.first()
+        if tech_row:
+            logger.info(
+                "ocg_consolidator.using_technical_questionnaire",
+                tech_id=str(tech_row[0]),
+                project_id=str(project_id),
+            )
+            # Retorna objeto compatível (duck typing: .id é o que importa)
+            class _TQ:
+                def __init__(self, row):
+                    self.id = row[0]
+                    self.project_id = row[1]
+                    self.status = row[2]
+                    self.created_at = row[3]
+            return _TQ(tech_row)
+
+        # FASE 1: Se não há questionário, criar placeholder para permitir
+        # que o OCG seja gerado a partir da ingestão de documentos (Phase B).
+        # Isso evita que o pipeline fique preso em "awaiting_ocg" para sempre.
+        logger.info(
+            "ocg_consolidator.creating_placeholder",
+            project_id=str(project_id),
+        )
+        import uuid as _uuid
+        from datetime import datetime as _dt, timezone as _tz
+
+        placeholder = Questionnaire(
+            id=_uuid.uuid4(),
+            project_id=project_id,
+            gp_email="placeholder@gca.internal",
+            responses=json.dumps({}),
+            status="placeholder",
+            approved=False,
+            submitted_at=_dt.now(_tz.utc),
+            created_at=_dt.now(_tz.utc),
+        )
+        self.db.add(placeholder)
+        await self.db.flush()
+        return placeholder
 
     async def _load_or_create_ocg(
         self, questionnaire_id: UUID, project_id: UUID

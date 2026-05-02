@@ -213,7 +213,7 @@ def create_llm_client(
     if provider_lower == "anthropic":
         return AnthropicLLMClient(api_key=api_key)
     elif provider_lower == "deepseek":
-        return DeepSeekLLMClient(api_key=api_key, model=model or "deepseek-chat")
+        return DeepSeekLLMClient(api_key=api_key, model=model or "deepseek-v4-flash")
     else:
         # Proibido contorno silencioso (§0 CLAUDE.md)
         raise ValueError(

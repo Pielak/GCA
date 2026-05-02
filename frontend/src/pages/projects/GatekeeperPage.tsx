@@ -265,11 +265,11 @@ export function GatekeeperPage() {
               <div className="ml-7 mt-2 flex gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => navigate(`/projects/${id}/arguider`)}
-                  title="Abrir Arguidor para revisar perguntas dirigidas deste pilar"
+                  onClick={() => navigate(`/projects/${id}/settings?tab=questionario`)}
+                  title="Ir para o Questionário Técnico — perguntas do pipeline aguardam sua resposta"
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-violet-900/30 text-violet-400 hover:bg-violet-900/50 transition-colors"
                 >
-                  <Zap className="w-3 h-3" /> Acionar Arguidor
+                  <Zap className="w-3 h-3" /> Responder Perguntas
                 </button>
                 {pillar.status === 'blocker' && (
                   <button

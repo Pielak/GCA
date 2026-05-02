@@ -15,7 +15,12 @@ from app.models.base import AIUsageLog
 logger = structlog.get_logger(__name__)
 
 AI_PRICING = {
-    "deepseek": {"deepseek-chat": {"input": 0.14, "output": 0.28}},
+    "deepseek": {
+        "deepseek-v4-pro": {"input": 1.74, "output": 3.48},
+        "deepseek-v4-flash": {"input": 0.14, "output": 0.28},
+        "deepseek-chat": {"input": 0.14, "output": 0.28},
+        "deepseek-reasoner": {"input": 0.14, "output": 0.28},
+    },
     "anthropic": {
         "claude-opus-4-6": {"input": 15.0, "output": 75.0},
         "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},

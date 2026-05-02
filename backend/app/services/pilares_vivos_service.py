@@ -164,7 +164,7 @@ class PilaresVivosService:
         prompt_template: str,
         contexto: Dict[str, Any],
         provider_name: str = "deepseek",
-        model_name: str = "deepseek-chat",
+        model_name: str = "deepseek-v4-flash",
     ) -> Dict[str, Any]:
         """Chama IA para análise de uma persona.
 
@@ -415,11 +415,11 @@ class PilaresVivosService:
             if provider_chain and isinstance(provider_chain[0], dict):
                 provider_name = provider_chain[0].get("provider", settings.DEFAULT_AI_PROVIDER)
                 model_name = provider_chain[0].get("model") or (
-                    "deepseek-chat" if provider_name == "deepseek" else f"{provider_name}-chat"
+                    "deepseek-v4-flash" if provider_name == "deepseek" else f"{provider_name}-v4-flash"
                 )
             else:
                 provider_name = provider_chain[0] if provider_chain else settings.DEFAULT_AI_PROVIDER
-                model_name = "deepseek-chat" if provider_name == "deepseek" else f"{provider_name}-chat"
+                model_name = "deepseek-v4-flash" if provider_name == "deepseek" else f"{provider_name}-v4-flash"
 
             logger.info(
                 "pilares_vivos.provider_resolved",
