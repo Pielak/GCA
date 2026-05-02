@@ -74,32 +74,35 @@ def _check_document_already_analyzed(document_id: str, project_id: str) -> bool:
     Falha silenciosa (retorna False) se DB inacessível — fail-open.
     """
     try:
+        import asyncio
         from sqlalchemy import select
-        from app.db.database import SessionLocal
+        from app.db.database import AsyncSessionLocal
         from app.models.base import IngestedDocument
 
-        with SessionLocal() as session:
-            stmt = select(IngestedDocument).where(
-                (IngestedDocument.id == UUID(document_id))
-                & (IngestedDocument.project_id == UUID(project_id))
+        async def _check():
+            async with AsyncSessionLocal() as session:
+                stmt = select(IngestedDocument).where(
+                    (IngestedDocument.id == UUID(document_id))
+                    & (IngestedDocument.project_id == UUID(project_id))
+                )
+                return await session.scalar(stmt)
+
+        doc = asyncio.get_event_loop().run_until_complete(_check())
+        if not doc:
+            logger.warning(
+                "pipeline_ingest.document_not_found",
+                document_id=document_id,
+                project_id=project_id,
             )
-            doc = session.execute(stmt).scalar_one_or_none()
-            if not doc:
-                logger.warning(
-                    "pipeline_ingest.document_not_found",
-                    document_id=document_id,
-                    project_id=project_id,
-                )
-                return False
-            # Se status não é 'processing', já foi analisado (sucesso/erro)
-            is_analyzed = doc.arguider_status != "processing"
-            if is_analyzed:
-                logger.info(
-                    "pipeline_ingest.document_status",
-                    document_id=document_id,
-                    status=doc.arguider_status,
-                )
-            return is_analyzed
+            return False
+        is_analyzed = doc.arguider_status in ("completed", "error", "failed")
+        if is_analyzed:
+            logger.info(
+                "pipeline_ingest.document_status",
+                document_id=document_id,
+                status=doc.arguider_status,
+            )
+        return is_analyzed
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "pipeline_ingest.idempotency_check_failed",

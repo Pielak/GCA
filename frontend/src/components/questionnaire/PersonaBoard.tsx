@@ -72,7 +72,7 @@ export const PersonaBoard: React.FC<PersonasBoardProps> = ({
   const fetchBoard = async () => {
     try {
       const response = await fetch(
-        `/api/projects/${projectId}/technical-questionnaire/${questionnaireId}/personas-board`,
+        `/api/v1/projects/${projectId}/technical-questionnaire/${questionnaireId}/personas-board`,
         {
           credentials: 'include',
         }

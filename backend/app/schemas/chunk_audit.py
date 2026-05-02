@@ -1,37 +1,61 @@
 """Schemas para auditoria de chunks — ChunkAuditorService."""
-from pydantic import BaseModel, Field
+import re
+from pydantic import BaseModel, Field, model_validator
 from typing import Literal, Optional
 from uuid import UUID
 from datetime import datetime
 
 
 class PersonaRelevance(BaseModel):
-    """Relevância de um chunk para uma persona específica."""
     relevant: bool
-    reason: str = Field(..., min_length=1, max_length=500)
+    reason: str = Field(default="", max_length=500)
     briefing: str = Field(default="", max_length=2000)
 
 
 class RequirementFound(BaseModel):
-    """Requisito detectado no chunk."""
-    id: str = Field(..., min_length=1, max_length=50)
-    type: Literal["business", "functional", "non_functional", "data", "integration", "security", "ux", "ui", "qa"]
-    text: str = Field(..., min_length=1, max_length=1000)
+    id: str = Field(default="", max_length=50)
+    type: str = Field(default="functional", max_length=50)
+    text: str = Field(default="", max_length=2000)
     confidence: float = Field(default=0.8, ge=0.0, le=1.0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_from_string(cls, data):
+        if isinstance(data, str):
+            m = re.match(r"^([A-Za-z0-9_-]+):\s*(.+)$", data, re.DOTALL)
+            if m:
+                return {"id": m.group(1)[:50], "text": m.group(2)[:2000]}
+            return {"text": data[:2000]}
+        return data
 
 
 class Risk(BaseModel):
-    """Risco identificado no chunk."""
-    id: str = Field(..., min_length=1, max_length=50)
-    severity: Literal["low", "medium", "high", "critical"]
-    description: str = Field(..., min_length=1, max_length=1000)
+    id: str = Field(default="", max_length=50)
+    severity: str = Field(default="medium", max_length=50)
+    description: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_from_string(cls, data):
+        if isinstance(data, str):
+            m = re.match(r"^([A-Za-z0-9_-]+):\s*(.+)$", data, re.DOTALL)
+            if m:
+                return {"id": m.group(1)[:50], "description": m.group(2)[:2000]}
+            return {"description": data[:2000]}
+        return data
 
 
 class Gap(BaseModel):
-    """Gap de informação — questão para humano."""
-    id: str = Field(..., min_length=1, max_length=50)
-    question: str = Field(..., min_length=1, max_length=500)
-    targetPersona: Literal["AUD", "GP", "ARQ", "DBA", "DEV", "QA", "UX", "UI"]
+    id: str = Field(default="", max_length=50)
+    question: str = Field(default="", max_length=500)
+    targetPersona: str = Field(default="DEV", max_length=50)
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_from_string(cls, data):
+        if isinstance(data, str):
+            return {"question": data[:500]}
+        return data
 
 
 class ChunkAuditOutput(BaseModel):

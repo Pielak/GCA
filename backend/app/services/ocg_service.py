@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import structlog
 
-from app.models.base import Questionnaire, OCG, OCGDeltaLog
+from app.models.base import Questionnaire, TechnicalQuestionnaire, OCG, OCGDeltaLog
 from app.schemas.ocg import (
     AnalyzerRequest,
     PillarAgentRequest,
@@ -66,8 +66,29 @@ class OCGService:
             if not questionnaire:
                 raise ValueError(f"Questionnaire {questionnaire_id} not found")
 
-            # Parse questionnaire data
+            # Parse questionnaire data — se for bridge do técnico, buscar respostas reais
             responses_data = json.loads(questionnaire.responses) if questionnaire.responses else {}
+
+            if responses_data.get("from") == "technical" and questionnaire.project_id:
+                tech_stmt = (
+                    select(TechnicalQuestionnaire)
+                    .where(
+                        TechnicalQuestionnaire.project_id == questionnaire.project_id,
+                        TechnicalQuestionnaire.status == "submitted",
+                    )
+                    .order_by(TechnicalQuestionnaire.submitted_at.desc())
+                    .limit(1)
+                )
+                tech_result = await self.db.execute(tech_stmt)
+                tech_q = tech_result.scalar_one_or_none()
+                if tech_q and tech_q.responses:
+                    tech_responses = json.loads(tech_q.responses) if isinstance(tech_q.responses, str) else tech_q.responses
+                    responses_data = tech_responses
+                    logger.info(
+                        "ocg.using_technical_questionnaire",
+                        technical_id=str(tech_q.id),
+                        num_responses=len(tech_responses),
+                    )
 
             # Extract answers from responses
             answers = [
@@ -75,45 +96,60 @@ class OCGService:
                 for qid, response_text in responses_data.items()
             ]
 
-            # Project metadata extraído das respostas do questionário
+            # Project metadata — suporta chaves do questionário inicial ("1","2"...)
+            # e do técnico ("Q1","Q2"...) via helper _g
             r = responses_data
+
+            def _g(initial_key: str, *fallbacks):
+                """Busca por chave numérica ou prefixada com Q."""
+                val = r.get(initial_key)
+                if val is not None:
+                    return val
+                val = r.get(f"Q{initial_key}")
+                if val is not None:
+                    return val
+                for fb in fallbacks:
+                    val = r.get(fb) or r.get(f"Q{fb}")
+                    if val is not None:
+                        return val
+                return ""
+
             project_metadata = {
-                "project_name": r.get("1", f"Project {questionnaire_id}"),
-                "project_slug": r.get("2", ""),
+                "project_name": _g("1") or f"Project {questionnaire_id}",
+                "project_slug": _g("2"),
                 "submitted_by": questionnaire.gp_email,
-                "project_type": r.get("4", []),
-                "criticality": r.get("5", ""),
-                "classification": r.get("6", ""),
-                # Stack definida pelo GP no questionário
-                "deliverables": r.get("15", r.get("22", [])),
-                "architecture": r.get("16", []),
-                "execution_model": r.get("17", []),
-                "multi_tenant": r.get("18", ""),
-                "high_availability": r.get("19", ""),
-                "async_processing": r.get("20", ""),
-                "has_frontend": r.get("21", ""),
-                "frontend_type": r.get("22", []),
-                "frontend_stack": r.get("23", []),
-                "frontend_language": r.get("24", ""),
-                "frontend_requirements": r.get("25", []),
-                "has_backend": r.get("26", ""),
-                "backend_language": r.get("27", ""),
-                "backend_framework": r.get("28", []),
-                "backend_type": r.get("29", []),
-                "backend_requirements": r.get("30", []),
-                "database": r.get("31", ""),
-                "database_profile": r.get("32", []),
-                "uses_redis": r.get("33", ""),
-                "redis_purpose": r.get("34", []),
-                "uses_messaging": r.get("35", ""),
-                "messaging_purpose": r.get("36", []),
-                "uses_ai": r.get("39", ""),
-                "ai_purpose": r.get("40", []),
-                "ai_provider": r.get("41", []),
-                "ai_restrictions": r.get("42", []),
-                "security_controls": r.get("43", []),
-                "observability": r.get("44", []),
-                "test_types": r.get("45", []),
+                "project_type": _g("4") or _g("1"),
+                "criticality": _g("5"),
+                "classification": _g("6"),
+                "deliverables": _g("15", "22"),
+                "architecture": _g("16"),
+                "execution_model": _g("17"),
+                "multi_tenant": _g("18"),
+                "high_availability": _g("19"),
+                "async_processing": _g("20"),
+                "has_frontend": _g("21"),
+                "frontend_type": _g("22"),
+                "frontend_stack": _g("23") or _g("6"),
+                "frontend_language": _g("24"),
+                "frontend_requirements": _g("25"),
+                "has_backend": _g("26"),
+                "backend_language": _g("27") or _g("5"),
+                "backend_framework": _g("28"),
+                "backend_type": _g("29"),
+                "backend_requirements": _g("30"),
+                "database": _g("31") or _g("4"),
+                "database_profile": _g("32"),
+                "uses_redis": _g("33") or _g("8"),
+                "redis_purpose": _g("34"),
+                "uses_messaging": _g("35") or _g("9"),
+                "messaging_purpose": _g("36"),
+                "uses_ai": _g("39"),
+                "ai_purpose": _g("40"),
+                "ai_provider": _g("41"),
+                "ai_restrictions": _g("42"),
+                "security_controls": _g("43") or _g("13"),
+                "observability": _g("44"),
+                "test_types": _g("45"),
                 "quality_gate": r.get("46", ""),
                 "formal_qa": r.get("47", ""),
                 "expected_deliverables": r.get("48", []),

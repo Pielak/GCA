@@ -943,6 +943,8 @@ class IngestionService:
             )
             return
         doc.arguider_stage = stage
+        if doc.arguider_status == "pending":
+            doc.arguider_status = "processing"
         if percent is None:
             percent = cls._STAGE_PERCENTS.get(stage, doc.arguider_progress_percent)
         # Não regride (exceto se caller explicitamente passar valor menor)

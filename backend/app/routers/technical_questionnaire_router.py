@@ -5,6 +5,8 @@ Endpoints para preencher, auto-salvar, validar e submeter questionários técnic
 Schema das perguntas é flexível (definido em technical_questions_schema.py).
 Respostas são armazenadas em JSONB {"Q1": valor, "Q2": [valores], ...}
 """
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,7 +17,7 @@ import structlog
 from datetime import datetime
 
 from app.db.database import get_db
-from app.models.base import TechnicalQuestionnaire, Project, User
+from app.models.base import TechnicalQuestionnaire, Questionnaire, Project, User
 from app.middleware.auth import get_current_user_from_token
 from app.data.technical_questions_schema import TECHNICAL_QUESTIONS_SCHEMA
 from app.services.technical_questionnaire_service import (
@@ -182,6 +184,28 @@ async def save_technical_questionnaire(
         questionnaire.status = "submitted"
         questionnaire.submitted_by = current_user
         questionnaire.submitted_at = datetime.utcnow()
+
+        # Criar registro na tabela questionnaires (FK do OCG).
+        # O OCG (Objeto de Contexto Global) exige questionnaire_id válido,
+        # e a FK aponta para questionnaires(id), não technical_questionnaires.
+        # Sem isso, a consolidação OCG falha com ForeignKeyViolationError.
+        current_q = await db.execute(
+            select(Questionnaire).where(
+                Questionnaire.project_id == project_id,
+            ).order_by(Questionnaire.submitted_at.desc()).limit(1)
+        )
+        existing_q = current_q.scalar_one_or_none()
+        if existing_q is None:
+            new_q = Questionnaire(
+                project_id=project_id,
+                gp_email=current_user if isinstance(current_user, str) else str(current_user),
+                responses=json.dumps(req.responses, ensure_ascii=False, default=str),
+                status="ok",
+                approved=True,
+                submitted_at=datetime.utcnow(),
+            )
+            db.add(new_q)
+
         logger.info(
             "technical_questionnaire_submitted",
             project_id=str(project_id),
@@ -388,13 +412,19 @@ async def get_personas_board(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
 
-    # Verify questionnaire exists
-    from app.models.base import TechnicalQuestionnaire, PersonaResponse
+    # Verify questionnaire exists (technical ou bridge na tabela questionnaires)
+    from app.models.base import TechnicalQuestionnaire, PersonaResponse, Questionnaire
     stmt = select(TechnicalQuestionnaire).where(
         (TechnicalQuestionnaire.id == questionnaire_id) &
         (TechnicalQuestionnaire.project_id == project_id)
     )
     questionnaire = await db.scalar(stmt)
+    if not questionnaire:
+        bridge_stmt = select(Questionnaire).where(
+            (Questionnaire.id == questionnaire_id) &
+            (Questionnaire.project_id == project_id)
+        )
+        questionnaire = await db.scalar(bridge_stmt)
     if not questionnaire:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Questionário não encontrado")
 
