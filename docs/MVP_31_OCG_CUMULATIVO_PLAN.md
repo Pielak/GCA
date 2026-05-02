@@ -51,16 +51,35 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 
 **Entrega:** Modelos ORM `OCGIndividual` e `OCGGlobal` em `base.py`, migration de stamp no Alembic, `webhooks.py:ingestion_complete` populando as 2 tabelas a cada documento via n8n.
 
-**Tarefas:**
-1. Auditar schema vivo das tabelas `ocg_individual` e `ocg_global` (já documentado em chat session 37 — `persona_id uuid` referencia `users(id)`, **divergente do padrão `ocg_delta_log`**). Decidir no Gate 2: alterar coluna ou aceitar e mapear.
-2. Criar modelos SQLAlchemy `OCGIndividual` e `OCGGlobal` em `base.py` espelhando o schema vivo (após decisão do passo 1).
-3. Migration Alembic — escolha entre:
-   - **(a)** `alembic stamp` se schema vivo já está OK
-   - **(b)** Migration "consolidação" que valida estrutura via `op.get_bind().execute(...)` e ajusta divergências (ex: alterar `persona_id` de `uuid FK` para `String(20)`)
-4. Em `webhooks.py:ingestion_complete`, antes do UPDATE atual:
-   - Para cada `(persona_tag, persona_output)` em `payload.ocg_individual`: upsert em `ocg_individual` por `(document_id, persona_id)`.
+**Tarefas (revisadas pelo Gate 2 — 2026-05-02):**
+
+1. **Migration de consolidação** (decisão do Arquiteto: opção b, **não** stamp). Tabelas estão vazias (0 rows confirmado) — custo zero para alteração de tipo. Script:
+   ```python
+   # backend/alembic/versions/<id>_mvp31_consolidate_ocg_tables.py
+   def upgrade():
+       # 1. Drop FK de persona_id (uuid → users) — divergente de ocg_delta_log
+       op.drop_constraint('ocg_individual_persona_id_fkey', 'ocg_individual', type_='foreignkey')
+       op.drop_index('idx_ocg_individual_persona', table_name='ocg_individual')
+       # 2. Alterar tipo: uuid → VARCHAR(20) com tag canônica ("AUD", "GP", etc.)
+       op.alter_column(
+           'ocg_individual', 'persona_id',
+           existing_type=sa.dialects.postgresql.UUID(),
+           type_=sa.String(20),
+           postgresql_using='persona_id::text',
+           nullable=False,
+       )
+       op.create_index('idx_ocg_individual_persona', 'ocg_individual', ['persona_id'])
+       # 3. Stub para Alembic reconhecer existência das tabelas filha (não cria modelos completos — DT-080)
+       # ocg_individual_refined e persona_follow_up_questions ficam como dívida parcial endereçada
+   ```
+2. **Modelos SQLAlchemy** em `backend/app/models/base.py`:
+   - `OCGIndividual` com `persona_id = Column(String(20), nullable=False)` (espelhando schema pós-migration)
+   - `OCGGlobal` com schema vivo
+   - Stubs `OCGIndividualRefined` e `PersonaFollowUpQuestion` apenas com `__tablename__` e PK — só pra Alembic não tentar dropar (DT-080 cobre completar no futuro)
+3. **Em `webhooks.py:ingestion_complete`**, antes do UPDATE atual (que será removido na Fase 31.2):
+   - Para cada `(persona_tag, persona_output)` em `payload.ocg_individual`: upsert em `ocg_individual` por `(document_id, persona_id)` — `persona_id` é a tag string, não FK.
    - Upsert em `ocg_global` por `document_id`.
-5. Pseudo-rows OK por persona, idempotência garantida pelo unique constraint.
+4. Idempotência garantida pelo unique constraint existente `uq_ocg_individual_per_document_persona`.
 
 **Critério de aceite:**
 - Modelos `OCGIndividual` e `OCGGlobal` importáveis via `from app.models.base import OCGIndividual, OCGGlobal`.
@@ -113,19 +132,32 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 - Doc com 1 persona falha (ex: SEG retornou JSON inválido): 8 rows OK + 1 row failed em `ocg_individual`. OCG mestre cresce só com as 8.
 - Doc com 5+ personas falhas: nenhum delta aplicado ao OCG mestre. Status doc = `partial` com erro descritivo.
 
-### Fase 31.4 — CodeGen Gate por maturidade do OCG (~0.5d)
+### Fase 31.4 — CodeGen Gate por maturidade do OCG (~1d, revisado pelo Gate 2)
 
-**Entrega:** Geração de código consulta maturidade do OCG antes de gerar.
+**Entrega:** Geração de código consulta maturidade do OCG antes de gerar — em **todos os 6 entry points** identificados pelo Gate 2.
 
 **Conceito:** CodeGen é liberado quando OCG está **maduro** (`overall_score >= 95`). Abaixo de 95, contexto insuficiente — pode rodar mais ingestões para amadurecer. Abaixo de 60 ou com `is_blocking=true` (CONF), é hard-block.
 
+**Achado do Gate 2 (2026-05-02):** O plano original mencionava só `module_codegen_service.py`. Insuficiente. Existem 6 entry points reais de geração de código:
+
+| # | Arquivo | Função | Linha aprox |
+|---|---|---|---|
+| 1 | `module_codegen_service.py` | `generate_module_from_candidate` | 111 |
+| 2 | `code_generation.py` | `generate_scaffold` | 472 |
+| 3 | `code_generation.py` | `generate_scaffold_plan` | 1579 |
+| 4 | `code_generation.py` | `generate_scaffold_item` | 1788 |
+| 5 | `code_generation.py` | `generate_project_code` | 2130 |
+| 6 | `code_generation.py` | `generate_module_code` | 2203 |
+
+`codegen_prompt_builder.py` é helper interno (chamado por `code_generation.py` linhas 562, 2485) — **não** é entry point separado.
+
 **Tarefas:**
-- Em `module_codegen_service.py`: na entrada do método de geração, ler `ocg.is_blocking`, `ocg.overall_score` e `ocg.context_health` do projeto.
-- Aplicar 3 níveis de gate:
-  - `is_blocking=true` → `HTTPException(409, "OCG bloqueado: <blocking_reason>. CodeGen recusa enquanto bloqueio não for resolvido.")`
-  - `overall_score < 60` → `HTTPException(409, "OCG insuficiente (score=<n>). Score mínimo absoluto: 60. Continue ingerindo documentos.")`
-  - `overall_score < 95` → `HTTPException(409, "OCG imaturo (score=<n>). CodeGen exige score >= 95 (contexto >= 95%) para gerar código válido. Continue ingerindo documentos para amadurecer o OCG.")`
-- Mesma checagem em `codegen_prompt_builder.py` se houver entry point separado.
+- Criar helper `_check_ocg_maturity_gate(project_id, db)` em `backend/app/services/ocg_gate.py` (novo arquivo) que retorna `None` se OCG ok, ou `HTTPException(409, ...)` com payload estruturado se bloqueado.
+- Inserir chamada `_check_ocg_maturity_gate` no início de cada um dos 6 entry points listados acima — **antes** dos pontos de hardcode Anthropic (DT-079) para não agravar a dívida.
+- 3 níveis de gate (mesma lógica nos 6 entry points):
+  - `is_blocking=true` → 409 `block_level=hard_block` com motivo
+  - `overall_score < 60` → 409 `block_level=insufficient` (mínimo absoluto)
+  - `overall_score < 95` → 409 `block_level=immature` (orientação para amadurecer)
 - Endpoints de codegen devolvem 409 com payload estruturado:
   ```json
   {
@@ -143,6 +175,7 @@ Fazer o caminho n8n respeitar as mesmas invariantes do caminho Celery, **sem ree
 - OCG com score 50 → 409 com `block_level=insufficient`
 - OCG com score 80 → 409 com `block_level=immature` (mensagem orientando ingerir mais docs)
 - OCG com score 96 e `is_blocking=false` → endpoint passa, código gerado
+- **Cobertura nos 6 entry points**: `grep -n "is_blocking\|overall_score\|_check_ocg_maturity_gate" backend/app/routers/code_generation.py backend/app/services/module_codegen_service.py` retorna match em todas as 6 funções.
 
 ### Fase 31.5 — Testes + doc + observabilidade (~1d)
 
@@ -207,12 +240,25 @@ Veredito: **Aprovado com ressalvas** (gerente-projetos-ti, 2026-05-02). Refiname
 4. **§5 do contrato canônico** atualizado pela Fase 31.5 com cláusula explícita: *"no caminho n8n, handler `/ingestion-complete` delega ao `OCGUpdaterService.update_ocg_from_arguider`"* — verificar via grep no critério de aceite.
 5. **R6 (hardcode Anthropic em `module_codegen_service.py`)**: registrar como nova DT em `GCA_MVP_PROGRESS.md §3` antes do dev tocar a Fase 31.4. Não corrigir neste MVP.
 
-## 11. Próximo passo
+## 11. Refinamentos do Gate 2 (aplicados em 2026-05-02)
 
-Após formalização atômica (este doc + `GCA_CANONICAL_CONTRACT.md §7` + `GCA_MVP_PROGRESS.md §1`):
+Veredito: **Aprovado com ressalvas** (arquiteto-projetos, 2026-05-02). Decisões arquiteturais consolidadas:
 
-**Gate 2 — arquiteto-projetos** (mandato canalizado pelo Gate 1):
-- Investigar schema vivo de `ocg_individual` e `ocg_global` (especialmente FK de `persona_id`).
-- Decidir entre stamp Alembic OU migration de consolidação para Fase 31.1.
-- Mapear compatibilidade do formato `arguider_analysis` entre `OCGUpdaterService._build_user_prompt` (linha 813) e payload do Consolidador n8n (`PIPELINE_OPERACIONAL.md §2.5`).
-- Go/no-go sobre R6 (hardcode Anthropic) — confirmar que **não** será corrigido neste MVP, apenas registrado como DT.
+1. **Schema vivo confirmado**: `ocg_individual.persona_id = uuid REFERENCES users(id)` (divergente do padrão `ocg_delta_log = String(20)`). Tabelas vazias (0 rows). Tabelas filha `ocg_individual_refined` e `persona_follow_up_questions` também sem ORM.
+2. **Decisão Fase 31.1**: migration de **consolidação** (opção b), **não** stamp. Script em §5 Fase 31.1.
+3. **Adapter n8n→updater**: confirmado como caminho correto. Updater não muda. Adapter constrói `arguider_analysis` mapeando `consolidated_findings` para `gaps`/`show_stoppers`/`recommendations` (CR-2 do Arquiteto).
+4. **R6 confirmado fora de escopo**: registrado como **DT-079** em `GCA_MVP_PROGRESS.md §3.2`. Diagnóstico ampliou: hardcode também em `code_generation.py:592,1693,1838,2353,2367,2498`.
+5. **DT-080 aberta**: ORM ausente para `ocg_individual`, `ocg_global`, `ocg_individual_refined`, `persona_follow_up_questions`. MVP 31 endereça parcialmente (as 2 primeiras + stubs das 2 filhas).
+6. **CO-1 do Gate 2 aplicado**: Fase 31.4 expandida para 6 entry points (não só `module_codegen_service.py`). Helper `ocg_gate.py` novo.
+7. **CR-3**: `trigger_source = TRIGGER_N8N` constante, não literal. Sugestão acatada para Fase 31.2.
+8. **CR-4**: lock `asyncio.Lock` per-project é in-process. Aceitável para uvicorn single-worker atual. DT futura quando escalar para multi-worker.
+
+## 12. Próximo passo
+
+**Gate 3 — DBA** com mandato específico:
+
+- Validar custo de escrita por documento (15 ops: 12 INSERTs em `ocg_individual` + 1 INSERT em `ocg_global` + 1 UPDATE versionado em `ocg` + 1 INSERT em `ocg_delta_log`). Throughput de 50+ docs/dia por projeto.
+- Confirmar script da migration de consolidação (Fase 31.1, decisão do Arquiteto). Verificar se drop da FK `ocg_individual_persona_id_fkey` não quebra constraints indiretas.
+- Validar índice `uq_ocg_individual_per_document_persona` pós-mudança de tipo (UNIQUE em `String(20)` + `uuid`).
+- Recomendar configuração de `include_tables`/`exclude_tables` no `env.py` do Alembic enquanto modelos completos das tabelas filha (`ocg_individual_refined`, `persona_follow_up_questions`) não existem.
+- Política de retenção: cresce indefinidamente em `ocg_individual` e `ocg_global`. Recomendar política de archive/purge para projetos antigos (ou confirmar que LGPD não exige retenção limitada para análise documental).
