@@ -418,17 +418,34 @@ async def ingestion_complete(
                     "error_message": error_msg,
                 })
 
+            # --- Fase 31.3: conjunto de personas falhas (reutilizado abaixo) ---
+            # Construído uma única vez para evitar duplicidade entre Tarefa 1 e 2.
+            failed_set = set(payload.personas_failed or [])
+
             # --- Persistir parecer consolidado (ocg_global) ---
+            # Fase 31.3 — Tarefa 2: parecer_consolidated exclui personas falhas.
+            # Lixo descartado: output de persona falha não contamina o consenso global.
+            # Tradeoff documentado: consensus_fields/voting_results são produzidos
+            # pelo consolidador n8n; se vierem com referências a personas falhas,
+            # filtrar aqui também (caso comum: chegam {} — protegido pelo json.dumps).
+            parecer_consolidated_clean = {
+                tag: data
+                for tag, data in (payload.ocg_individual or {}).items()
+                if tag not in failed_set
+            }
             ocg_global_payload = {
                 "overall_score": payload.overall_score,
                 "blocked": payload.blocked,
                 "blocking_reason": payload.blocking_reason,
                 "personas_executed": payload.personas_executed,
                 "personas_failed": payload.personas_failed,
+                "personas_excluded_from_consensus": sorted(failed_set),
                 "ocg_global_delta": payload.ocg_global_delta,
                 "consolidated_findings": payload.consolidated_findings,
                 "consolidated_recommendations": payload.consolidated_recommendations,
                 "execution_summary": payload.execution_summary,
+                # Pareceres individuais filtrados — sem contaminação de falhas
+                "parecer_por_persona": parecer_consolidated_clean,
             }
             await db.execute(text("""
                 INSERT INTO ocg_global
@@ -452,7 +469,7 @@ async def ingestion_complete(
                 "project_id": project_id,
                 "document_id": doc_id,
                 "parecer_consolidated": json.dumps(ocg_global_payload, ensure_ascii=False),
-                # Campos de votação/conflito serão expandidos na Fase 31.3 (HITL)
+                # consensus_fields e voting_results expandidos em MVP futuro (HITL)
                 "consensus_fields": json.dumps({}, ensure_ascii=False),
                 "conflicting_fields": json.dumps({}, ensure_ascii=False),
                 "voting_results": json.dumps({}, ensure_ascii=False),
@@ -500,13 +517,25 @@ async def ingestion_complete(
                 return {"status": "processed", "ingestion_id": doc_id}
 
             # --- Adapter n8n → formato arguider_analysis esperado pelo OCGUpdaterService ---
+            # Fase 31.3 — Tarefa 1: filtra personas falhas antes de entregar ao updater.
+            # Lixo descartado: persona com falha não contamina o OCG cumulativo.
+            # Tradeoff documentado: ocg_global_delta é agregado pelo consolidador n8n;
+            # se ele não excluir falhas do delta, MVP futuro filtra aqui também.
+            ocg_individual_filtered = {
+                tag: out
+                for tag, out in (payload.ocg_individual or {}).items()
+                if tag not in failed_set
+            }
+            personas_excluded_count = len(failed_set)
+
             arguider_analysis = {
                 "overall_score": payload.overall_score,
                 "blocked": payload.blocked,
                 "blocking_reason": payload.blocking_reason,
                 "personas_executed": payload.personas_executed,
                 "personas_failed": payload.personas_failed,
-                "ocg_individual": payload.ocg_individual,
+                "personas_excluded_count": personas_excluded_count,  # auditoria
+                "ocg_individual": ocg_individual_filtered,
                 "ocg_global_delta": payload.ocg_global_delta,
                 # Mapeamento sugerido pelo Gate 2 (CR-2): findings consolidados → categorias
                 # análogas ao Arguidor antigo (gaps/show_stoppers/recommendations).
