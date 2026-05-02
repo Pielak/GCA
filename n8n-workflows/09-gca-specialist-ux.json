@@ -1,18 +1,19 @@
 {
-  "name": "GCA Specialist - UX",
-  "active": true,
+  "id": "gca-specialist-ux",
+  "name": "09 - GCA Specialist UX",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "gca-pipeline-logger"
+  },
   "nodes": [
     {
-      "id": "3a4b5c6d-7e8f-9a0b-1c2d-3e4f5a6b7c8d",
+      "id": "node-webhook-ux",
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        250,
-        300
-      ],
+      "position": [240, 300],
       "alwaysOutputData": true,
-      "webhookId": "gca-specialist-ux",
       "parameters": {
         "httpMethod": "POST",
         "path": "gca-specialist-ux",
@@ -21,181 +22,153 @@
       }
     },
     {
-      "id": "4b5c6d7e-8f9a-0b1c-2d3e-4f5a6b7c8d9e",
+      "id": "node-log-inicio-ux",
+      "name": "Log - Inicio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Webhook Trigger').item.json.ingestion_id || '', workflow: 'gca-specialist-ux', node: 'Log - Inicio', event: 'started', persona_tag: 'UX', duration_ms: 0, detail: 'UX specialist iniciado', error: null }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-hmac-verify-ux",
+      "name": "Verificar HMAC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/verify",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($('Webhook Trigger').item.json), signature: $('Webhook Trigger').item.headers['x-conferente-signature'] || '', secret_name: 'CONFERENTE_SECRET' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-validar-hmac-ux",
       "name": "Validar HMAC",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        500,
-        300
-      ],
+      "position": [900, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Validar X-Conferente-Signature HMAC-SHA256\nconst crypto = require('crypto');\nconst body = JSON.stringify($input.first().json.body);\nconst signature = $input.first().json.headers['x-conferente-signature'];\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.CONFERENTE_SECRET).update(body).digest('hex');\nif (signature !== expected) throw new Error('HMAC inválido');\nreturn $input.all();"
+        "jsCode": "const hmacResult = $json;\nif (!hmacResult.valid) {\n  throw new Error('HMAC invalido: assinatura recusada pelo backend');\n}\nconst webhookData = $('Webhook Trigger').item.json;\nconst normalized_text = webhookData.normalized_text || '';\nconst provider_chain = webhookData.provider_chain || [];\nconst ingestion_id = webhookData.ingestion_id || '';\nconst shared_context = webhookData.shared_context || {};\nif (!normalized_text) {\n  throw new Error('Campo normalized_text ausente no payload');\n}\nif (!provider_chain || provider_chain.length === 0) {\n  throw new Error('Campo provider_chain ausente ou vazio no payload');\n}\nreturn [{ json: { normalized_text, provider_chain, ingestion_id, shared_context, hmac_valid: true } }];"
       }
     },
     {
-      "id": "5c6d7e8f-9a0b-1c2d-3e4f-5a6b7c8d9e0f",
-      "name": "Montar prompt",
+      "id": "node-montar-prompt-ux",
+      "name": "Montar Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        750,
-        300
-      ],
+      "position": [1120, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Monta mensagem para LLM com system prompt da persona UX\nconst systemPrompt = `Você é o UX Designer (UX) — sexta persona técnica do Gatekeeper.\n\nSeu papel é validar:\n1. **Jornada de Usuário**: Fluxos principais estão mapeados e lógicos?\n2. **Acessibilidade**: WCAG AA é atendido? Navegação funcional?\n3. **Usabilidade**: Interface é intuitiva para o público-alvo?\n4. **Performance Perceptual**: Feedback visual é claro e imediato?\n5. **Múltiplos Contextos**: Responsivo, offline, múltiplos dispositivos?\n6. **Inclusão**: Suporta diferentes capacidades (visual, auditivo, motor)?\n\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\n\n1. SCORES (0–100)\n   - jornada: clareza de fluxos de usuário\n   - acessibilidade: conformidade WCAG AA\n   - usabilidade: intuitividade da interface\n   - performance: feedback visual e responsividade\n   - contextos: suporte a múltiplos contextos\n   - inclusao: suporte a capacidades diversas\n\n2. APPROVED (bool)\n   - true se UX é aceitável para lançamento\n   - false se há problema crítico na jornada\n\n3. ISSUES (array)\n   - Fluxos não claros\n   - Acessibilidade não atende WCAG AA\n   - Interface não intuitiva\n   - Performance perceptual ruim\n   - Falta suporte responsivo/offline\n   - Não inclui usuários com diferentes capacidades\n\n4. QUESTIONS (array)\n   - Perguntas que PRECISAM de resposta para proceder\n   - Exemplos: \"Qual é o público-alvo principal?\", \"Há restrições de rede esperadas?\"\n\n5. JUSTIFICATION (texto)\n   - Raciocínio resumido para aprovação/reprovação\n\n6. METADATA\n   - tentative: true em passada 1, false em passada 2\n\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\n\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem \\`\\`\\`).`;\nconst input = $input.first().json;\nconst userMessage = `Documento: ${input.body.document_text}\\n\\nContexto compartilhado: ${JSON.stringify(input.body.shared_context)}`;\n\n// Resolver provider da chain\nconst chain = input.body.provider_chain || [];\nconst provider = chain[0] || {provider: 'deepseek', model: 'deepseek-v4-pro'};\n\nreturn [{json: {systemPrompt, userMessage, provider, ingestion_id: input.body.ingestion_id, project_id: input.body.project_id, started_at: new Date().toISOString()}}];"
+        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst systemPrompt = 'Você é o UX Designer (UX) — sexta persona técnica do Gatekeeper.\\n\\nSeu papel é validar:\\n1. **Jornada de Usuário**: Fluxos principais estão mapeados e lógicos?\\n2. **Acessibilidade**: WCAG AA é atendido? Navegação funcional?\\n3. **Usabilidade**: Interface é intuitiva para o público-alvo?\\n4. **Performance Perceptual**: Feedback visual é claro e imediato?\\n5. **Múltiplos Contextos**: Responsivo, offline, múltiplos dispositivos?\\n6. **Inclusão**: Suporta diferentes capacidades (visual, auditivo, motor)?\\n\\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\\n\\n1. SCORES (0–100)\\n   - jornada: clareza de fluxos de usuário\\n   - acessibilidade: conformidade WCAG AA\\n   - usabilidade: intuitividade da interface\\n   - performance: feedback visual e responsividade\\n   - contextos: suporte a múltiplos contextos\\n   - inclusao: suporte a capacidades diversas\\n\\n2. APPROVED (bool)\\n3. ISSUES (array)\\n4. QUESTIONS (array)\\n5. JUSTIFICATION (texto)\\n6. METADATA - tentative: true em passada 1, false em passada 2\\n\\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem ```).';\nconst userMessage = JSON.stringify({ passada: 1, normalized_text: data.normalized_text, shared_context: data.shared_context });\nlet requestBody;\nconst providerType = (provider.provider_type || '').toLowerCase();\nif (providerType === 'anthropic') {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, system: systemPrompt, messages: [{ role: 'user', content: userMessage }] };\n} else {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] };\n}\nreturn [{ json: { provider, requestBody, ingestion_id: data.ingestion_id } }];"
       }
     },
     {
-      "id": "6d7e8f9a-0b1c-2d3e-4f5a-6b7c8d9e0f1a",
+      "id": "node-llm-call-ux",
       "name": "LLM Call",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1000,
-        300
-      ],
+      "position": [1340, 300],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.provider.provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://api.deepseek.com/chat/completions' }}",
+        "url": "={{ $json.provider.api_url }}",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "=={{ $json.provider.provider === 'anthropic' ? 'x-api-key' : 'Authorization' }}",
-              "value": "={{ $json.provider.provider === 'anthropic' ? $json.provider.api_key : 'Bearer ' + $json.provider.api_key }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
+            { "name": "x-api-key", "value": "={{ $json.provider.api_key }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": []
-        },
-        "jsonBody": "={{ JSON.stringify($json.provider.provider === 'anthropic' ? {model: $json.provider.model, max_tokens: 2500, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userMessage}]} : {model: $json.provider.model, max_tokens: 2500, messages: [{role: 'system', content: $json.systemPrompt}, {role: 'user', content: $json.userMessage}]}) }}",
-        "options": {
-          "timeout": 60000
-        }
+        "options": {}
       }
     },
     {
-      "id": "7e8f9a0b-1c2d-3e4f-5a6b-7c8d9e0f1a2b",
+      "id": "node-parse-output-ux",
       "name": "Parse PersonaOutput",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1250,
-        300
-      ],
+      "position": [1560, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Parse resposta LLM e montar PersonaOutput\nconst input = $('Montar prompt').first().json;\nconst llmResponse = $input.first().json;\nconst content = llmResponse.content?.[0]?.text || llmResponse.choices?.[0]?.message?.content || '{}';\nlet parsed;\ntry { parsed = JSON.parse(content); } catch(e) { parsed = {}; }\n\nconst scores = parsed.SCORES || {};\nconst scoreValues = Object.values(scores).filter(v => typeof v === 'number');\nconst avgScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((a,b) => a+b, 0) / scoreValues.length) : 50;\n\nconst output = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id: input.ingestion_id,\n  persona_tag: 'UX',\n  persona_name: 'UX Designer',\n  execution_metadata: {\n    started_at: input.started_at,\n    completed_at: new Date().toISOString(),\n    model_used: input.provider.model,\n    tokens_consumed: {input: llmResponse.usage?.prompt_tokens || llmResponse.usage?.input_tokens || 0, output: llmResponse.usage?.completion_tokens || llmResponse.usage?.output_tokens || 0}\n  },\n  score: avgScore,\n  score_rationale: (parsed.JUSTIFICATION || '').substring(0, 280),\n  blocking: false,\n  blocking_reason: null,\n  status: 'completed',\n  findings: (parsed.ISSUES || []).map((issue, i) => ({id: `finding-${i}`, severity: 'medium', category: 'ux', title: typeof issue === 'string' ? issue.substring(0, 120) : (issue.description || '').substring(0, 120), description: typeof issue === 'string' ? issue : (issue.description || '')})),\n  recommendations: [],\n  ocg_contributions: {individual: scores, global_delta: {}},\n  validation_self_report: {schema_version_check: true, score_in_range: true, evidence_excerpts_present: false, ocg_individual_non_empty: true, ocg_global_delta_non_empty: false}\n};\n\nreturn [{json: output}];"
+        "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar Prompt').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst scores = parsed.scores || {};\nconst avgScore = Object.keys(scores).length > 0\n  ? Math.round(Object.values(scores).reduce((a, b) => a + Number(b), 0) / Object.keys(scores).length)\n  : 0;\nconst personaOutput = {\n  persona_tag: 'UX',\n  persona_name: 'UX Designer',\n  ingestion_id: prevData.ingestion_id,\n  scores,\n  avg_score: avgScore,\n  approved: parsed.approved || false,\n  blocking: false,\n  issues: parsed.issues || [],\n  questions: parsed.questions || [],\n  justification: parsed.justification || '',\n  metadata: parsed.metadata || {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id } }];"
       }
     },
     {
-      "id": "8f9a0b1c-2d3e-4f5a-6b7c-8d9e0f1a2b3c",
-      "name": "Callback Consolidador",
+      "id": "node-assinar-callback-ux",
+      "name": "Assinar Callback",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1500,
-        300
-      ],
+      "position": [1780, 300],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-consolidador-accumulate",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/sign",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($json.personaOutput), secret_name: 'SPECIALIST_SECRET' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-callback-consolidador-ux",
+      "name": "Callback Consolidador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/gca-consolidador-accumulate",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Parse PersonaOutput').item.json.personaOutput) }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Specialist-Signature",
-              "value": "=sha256={{ require('crypto').createHmac('sha256', $env.SPECIALIST_SECRET).update(JSON.stringify($json)).digest('hex') }}"
-            }
+            { "name": "X-Specialist-Signature", "value": "={{ $json.signature }}" }
           ]
         },
-        "sendBody": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "node-log-fim-ux",
+      "name": "Log - Concluido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {
-          "timeout": 10000
-        }
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Parse PersonaOutput').item.json.ingestion_id || '', workflow: 'gca-specialist-ux', node: 'Log - Concluido', event: 'completed', persona_tag: 'UX', duration_ms: 0, detail: 'score=' + $('Parse PersonaOutput').item.json.personaOutput.avg_score + ' findings=' + ($('Parse PersonaOutput').item.json.personaOutput.issues || []).length, error: null }) }}",
+        "options": {}
       }
     }
   ],
   "connections": {
-    "Webhook Trigger": {
-      "main": [
-        [
-          {
-            "node": "Validar HMAC",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Validar HMAC": {
-      "main": [
-        [
-          {
-            "node": "Montar prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Montar prompt": {
-      "main": [
-        [
-          {
-            "node": "LLM Call",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "LLM Call": {
-      "main": [
-        [
-          {
-            "node": "Parse PersonaOutput",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse PersonaOutput": {
-      "main": [
-        [
-          {
-            "node": "Callback Consolidador",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "id": "gca-specialist-ux"
+    "Webhook Trigger": { "main": [[{ "node": "Log - Inicio", "type": "main", "index": 0 }]] },
+    "Log - Inicio": { "main": [[{ "node": "Verificar HMAC", "type": "main", "index": 0 }]] },
+    "Verificar HMAC": { "main": [[{ "node": "Validar HMAC", "type": "main", "index": 0 }]] },
+    "Validar HMAC": { "main": [[{ "node": "Montar Prompt", "type": "main", "index": 0 }]] },
+    "Montar Prompt": { "main": [[{ "node": "LLM Call", "type": "main", "index": 0 }]] },
+    "LLM Call": { "main": [[{ "node": "Parse PersonaOutput", "type": "main", "index": 0 }]] },
+    "Parse PersonaOutput": { "main": [[{ "node": "Assinar Callback", "type": "main", "index": 0 }]] },
+    "Assinar Callback": { "main": [[{ "node": "Callback Consolidador", "type": "main", "index": 0 }]] },
+    "Callback Consolidador": { "main": [[{ "node": "Log - Concluido", "type": "main", "index": 0 }]] }
+  }
 }

@@ -1,18 +1,19 @@
 {
-  "name": "GCA Specialist - CONF",
-  "active": true,
+  "id": "gca-specialist-conf",
+  "name": "12 - GCA Specialist CONF",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "errorWorkflow": "gca-pipeline-logger"
+  },
   "nodes": [
     {
-      "id": "aa1bb2cc-3dd4-ee5f-f660-77889900aabb",
+      "id": "node-webhook-conf",
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        250,
-        300
-      ],
+      "position": [240, 300],
       "alwaysOutputData": true,
-      "webhookId": "gca-specialist-conf",
       "parameters": {
         "httpMethod": "POST",
         "path": "gca-specialist-conf",
@@ -21,181 +22,153 @@
       }
     },
     {
-      "id": "bb2cc3dd-4ee5-ff60-0771-889900aabbcc",
+      "id": "node-log-inicio-conf",
+      "name": "Log - Inicio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Webhook Trigger').item.json.ingestion_id || '', workflow: 'gca-specialist-conf', node: 'Log - Inicio', event: 'started', persona_tag: 'CONF', duration_ms: 0, detail: 'CONF specialist iniciado', error: null }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-hmac-verify-conf",
+      "name": "Verificar HMAC",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/verify",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($('Webhook Trigger').item.json), signature: $('Webhook Trigger').item.headers['x-conferente-signature'] || '', secret_name: 'CONFERENTE_SECRET' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-validar-hmac-conf",
       "name": "Validar HMAC",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        500,
-        300
-      ],
+      "position": [900, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Validar X-Conferente-Signature HMAC-SHA256\nconst crypto = require('crypto');\nconst body = JSON.stringify($input.first().json.body);\nconst signature = $input.first().json.headers['x-conferente-signature'];\nconst expected = 'sha256=' + crypto.createHmac('sha256', $env.CONFERENTE_SECRET).update(body).digest('hex');\nif (signature !== expected) throw new Error('HMAC inválido');\nreturn $input.all();"
+        "jsCode": "const hmacResult = $json;\nif (!hmacResult.valid) {\n  throw new Error('HMAC invalido: assinatura recusada pelo backend');\n}\nconst webhookData = $('Webhook Trigger').item.json;\nconst normalized_text = webhookData.normalized_text || '';\nconst provider_chain = webhookData.provider_chain || [];\nconst ingestion_id = webhookData.ingestion_id || '';\nconst shared_context = webhookData.shared_context || {};\nif (!normalized_text) {\n  throw new Error('Campo normalized_text ausente no payload');\n}\nif (!provider_chain || provider_chain.length === 0) {\n  throw new Error('Campo provider_chain ausente ou vazio no payload');\n}\nreturn [{ json: { normalized_text, provider_chain, ingestion_id, shared_context, hmac_valid: true } }];"
       }
     },
     {
-      "id": "cc3dd4ee-5ff6-0077-1880-99aabbccddee",
-      "name": "Montar prompt",
+      "id": "node-montar-prompt-conf",
+      "name": "Montar Prompt",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        750,
-        300
-      ],
+      "position": [1120, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Monta mensagem para LLM com system prompt da persona CONF\n// SUBSTITUIR pelo prompt real da v1 (gca-personas-system-prompts.md §3.3 — conformidade)\n// ATENÇÃO: CONF é pilar BLOQUEANTE — blocking=true quando score < 60\nconst systemPrompt = `PROMPT_CONFORMIDADE\n\nVocê é o especialista em Conformidade Regulatória (CONF) do pipeline GCA.\n\nATENÇÃO: Você é o ÚNICO pilar BLOQUEANTE do sistema. Se detectar não-conformidade crítica (score < 60), emita blocking=true com razão explícita.\n\nSeu papel é analisar o documento sob a ótica de conformidade:\n1. **Regulatório**: Conformidade com normas do setor (ISO 27001, SOC 2, PCI-DSS, HIPAA, etc.)?\n2. **Contratual**: Obrigações contratuais e SLAs atendidos?\n3. **Auditabilidade**: Trilha de auditoria e rastreabilidade implementadas?\n4. **Controles internos**: Segregação de funções, aprovações, revisões?\n5. **Política corporativa**: Aderência a políticas internas da organização?\n6. **Riscos regulatórios**: Penalidades e multas potenciais mapeadas?\n\nSEUS OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\n\n1. SCORES (0–100)\n   - regulatorio: aderência a normas do setor\n   - contratual: cumprimento de obrigações contratuais\n   - auditabilidade: qualidade da trilha de auditoria\n   - controles: maturidade de controles internos\n   - riscos: identificação de riscos regulatórios\n\n2. APPROVED (bool): true apenas se score >= 60 em TODOS os critérios\n\n3. BLOCKING (bool): true se score geral < 60 (pilar bloqueante)\n\n4. BLOCKING_REASON (string|null): razão detalhada quando blocking=true\n\n5. ISSUES (array): não-conformidades detectadas com referência normativa\n\n6. QUESTIONS (array): perguntas necessárias para avaliação completa\n\n7. JUSTIFICATION (texto): raciocínio resumido\n\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\n\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem \\`\\`\\`).`;\nconst input = $input.first().json;\nconst userMessage = `Documento: ${input.body.document_text}\\n\\nContexto compartilhado: ${JSON.stringify(input.body.shared_context)}`;\n\n// Resolver provider da chain\nconst chain = input.body.provider_chain || [];\nconst provider = chain[0] || {provider: 'deepseek', model: 'deepseek-v4-pro'};\n\nreturn [{json: {systemPrompt, userMessage, provider, ingestion_id: input.body.ingestion_id, project_id: input.body.project_id, started_at: new Date().toISOString()}}];"
+        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst systemPrompt = 'Você é o Especialista em Conformidade (CONF) do GCA.\\n\\nSeu papel é validar aderência regulatória:\\n1. **Regulamentações Aplicáveis**: Quais normas se aplicam (ISO, SOC2, PCI-DSS, HIPAA, etc)?\\n2. **Controles Implementados**: Os controles exigidos estão presentes?\\n3. **Evidências**: Há evidências documentadas de conformidade?\\n4. **Lacunas**: Quais lacunas existem frente ao framework regulatório?\\n5. **Penalidades**: Quais são os riscos de não-conformidade?\\n6. **Roadmap**: Existe plano para atingir conformidade total?\\n\\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\\n\\n1. SCORES (0–100)\\n   - regulamentacoes: identificação das normas aplicáveis\\n   - controles: implementação dos controles exigidos\\n   - evidencias: documentação de conformidade\\n   - lacunas: mapeamento de gaps regulatórios\\n   - riscos: avaliação de penalidades e exposição\\n   - roadmap: clareza do plano de conformidade\\n\\n2. APPROVED (bool) — false se score médio < 60\\n3. ISSUES (array)\\n4. QUESTIONS (array)\\n5. JUSTIFICATION (texto)\\n6. METADATA - tentative: true em passada 1, false em passada 2\\n\\nATENÇÃO: Esta persona é BLOQUEANTE. Score médio < 60 implica blocking=true no output.\\n\\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem ```).';\nconst userMessage = JSON.stringify({ passada: 1, normalized_text: data.normalized_text, shared_context: data.shared_context });\nlet requestBody;\nconst providerType = (provider.provider_type || '').toLowerCase();\nif (providerType === 'anthropic') {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, system: systemPrompt, messages: [{ role: 'user', content: userMessage }] };\n} else {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] };\n}\nreturn [{ json: { provider, requestBody, ingestion_id: data.ingestion_id } }];"
       }
     },
     {
-      "id": "dd4ee5ff-6007-7118-8099-aabbccddeeff",
+      "id": "node-llm-call-conf",
       "name": "LLM Call",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1000,
-        300
-      ],
+      "position": [1340, 300],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.provider.provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://api.deepseek.com/chat/completions' }}",
+        "url": "={{ $json.provider.api_url }}",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "=={{ $json.provider.provider === 'anthropic' ? 'x-api-key' : 'Authorization' }}",
-              "value": "={{ $json.provider.provider === 'anthropic' ? $json.provider.api_key : 'Bearer ' + $json.provider.api_key }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
+            { "name": "x-api-key", "value": "={{ $json.provider.api_key }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" },
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
-        "sendBody": true,
-        "bodyParameters": {
-          "parameters": []
-        },
-        "jsonBody": "={{ JSON.stringify($json.provider.provider === 'anthropic' ? {model: $json.provider.model, max_tokens: 2500, system: $json.systemPrompt, messages: [{role: 'user', content: $json.userMessage}]} : {model: $json.provider.model, max_tokens: 2500, messages: [{role: 'system', content: $json.systemPrompt}, {role: 'user', content: $json.userMessage}]}) }}",
-        "options": {
-          "timeout": 60000
-        }
+        "options": {}
       }
     },
     {
-      "id": "ee5ff600-7711-8822-9033-aabbccddeeff",
+      "id": "node-parse-output-conf",
       "name": "Parse PersonaOutput",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1250,
-        300
-      ],
+      "position": [1560, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Parse resposta LLM e montar PersonaOutput\n// CONF é pilar BLOQUEANTE: blocking=true quando score < 60\nconst input = $('Montar prompt').first().json;\nconst llmResponse = $input.first().json;\nconst content = llmResponse.content?.[0]?.text || llmResponse.choices?.[0]?.message?.content || '{}';\nlet parsed;\ntry { parsed = JSON.parse(content); } catch(e) { parsed = {}; }\n\nconst scores = parsed.SCORES || {};\nconst scoreValues = Object.values(scores).filter(v => typeof v === 'number');\nconst avgScore = scoreValues.length > 0 ? Math.round(scoreValues.reduce((a,b) => a+b, 0) / scoreValues.length) : 50;\n\n// Lógica de bloqueio: CONF bloqueia quando score < 60\nconst isBlocking = avgScore < 60;\nconst blockingReason = isBlocking\n  ? (parsed.BLOCKING_REASON || `Score de conformidade ${avgScore}/100 está abaixo do mínimo obrigatório de 60. Não-conformidade detectada.`)\n  : null;\n\nconst output = {\n  schema_version: 'PersonaOutput-v2',\n  ingestion_id: input.ingestion_id,\n  persona_tag: 'CONF',\n  persona_name: 'Conformidade',\n  execution_metadata: {\n    started_at: input.started_at,\n    completed_at: new Date().toISOString(),\n    model_used: input.provider.model,\n    tokens_consumed: {input: llmResponse.usage?.prompt_tokens || llmResponse.usage?.input_tokens || 0, output: llmResponse.usage?.completion_tokens || llmResponse.usage?.output_tokens || 0}\n  },\n  score: avgScore,\n  score_rationale: (parsed.JUSTIFICATION || '').substring(0, 280),\n  blocking: isBlocking,\n  blocking_reason: blockingReason,\n  status: 'completed',\n  findings: (parsed.ISSUES || []).map((issue, i) => ({id: `finding-${i}`, severity: 'high', category: 'conformidade', title: typeof issue === 'string' ? issue.substring(0, 120) : (issue.description || '').substring(0, 120), description: typeof issue === 'string' ? issue : (issue.description || ''), regulatory_reference: typeof issue === 'object' ? (issue.regulatory_reference || null) : null})).filter(f => f.title),\n  recommendations: [],\n  ocg_contributions: {individual: scores, global_delta: {}},\n  validation_self_report: {schema_version_check: true, score_in_range: true, evidence_excerpts_present: false, ocg_individual_non_empty: true, ocg_global_delta_non_empty: false}\n};\n\nreturn [{json: output}];"
+        "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar Prompt').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst scores = parsed.scores || {};\nconst avgScore = Object.keys(scores).length > 0\n  ? Math.round(Object.values(scores).reduce((a, b) => a + Number(b), 0) / Object.keys(scores).length)\n  : 0;\n// CONF é BLOQUEANTE: score < 60 ativa blocking=true\nconst isBlocking = avgScore < 60;\nconst personaOutput = {\n  persona_tag: 'CONF',\n  persona_name: 'Conformidade',\n  ingestion_id: prevData.ingestion_id,\n  scores,\n  avg_score: avgScore,\n  approved: parsed.approved !== undefined ? parsed.approved : (avgScore >= 60),\n  blocking: isBlocking,\n  issues: parsed.issues || [],\n  questions: parsed.questions || [],\n  justification: parsed.justification || '',\n  metadata: parsed.metadata || {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id } }];"
       }
     },
     {
-      "id": "ff600711-8822-9933-00aa-bbccddeeff00",
-      "name": "Callback Consolidador",
+      "id": "node-assinar-callback-conf",
+      "name": "Assinar Callback",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1500,
-        300
-      ],
+      "position": [1780, 300],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-consolidador-accumulate",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/sign",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($json.personaOutput), secret_name: 'SPECIALIST_SECRET' }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-callback-consolidador-conf",
+      "name": "Callback Consolidador",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/gca-consolidador-accumulate",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Parse PersonaOutput').item.json.personaOutput) }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Specialist-Signature",
-              "value": "=sha256={{ require('crypto').createHmac('sha256', $env.SPECIALIST_SECRET).update(JSON.stringify($json)).digest('hex') }}"
-            }
+            { "name": "X-Specialist-Signature", "value": "={{ $json.signature }}" }
           ]
         },
-        "sendBody": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "node-log-fim-conf",
+      "name": "Log - Concluido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
-        "options": {
-          "timeout": 10000
-        }
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Parse PersonaOutput').item.json.ingestion_id || '', workflow: 'gca-specialist-conf', node: 'Log - Concluido', event: 'completed', persona_tag: 'CONF', duration_ms: 0, detail: 'score=' + $('Parse PersonaOutput').item.json.personaOutput.avg_score + ' blocking=' + $('Parse PersonaOutput').item.json.personaOutput.blocking + ' findings=' + ($('Parse PersonaOutput').item.json.personaOutput.issues || []).length, error: null }) }}",
+        "options": {}
       }
     }
   ],
   "connections": {
-    "Webhook Trigger": {
-      "main": [
-        [
-          {
-            "node": "Validar HMAC",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Validar HMAC": {
-      "main": [
-        [
-          {
-            "node": "Montar prompt",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Montar prompt": {
-      "main": [
-        [
-          {
-            "node": "LLM Call",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "LLM Call": {
-      "main": [
-        [
-          {
-            "node": "Parse PersonaOutput",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Parse PersonaOutput": {
-      "main": [
-        [
-          {
-            "node": "Callback Consolidador",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    }
-  },
-  "settings": {
-    "executionOrder": "v1"
-  },
-  "id": "gca-specialist-conf"
+    "Webhook Trigger": { "main": [[{ "node": "Log - Inicio", "type": "main", "index": 0 }]] },
+    "Log - Inicio": { "main": [[{ "node": "Verificar HMAC", "type": "main", "index": 0 }]] },
+    "Verificar HMAC": { "main": [[{ "node": "Validar HMAC", "type": "main", "index": 0 }]] },
+    "Validar HMAC": { "main": [[{ "node": "Montar Prompt", "type": "main", "index": 0 }]] },
+    "Montar Prompt": { "main": [[{ "node": "LLM Call", "type": "main", "index": 0 }]] },
+    "LLM Call": { "main": [[{ "node": "Parse PersonaOutput", "type": "main", "index": 0 }]] },
+    "Parse PersonaOutput": { "main": [[{ "node": "Assinar Callback", "type": "main", "index": 0 }]] },
+    "Assinar Callback": { "main": [[{ "node": "Callback Consolidador", "type": "main", "index": 0 }]] },
+    "Callback Consolidador": { "main": [[{ "node": "Log - Concluido", "type": "main", "index": 0 }]] }
+  }
 }

@@ -1,17 +1,14 @@
 {
-  "id": "gca-normalizer-v2",
+  "id": "gca-normalizer-v3",
   "name": "GCA Normalizer — Workflow 1 (Pré-processador de Documentos)",
   "active": true,
   "nodes": [
     {
-      "id": "webhook-normalizer",
+      "id": "norm-wh-01",
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [
-        250,
-        400
-      ],
+      "position": [240, 400],
       "webhookId": "gca-normalizer",
       "alwaysOutputData": true,
       "parameters": {
@@ -23,55 +20,83 @@
         "options": {
           "responseHeaders": {
             "entries": [
-              {
-                "name": "Content-Type",
-                "value": "application/json"
-              }
+              { "name": "Content-Type", "value": "application/json" }
             ]
           }
         }
       }
     },
     {
-      "id": "g0-validar-entrada",
-      "name": "G0 - Validar entrada",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        500,
-        400
-      ],
+      "id": "norm-log-inicio",
+      "name": "Log - Inicio",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 400],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Gate G0 — Valida assinatura HMAC, tamanho, mime_type e ingestion_id UUID\n// Falha: responde com status_code correspondente e encerra o fluxo\n\nconst crypto = require('crypto');\n\nconst payload = $input.first();\nconst body = payload.json.body || payload.json;\nconst headers = payload.json.headers || {};\n\n// Recupera signature do header (case-insensitive)\nconst receivedSignature = headers['x-gca-signature'] || headers['X-GCA-Signature'] || '';\nconst webhookSecret = $env.GCA_WEBHOOK_SECRET || '';\n\n// --- Validação HMAC ---\nconst rawBody = JSON.stringify(body);\nconst expectedSignature = 'sha256=' + crypto\n  .createHmac('sha256', webhookSecret)\n  .update(rawBody)\n  .digest('hex');\n\nif (!webhookSecret) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'GCA_WEBHOOK_SECRET não configurado no ambiente n8n',\n      _http_status: 500,\n      ingestion_id: body.ingestion_id || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\nif (!receivedSignature) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'Header X-GCA-Signature ausente',\n      _http_status: 401,\n      ingestion_id: body.ingestion_id || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\nconst sigValid = crypto.timingSafeEqual(\n  Buffer.from(receivedSignature),\n  Buffer.from(expectedSignature)\n);\n\nif (!sigValid) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'Assinatura HMAC inválida',\n      _http_status: 401,\n      ingestion_id: body.ingestion_id || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação tamanho ≤ 50MB ---\nconst sizeBytes = body.document_metadata?.size_bytes || 0;\nconst MAX_SIZE = parseInt($env.MAX_DOC_SIZE_BYTES || '52428800', 10);\n\nif (sizeBytes > MAX_SIZE) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: `Documento excede limite de ${MAX_SIZE} bytes. Recebido: ${sizeBytes} bytes`,\n      _http_status: 413,\n      ingestion_id: body.ingestion_id || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação mime_type permitido ---\nconst ALLOWED_MIMES = [\n  'text/plain',\n  'text/markdown',\n  'text/html',\n  'application/json',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n  'application/pdf',\n  'image/png',\n  'image/jpeg',\n  'image/webp',\n  'message/rfc822'\n];\n\nconst mimeType = body.document_metadata?.mime_type || '';\n\nif (!mimeType || !ALLOWED_MIMES.includes(mimeType)) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: `mime_type não suportado: '${mimeType}'. Permitidos: ${ALLOWED_MIMES.join(', ')}`,\n      _http_status: 415,\n      ingestion_id: body.ingestion_id || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação ingestion_id UUID v4 ---\nconst UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst ingestionId = body.ingestion_id || '';\n\nif (!UUID_V4_REGEX.test(ingestionId)) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: `ingestion_id inválido ou não é UUID v4: '${ingestionId}'`,\n      _http_status: 422,\n      ingestion_id: ingestionId || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação campos obrigatórios ---\nif (!body.document_bytes_base64) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'Campo document_bytes_base64 ausente ou vazio',\n      _http_status: 422,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\nif (!body.project_id) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'Campo project_id ausente',\n      _http_status: 422,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação provider_chain ---\nconst providerChain = body.provider_chain || [];\nif (!Array.isArray(providerChain) || providerChain.length === 0) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'provider_chain ausente ou vazio. Configure em Settings > IA no GCA',\n      _http_status: 422,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// G0 aprovado — propaga payload completo com marcação de status\nreturn [{\n  json: {\n    _g0_status: 'ok',\n    ingestion_id: ingestionId,\n    project_id: body.project_id,\n    document_bytes_base64: body.document_bytes_base64,\n    document_metadata: body.document_metadata,\n    provider_chain: body.provider_chain,\n    callback_url: body.callback_url,\n    timestamp: body.timestamp,\n    _received_at: new Date().toISOString()\n  }\n}];\n"
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $json.body?.ingestion_id || 'unknown', workflow: '01-normalizer', node: 'webhook', event: 'started', persona_tag: null, duration_ms: 0, detail: 'Payload recebido pelo Normalizador', error: null }) }}",
+        "options": { "timeout": 5000 }
       }
     },
     {
-      "id": "if-g0-ok",
+      "id": "norm-hmac-verify",
+      "name": "Verificar HMAC G0",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/verify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($('Webhook Trigger').first().json.body || $('Webhook Trigger').first().json), signature: $('Webhook Trigger').first().json.headers?.['x-gca-signature'] || $('Webhook Trigger').first().json.headers?.['X-GCA-Signature'] || '', secret_name: 'GCA_WEBHOOK_SECRET' }) }}",
+        "options": { "timeout": 10000 }
+      }
+    },
+    {
+      "id": "norm-g0-validar",
+      "name": "G0 - Validar entrada",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 400],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Gate G0 — Valida resultado do HMAC + campos obrigatórios + tamanho + mime_type + UUID\n// SEM require(), SEM $env — usa apenas $input e $('NodeName')\n\nconst hmacResult = $input.first().json;\nconst webhookData = $('Webhook Trigger').first().json;\nconst body = webhookData.body || webhookData;\n\n// --- Verifica resultado do hmac/verify ---\nif (!hmacResult.valid) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: hmacResult.detail || 'Assinatura HMAC inválida',\n      _http_status: 401,\n      ingestion_id: body.ingestion_id || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação ingestion_id UUID v4 ---\nconst UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nconst ingestionId = body.ingestion_id || '';\nif (!UUID_V4_REGEX.test(ingestionId)) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'ingestion_id inválido ou ausente (esperado UUID v4)',\n      _http_status: 422,\n      ingestion_id: ingestionId || null,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação tamanho (máximo 50MB = 52428800 bytes) ---\nconst sizeBytes = body.document_metadata?.size_bytes || 0;\nconst MAX_SIZE = 52428800;\nif (sizeBytes > MAX_SIZE) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: `Documento excede 50MB. Recebido: ${sizeBytes} bytes`,\n      _http_status: 413,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação mime_type ---\nconst ALLOWED_MIMES = [\n  'text/plain', 'text/markdown', 'text/html', 'application/json',\n  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',\n  'application/pdf', 'image/png', 'image/jpeg', 'image/webp', 'message/rfc822'\n];\nconst mimeType = body.document_metadata?.mime_type || '';\nif (!mimeType || !ALLOWED_MIMES.includes(mimeType)) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: `mime_type não suportado: '${mimeType}'`,\n      _http_status: 415,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\n// --- Validação campos obrigatórios ---\nif (!body.document_bytes_base64) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'Campo document_bytes_base64 ausente',\n      _http_status: 422,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\nif (!body.project_id) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'Campo project_id ausente',\n      _http_status: 422,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\nconst providerChain = body.provider_chain || [];\nif (!Array.isArray(providerChain) || providerChain.length === 0) {\n  return [{\n    json: {\n      _g0_status: 'failed',\n      _g0_reason: 'g0_input_invalid',\n      _g0_detail: 'provider_chain ausente ou vazio',\n      _http_status: 422,\n      ingestion_id: ingestionId,\n      callback_url: body.callback_url || null\n    }\n  }];\n}\n\nreturn [{\n  json: {\n    _g0_status: 'ok',\n    ingestion_id: ingestionId,\n    project_id: body.project_id,\n    document_bytes_base64: body.document_bytes_base64,\n    document_metadata: body.document_metadata,\n    provider_chain: body.provider_chain,\n    callback_url: body.callback_url,\n    timestamp: body.timestamp,\n    _received_at: new Date().toISOString()\n  }\n}];\n"
+      }
+    },
+    {
+      "id": "norm-if-g0",
       "name": "IF G0 passou?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        750,
-        400
-      ],
+      "position": [1200, 400],
       "alwaysOutputData": true,
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
           "conditions": [
             {
               "id": "cond-g0-status",
               "leftValue": "={{ $json._g0_status }}",
               "rightValue": "ok",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "operator": { "type": "string", "operation": "equals" }
             }
           ],
           "combinator": "and"
@@ -80,59 +105,32 @@
       }
     },
     {
-      "id": "detectar-formato",
-      "name": "Detectar formato",
+      "id": "norm-detectar-formato",
+      "name": "Detectar formato e extrair texto",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        1000,
-        300
-      ],
+      "position": [1440, 280],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Detecta o formato do documento e define estratégia de extração\n// Conforme spec §4.2 — suporta: txt, md, html, json, docx, pdf, pdf_scanned, image/*, email\n\nconst item = $input.first().json;\nconst mimeType = item.document_metadata?.mime_type || '';\nconst filename = item.document_metadata?.filename || '';\nconst extension = filename.split('.').pop()?.toLowerCase() || '';\n\n// Decodifica bytes para inspeção de magic bytes\nlet rawBuffer = null;\ntry {\n  rawBuffer = Buffer.from(item.document_bytes_base64, 'base64');\n} catch (e) {\n  return [{\n    json: {\n      ...item,\n      _detection_status: 'failed',\n      _detection_error: `Falha ao decodificar base64: ${e.message}`,\n      _g1_reason: 'g1_normalization_failed',\n      _g1_detail: 'document_bytes_base64 inválido — não é base64 válido'\n    }\n  }];\n}\n\n// Magic bytes para detecção adicional\nconst magicPDF = rawBuffer.slice(0, 4).toString('ascii') === '%PDF';\nconst magicDOCX = rawBuffer.slice(0, 4).toString('hex') === '504b0304'; // PK zip (DOCX/XLSX/etc.)\nconst magicPNG = rawBuffer.slice(0, 4).toString('hex') === '89504e47';\nconst magicJPEG = rawBuffer.slice(0, 2).toString('hex') === 'ffd8';\n\nlet strategy = 'unknown';\nlet extractionMethod = 'unknown';\nlet needsOCR = false;\nlet sourceFormat = 'unknown';\n\n// Estratégia por mime_type (com fallback para magic bytes)\nif (mimeType === 'text/plain' || extension === 'txt') {\n  strategy = 'passthrough';\n  extractionMethod = 'passthrough';\n  sourceFormat = 'txt';\n  needsOCR = false;\n\n} else if (mimeType === 'text/markdown' || extension === 'md') {\n  strategy = 'passthrough';\n  extractionMethod = 'passthrough';\n  sourceFormat = 'md';\n  needsOCR = false;\n\n} else if (mimeType === 'text/html' || extension === 'html' || extension === 'htm') {\n  strategy = 'cheerio';\n  extractionMethod = 'cheerio';\n  sourceFormat = 'html';\n  needsOCR = false;\n\n} else if (mimeType === 'application/json' || extension === 'json') {\n  strategy = 'json_parse';\n  extractionMethod = 'json_parse';\n  sourceFormat = 'json';\n  needsOCR = false;\n\n} else if (\n  mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||\n  extension === 'docx' ||\n  magicDOCX\n) {\n  strategy = 'mammoth';\n  extractionMethod = 'mammoth';\n  sourceFormat = 'docx';\n  needsOCR = false;\n\n} else if (mimeType === 'application/pdf' || extension === 'pdf' || magicPDF) {\n  // PDF: tenta pdf-parse primeiro; se texto < 200 chars trata como pdf_scanned\n  strategy = 'pdf_parse';\n  extractionMethod = 'pdf-parse';\n  sourceFormat = 'pdf_text'; // pode ser reclassificado para pdf_scanned após extração\n  needsOCR = false; // será reavaliado no nó de extração\n\n} else if (\n  mimeType.startsWith('image/') ||\n  extension === 'png' ||\n  extension === 'jpg' ||\n  extension === 'jpeg' ||\n  extension === 'webp' ||\n  magicPNG ||\n  magicJPEG\n) {\n  strategy = 'vision';\n  extractionMethod = 'claude-vision';\n  sourceFormat = 'image';\n  needsOCR = true;\n\n} else if (mimeType === 'message/rfc822' || extension === 'eml') {\n  strategy = 'mailparser';\n  extractionMethod = 'mailparser';\n  sourceFormat = 'email';\n  needsOCR = false;\n\n} else {\n  // Formato desconhecido — tenta passthrough como fallback\n  strategy = 'passthrough';\n  extractionMethod = 'passthrough';\n  sourceFormat = 'txt';\n  needsOCR = false;\n}\n\nreturn [{\n  json: {\n    ...item,\n    _strategy: strategy,\n    _extraction_method: extractionMethod,\n    _source_format: sourceFormat,\n    _needs_ocr: needsOCR,\n    _raw_size_bytes: rawBuffer.length,\n    _detection_status: 'ok'\n  }\n}];\n"
+        "jsCode": "// Detecta formato e extrai texto (passthrough txt/md, heurística html/pdf/email, marca OCR para imagem)\n// SEM require(), SEM $env\n\nconst item = $input.first().json;\nconst mimeType = item.document_metadata?.mime_type || '';\nconst filename = item.document_metadata?.filename || '';\nconst extension = (filename.split('.').pop() || '').toLowerCase();\n\nlet rawBuffer;\ntry {\n  rawBuffer = Buffer.from(item.document_bytes_base64, 'base64');\n} catch (e) {\n  return [{ json: { ...item, _needs_ocr: false, _normalized_text: '', _extraction_warnings: ['base64_decode_failed'], _extraction_status: 'failed', _source_format: 'unknown', _extraction_method: 'none' } }];\n}\n\nconst magicPDF = rawBuffer.slice(0, 4).toString('ascii') === '%PDF';\nconst magicDOCX = rawBuffer.slice(0, 4).toString('hex') === '504b0304';\nconst magicPNG = rawBuffer.slice(0, 4).toString('hex') === '89504e47';\nconst magicJPEG = rawBuffer.slice(0, 2).toString('hex') === 'ffd8';\n\nlet normalizedText = '';\nlet needsOCR = false;\nlet sourceFormat = 'unknown';\nlet extractionMethod = 'passthrough';\nconst warnings = [];\n\nif (mimeType === 'text/plain' || extension === 'txt') {\n  normalizedText = rawBuffer.toString('utf8');\n  sourceFormat = 'txt';\n  extractionMethod = 'passthrough';\n\n} else if (mimeType === 'text/markdown' || extension === 'md') {\n  normalizedText = rawBuffer.toString('utf8');\n  sourceFormat = 'md';\n  extractionMethod = 'passthrough';\n\n} else if (mimeType === 'application/json' || extension === 'json') {\n  try {\n    const parsed = JSON.parse(rawBuffer.toString('utf8'));\n    normalizedText = JSON.stringify(parsed, null, 2);\n  } catch (e) {\n    normalizedText = rawBuffer.toString('utf8');\n    warnings.push('json_parse_error');\n  }\n  sourceFormat = 'json';\n  extractionMethod = 'json_parse';\n\n} else if (mimeType === 'text/html' || extension === 'html' || extension === 'htm') {\n  const htmlText = rawBuffer.toString('utf8');\n  normalizedText = htmlText\n    .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<br\\s*\\/?>/gi, '\\n')\n    .replace(/<\\/p>/gi, '\\n\\n')\n    .replace(/<\\/div>/gi, '\\n')\n    .replace(/<\\/h[1-6]>/gi, '\\n\\n')\n    .replace(/<[^>]+>/g, '')\n    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')\n    .replace(/&quot;/g, '\"').replace(/&nbsp;/g, ' ')\n    .replace(/\\n{3,}/g, '\\n\\n').trim();\n  sourceFormat = 'html';\n  extractionMethod = 'html_regex';\n  warnings.push('html_extracted_via_regex');\n\n} else if (mimeType === 'message/rfc822' || extension === 'eml') {\n  const emlText = rawBuffer.toString('utf8');\n  const lines = emlText.split('\\n');\n  let inBody = false;\n  const bodyLines = [];\n  for (const line of lines) {\n    if (!inBody) { if (line.trim() === '') { inBody = true; } }\n    else { bodyLines.push(line); }\n  }\n  normalizedText = bodyLines.join('\\n').trim();\n  sourceFormat = 'email';\n  extractionMethod = 'eml_regex';\n  warnings.push('email_extracted_via_regex');\n\n} else if (mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === 'docx' || magicDOCX) {\n  // DOCX: sem biblioteca nativa disponível — marca como pendente e passa base64 adiante\n  normalizedText = '';\n  sourceFormat = 'docx';\n  extractionMethod = 'pending_external';\n  warnings.push('docx_extraction_pending_external_service');\n\n} else if (mimeType === 'application/pdf' || extension === 'pdf' || magicPDF) {\n  // PDF: heurística de extração de texto em BT/ET blocks\n  const pdfText = rawBuffer.toString('binary');\n  const textMatches = pdfText.match(/BT[\\s\\S]*?ET/g) || [];\n  const fragments = [];\n  for (const block of textMatches) {\n    const strings = block.match(/\\(([^)]+)\\)\\s*Tj/g) || [];\n    for (const s of strings) {\n      const text = s.replace(/\\(([^)]+)\\)\\s*Tj/, '$1').trim();\n      if (text) fragments.push(text);\n    }\n  }\n  normalizedText = fragments.join(' ');\n  if (normalizedText.length < 200) {\n    needsOCR = true;\n    normalizedText = '';\n    warnings.push('pdf_below_threshold_routing_to_ocr');\n    sourceFormat = 'pdf_scanned';\n  } else {\n    sourceFormat = 'pdf_text';\n    warnings.push('pdf_extracted_via_heuristic');\n  }\n  extractionMethod = 'pdf_heuristic';\n\n} else if (mimeType.startsWith('image/') || magicPNG || magicJPEG) {\n  needsOCR = true;\n  normalizedText = '';\n  sourceFormat = 'image';\n  extractionMethod = 'vision_llm';\n\n} else {\n  normalizedText = rawBuffer.toString('utf8');\n  sourceFormat = 'txt';\n  extractionMethod = 'passthrough';\n  warnings.push('unknown_format_passthrough');\n}\n\nreturn [{\n  json: {\n    ...item,\n    _normalized_text: normalizedText,\n    _needs_ocr: needsOCR,\n    _source_format: sourceFormat,\n    _extraction_method: extractionMethod,\n    _extraction_warnings: warnings,\n    _raw_size_bytes: rawBuffer.length,\n    _extraction_status: 'ok'\n  }\n}];\n"
       }
     },
     {
-      "id": "extrair-texto",
-      "name": "Extrair texto (sem OCR)",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        1250,
-        300
-      ],
-      "alwaysOutputData": true,
-      "parameters": {
-        "jsCode": "// Extração de texto para formatos não-OCR:\n// passthrough (txt/md), cheerio (html), json_parse, mammoth (docx), pdf_parse, mailparser\n// Resultado: _normalized_text, _extraction_warnings, _pages, _tables, _images\n\nconst item = $input.first().json;\nconst strategy = item._strategy;\nconst mimeType = item.document_metadata?.mime_type || '';\n\nlet normalizedText = '';\nlet extractionWarnings = [];\nlet pageCount = 1;\nlet tablesDetected = 0;\nlet imagesExtracted = 0;\nlet emailHeaders = null;\nlet attachmentsListed = [];\nlet needsOCR = item._needs_ocr || false;\n\nconst rawBuffer = Buffer.from(item.document_bytes_base64, 'base64');\n\ntry {\n  if (strategy === 'passthrough') {\n    // Detecta encoding: tenta UTF-8, fallback para Latin-1\n    try {\n      normalizedText = rawBuffer.toString('utf8');\n      // Verifica se tem replacement chars (indica encoding errado)\n      if (normalizedText.includes('\\uFFFD')) {\n        normalizedText = rawBuffer.toString('latin1');\n        extractionWarnings.push('encoding_converted_latin1_to_utf8');\n      }\n    } catch (encErr) {\n      normalizedText = rawBuffer.toString('latin1');\n      extractionWarnings.push('encoding_fallback_latin1');\n    }\n\n  } else if (strategy === 'json_parse') {\n    const raw = rawBuffer.toString('utf8');\n    try {\n      const parsed = JSON.parse(raw);\n      normalizedText = JSON.stringify(parsed, null, 2);\n    } catch (jsonErr) {\n      extractionWarnings.push(`json_parse_error: ${jsonErr.message}`);\n      normalizedText = raw; // fallback: texto bruto\n    }\n\n  } else if (strategy === 'cheerio') {\n    // Extração via cheerio não disponível nativamente no n8n Code node\n    // Implementação: extrai texto removendo tags HTML manualmente\n    const htmlText = rawBuffer.toString('utf8');\n    // Remove scripts e styles\n    const noScripts = htmlText\n      .replace(/<script[^>]*>[\\s\\S]*?<\\/script>/gi, '')\n      .replace(/<style[^>]*>[\\s\\S]*?<\\/style>/gi, '');\n    // Remove demais tags\n    normalizedText = noScripts\n      .replace(/<br\\s*\\/?>/gi, '\\n')\n      .replace(/<\\/p>/gi, '\\n\\n')\n      .replace(/<\\/div>/gi, '\\n')\n      .replace(/<\\/h[1-6]>/gi, '\\n\\n')\n      .replace(/<[^>]+>/g, '')\n      .replace(/&amp;/g, '&')\n      .replace(/&lt;/g, '<')\n      .replace(/&gt;/g, '>')\n      .replace(/&quot;/g, '\"')\n      .replace(/&nbsp;/g, ' ')\n      .replace(/\\n{3,}/g, '\\n\\n')\n      .trim();\n    extractionWarnings.push('html_extracted_via_regex_fallback');\n\n  } else if (strategy === 'mammoth') {\n    // mammoth não está disponível no n8n Code node por padrão\n    // Retorna indicação para processamento externo via HTTP\n    extractionWarnings.push('mammoth_not_available_in_node — use HTTP Request para serviço externo de extração DOCX');\n    // Emite base64 para tratamento downstream\n    normalizedText = `[DOCX_EXTRACTION_PENDING: ${item.document_bytes_base64.slice(0, 20)}...]`;\n\n  } else if (strategy === 'pdf_parse') {\n    // pdf-parse não está disponível no n8n Code node por padrão\n    // Estratégia: verifica se texto simples embutido no buffer (PDFs simples)\n    const pdfText = rawBuffer.toString('binary');\n    // Extração heurística de texto em PDFs simples (BT/ET blocks)\n    const textMatches = pdfText.match(/BT[\\s\\S]*?ET/g) || [];\n    const extractedFragments = [];\n    for (const block of textMatches) {\n      const strings = block.match(/\\(([^)]+)\\)\\s*Tj/g) || [];\n      for (const s of strings) {\n        const text = s.replace(/\\(([^)]+)\\)\\s*Tj/, '$1').trim();\n        if (text) extractedFragments.push(text);\n      }\n    }\n    normalizedText = extractedFragments.join(' ');\n\n    // Heurística: se texto extraído < 200 chars → pdf_scanned\n    if (normalizedText.length < 200) {\n      needsOCR = true;\n      normalizedText = '';\n      extractionWarnings.push('pdf_text_below_threshold_routing_to_ocr');\n    } else {\n      extractionWarnings.push('pdf_extracted_via_heuristic — qualidade pode variar; recomendado serviço pdf-parse externo');\n    }\n\n  } else if (strategy === 'mailparser') {\n    // mailparser não disponível no Code node\n    // Extração heurística de email RFC 822\n    const emlText = rawBuffer.toString('utf8');\n    const lines = emlText.split('\\n');\n    let inBody = false;\n    const headerLines = {};\n    const bodyLines = [];\n\n    for (const line of lines) {\n      if (!inBody) {\n        if (line.trim() === '') {\n          inBody = true;\n          continue;\n        }\n        const colonIdx = line.indexOf(':');\n        if (colonIdx > 0) {\n          const key = line.slice(0, colonIdx).toLowerCase().trim();\n          const value = line.slice(colonIdx + 1).trim();\n          headerLines[key] = value;\n        }\n      } else {\n        bodyLines.push(line);\n      }\n    }\n\n    emailHeaders = {\n      from: headerLines['from'] || null,\n      to: headerLines['to'] ? [headerLines['to']] : [],\n      subject: headerLines['subject'] || null,\n      date: headerLines['date'] || null\n    };\n\n    normalizedText = bodyLines.join('\\n').trim();\n\n    if (!normalizedText) {\n      extractionWarnings.push('email_empty_body');\n    }\n    extractionWarnings.push('email_extracted_via_regex_fallback');\n  }\n\n} catch (extractErr) {\n  return [{\n    json: {\n      ...item,\n      _normalized_text: '',\n      _extraction_warnings: [`extraction_error: ${extractErr.message}`],\n      _extraction_status: 'failed',\n      _needs_ocr: needsOCR,\n      _g1_reason: 'g1_normalization_failed',\n      _g1_detail: `Erro na extração de texto (${strategy}): ${extractErr.message}`\n    }\n  }];\n}\n\n// Casos especiais §4.5\nif (item._raw_size_bytes < 50 && strategy !== 'pdf_parse') {\n  extractionWarnings.push('empty_or_truncated');\n}\n\nif (\n  (strategy === 'vision' || strategy === 'pdf_parse') &&\n  normalizedText.length > 0 &&\n  normalizedText.length < 10\n) {\n  extractionWarnings.push('low_text_density');\n}\n\nreturn [{\n  json: {\n    ...item,\n    _normalized_text: normalizedText,\n    _extraction_warnings: extractionWarnings,\n    _page_count: pageCount,\n    _tables_detected: tablesDetected,\n    _images_extracted: imagesExtracted,\n    _email_headers: emailHeaders,\n    _attachments_listed: attachmentsListed,\n    _extraction_status: 'ok',\n    _needs_ocr: needsOCR\n  }\n}];\n"
-      }
-    },
-    {
-      "id": "if-precisa-ocr",
+      "id": "norm-if-ocr",
       "name": "Precisa OCR?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        1500,
-        300
-      ],
+      "position": [1680, 280],
       "alwaysOutputData": true,
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
           "conditions": [
             {
               "id": "cond-needs-ocr",
               "leftValue": "={{ $json._needs_ocr }}",
               "rightValue": true,
-              "operator": {
-                "type": "boolean",
-                "operation": "true"
-              }
+              "operator": { "type": "boolean", "operation": "true" }
             }
           ],
           "combinator": "and"
@@ -141,102 +139,68 @@
       }
     },
     {
-      "id": "ocr-via-llm",
+      "id": "norm-ocr-llm",
       "name": "OCR via LLM",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        1750,
-        200
-      ],
+      "position": [1920, 160],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.provider.provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : 'https://api.deepseek.com/chat/completions' }}",
+        "url": "={{ $json.provider_chain[0].provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : ($json.provider_chain[0].base_url || 'https://api.openai.com') + '/chat/completions' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "=={{ $json.provider.provider === 'anthropic' ? 'x-api-key' : 'Authorization' }}",
-              "value": "={{ $json.provider.provider === 'anthropic' ? $json.provider.api_key : 'Bearer ' + $json.provider.api_key }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "x-api-key", "value": "={{ $json.provider_chain[0].api_key }}" },
+            { "name": "Authorization", "value": "=Bearer {{ $json.provider_chain[0].api_key }}" },
+            { "name": "anthropic-version", "value": "2023-06-01" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"model\": \"{{ $json.provider_chain[0].model }}\",\n  \"max_tokens\": 4000,\n  \"temperature\": 0,\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        {\n          \"type\": \"image\",\n          \"source\": {\n            \"type\": \"base64\",\n            \"media_type\": \"{{ $json.document_metadata.mime_type }}\",\n            \"data\": \"{{ $json.document_bytes_base64 }}\"\n          }\n        },\n        {\n          \"type\": \"text\",\n          \"text\": \"# PERSONA: Normalizador OCR (Vision)\\n\\nVocê está recebendo uma imagem (ou página rasterizada de PDF). Sua única função é extrair TODO o texto legível, na ordem em que aparece, preservando a estrutura.\\n\\n## Regras\\n- Reproduza o texto VERBATIM. Não interprete, resuma ou parafraseie.\\n- Preserve estrutura usando markdown:\\n  - Títulos com `#`, `##`, `###` conforme hierarquia visual\\n  - Listas com `-` ou `1.` conforme apareçam\\n  - Tabelas em sintaxe markdown (com `|` e `---`)\\n  - Código em blocos com ` ``` `\\n- Se um trecho for ilegível, marque com `[ILLEGIBLE]`\\n- Se houver carimbos, assinaturas ou marcas d'água relevantes, descreva entre `[STAMP: ...]`\\n- NÃO inclua preâmbulo, comentários ou explicação. Apenas o texto extraído.\\n\\n## Saída\\nTexto markdown UTF-8. Nada mais.\"\n        }\n      ]\n    }\n  ]\n}",
-        "options": {
-          "timeout": 60000,
-          "response": {
-            "response": {
-              "fullResponse": false
-            }
-          }
-        }
+        "jsonBody": "={{ $json.provider_chain[0].provider === 'anthropic' ? JSON.stringify({ model: $json.provider_chain[0].model, max_tokens: 4000, temperature: 0, messages: [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: $json.document_metadata.mime_type, data: $json.document_bytes_base64 } }, { type: 'text', text: 'Extraia TODO o texto desta imagem verbatim em markdown UTF-8. Sem preâmbulo. Só o texto.' }] }] }) : JSON.stringify({ model: $json.provider_chain[0].model, max_tokens: 4000, temperature: 0, messages: [{ role: 'user', content: 'Extraia TODO o texto desta imagem verbatim em markdown UTF-8. Sem preâmbulo.' }] }) }}",
+        "options": { "timeout": 60000 }
       }
     },
     {
-      "id": "processar-resposta-ocr",
+      "id": "norm-processar-ocr",
       "name": "Processar resposta OCR",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2000,
-        200
-      ],
+      "position": [2160, 160],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Extrai o texto da resposta do LLM (Anthropic, OpenAI ou DeepSeek)\n// e prepara para o nó de montagem do envelope\n\nconst ocrResponse = $input.first().json;\nconst prevItems = $('Precisa OCR?').first().json;\n\nlet normalizedText = '';\nlet ocrConfidence = 0.85; // estimativa padrão\nconst extractionWarnings = prevItems._extraction_warnings || [];\n\ntry {\n  // Formato Anthropic: response.content[0].text\n  if (ocrResponse.content && Array.isArray(ocrResponse.content)) {\n    normalizedText = ocrResponse.content\n      .filter(c => c.type === 'text')\n      .map(c => c.text)\n      .join('\\n');\n  }\n  // Formato OpenAI / DeepSeek: choices[0].message.content\n  else if (ocrResponse.choices && Array.isArray(ocrResponse.choices)) {\n    normalizedText = ocrResponse.choices[0]?.message?.content || '';\n  }\n\n  if (!normalizedText) {\n    extractionWarnings.push('ocr_response_empty');\n  }\n\n  // Heurística de confiança: presença de [ILLEGIBLE] reduz estimativa\n  const illegibleCount = (normalizedText.match(/\\[ILLEGIBLE\\]/g) || []).length;\n  if (illegibleCount > 0) {\n    ocrConfidence = Math.max(0.3, ocrConfidence - illegibleCount * 0.1);\n    extractionWarnings.push(`ocr_illegible_fragments: ${illegibleCount}`);\n  }\n\n  if (normalizedText.length < 10) {\n    extractionWarnings.push('low_text_density');\n  }\n\n} catch (e) {\n  extractionWarnings.push(`ocr_processing_error: ${e.message}`);\n}\n\nreturn [{\n  json: {\n    ...prevItems,\n    _normalized_text: normalizedText,\n    _extraction_warnings: extractionWarnings,\n    _ocr_confidence: ocrConfidence,\n    _source_format: prevItems._source_format === 'pdf_text' ? 'pdf_scanned' : prevItems._source_format,\n    _extraction_method: 'claude-vision',\n    _extraction_status: normalizedText ? 'ok' : 'failed'\n  }\n}];\n"
+        "jsCode": "// Extrai texto da resposta do LLM (Anthropic ou OpenAI-compat)\n// SEM require(), SEM $env\n\nconst ocrResponse = $input.first().json;\nconst prevItem = $('Precisa OCR?').first().json;\n\nlet normalizedText = '';\nconst warnings = prevItem._extraction_warnings || [];\n\nif (ocrResponse.content && Array.isArray(ocrResponse.content)) {\n  // Formato Anthropic\n  normalizedText = ocrResponse.content.filter(c => c.type === 'text').map(c => c.text).join('\\n');\n} else if (ocrResponse.choices && Array.isArray(ocrResponse.choices)) {\n  // Formato OpenAI-compat\n  normalizedText = ocrResponse.choices[0]?.message?.content || '';\n}\n\nif (!normalizedText) warnings.push('ocr_response_empty');\nconst illegibleCount = (normalizedText.match(/\\[ILLEGIBLE\\]/g) || []).length;\nif (illegibleCount > 0) warnings.push('ocr_illegible_fragments:' + illegibleCount);\n\nreturn [{\n  json: {\n    ...prevItem,\n    _normalized_text: normalizedText,\n    _extraction_warnings: warnings,\n    _ocr_confidence: illegibleCount > 0 ? Math.max(0.3, 0.85 - illegibleCount * 0.1) : 0.85,\n    _extraction_status: normalizedText ? 'ok' : 'failed'\n  }\n}];\n"
       }
     },
     {
-      "id": "montar-envelope",
+      "id": "norm-montar-envelope",
       "name": "Montar envelope normalizado",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [
-        2250,
-        300
-      ],
+      "position": [2400, 280],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Monta o envelope de output conforme spec §4.4\n// Alimentado pela rota sem OCR (Extrair texto) ou com OCR (Processar resposta OCR)\n\nconst item = $input.first().json;\n\nconst normalizedText = item._normalized_text || '';\nconst charCount = normalizedText.length;\nconst MAX_CHARS = parseInt($env.MAX_NORMALIZED_CHARS || '200000', 10);\n\n// Gate G1 — validações de saída do Normalizador\nconst g1Warnings = item._extraction_warnings || [];\n\n// G1: texto não-vazio\nif (!normalizedText.trim()) {\n  const reason = g1Warnings.includes('email_empty_body')\n    ? 'email_empty_body'\n    : g1Warnings.includes('pdf_password_protected')\n    ? 'pdf_password_protected'\n    : g1Warnings.includes('empty_or_truncated')\n    ? 'empty_or_truncated'\n    : 'g1_normalization_failed';\n\n  return [{\n    json: {\n      _envelope_status: 'failed',\n      _g1_reason: 'g1_normalization_failed',\n      _g1_detail: `Texto normalizado vazio. Causa: ${reason}`,\n      ingestion_id: item.ingestion_id,\n      project_id: item.project_id,\n      callback_url: item.callback_url\n    }\n  }];\n}\n\n// G1: tamanho ≤ 200k chars\nif (charCount > MAX_CHARS) {\n  return [{\n    json: {\n      _envelope_status: 'failed',\n      _g1_reason: 'g1_normalization_failed',\n      _g1_detail: `Texto normalizado excede ${MAX_CHARS} chars. Obtido: ${charCount} chars`,\n      ingestion_id: item.ingestion_id,\n      project_id: item.project_id,\n      callback_url: item.callback_url\n    }\n  }];\n}\n\n// G1: extraction_metadata completo\nif (!item._source_format || !item._extraction_method) {\n  return [{\n    json: {\n      _envelope_status: 'failed',\n      _g1_reason: 'g1_normalization_failed',\n      _g1_detail: 'extraction_metadata incompleto: source_format ou extraction_method ausente',\n      ingestion_id: item.ingestion_id,\n      project_id: item.project_id,\n      callback_url: item.callback_url\n    }\n  }];\n}\n\n// Monta envelope conforme §4.4\nconst envelope = {\n  ingestion_id: item.ingestion_id,\n  project_id: item.project_id,\n  normalized_text: normalizedText,\n  extraction_metadata: {\n    source_format: item._source_format,\n    original_size_bytes: item.document_metadata?.size_bytes || item._raw_size_bytes || 0,\n    normalized_char_count: charCount,\n    extraction_method: item._extraction_method,\n    extraction_warnings: g1Warnings,\n    ocr_confidence_estimate: item._ocr_confidence || null,\n    page_count: item._page_count || 1,\n    tables_detected: item._tables_detected || 0,\n    images_extracted: item._images_extracted || 0,\n    email_headers: item._email_headers || null,\n    attachments_listed: item._attachments_listed || []\n  },\n  provider_chain: item.provider_chain,\n  callback_url: item.callback_url,\n  received_at: item._received_at || new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    _envelope_status: 'ok',\n    envelope: envelope,\n    ingestion_id: item.ingestion_id,\n    project_id: item.project_id,\n    callback_url: item.callback_url\n  }\n}];\n"
+        "jsCode": "// Monta envelope de saída conforme spec §4.4\n// SEM require(), SEM $env — limite fixo 200k chars\n\nconst item = $input.first().json;\nconst normalizedText = item._normalized_text || '';\nconst MAX_CHARS = 200000;\n\nif (!normalizedText.trim()) {\n  return [{ json: { _envelope_status: 'failed', _g1_reason: 'g1_normalization_failed', _g1_detail: 'Texto normalizado vazio', ingestion_id: item.ingestion_id, project_id: item.project_id, callback_url: item.callback_url } }];\n}\nif (normalizedText.length > MAX_CHARS) {\n  return [{ json: { _envelope_status: 'failed', _g1_reason: 'g1_normalization_failed', _g1_detail: `Texto excede ${MAX_CHARS} chars (${normalizedText.length})`, ingestion_id: item.ingestion_id, project_id: item.project_id, callback_url: item.callback_url } }];\n}\nif (!item._source_format || !item._extraction_method) {\n  return [{ json: { _envelope_status: 'failed', _g1_reason: 'g1_normalization_failed', _g1_detail: 'extraction_metadata incompleto', ingestion_id: item.ingestion_id, project_id: item.project_id, callback_url: item.callback_url } }];\n}\n\nconst envelope = {\n  ingestion_id: item.ingestion_id,\n  project_id: item.project_id,\n  normalized_text: normalizedText,\n  extraction_metadata: {\n    source_format: item._source_format,\n    original_size_bytes: item.document_metadata?.size_bytes || item._raw_size_bytes || 0,\n    normalized_char_count: normalizedText.length,\n    extraction_method: item._extraction_method,\n    extraction_warnings: item._extraction_warnings || [],\n    ocr_confidence_estimate: item._ocr_confidence || null,\n    page_count: 1,\n    tables_detected: 0,\n    images_extracted: 0\n  },\n  provider_chain: item.provider_chain,\n  callback_url: item.callback_url,\n  received_at: item._received_at || new Date().toISOString()\n};\n\nreturn [{ json: { _envelope_status: 'ok', envelope, ingestion_id: item.ingestion_id, project_id: item.project_id, callback_url: item.callback_url } }];\n"
       }
     },
     {
-      "id": "if-envelope-ok",
+      "id": "norm-if-envelope",
       "name": "IF envelope OK?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2.2,
-      "position": [
-        2500,
-        300
-      ],
+      "position": [2640, 280],
       "alwaysOutputData": true,
       "parameters": {
         "conditions": {
-          "options": {
-            "caseSensitive": true,
-            "leftValue": "",
-            "typeValidation": "strict"
-          },
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
           "conditions": [
             {
               "id": "cond-envelope-status",
               "leftValue": "={{ $json._envelope_status }}",
               "rightValue": "ok",
-              "operator": {
-                "type": "string",
-                "operation": "equals"
-              }
+              "operator": { "type": "string", "operation": "equals" }
             }
           ],
           "combinator": "and"
@@ -245,261 +209,215 @@
       }
     },
     {
-      "id": "assinar-e-despachar-conferente",
-      "name": "Despachar para Conferente",
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        2750,
-        200
-      ],
-      "alwaysOutputData": true,
-      "parameters": {
-        "jsCode": "// Assina o payload com HMAC X-Normalizer-Signature usando NORMALIZER_SECRET\n// e prepara para envio ao Conferente\n\nconst crypto = require('crypto');\nconst item = $input.first().json;\nconst envelope = item.envelope;\n\nconst normalizerSecret = $env.NORMALIZER_SECRET || '';\n\nif (!normalizerSecret) {\n  return [{\n    json: {\n      ...item,\n      _dispatch_status: 'failed',\n      _dispatch_error: 'NORMALIZER_SECRET não configurado no ambiente n8n'\n    }\n  }];\n}\n\nconst bodyStr = JSON.stringify(envelope);\nconst hmacSignature = 'sha256=' + crypto\n  .createHmac('sha256', normalizerSecret)\n  .update(bodyStr)\n  .digest('hex');\n\nreturn [{\n  json: {\n    ...item,\n    _hmac_signature: hmacSignature,\n    _body_to_send: bodyStr,\n    _dispatch_status: 'ready'\n  }\n}];\n"
-      }
-    },
-    {
-      "id": "http-despachar-conferente",
-      "name": "HTTP Despachar Conferente",
+      "id": "norm-assinar-hmac",
+      "name": "Assinar HMAC para Conferente",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        3000,
-        200
-      ],
+      "position": [2880, 160],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $env.N8N_BASE_URL }}/webhook/gca-conferente",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/sign",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "X-Normalizer-Signature",
-              "value": "={{ $json._hmac_signature }}"
-            }
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
-        "specifyBody": "string",
-        "body": "={{ $json._body_to_send }}",
-        "options": {
-          "timeout": 30000,
-          "response": {
-            "response": {
-              "fullResponse": true
-            }
-          }
-        }
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($json.envelope), secret_name: 'NORMALIZER_SECRET' }) }}",
+        "options": { "timeout": 10000 }
       }
     },
     {
-      "id": "callback-erro-g0",
+      "id": "norm-despachar-conferente",
+      "name": "Despachar para Conferente",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3120, 160],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://n8n:5678/webhook/gca-conferente",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "X-Normalizer-Signature", "value": "={{ $json.signature }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Assinar HMAC para Conferente').first().json.envelope || $('IF envelope OK?').first().json.envelope) }}",
+        "options": { "timeout": 30000 }
+      }
+    },
+    {
+      "id": "norm-log-concluido",
+      "name": "Log - Concluido",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3360, 160],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('IF envelope OK?').first().json.ingestion_id || 'unknown', workflow: '01-normalizer', node: 'despachar', event: 'completed', persona_tag: null, duration_ms: 0, detail: 'Envelope enviado ao Conferente com sucesso', error: null }) }}",
+        "options": { "timeout": 5000 }
+      }
+    },
+    {
+      "id": "norm-callback-erro-g0",
       "name": "Callback erro G0",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        750,
-        550
-      ],
+      "position": [1200, 560],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.callback_url || $env.GCA_CALLBACK_BASE_URL + '/api/webhooks/ingestion-complete' }}",
+        "url": "={{ $json.callback_url || 'http://gca-backend:8000/api/v1/webhooks/ingestion-complete' }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"ingestion_id\": \"{{ $json.ingestion_id }}\",\n  \"status\": \"failed\",\n  \"reason\": \"{{ $json._g0_reason }}\",\n  \"detail\": \"{{ $json._g0_detail }}\",\n  \"http_status_code\": {{ $json._http_status || 400 }},\n  \"failed_at\": \"g0_normalizer_input\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
-        "options": {
-          "timeout": 15000
-        }
+        "jsonBody": "={{ JSON.stringify({ ingestion_id: $json.ingestion_id, status: 'failed', reason: $json._g0_reason, detail: $json._g0_detail, http_status_code: $json._http_status || 400, failed_at: 'g0_normalizer_input', timestamp: new Date().toISOString() }) }}",
+        "options": { "timeout": 15000 }
       }
     },
     {
-      "id": "callback-erro-g1",
-      "name": "Callback erro G1",
+      "id": "norm-log-erro-g0",
+      "name": "Log - Erro G0",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [
-        2500,
-        450
-      ],
+      "position": [1440, 560],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.callback_url || $env.GCA_CALLBACK_BASE_URL + '/api/webhooks/ingestion-complete' }}",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
+            { "name": "Content-Type", "value": "application/json" }
           ]
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={\n  \"ingestion_id\": \"{{ $json.ingestion_id }}\",\n  \"status\": \"failed\",\n  \"reason\": \"{{ $json._g1_reason || 'g1_normalization_failed' }}\",\n  \"detail\": \"{{ $json._g1_detail || $json._envelope_status }}\",\n  \"failed_at\": \"g1_normalizer_output\",\n  \"timestamp\": \"{{ new Date().toISOString() }}\"\n}",
-        "options": {
-          "timeout": 15000
-        }
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('IF G0 passou?').first().json.ingestion_id || 'unknown', workflow: '01-normalizer', node: 'g0', event: 'failed', persona_tag: null, duration_ms: 0, detail: $('IF G0 passou?').first().json._g0_detail || 'G0 falhou', error: $('IF G0 passou?').first().json._g0_reason || 'g0_failed' }) }}",
+        "options": { "timeout": 5000 }
+      }
+    },
+    {
+      "id": "norm-callback-erro-g1",
+      "name": "Callback erro G1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 460],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.callback_url || 'http://gca-backend:8000/api/v1/webhooks/ingestion-complete' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ingestion_id: $json.ingestion_id, status: 'failed', reason: $json._g1_reason || 'g1_normalization_failed', detail: $json._g1_detail || 'Falha no normalizador', failed_at: 'g1_normalizer_output', timestamp: new Date().toISOString() }) }}",
+        "options": { "timeout": 15000 }
+      }
+    },
+    {
+      "id": "norm-log-erro-g1",
+      "name": "Log - Erro G1",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, 460],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('IF envelope OK?').first().json.ingestion_id || 'unknown', workflow: '01-normalizer', node: 'envelope', event: 'failed', persona_tag: null, duration_ms: 0, detail: $('IF envelope OK?').first().json._g1_detail || 'G1 falhou', error: $('IF envelope OK?').first().json._g1_reason || 'g1_failed' }) }}",
+        "options": { "timeout": 5000 }
       }
     }
   ],
   "connections": {
     "Webhook Trigger": {
-      "main": [
-        [
-          {
-            "node": "G0 - Validar entrada",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Log - Inicio", "type": "main", "index": 0 }]]
+    },
+    "Log - Inicio": {
+      "main": [[{ "node": "Verificar HMAC G0", "type": "main", "index": 0 }]]
+    },
+    "Verificar HMAC G0": {
+      "main": [[{ "node": "G0 - Validar entrada", "type": "main", "index": 0 }]]
     },
     "G0 - Validar entrada": {
-      "main": [
-        [
-          {
-            "node": "IF G0 passou?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "IF G0 passou?", "type": "main", "index": 0 }]]
     },
     "IF G0 passou?": {
       "main": [
-        [
-          {
-            "node": "Detectar formato",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Callback erro G0",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Detectar formato e extrair texto", "type": "main", "index": 0 }],
+        [{ "node": "Callback erro G0", "type": "main", "index": 0 }]
       ]
     },
-    "Detectar formato": {
-      "main": [
-        [
-          {
-            "node": "Extrair texto (sem OCR)",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Extrair texto (sem OCR)": {
-      "main": [
-        [
-          {
-            "node": "Precisa OCR?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Detectar formato e extrair texto": {
+      "main": [[{ "node": "Precisa OCR?", "type": "main", "index": 0 }]]
     },
     "Precisa OCR?": {
       "main": [
-        [
-          {
-            "node": "OCR via LLM",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Montar envelope normalizado",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "OCR via LLM", "type": "main", "index": 0 }],
+        [{ "node": "Montar envelope normalizado", "type": "main", "index": 0 }]
       ]
     },
     "OCR via LLM": {
-      "main": [
-        [
-          {
-            "node": "Processar resposta OCR",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Processar resposta OCR", "type": "main", "index": 0 }]]
     },
     "Processar resposta OCR": {
-      "main": [
-        [
-          {
-            "node": "Montar envelope normalizado",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Montar envelope normalizado", "type": "main", "index": 0 }]]
     },
     "Montar envelope normalizado": {
-      "main": [
-        [
-          {
-            "node": "IF envelope OK?",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "IF envelope OK?", "type": "main", "index": 0 }]]
     },
     "IF envelope OK?": {
       "main": [
-        [
-          {
-            "node": "Despachar para Conferente",
-            "type": "main",
-            "index": 0
-          }
-        ],
-        [
-          {
-            "node": "Callback erro G1",
-            "type": "main",
-            "index": 0
-          }
-        ]
+        [{ "node": "Assinar HMAC para Conferente", "type": "main", "index": 0 }],
+        [{ "node": "Callback erro G1", "type": "main", "index": 0 }]
       ]
     },
+    "Assinar HMAC para Conferente": {
+      "main": [[{ "node": "Despachar para Conferente", "type": "main", "index": 0 }]]
+    },
     "Despachar para Conferente": {
-      "main": [
-        [
-          {
-            "node": "HTTP Despachar Conferente",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+      "main": [[{ "node": "Log - Concluido", "type": "main", "index": 0 }]]
+    },
+    "Callback erro G0": {
+      "main": [[{ "node": "Log - Erro G0", "type": "main", "index": 0 }]]
+    },
+    "Callback erro G1": {
+      "main": [[{ "node": "Log - Erro G1", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
