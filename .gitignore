@@ -137,3 +137,9 @@ otimizar-sistema.sh
 
 # Questionários baixados em dogfood local (contêm dados de projetos reais)
 questionario_governance_*.pdf
+
+# Harness do Claude Code — backups e logs locais que podem conter chaves
+.claude/audit.log
+.claude/audit.log.lock
+.claude/settings.json.bak.*
+.claude.bak.*
