@@ -407,7 +407,7 @@
         },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "{{ JSON.stringify({ ingestion_id: $json.ingestion_id, project_id: $json.project_id, status: \"failed\", overall_score: 0, blocked: false, blocking_reason: $json._g0_reason, personas_executed: [], personas_failed: [\"G0\"], ocg_individual: {}, ocg_global_delta: {}, conflicts_resolved: [], consolidated_findings: [], consolidated_recommendations: [], execution_summary: { error: $json._g0_detail, failed_at: \"g0_normalizer_input\", timestamp: new Date().toISOString() } }) }}",
+        "jsonBody": "={{ JSON.stringify({ ingestion_id: $json.ingestion_id, project_id: $json.project_id, status: \"failed\", overall_score: 0, blocked: false, blocking_reason: $json._g0_reason, personas_executed: [], personas_failed: [\"G0\"], ocg_individual: {}, ocg_global_delta: {}, conflicts_resolved: [], consolidated_findings: [], consolidated_recommendations: [], execution_summary: { error: $json._g0_detail, failed_at: \"g0_normalizer_input\", timestamp: new Date().toISOString() } }) }}",
         "options": {
           "timeout": 15000
         }
