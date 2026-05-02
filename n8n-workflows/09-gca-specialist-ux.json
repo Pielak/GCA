@@ -12,7 +12,10 @@
       "name": "Webhook Trigger",
       "type": "n8n-nodes-base.webhook",
       "typeVersion": 2,
-      "position": [240, 300],
+      "position": [
+        240,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "httpMethod": "POST",
@@ -26,7 +29,10 @@
       "name": "Log - Inicio",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [460, 300],
+      "position": [
+        460,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -41,7 +47,10 @@
       "name": "Verificar HMAC",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [680, 300],
+      "position": [
+        680,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -56,21 +65,27 @@
       "name": "Validar HMAC",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [900, 300],
+      "position": [
+        900,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "const hmacResult = $json;\nif (!hmacResult.valid) {\n  throw new Error('HMAC invalido: assinatura recusada pelo backend');\n}\nconst webhookData = $('Webhook Trigger').item.json;\nconst normalized_text = webhookData.normalized_text || '';\nconst provider_chain = webhookData.provider_chain || [];\nconst ingestion_id = webhookData.ingestion_id || '';\nconst shared_context = webhookData.shared_context || {};\nif (!normalized_text) {\n  throw new Error('Campo normalized_text ausente no payload');\n}\nif (!provider_chain || provider_chain.length === 0) {\n  throw new Error('Campo provider_chain ausente ou vazio no payload');\n}\nreturn [{ json: { normalized_text, provider_chain, ingestion_id, shared_context, hmac_valid: true } }];"
       }
     },
     {
-      "id": "node-montar-prompt-ux",
-      "name": "Montar Prompt",
+      "id": "node-montar-llm-request-ux",
+      "name": "Montar LLM Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1120, 300],
+      "position": [
+        1120,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst systemPrompt = 'Você é o UX Designer (UX) — sexta persona técnica do Gatekeeper.\\n\\nSeu papel é validar:\\n1. **Jornada de Usuário**: Fluxos principais estão mapeados e lógicos?\\n2. **Acessibilidade**: WCAG AA é atendido? Navegação funcional?\\n3. **Usabilidade**: Interface é intuitiva para o público-alvo?\\n4. **Performance Perceptual**: Feedback visual é claro e imediato?\\n5. **Múltiplos Contextos**: Responsivo, offline, múltiplos dispositivos?\\n6. **Inclusão**: Suporta diferentes capacidades (visual, auditivo, motor)?\\n\\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\\n\\n1. SCORES (0–100)\\n   - jornada: clareza de fluxos de usuário\\n   - acessibilidade: conformidade WCAG AA\\n   - usabilidade: intuitividade da interface\\n   - performance: feedback visual e responsividade\\n   - contextos: suporte a múltiplos contextos\\n   - inclusao: suporte a capacidades diversas\\n\\n2. APPROVED (bool)\\n3. ISSUES (array)\\n4. QUESTIONS (array)\\n5. JUSTIFICATION (texto)\\n6. METADATA - tentative: true em passada 1, false em passada 2\\n\\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem ```).';\nconst userMessage = JSON.stringify({ passada: 1, normalized_text: data.normalized_text, shared_context: data.shared_context });\nlet requestBody;\nconst providerType = (provider.provider_type || '').toLowerCase();\nif (providerType === 'anthropic') {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, system: systemPrompt, messages: [{ role: 'user', content: userMessage }] };\n} else {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] };\n}\nreturn [{ json: { provider, requestBody, ingestion_id: data.ingestion_id } }];"
+        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst providerName = (provider.provider || 'openai').toLowerCase();\nconst apiKey = provider.api_key || '';\n\nconst systemPrompt = $('Validar HMAC').item.json.systemPrompt || 'Voc\u00ea \u00e9 um especialista.';\nconst userMessage = JSON.stringify({ normalized_text: data.normalized_text || '', shared_context: data.shared_context || {} });\n\nlet llmUrl, requestHeaders, requestBody;\n\nif (providerName === 'anthropic') {\n  llmUrl = 'https://api.anthropic.com/v1/messages';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'anthropic-version': '2023-06-01',\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'openai') {\n  llmUrl = 'https://api.openai.com/v1/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'deepseek') {\n  llmUrl = 'https://api.deepseek.com/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'gemini') {\n  llmUrl = `https://generativelanguage.googleapis.com/v1/models/${provider.model}:generateContent?key=${apiKey}`;\n  requestHeaders = {\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    contents: [{ parts: [{ text: systemPrompt + '\\n\\n' + userMessage }] }]\n  };\n} else {\n  throw new Error(`Provider desconhecido: ${providerName}`);\n}\n\nreturn [{ json: { llmUrl, requestHeaders, requestBody, provider, ingestion_id: data.ingestion_id, shared_context: data.shared_context } }];"
       }
     },
     {
@@ -78,7 +93,10 @@
       "name": "LLM Call",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1340, 300],
+      "position": [
+        1340,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -88,10 +106,22 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "x-api-key", "value": "={{ $json.provider.api_key }}" },
-            { "name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}" },
-            { "name": "anthropic-version", "value": "2023-06-01" },
-            { "name": "Content-Type", "value": "application/json" }
+            {
+              "name": "x-api-key",
+              "value": "={{ $json.provider.api_key }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $json.provider.api_key }}"
+            },
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
           ]
         },
         "options": {}
@@ -102,7 +132,10 @@
       "name": "Parse PersonaOutput",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1560, 300],
+      "position": [
+        1560,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar Prompt').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst scores = parsed.scores || {};\nconst avgScore = Object.keys(scores).length > 0\n  ? Math.round(Object.values(scores).reduce((a, b) => a + Number(b), 0) / Object.keys(scores).length)\n  : 0;\nconst personaOutput = {\n  persona_tag: 'UX',\n  persona_name: 'UX Designer',\n  ingestion_id: prevData.ingestion_id,\n  scores,\n  avg_score: avgScore,\n  approved: parsed.approved || false,\n  blocking: false,\n  issues: parsed.issues || [],\n  questions: parsed.questions || [],\n  justification: parsed.justification || '',\n  metadata: parsed.metadata || {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id } }];"
@@ -113,7 +146,10 @@
       "name": "Assinar Callback",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1780, 300],
+      "position": [
+        1780,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -128,7 +164,10 @@
       "name": "Callback Consolidador",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2000, 300],
+      "position": [
+        2000,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -138,7 +177,10 @@
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
-            { "name": "X-Specialist-Signature", "value": "={{ $json.signature }}" }
+            {
+              "name": "X-Specialist-Signature",
+              "value": "={{ $json.signature }}"
+            }
           ]
         },
         "options": {}
@@ -149,7 +191,10 @@
       "name": "Log - Concluido",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [2220, 300],
+      "position": [
+        2220,
+        300
+      ],
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
@@ -161,14 +206,104 @@
     }
   ],
   "connections": {
-    "Webhook Trigger": { "main": [[{ "node": "Log - Inicio", "type": "main", "index": 0 }]] },
-    "Log - Inicio": { "main": [[{ "node": "Verificar HMAC", "type": "main", "index": 0 }]] },
-    "Verificar HMAC": { "main": [[{ "node": "Validar HMAC", "type": "main", "index": 0 }]] },
-    "Validar HMAC": { "main": [[{ "node": "Montar Prompt", "type": "main", "index": 0 }]] },
-    "Montar Prompt": { "main": [[{ "node": "LLM Call", "type": "main", "index": 0 }]] },
-    "LLM Call": { "main": [[{ "node": "Parse PersonaOutput", "type": "main", "index": 0 }]] },
-    "Parse PersonaOutput": { "main": [[{ "node": "Assinar Callback", "type": "main", "index": 0 }]] },
-    "Assinar Callback": { "main": [[{ "node": "Callback Consolidador", "type": "main", "index": 0 }]] },
-    "Callback Consolidador": { "main": [[{ "node": "Log - Concluido", "type": "main", "index": 0 }]] }
+    "Webhook Trigger": {
+      "main": [
+        [
+          {
+            "node": "Log - Inicio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log - Inicio": {
+      "main": [
+        [
+          {
+            "node": "Verificar HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verificar HMAC": {
+      "main": [
+        [
+          {
+            "node": "Validar HMAC",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validar HMAC": {
+      "main": [
+        [
+          {
+            "node": "Montar LLM Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM Call": {
+      "main": [
+        [
+          {
+            "node": "Parse PersonaOutput",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse PersonaOutput": {
+      "main": [
+        [
+          {
+            "node": "Assinar Callback",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assinar Callback": {
+      "main": [
+        [
+          {
+            "node": "Callback Consolidador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Callback Consolidador": {
+      "main": [
+        [
+          {
+            "node": "Log - Concluido",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar LLM Request": {
+      "main": [
+        [
+          {
+            "node": "LLM Call",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
   }
 }

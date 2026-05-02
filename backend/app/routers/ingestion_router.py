@@ -314,14 +314,13 @@ async def reanalyze_document(
         import base64
         from app.services.ai_key_resolver import AIKeyResolver
 
-        provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id)
+        provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id, include_api_key=True)
         chain_data = []
         for p in (provider_chain or []):
             chain_data.append({
                 "provider": p.get("provider", ""),
                 "model": p.get("model", ""),
                 "api_key": p.get("api_key", ""),
-                "is_default": p.get("is_default", False),
             })
 
         n8n_payload = {

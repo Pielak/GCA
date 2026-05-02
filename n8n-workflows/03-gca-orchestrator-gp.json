@@ -63,14 +63,14 @@
       }
     },
     {
-      "id": "node-montar-prompt-gp",
-      "name": "Montar Prompt",
+      "id": "node-montar-llm-request-gp",
+      "name": "Montar LLM Request",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1120, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst systemPrompt = 'Você é o Gerente de Projetos (GP) — primeira persona técnica do Gatekeeper.\\n\\nSeu papel é validar:\\n1. **Escopo**: Requisitos funcionais estão completos e testáveis?\\n2. **Viabilidade**: É possível entregar com recursos e timeline planejados?\\n3. **Stakeholders**: Estão todos identificados? Há consenso?\\n4. **ROI**: O projeto agrega valor? Há riscos de negócio documentados?\\n\\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\\n\\n1. SCORES (0–100)\\n   - escopo: clareza e completude de requisitos\\n   - stack: alinhamento com capacidade da equipe\\n   - dados: modelo de dados faz sentido para os fluxos?\\n   - implementacao: timeline é realista?\\n   - testes: estratégia de aceite definida?\\n\\n2. APPROVED (bool)\\n   - true se pode proceder (escopo claro, stakeholders alinhados)\\n   - false se há blocker de negócio\\n\\n3. ISSUES (array)\\n   - Ambiguidades no escopo\\n   - Requisitos conflitantes\\n   - Stakeholders faltando\\n   - Timeline não realista\\n   - Riscos não documentados\\n\\n4. QUESTIONS (array)\\n   - Perguntas que PRECISAM de resposta humana para proceder\\n\\n5. JUSTIFICATION (texto)\\n   - Raciocínio resumido para aprovação/reprovação\\n\\n6. METADATA\\n   - tentative: true em passada 1, false em passada 2\\n\\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\\n\\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem ```).';\nconst userMessage = JSON.stringify({ passada: 1, normalized_text: data.normalized_text, shared_context: data.shared_context });\nlet requestBody;\nconst providerType = (provider.provider_type || '').toLowerCase();\nif (providerType === 'anthropic') {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, system: systemPrompt, messages: [{ role: 'user', content: userMessage }] };\n} else {\n  requestBody = { model: provider.model, max_tokens: 4000, temperature: 0.2, messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }] };\n}\nreturn [{ json: { provider, requestBody, ingestion_id: data.ingestion_id } }];"
+        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst providerName = (provider.provider || 'openai').toLowerCase();\nconst apiKey = provider.api_key || '';\n\nconst systemPrompt = 'Você é o Gerente de Projetos (GP) — primeira persona técnica do Gatekeeper.\\n\\nSeu papel é validar:\\n1. **Escopo**: Requisitos funcionais estão completos e testáveis?\\n2. **Viabilidade**: É possível entregar com recursos e timeline planejados?\\n3. **Stakeholders**: Estão todos identificados? Há consenso?\\n4. **ROI**: O projeto agrega valor? Há riscos de negócio documentados?\\n\\nSEUS 6 OUTPUTS OBRIGATÓRIOS (em UMA resposta JSON):\\n\\n1. SCORES (0–100)\\n   - escopo: clareza e completude de requisitos\\n   - stack: alinhamento com capacidade da equipe\\n   - dados: modelo de dados faz sentido para os fluxos?\\n   - implementacao: timeline é realista?\\n   - testes: estratégia de aceite definida?\\n\\n2. APPROVED (bool)\\n   - true se pode proceder (escopo claro, stakeholders alinhados)\\n   - false se há blocker de negócio\\n\\n3. ISSUES (array)\\n   - Ambiguidades no escopo\\n   - Requisitos conflitantes\\n   - Stakeholders faltando\\n   - Timeline não realista\\n   - Riscos não documentados\\n\\n4. QUESTIONS (array)\\n   - Perguntas que PRECISAM de resposta humana para proceder\\n\\n5. JUSTIFICATION (texto)\\n   - Raciocínio resumido para aprovação/reprovação\\n\\n6. METADATA\\n   - tentative: true em passada 1, false em passada 2\\n\\nSem improviso. Se não houver insumo suficiente, declare incerteza explícita.\\n\\nRETORNE APENAS JSON VÁLIDO (sem markdown, sem ```).';\nconst userMessage = JSON.stringify({ passada: 1, normalized_text: data.normalized_text, shared_context: data.shared_context });\n\nlet llmUrl, requestHeaders, requestBody;\n\nif (providerName === 'anthropic') {\n  llmUrl = 'https://api.anthropic.com/v1/messages';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'anthropic-version': '2023-06-01',\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'openai') {\n  llmUrl = 'https://api.openai.com/v1/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'deepseek') {\n  llmUrl = 'https://api.deepseek.com/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else {\n  throw new Error(`Provider desconhecido: ${providerName}`);\n}\n\nreturn [{ json: { llmUrl, requestHeaders, requestBody, provider, ingestion_id: data.ingestion_id, shared_context: data.shared_context } }];"
       }
     },
     {
@@ -82,17 +82,12 @@
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.provider.api_url }}",
+        "url": "={{ $json.llmUrl }}",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
         "sendHeaders": true,
         "headerParameters": {
-          "parameters": [
-            { "name": "x-api-key", "value": "={{ $json.provider.api_key }}" },
-            { "name": "Authorization", "value": "=Bearer {{ $json.provider.api_key }}" },
-            { "name": "anthropic-version", "value": "2023-06-01" },
-            { "name": "Content-Type", "value": "application/json" }
-          ]
+          "parameters": "={{ Object.entries($json.requestHeaders).map(([k, v]) => ({ name: k, value: v })) }}"
         },
         "options": {}
       }
@@ -105,7 +100,7 @@
       "position": [1560, 300],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar Prompt').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst scores = parsed.scores || {};\nconst avgScore = Object.keys(scores).length > 0\n  ? Math.round(Object.values(scores).reduce((a, b) => a + Number(b), 0) / Object.keys(scores).length)\n  : 0;\nconst personaOutput = {\n  persona_tag: 'GP',\n  persona_name: 'Gerente de Projetos',\n  ingestion_id: prevData.ingestion_id,\n  scores,\n  avg_score: avgScore,\n  approved: parsed.approved || false,\n  blocking: false,\n  issues: parsed.issues || [],\n  questions: parsed.questions || [],\n  justification: parsed.justification || '',\n  metadata: parsed.metadata || {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id } }];"
+        "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar LLM Request').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst scores = parsed.scores || {};\nconst avgScore = Object.keys(scores).length > 0\n  ? Math.round(Object.values(scores).reduce((a, b) => a + Number(b), 0) / Object.keys(scores).length)\n  : 0;\nconst personaOutput = {\n  persona_tag: 'GP',\n  persona_name: 'Gerente de Projetos',\n  ingestion_id: prevData.ingestion_id,\n  scores,\n  avg_score: avgScore,\n  approved: parsed.approved || false,\n  blocking: false,\n  issues: parsed.issues || [],\n  questions: parsed.questions || [],\n  justification: parsed.justification || '',\n  metadata: parsed.metadata || {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id } }];"
       }
     },
     {
@@ -164,8 +159,8 @@
     "Webhook Trigger": { "main": [[{ "node": "Log - Inicio", "type": "main", "index": 0 }]] },
     "Log - Inicio": { "main": [[{ "node": "Verificar HMAC", "type": "main", "index": 0 }]] },
     "Verificar HMAC": { "main": [[{ "node": "Validar HMAC", "type": "main", "index": 0 }]] },
-    "Validar HMAC": { "main": [[{ "node": "Montar Prompt", "type": "main", "index": 0 }]] },
-    "Montar Prompt": { "main": [[{ "node": "LLM Call", "type": "main", "index": 0 }]] },
+    "Validar HMAC": { "main": [[{ "node": "Montar LLM Request", "type": "main", "index": 0 }]] },
+    "Montar LLM Request": { "main": [[{ "node": "LLM Call", "type": "main", "index": 0 }]] },
     "LLM Call": { "main": [[{ "node": "Parse PersonaOutput", "type": "main", "index": 0 }]] },
     "Parse PersonaOutput": { "main": [[{ "node": "Assinar Callback", "type": "main", "index": 0 }]] },
     "Assinar Callback": { "main": [[{ "node": "Callback Consolidador", "type": "main", "index": 0 }]] },
