@@ -44,23 +44,48 @@
 
 | # | Nome | Tipo | Função | Modelo |
 |---|---|---|---|---|
-| 1 | `gca-normalizer` | Pré-processador | Converte PDF / DOCX / imagem / email / TXT / HTML / JSON em texto unificado UTF-8 | Sonnet 4.6 (apenas para vision/OCR) |
-| 2 | `gca-conferente` | Roteador | Classifica e decide quais especialistas ativar | Sonnet 4.6 |
-| 3 | `gca-orchestrator-gp` | **Orquestrador** | Recebe classificação do AUD, supervisiona equipe, valida escopo/viabilidade | Sonnet 4.6 |
-| 4 | `gca-specialist-aud` | Especialista | Auditoria de qualidade documental | Sonnet 4.6 |
-| 5 | `gca-specialist-arq` | Especialista | Arquitetura + perf arquitetural | Sonnet 4.6 |
-| 6 | `gca-specialist-dba` | Especialista | Modelagem de dados + perf de banco | Sonnet 4.6 |
-| 7 | `gca-specialist-dev` | Especialista | Qualidade de código + perf de código | Sonnet 4.6 |
-| 8 | `gca-specialist-qa` | Especialista | Estratégia e cobertura de testes | Sonnet 4.6 |
-| 9 | `gca-specialist-ux` | Especialista | Jornada + heurísticas Nielsen | Sonnet 4.6 |
-| 10 | `gca-specialist-ui` | Especialista | Design tokens, componentes, contraste WCAG | Sonnet 4.6 |
-| 11 | `gca-specialist-seg` | Especialista | OWASP, secrets, AuthN/AuthZ | Sonnet 4.6 |
-| 12 | `gca-specialist-conf` | Especialista (BLOQUEANTE) | Conformidade regulatória | Sonnet 4.6 |
-| 13 | `gca-specialist-lgpd` | Especialista | LGPD em profundidade | Sonnet 4.6 |
-| 14 | `gca-specialist-neg` | Especialista | Valor de negócio, ROI, risco operacional | Sonnet 4.6 |
-| 15 | `gca-consolidador` | Agregador | Merge de OCGs individuais + delta global | Sonnet 4.6 (fallback DeepSeek) |
+| 1 | `gca-normalizer` | Pré-processador | Converte PDF / DOCX / imagem / email / TXT / HTML / JSON em texto unificado UTF-8 | provider_chain[0] (vision se OCR) |
+| 2 | `gca-conferente` | Roteador | Classifica e decide quais especialistas ativar | provider_chain[0] |
+| 3 | `gca-orchestrator-gp` | **Orquestrador** | Recebe classificação do AUD, supervisiona equipe, valida escopo/viabilidade | provider_chain[0] |
+| 4 | `gca-specialist-aud` | Especialista | Auditoria de qualidade documental | provider_chain[0] |
+| 5 | `gca-specialist-arq` | Especialista | Arquitetura + perf arquitetural | provider_chain[0] |
+| 6 | `gca-specialist-dba` | Especialista | Modelagem de dados + perf de banco | provider_chain[0] |
+| 7 | `gca-specialist-dev` | Especialista | Qualidade de código + perf de código | provider_chain[0] |
+| 8 | `gca-specialist-qa` | Especialista | Estratégia e cobertura de testes | provider_chain[0] |
+| 9 | `gca-specialist-ux` | Especialista | Jornada + heurísticas Nielsen | provider_chain[0] |
+| 10 | `gca-specialist-ui` | Especialista | Design tokens, componentes, contraste WCAG | provider_chain[0] |
+| 11 | `gca-specialist-seg` | Especialista | OWASP, secrets, AuthN/AuthZ | provider_chain[0] |
+| 12 | `gca-specialist-conf` | Especialista (BLOQUEANTE) | Conformidade regulatória | provider_chain[0] |
+| 13 | `gca-specialist-lgpd` | Especialista | LGPD em profundidade | provider_chain[0] |
+| 14 | `gca-specialist-neg` | Especialista | Valor de negócio, ROI, risco operacional | provider_chain[0] |
+| 15 | `gca-consolidador` | Agregador | Merge de OCGs individuais + delta global | provider_chain[0] |
 
 > **Nota arquitetural — GP como orquestrador:** O GP não roda em paralelo com os especialistas. O fluxo é: AUD classifica → GP recebe resultado, avalia viabilidade e supervisiona → GP despacha para especialistas ativos → especialistas rodam em paralelo → resultados convergem no Consolidador. GP é o "gerente" que tem visão da equipe.
+
+### 1.3 Resolução de provider — cadeia do GCA
+
+**Nenhum workflow tem provider/modelo chumbado.** Todos usam a cadeia configurada pelo GP no GCA (`Settings > Provedor de IA`).
+
+O GCA Backend inclui `provider_chain` no payload do webhook de ingestão:
+
+```json
+{
+  "provider_chain": [
+    {"provider": "deepseek", "model": "deepseek-v4-pro", "api_key": "sk-***", "is_default": true},
+    {"provider": "anthropic", "model": "claude-sonnet-4-6", "api_key": "sk-ant-***", "is_default": false}
+  ]
+}
+```
+
+Regras de fallback em cada workflow:
+1. Tenta `provider_chain[0]` (default do projeto)
+2. Se falhar (timeout, 429, 500, 503, créditos esgotados): tenta `provider_chain[1]`
+3. Continua até esgotar a cadeia
+4. Se todos falharem: emite `status: "failed"` com `error_detail` e avança o contador do Consolidador
+
+Isso respeita `AIKeyResolver.resolve_project_provider_chain()` (CLAUDE.md §3.1) — a decisão de qual IA usar é do GP, não do n8n.
+
+> **Segurança:** as `api_key`s viajam no payload HMAC-assinado entre GCA e n8n (rede interna via Cloudflare Tunnel). Em produção on-premise, considerar vault intermediário ou credenciais n8n por projeto.
 
 ---
 
