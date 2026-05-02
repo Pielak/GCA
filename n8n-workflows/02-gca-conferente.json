@@ -93,7 +93,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// G1 \u2014 Valida resultado do HMAC + normalized_text + extraction_metadata\n// SEM require(), SEM $env\n\nconst hmacResult = $input.first().json;\nconst webhookData = $('Webhook Trigger').first().json;\nconst body = webhookData.body || webhookData;\n\nif (!hmacResult.valid) {\n  throw new Error('G1_AUTH_FAILED: Assinatura HMAC inv\u00e1lida \u2014 ' + (hmacResult.detail || ''));\n}\n\nconst { ingestion_id, project_id, normalized_text, extraction_metadata, provider_chain, callback_url } = body;\n\nconst UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (!ingestion_id || !UUID_V4_REGEX.test(ingestion_id)) {\n  throw new Error('G1_INVALID: ingestion_id deve ser UUID v4');\n}\nif (!project_id) throw new Error('G1_INVALID: project_id ausente');\nif (!normalized_text || !normalized_text.trim()) throw new Error('G1_INVALID: normalized_text vazio ou ausente');\nif (normalized_text.length > 200000) throw new Error(`G1_INVALID: normalized_text excede 200000 chars (${normalized_text.length})`);\nif (!extraction_metadata || typeof extraction_metadata !== 'object') throw new Error('G1_INVALID: extraction_metadata ausente');\nconst requiredMeta = ['source_format', 'original_size_bytes', 'normalized_char_count', 'extraction_method'];\nfor (const f of requiredMeta) {\n  if (extraction_metadata[f] === undefined || extraction_metadata[f] === null) {\n    throw new Error(`G1_INVALID: extraction_metadata.${f} ausente`);\n  }\n}\nif (!provider_chain || !Array.isArray(provider_chain) || provider_chain.length === 0) {\n  throw new Error('G1_INVALID: provider_chain ausente ou vazia');\n}\nif (!callback_url) throw new Error('G1_INVALID: callback_url ausente');\n\nreturn [{\n  json: {\n    ingestion_id,\n    project_id,\n    normalized_text,\n    extraction_metadata,\n    provider_chain,\n    callback_url,\n    g1_validated_at: new Date().toISOString()\n  }\n}];\n"
+        "jsCode": "// G1 — Valida resultado do HMAC + normalized_text + extraction_metadata\n// SEM require(), SEM $env\n\nconst hmacResult = $input.first().json;\nconst webhookData = $('Webhook Trigger').first().json;\nconst body = webhookData.body || webhookData;\n\nif (!hmacResult.valid) {\n  throw new Error('G1_AUTH_FAILED: Assinatura HMAC inválida — ' + (hmacResult.detail || ''));\n}\n\nconst { ingestion_id, project_id, normalized_text, extraction_metadata, provider_chain, callback_url, persona_prompts } = body;\n\nconst UUID_V4_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;\nif (!ingestion_id || !UUID_V4_REGEX.test(ingestion_id)) {\n  throw new Error('G1_INVALID: ingestion_id deve ser UUID v4');\n}\nif (!project_id) throw new Error('G1_INVALID: project_id ausente');\nif (!normalized_text || !normalized_text.trim()) throw new Error('G1_INVALID: normalized_text vazio ou ausente');\nif (normalized_text.length > 200000) throw new Error(`G1_INVALID: normalized_text excede 200000 chars (${normalized_text.length})`);\nif (!extraction_metadata || typeof extraction_metadata !== 'object') throw new Error('G1_INVALID: extraction_metadata ausente');\nconst requiredMeta = ['source_format', 'original_size_bytes', 'normalized_char_count', 'extraction_method'];\nfor (const f of requiredMeta) {\n  if (extraction_metadata[f] === undefined || extraction_metadata[f] === null) {\n    throw new Error(`G1_INVALID: extraction_metadata.${f} ausente`);\n  }\n}\nif (!provider_chain || !Array.isArray(provider_chain) || provider_chain.length === 0) {\n  throw new Error('G1_INVALID: provider_chain ausente ou vazia');\n}\nif (!callback_url) throw new Error('G1_INVALID: callback_url ausente');\n\nreturn [{\n  json: {\n    ingestion_id,\n    project_id,\n    normalized_text,\n    extraction_metadata,\n    provider_chain,\n    callback_url,\n    persona_prompts: persona_prompts || {},\n    g1_validated_at: new Date().toISOString()\n  }\n}];\n"
       }
     },
     {
@@ -107,7 +107,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst providerName = (provider.provider || 'openai').toLowerCase();\nconst apiKey = provider.api_key || '';\n\nconst systemPrompt = $('Validar HMAC').item.json.systemPrompt || 'Voc\u00ea \u00e9 um especialista.';\nconst userMessage = JSON.stringify({ normalized_text: data.normalized_text || '', shared_context: data.shared_context || {} });\n\nlet llmUrl, requestHeaders, requestBody;\n\nif (providerName === 'anthropic') {\n  llmUrl = 'https://api.anthropic.com/v1/messages';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'anthropic-version': '2023-06-01',\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'openai') {\n  llmUrl = 'https://api.openai.com/v1/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'deepseek') {\n  llmUrl = 'https://api.deepseek.com/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'gemini') {\n  llmUrl = `https://generativelanguage.googleapis.com/v1/models/${provider.model}:generateContent?key=${apiKey}`;\n  requestHeaders = {\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    contents: [{ parts: [{ text: systemPrompt + '\\n\\n' + userMessage }] }]\n  };\n} else {\n  throw new Error(`Provider desconhecido: ${providerName}`);\n}\n\nreturn [{ json: { llmUrl, requestHeaders, requestBody, provider, ingestion_id: data.ingestion_id, shared_context: data.shared_context } }];"
+        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst providerName = (provider.provider || 'openai').toLowerCase();\nconst apiKey = provider.api_key || '';\n\nconst upstream = $('G1 - Validar entrada').first().json;\nconst persona_prompts = upstream.persona_prompts || {};\nconst CONFERENTE_CLASSIFIER_PROMPT = \"Voc\\u00ea \\u00e9 o Conferente do GCA (roteador de documentos). Sua \\u00fanica tarefa: classificar o documento e decidir quais personas LLM devem analis\\u00e1-lo.\\n\\nPERSONAS DISPON\\u00cdVEIS (Conjunto B do GCA, 11 especialistas):\\n- AUD: Auditor Documental (interpreta\\u00e7\\u00e3o geral)\\n- ARQ: Arquiteto (stack, padr\\u00f5es, NFRs, integra\\u00e7\\u00e3o)\\n- DBA: DBA (modelo de dados, queries, reten\\u00e7\\u00e3o)\\n- DEV: Dev S\\u00eanior (implementabilidade, depend\\u00eancias)\\n- QA: QA (testes, cobertura, BDD)\\n- UX: UX Designer (jornada, acessibilidade)\\n- UI: UI Designer (design system, estados, responsividade)\\n- SEG: Seguran\\u00e7a (OWASP, ASVS, amea\\u00e7as, criptografia)\\n- CONF: Conformidade BLOQUEANTE (ISO 27001, governan\\u00e7a ISMS)\\n- LGPD: Prote\\u00e7\\u00e3o de Dados (Lei 13.709/2018)\\n- NEG: Analista de Requisitos (BABOK v3)\\n\\nREGRAS R\\u00cdGIDAS:\\n- active_personas: lista com no m\\u00ednimo 3 tags. CONF e AUD s\\u00e3o SEMPRE inclu\\u00eddas (n\\u00e3o precisa repetir \\u2014 o sistema garante).\\n- Inclua personas relevantes \\u00e0 natureza do documento (ex: doc com dados pessoais \\u2192 LGPD; doc t\\u00e9cnico de stack \\u2192 ARQ+DEV+QA; doc com requisitos \\u2192 NEG).\\n- doc_classification.primary_type: um de \\\"specification\\\", \\\"design\\\", \\\"code\\\", \\\"report\\\", \\\"policy\\\", \\\"questionnaire\\\", \\\"other\\\".\\n- doc_classification.sensitivity: um de \\\"low\\\", \\\"medium\\\", \\\"high\\\".\\n- shared_context.summary: 2-4 senten\\u00e7as resumindo o conte\\u00fado do documento.\\n\\nRETORNE APENAS JSON V\\u00c1LIDO (sem markdown, sem ``` , sem texto antes ou depois). Estrutura exata:\\n{\\n  \\\"active_personas\\\": [\\\"AUD\\\",\\\"CONF\\\",\\\"...\\\"],\\n  \\\"doc_classification\\\": {\\\"primary_type\\\":\\\"...\\\",\\\"sensitivity\\\":\\\"...\\\"},\\n  \\\"shared_context\\\": {\\\"summary\\\":\\\"...\\\"},\\n  \\\"chunking_strategy\\\": \\\"single\\\"\\n}\";\nconst systemPrompt = CONFERENTE_CLASSIFIER_PROMPT;\nconst userMessage = JSON.stringify({ normalized_text: data.normalized_text || '', shared_context: data.shared_context || {} });\n\nlet llmUrl, requestHeaders, requestBody;\n\nif (providerName === 'anthropic') {\n  llmUrl = 'https://api.anthropic.com/v1/messages';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'anthropic-version': '2023-06-01',\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'openai') {\n  llmUrl = 'https://api.openai.com/v1/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'deepseek') {\n  llmUrl = 'https://api.deepseek.com/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'gemini') {\n  llmUrl = `https://generativelanguage.googleapis.com/v1/models/${provider.model}:generateContent?key=${apiKey}`;\n  requestHeaders = {\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    contents: [{ parts: [{ text: systemPrompt + '\\n\\n' + userMessage }] }]\n  };\n} else {\n  throw new Error(`Provider desconhecido: ${providerName}`);\n}\n\nreturn [{ json: {\n  llmUrl, requestHeaders, requestBody, provider,\n  ingestion_id: data.ingestion_id, shared_context: data.shared_context,\n  provider_chain: data.provider_chain,\n  conferente_system_prompt: systemPrompt,\n  conferente_user_message: userMessage\n} }];"
       }
     },
     {
@@ -122,34 +122,16 @@
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.provider_chain[0].provider === 'anthropic' ? 'https://api.anthropic.com/v1/messages' : ($json.provider_chain[0].base_url || 'https://api.openai.com') + '/chat/completions' }}",
+        "url": "={{ $json.llmUrl }}",
         "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            },
-            {
-              "name": "x-api-key",
-              "value": "={{ $json.provider_chain[0].api_key }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $json.provider_chain[0].api_key }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            }
-          ]
-        },
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json.provider_chain[0].provider === 'anthropic' ? JSON.stringify({ model: $json.provider_chain[0].model, max_tokens: 1500, temperature: 0, system: $json.conferente_system_prompt, messages: [{ role: 'user', content: $json.conferente_user_message }] }) : JSON.stringify({ model: $json.provider_chain[0].model, max_tokens: 1500, temperature: 0, messages: [{ role: 'system', content: $json.conferente_system_prompt }, { role: 'user', content: $json.conferente_user_message }] }) }}",
+        "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
         "options": {
           "timeout": 60000
-        }
+        },
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.requestHeaders) }}"
       }
     },
     {
@@ -163,7 +145,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Extrai JSON da resposta LLM e aplica Gate G2\n// GP n\u00e3o entra em active_personas mas \u00e9 contado em expected_count (+1)\n// SEM require(), SEM $env\n\nconst llmResponse = $input.first().json;\nconst upstream = $('Montar prompt Conferente').first().json;\n\nlet rawText = '';\nif (llmResponse.content && Array.isArray(llmResponse.content)) {\n  rawText = llmResponse.content.map(c => c.text || '').join('');\n} else if (llmResponse.choices && Array.isArray(llmResponse.choices)) {\n  rawText = llmResponse.choices[0]?.message?.content || '';\n} else {\n  throw new Error('G2_PARSE_FAILED: Estrutura de resposta LLM desconhecida');\n}\n\nrawText = rawText.trim();\nif (rawText.startsWith('```')) {\n  rawText = rawText.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  throw new Error(`G2_PARSE_FAILED: JSON inv\u00e1lido: ${e.message}. Trecho: ${rawText.substring(0, 200)}`);\n}\n\n// --- Gate G2 ---\nconst TAGS_VALIDAS = new Set(['AUD', 'ARQ', 'DBA', 'DEV', 'QA', 'UX', 'UI', 'SEG', 'CONF', 'LGPD', 'NEG']);\nlet activePersonas = (parsed.active_personas || []).filter(t => t !== 'GP');\n\nif (!Array.isArray(activePersonas) || activePersonas.length === 0) {\n  throw new Error('G2_INVALID: active_personas ausente ou vazio');\n}\nconst tagsInvalidas = activePersonas.filter(t => !TAGS_VALIDAS.has(t));\nif (tagsInvalidas.length > 0) {\n  throw new Error(`G2_INVALID: Tags n\u00e3o-can\u00f4nicas: ${tagsInvalidas.join(', ')}`);\n}\n// Garante CONF e AUD sempre presentes\nif (!activePersonas.includes('CONF')) activePersonas.push('CONF');\nif (!activePersonas.includes('AUD')) activePersonas.push('AUD');\n// M\u00ednimo 3\nif (activePersonas.length < 3) {\n  throw new Error(`G2_INVALID: active_personas deve ter m\u00ednimo 3 (recebido: ${activePersonas.length})`);\n}\nif (!parsed.doc_classification?.primary_type || !parsed.doc_classification?.sensitivity) {\n  throw new Error('G2_INVALID: doc_classification incompleto');\n}\nif (!parsed.shared_context?.summary) {\n  throw new Error('G2_INVALID: shared_context.summary ausente');\n}\n\n// expected_count = personas ativas + 1 (GP orquestrador)\nconst expectedCount = activePersonas.length + 1;\n\nreturn [{\n  json: {\n    ingestion_id: upstream.ingestion_id,\n    project_id: upstream.project_id,\n    normalized_text: upstream.normalized_text,\n    extraction_metadata: upstream.extraction_metadata,\n    provider_chain: upstream.provider_chain,\n    callback_url: upstream.callback_url,\n    doc_classification: parsed.doc_classification,\n    active_personas: activePersonas,\n    shared_context: parsed.shared_context,\n    chunking_strategy: parsed.chunking_strategy || 'single',\n    expected_count: expectedCount,\n    g2_validated_at: new Date().toISOString()\n  }\n}];\n"
+        "jsCode": "// Extrai JSON da resposta LLM e aplica Gate G2\n// GP não entra em active_personas mas é contado em expected_count (+1)\n// SEM require(), SEM $env\n\nconst llmResponse = $input.first().json;\nconst upstream = $('G1 - Validar entrada').first().json;\n\nlet rawText = '';\nif (llmResponse.content && Array.isArray(llmResponse.content)) {\n  rawText = llmResponse.content.map(c => c.text || '').join('');\n} else if (llmResponse.choices && Array.isArray(llmResponse.choices)) {\n  rawText = llmResponse.choices[0]?.message?.content || '';\n} else {\n  throw new Error('G2_PARSE_FAILED: Estrutura de resposta LLM desconhecida');\n}\n\nrawText = rawText.trim();\nif (rawText.startsWith('```')) {\n  rawText = rawText.replace(/^```(?:json)?\\n?/, '').replace(/\\n?```$/, '').trim();\n}\n\nlet parsed;\ntry {\n  parsed = JSON.parse(rawText);\n} catch (e) {\n  throw new Error(`G2_PARSE_FAILED: JSON inválido: ${e.message}. Trecho: ${rawText.substring(0, 200)}`);\n}\n\n// --- Gate G2 ---\nconst TAGS_VALIDAS = new Set(['AUD', 'ARQ', 'DBA', 'DEV', 'QA', 'UX', 'UI', 'SEG', 'CONF', 'LGPD', 'NEG']);\nlet activePersonas = (parsed.active_personas || []).filter(t => t !== 'GP');\n\nif (!Array.isArray(activePersonas) || activePersonas.length === 0) {\n  throw new Error('G2_INVALID: active_personas ausente ou vazio');\n}\nconst tagsInvalidas = activePersonas.filter(t => !TAGS_VALIDAS.has(t));\nif (tagsInvalidas.length > 0) {\n  throw new Error(`G2_INVALID: Tags não-canônicas: ${tagsInvalidas.join(', ')}`);\n}\n// Garante CONF e AUD sempre presentes\nif (!activePersonas.includes('CONF')) activePersonas.push('CONF');\nif (!activePersonas.includes('AUD')) activePersonas.push('AUD');\n// Mínimo 3\nif (activePersonas.length < 3) {\n  throw new Error(`G2_INVALID: active_personas deve ter mínimo 3 (recebido: ${activePersonas.length})`);\n}\nif (!parsed.doc_classification?.primary_type || !parsed.doc_classification?.sensitivity) {\n  throw new Error('G2_INVALID: doc_classification incompleto');\n}\nif (!parsed.shared_context?.summary) {\n  throw new Error('G2_INVALID: shared_context.summary ausente');\n}\n\n// expected_count = personas ativas + 1 (GP orquestrador)\nconst expectedCount = activePersonas.length + 1;\n\nreturn [{\n  json: {\n    ingestion_id: upstream.ingestion_id,\n    project_id: upstream.project_id,\n    normalized_text: upstream.normalized_text,\n    extraction_metadata: upstream.extraction_metadata,\n    provider_chain: upstream.provider_chain,\n    callback_url: upstream.callback_url,\n    persona_prompts: upstream.persona_prompts || $('G1 - Validar entrada').first().json.persona_prompts || {},\n    doc_classification: parsed.doc_classification,\n    active_personas: activePersonas,\n    shared_context: parsed.shared_context,\n    chunking_strategy: parsed.chunking_strategy || 'single',\n    expected_count: expectedCount,\n    g2_validated_at: new Date().toISOString()\n  }\n}];\n"
       }
     },
     {
@@ -207,7 +189,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Emite N items \u2014 1 por persona ativa (sem GP)\n// HTTP Request seguinte itera automaticamente sobre todos\n// SEM require(), SEM $env\n\nconst upstream = $('Parse resposta e G2').first().json;\nconst {\n  ingestion_id, project_id, normalized_text, extraction_metadata,\n  provider_chain, callback_url, active_personas, shared_context,\n  doc_classification, chunking_strategy\n} = upstream;\n\nconst items = [];\nfor (const tag of active_personas) {\n  const tagLower = tag.toLowerCase();\n  const webhookUrl = `http://n8n:5678/webhook/gca-specialist-${tagLower}`;\n  const payload = {\n    ingestion_id, project_id, normalized_text, extraction_metadata,\n    provider_chain, callback_url, shared_context, doc_classification,\n    chunking_strategy, persona_tag: tag,\n    dispatched_at: new Date().toISOString()\n  };\n  items.push({\n    json: {\n      webhook_url: webhookUrl,\n      payload_json: JSON.stringify(payload),\n      persona_tag: tag\n    }\n  });\n}\nreturn items;\n"
+        "jsCode": "// Emite N items — 1 por persona ativa (sem GP)\n// HTTP Request seguinte itera automaticamente sobre todos\n// SEM require(), SEM $env\n\nconst upstream = $('Parse resposta e G2').first().json;\nconst {\n  ingestion_id, project_id, normalized_text, extraction_metadata,\n  provider_chain, callback_url, active_personas, shared_context,\n  doc_classification, chunking_strategy, persona_prompts\n} = upstream;\n\nconst prompts = persona_prompts || {};\nconst items = [];\nfor (const tag of active_personas) {\n  const tagLower = tag.toLowerCase();\n  const webhookUrl = `http://n8n:5678/webhook/gca-specialist-${tagLower}`;\n  const systemPrompt = prompts[tag];\n  if (!systemPrompt) {\n    throw new Error(`PROMPT_AUSENTE: persona_prompts['${tag}'] não foi fornecido pelo Conferente. Tags com prompt: ${Object.keys(prompts).join(',') || '(nenhuma)'}`);\n  }\n  const payload = {\n    ingestion_id, project_id, normalized_text, extraction_metadata,\n    provider_chain, callback_url, shared_context, doc_classification,\n    chunking_strategy, persona_tag: tag, systemPrompt,\n    dispatched_at: new Date().toISOString()\n  };\n  items.push({\n    json: {\n      webhook_url: webhookUrl,\n      payload_json: JSON.stringify(payload),\n      persona_tag: tag\n    }\n  });\n}\nreturn items;\n"
       }
     },
     {
@@ -267,11 +249,11 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "string",
-        "body": "={{ $('Preparar dispatch especialistas').item.json.payload_json }}",
+        "specifyBody": "json",
         "options": {
           "timeout": 5000
-        }
+        },
+        "jsonBody": "={{ JSON.parse($('Preparar dispatch especialistas').item.json.payload_json) }}"
       }
     },
     {
@@ -285,7 +267,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Prepara dispatch para o GP Orquestrador (sempre ativado)\n// SEM require(), SEM $env\n\nconst upstream = $('Parse resposta e G2').first().json;\n\nconst payload = {\n  ingestion_id: upstream.ingestion_id,\n  project_id: upstream.project_id,\n  normalized_text: upstream.normalized_text,\n  extraction_metadata: upstream.extraction_metadata,\n  provider_chain: upstream.provider_chain,\n  callback_url: upstream.callback_url,\n  doc_classification: upstream.doc_classification,\n  active_personas: upstream.active_personas,\n  shared_context: upstream.shared_context,\n  chunking_strategy: upstream.chunking_strategy,\n  persona_tag: 'GP',\n  dispatched_at: new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    webhook_url: 'http://n8n:5678/webhook/gca-orchestrator-gp',\n    payload_json: JSON.stringify(payload),\n    persona_tag: 'GP'\n  }\n}];\n"
+        "jsCode": "// Prepara dispatch para o GP Orquestrador (sempre ativado)\n// SEM require(), SEM $env\n\nconst upstream = $('Parse resposta e G2').first().json;\n\nconst prompts = upstream.persona_prompts || {};\nconst gpSystemPrompt = prompts['GP'];\nif (!gpSystemPrompt) {\n  throw new Error(`PROMPT_AUSENTE: persona_prompts['GP'] não foi fornecido pelo Conferente.`);\n}\n\nconst payload = {\n  ingestion_id: upstream.ingestion_id,\n  project_id: upstream.project_id,\n  normalized_text: upstream.normalized_text,\n  extraction_metadata: upstream.extraction_metadata,\n  provider_chain: upstream.provider_chain,\n  callback_url: upstream.callback_url,\n  doc_classification: upstream.doc_classification,\n  active_personas: upstream.active_personas,\n  shared_context: upstream.shared_context,\n  chunking_strategy: upstream.chunking_strategy,\n  persona_tag: 'GP',\n  systemPrompt: gpSystemPrompt,\n  dispatched_at: new Date().toISOString()\n};\n\nreturn [{\n  json: {\n    webhook_url: 'http://n8n:5678/webhook/gca-orchestrator-gp',\n    payload_json: JSON.stringify(payload),\n    persona_tag: 'GP'\n  }\n}];\n"
       }
     },
     {
@@ -345,11 +327,11 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "string",
-        "body": "={{ $('Preparar dispatch GP').first().json.payload_json }}",
+        "specifyBody": "json",
         "options": {
           "timeout": 5000
-        }
+        },
+        "jsonBody": "={{ JSON.parse($('Preparar dispatch GP').item.json.payload_json) }}"
       }
     },
     {
@@ -393,7 +375,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "// Handler global de erro \u2014 captura falhas dos n\u00f3s anteriores\n// SEM require(), SEM $env\n\nconst errorData = $input.first();\nconst errorMessage = errorData.json.error?.message || errorData.json.message || 'Erro desconhecido no Conferente';\n\nlet ingestion_id = 'unknown';\nlet project_id = 'unknown';\ntry {\n  const wh = $('Webhook Trigger').first().json;\n  ingestion_id = wh.body?.ingestion_id || wh.ingestion_id || 'unknown';\n  project_id = wh.body?.project_id || wh.project_id || 'unknown';\n} catch (_) {}\n\nreturn [{ json: { ingestion_id, project_id, error: { message: errorMessage }, failed_at: new Date().toISOString() } }];\n"
+        "jsCode": "// Handler global de erro — captura falhas dos nós anteriores\n// SEM require(), SEM $env\n\nconst errorData = $input.first();\nconst errorMessage = errorData.json.error?.message || errorData.json.message || 'Erro desconhecido no Conferente';\n\nlet ingestion_id = 'unknown';\nlet project_id = 'unknown';\ntry {\n  const wh = $('Webhook Trigger').first().json;\n  ingestion_id = wh.body?.ingestion_id || wh.ingestion_id || 'unknown';\n  project_id = wh.body?.project_id || wh.project_id || 'unknown';\n} catch (_) {}\n\nreturn [{ json: { ingestion_id, project_id, error: { message: errorMessage }, failed_at: new Date().toISOString() } }];\n"
       }
     },
     {
@@ -495,18 +477,7 @@
       "main": [
         [
           {
-            "node": "Montar prompt Conferente",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Montar prompt Conferente": {
-      "main": [
-        [
-          {
-            "node": "LLM - Classificar",
+            "node": "Montar LLM Request",
             "type": "main",
             "index": 0
           }
@@ -622,6 +593,17 @@
         [
           {
             "node": "Log - Erro Conferente",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Montar LLM Request": {
+      "main": [
+        [
+          {
+            "node": "LLM - Classificar",
             "type": "main",
             "index": 0
           }

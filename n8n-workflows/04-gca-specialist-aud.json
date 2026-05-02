@@ -22,7 +22,8 @@
         "path": "gca-specialist-aud",
         "responseMode": "onReceived",
         "options": {}
-      }
+      },
+      "webhookId": "gca-specialist-aud"
     },
     {
       "id": "node-log-inicio-aud",
@@ -39,8 +40,19 @@
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Webhook Trigger').item.json.ingestion_id || '', workflow: 'gca-specialist-aud', node: 'Log - Inicio', event: 'started', persona_tag: 'AUD', duration_ms: 0, detail: 'AUD specialist iniciado', error: null }) }}",
-        "options": {}
-      }
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput"
     },
     {
       "id": "node-hmac-verify-aud",
@@ -56,8 +68,18 @@
         "method": "POST",
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/verify",
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($('Webhook Trigger').item.json), signature: $('Webhook Trigger').item.headers['x-conferente-signature'] || '', secret_name: 'CONFERENTE_SECRET' }) }}",
-        "options": {}
+        "options": {},
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($('Webhook Trigger').first().json.body || $('Webhook Trigger').first().json), signature: ($('Webhook Trigger').first().json.headers && ($('Webhook Trigger').first().json.headers['x-conferente-signature'] || $('Webhook Trigger').first().json.headers['X-Conferente-Signature'])) || '', secret_name: 'CONFERENTE_SECRET' }) }}"
       }
     },
     {
@@ -71,7 +93,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const hmacResult = $json;\nif (!hmacResult.valid) {\n  throw new Error('HMAC invalido: assinatura recusada pelo backend');\n}\nconst webhookData = $('Webhook Trigger').item.json;\nconst normalized_text = webhookData.normalized_text || '';\nconst provider_chain = webhookData.provider_chain || [];\nconst ingestion_id = webhookData.ingestion_id || '';\nconst shared_context = webhookData.shared_context || {};\nif (!normalized_text) {\n  throw new Error('Campo normalized_text ausente no payload');\n}\nif (!provider_chain || provider_chain.length === 0) {\n  throw new Error('Campo provider_chain ausente ou vazio no payload');\n}\nreturn [{ json: { normalized_text, provider_chain, ingestion_id, shared_context, hmac_valid: true } }];"
+        "jsCode": "const hmacResult = $json;\nif (!hmacResult.valid) {\n  throw new Error('HMAC invalido: assinatura recusada pelo backend');\n}\nconst webhookData = $('Webhook Trigger').item.json.body || $('Webhook Trigger').item.json;\nconst normalized_text = webhookData.normalized_text || '';\nconst provider_chain = webhookData.provider_chain || [];\nconst ingestion_id = webhookData.ingestion_id || '';\nconst shared_context = webhookData.shared_context || {};\n  const systemPrompt = webhookData.systemPrompt || '';\n  if (!systemPrompt) {\n    throw new Error('PROMPT_AUSENTE: systemPrompt nao fornecido pelo Conferente.');\n  }\nif (!normalized_text) {\n  throw new Error('Campo normalized_text ausente no payload');\n}\nif (!provider_chain || provider_chain.length === 0) {\n  throw new Error('Campo provider_chain ausente ou vazio no payload');\n}\nreturn [{ json: { normalized_text, provider_chain, ingestion_id, shared_context, systemPrompt, hmac_valid: true } }];"
       }
     },
     {
@@ -85,7 +107,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst providerName = (provider.provider || 'openai').toLowerCase();\nconst apiKey = provider.api_key || '';\n\nconst systemPrompt = $('Validar HMAC').item.json.systemPrompt || 'Voc\u00ea \u00e9 um especialista.';\nconst userMessage = JSON.stringify({ normalized_text: data.normalized_text || '', shared_context: data.shared_context || {} });\n\nlet llmUrl, requestHeaders, requestBody;\n\nif (providerName === 'anthropic') {\n  llmUrl = 'https://api.anthropic.com/v1/messages';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'anthropic-version': '2023-06-01',\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'openai') {\n  llmUrl = 'https://api.openai.com/v1/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'deepseek') {\n  llmUrl = 'https://api.deepseek.com/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'gemini') {\n  llmUrl = `https://generativelanguage.googleapis.com/v1/models/${provider.model}:generateContent?key=${apiKey}`;\n  requestHeaders = {\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    contents: [{ parts: [{ text: systemPrompt + '\\n\\n' + userMessage }] }]\n  };\n} else {\n  throw new Error(`Provider desconhecido: ${providerName}`);\n}\n\nreturn [{ json: { llmUrl, requestHeaders, requestBody, provider, ingestion_id: data.ingestion_id, shared_context: data.shared_context } }];"
+        "jsCode": "const data = $json;\nconst provider = data.provider_chain[0];\nconst providerName = (provider.provider || 'openai').toLowerCase();\nconst apiKey = provider.api_key || '';\n\nconst systemPrompt = $('Validar HMAC').item.json.systemPrompt || 'Você é um especialista.';\nconst userMessage = JSON.stringify({ normalized_text: data.normalized_text || '', shared_context: data.shared_context || {} });\n\nlet llmUrl, requestHeaders, requestBody;\n\nif (providerName === 'anthropic') {\n  llmUrl = 'https://api.anthropic.com/v1/messages';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'anthropic-version': '2023-06-01',\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    system: systemPrompt,\n    messages: [{ role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'openai') {\n  llmUrl = 'https://api.openai.com/v1/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'deepseek') {\n  llmUrl = 'https://api.deepseek.com/chat/completions';\n  requestHeaders = {\n    'Authorization': `Bearer ${apiKey}`,\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    model: provider.model,\n    max_tokens: 4000,\n    temperature: 0.2,\n    messages: [{ role: 'system', content: systemPrompt }, { role: 'user', content: userMessage }]\n  };\n} else if (providerName === 'gemini') {\n  llmUrl = `https://generativelanguage.googleapis.com/v1/models/${provider.model}:generateContent?key=${apiKey}`;\n  requestHeaders = {\n    'Content-Type': 'application/json'\n  };\n  requestBody = {\n    contents: [{ parts: [{ text: systemPrompt + '\\n\\n' + userMessage }] }]\n  };\n} else {\n  throw new Error(`Provider desconhecido: ${providerName}`);\n}\n\nreturn [{ json: { llmUrl, requestHeaders, requestBody, provider, ingestion_id: data.ingestion_id, shared_context: data.shared_context } }];"
       }
     },
     {
@@ -100,31 +122,14 @@
       "alwaysOutputData": true,
       "parameters": {
         "method": "POST",
-        "url": "={{ $json.provider.api_url }}",
+        "url": "={{ $json.llmUrl }}",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.requestBody) }}",
         "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "x-api-key",
-              "value": "={{ $json.provider.api_key }}"
-            },
-            {
-              "name": "Authorization",
-              "value": "=Bearer {{ $json.provider.api_key }}"
-            },
-            {
-              "name": "anthropic-version",
-              "value": "2023-06-01"
-            },
-            {
-              "name": "Content-Type",
-              "value": "application/json"
-            }
-          ]
-        },
-        "options": {}
+        "options": {},
+        "specifyHeaders": "json",
+        "jsonHeaders": "={{ JSON.stringify($json.requestHeaders) }}",
+        "sendBody": true
       }
     },
     {
@@ -138,7 +143,7 @@
       ],
       "alwaysOutputData": true,
       "parameters": {
-        "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar Prompt').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst findings = parsed.audit_findings || {};\nconst findingsCount = Array.isArray(findings) ? findings.length : Object.keys(findings).length;\nconst personaOutput = {\n  persona_tag: 'AUD',\n  persona_name: 'Auditor Documental',\n  ingestion_id: prevData.ingestion_id,\n  scores: {},\n  avg_score: 0,\n  approved: true,\n  blocking: false,\n  summary: parsed.summary || '',\n  chunk_tags: parsed.chunk_tags || {},\n  highlights: parsed.highlights || {},\n  audit_findings: findings,\n  backlog_to_specialists: parsed.backlog_to_specialists || [],\n  questionnaire_to_human: parsed.questionnaire_to_human || [],\n  issues: [],\n  questions: [],\n  justification: parsed.summary || '',\n  metadata: {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id, findingsCount } }];"
+        "jsCode": "const llmResponse = $json;\nconst prevData = $('Montar LLM Request').item.json;\nlet rawContent = '';\nif (llmResponse.content && llmResponse.content[0] && llmResponse.content[0].text) {\n  rawContent = llmResponse.content[0].text;\n} else if (llmResponse.choices && llmResponse.choices[0] && llmResponse.choices[0].message) {\n  rawContent = llmResponse.choices[0].message.content;\n} else {\n  rawContent = JSON.stringify(llmResponse);\n}\nlet parsed = {};\ntry {\n  parsed = JSON.parse(rawContent);\n} catch (e) {\n  const match = rawContent.match(/\\{[\\s\\S]*\\}/);\n  if (match) { try { parsed = JSON.parse(match[0]); } catch (e2) { parsed = {}; } }\n}\nconst findings = parsed.audit_findings || {};\nconst findingsCount = Array.isArray(findings) ? findings.length : Object.keys(findings).length;\nconst personaOutput = {\n  persona_tag: 'AUD',\n  persona_name: 'Auditor Documental',\n  ingestion_id: prevData.ingestion_id,\n  scores: {},\n  avg_score: 0,\n  approved: true,\n  blocking: false,\n  summary: parsed.summary || '',\n  chunk_tags: parsed.chunk_tags || {},\n  highlights: parsed.highlights || {},\n  audit_findings: findings,\n  backlog_to_specialists: parsed.backlog_to_specialists || [],\n  questionnaire_to_human: parsed.questionnaire_to_human || [],\n  issues: [],\n  questions: [],\n  justification: parsed.summary || '',\n  metadata: {}\n};\nreturn [{ json: { personaOutput, ingestion_id: prevData.ingestion_id, findingsCount } }];"
       }
     },
     {
@@ -156,7 +161,17 @@
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/sign",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($json.personaOutput), secret_name: 'SPECIALIST_SECRET' }) }}",
-        "options": {}
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
       }
     },
     {
@@ -178,12 +193,17 @@
         "headerParameters": {
           "parameters": [
             {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
               "name": "X-Specialist-Signature",
               "value": "={{ $json.signature }}"
             }
           ]
         },
-        "options": {}
+        "options": {},
+        "sendBody": true
       }
     },
     {
@@ -201,8 +221,19 @@
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Parse PersonaOutput').item.json.ingestion_id || '', workflow: 'gca-specialist-aud', node: 'Log - Concluido', event: 'completed', persona_tag: 'AUD', duration_ms: 0, detail: 'findings=' + $('Parse PersonaOutput').item.json.findingsCount, error: null }) }}",
-        "options": {}
-      }
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "onError": "continueRegularOutput"
     }
   ],
   "connections": {
