@@ -218,10 +218,108 @@ Sem mudança de fases — apenas escopo das fases existentes ganha:
 - 35.5: + guard n8n (A-M1) + hash canônico (A-M2) + IngestedDocument direto no router
 - 35.6: + filtro `status != 'archived'` em `_questionnaire_state` (A-S3) + cascata extra para `file_type='questionnaire'` no DocumentRevertService
 
+## Decisões pós-Gate 3 (2026-05-03)
+
+Gate 3 (DBA) ✅ Aprovado com ressalvas. 6 MUSTs (DBA-M) + 4 SHOULDs (DBA-S).
+
+### MUSTs DBA
+
+**DBA-M1 — Dup-check no router de submit (NÃO migration):** `uq_ingested_doc_hash` é UNIQUE regular (não parcial). Router de submit Fase 35.5 deve fazer:
+```python
+existing = await db.execute(select(IngestedDocument).where(
+    IngestedDocument.project_id == pid,
+    IngestedDocument.file_hash == hash,
+    IngestedDocument.deleted_at.is_(None),  # CRÍTICO
+))
+if existing: return existing.id  # idempotente
+# else INSERT new
+```
+Sem isso: delete+resubmit com hash idêntico → `UniqueViolationError` em produção.
+
+**DBA-M2 — Migration 069 estrutura canônica idempotente:**
+```sql
+BEGIN;
+
+-- 1. UPDATE preventivo ANTES de instalar CHECK
+UPDATE technical_questionnaires
+   SET status = 'submitted'
+ WHERE status IN ('ocg_generated', 'validated');
+-- 'validated' aqui = valor LEGACY (pós-personas), antes de MVP 35 redefinir
+
+-- 2. CHECK enum status
+ALTER TABLE technical_questionnaires DROP CONSTRAINT IF EXISTS chk_tq_status;
+ALTER TABLE technical_questionnaires ADD CONSTRAINT chk_tq_status
+    CHECK (status IN ('draft','validated','submitted','archived'));
+
+-- 3. CHECK submitted_at obrigatório quando submitted/archived
+ALTER TABLE technical_questionnaires DROP CONSTRAINT IF EXISTS chk_tq_submitted_at;
+ALTER TABLE technical_questionnaires ADD CONSTRAINT chk_tq_submitted_at
+    CHECK (status NOT IN ('submitted','archived') OR submitted_at IS NOT NULL);
+
+-- 4. CHECK validated_at obrigatório quando validated
+ALTER TABLE technical_questionnaires DROP CONSTRAINT IF EXISTS chk_tq_validated_at;
+ALTER TABLE technical_questionnaires ADD CONSTRAINT chk_tq_validated_at
+    CHECK (status != 'validated' OR validated_at IS NOT NULL);
+
+COMMIT;
+```
+
+**DBA-M3 — `validated_at` populado no validate-field:** Router seta `validated_at = NOW()` + `validated_by = current_user.id` na transição para `validated`. Sem isso: UPDATE rejeitado por CHECK constraint.
+
+**DBA-M4 — Código corrigido ANTES (ou atomicamente com) migration:** `questionnaire_service.py:717` + `webhooks.py:259` ainda escrevem `status='ocg_generated'`. Após migration, esses UPDATEs falham com CheckViolationError. Sequência canônica: corrigir código → deploy → migration. Adicionado à Fase 35.2.
+
+**DBA-M5 — Guard contra regressão status no save:** Router save (linha 216) faz `status='draft'` incondicional quando `submit=False`. Auto-save no campo de validated regrediria para draft, invalidando Submeter. Fix:
+```python
+if questionnaire.status not in ('submitted','archived'):
+    questionnaire.status = 'draft'
+```
+Auto-save NUNCA sobrescreve submitted/archived; pode regredir validated→draft (intencional — usuário editou após validar, precisa revalidar).
+
+**DBA-M6 — DocumentRevertService cascata para file_type='questionnaire':** Service atual NÃO importa TechnicalQuestionnaire. Adicionar branch:
+```python
+if doc.file_type == 'questionnaire':
+    # archive TechnicalQuestionnaire + Questionnaire.approved=False
+    await db.execute(update(TechnicalQuestionnaire)
+        .where(TechnicalQuestionnaire.project_id == project_id,
+               TechnicalQuestionnaire.status == 'submitted')
+        .values(status='archived'))
+    await db.execute(update(Questionnaire)
+        .where(Questionnaire.project_id == project_id, Questionnaire.approved == True)
+        .values(approved=False))
+```
+
+### SHOULDs DBA
+
+**DBA-S1** — Sem índice extra para validate-field (operação stateless em payload).
+**DBA-S2** — `COMMENT ON TABLE technical_questionnaires` atualizado com novo enum.
+**DBA-S3** — `_questionnaire_state` deve reconhecer `validated` como "em progresso" (não retorna `submitted=False` erroneamente). Refinamento da A-S3 do Gate 2.
+**DBA-S4** — IngestedDocument tipo `questionnaire` com `deleted_reason='lgpd'` entra no escopo do DT-086 (purge físico futuro).
+
+### LGPD
+
+`technical_questionnaires.responses` JSONB clear-text é **OK**. Q1-Q15 são técnicas (escopo, stack, prazo, compliance flags) — sem PII. Sob LGPD Art. 5º I, não são dados pessoais.
+
+### Critérios DBA (8 itens, somam aos 16 já definidos)
+
+D1. Migration 069 aplica em <3s.
+D2. `SELECT conname FROM pg_constraint WHERE conrelid='technical_questionnaires'::regclass AND contype='c'` = 3 rows (chk_tq_status, chk_tq_submitted_at, chk_tq_validated_at).
+D3. `SELECT COUNT(*) WHERE status NOT IN (...)` = 0 após migration.
+D4. INSERT com `status='ocg_generated'` rejeitado com CheckViolationError.
+D5. Soft-delete + resubmit com hash idêntico → sem IntegrityError.
+D6. UPDATE `status='validated'` sem `validated_at` rejeitado.
+D7. `validated_at` é TIMESTAMPTZ (mantém padrão drift histórico).
+D8. `status='ocg_generated'` retorna 0 rows pós-migration.
+
 ## Próxima ação
 
-Gate 3 (DBA) — foco em:
-1. Número da migration (069 ou 070?)
-2. CHECK constraint `status IN ('draft','validated','submitted','archived')` — DEFERRABLE necessário?
-3. `uq_ingested_doc_hash` cobre `(project_id, file_hash)` mas filtro de dup usa código com `WHERE deleted_at IS NULL` — confirmar ou propor índice único parcial
-4. Trigger/view sobre `technical_questionnaires.status` que invalide UPDATE preventivo de `ocg_generated` → `submitted`?
+**Gate 4 — Dev Sênior.** Implementação canônica:
+
+1. **Pré-migration (M4):** corrigir `questionnaire_service.py:717` + `webhooks.py:259` (`'ocg_generated'` → `'submitted'`). Commit isolado primeiro.
+2. **Fase 35.1:** RulesEvaluator + 30 regras seed + endpoint `GET /rules`.
+3. **Fase 35.2:** migration 069 + endpoint validate-field + populate validated_at + guard status no save.
+4. **Fase 35.3:** Frontend validate-on-blur + UI inline + TS union archived + modal delete diferenciado.
+5. **Fase 35.4:** Q13 frontend (textarea condicional).
+6. **Fase 35.5:** Camada 2 LLM submit + IngestedDocument sintético com dup-check + hash canônico.
+7. **Fase 35.6:** DocumentRevertService cascata file_type='questionnaire' + filtro `status != 'archived'` em `_questionnaire_state` + smoke E2E real.
+
+Aguarda autorização explícita do GP humano (CLAUDE.md §2.6) antes de iniciar Fase pré-migration.
