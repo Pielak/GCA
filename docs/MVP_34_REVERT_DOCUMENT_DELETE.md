@@ -217,11 +217,88 @@ Os três fazem JOIN com `ingested_documents` para buscar docs `completed`. Sem f
 16. ✅ Idempotência: 2ª chamada sobre mesmo doc retorna `already_reverted` no payload
 17. ✅ Breaking change DELETE 200→202 documentado em CHANGELOG e validado em smoke
 
-## 7. Próxima ação
+## 7. Decisões de dados (Gate 3 — 2026-05-03)
 
-**Gate 3 — DBA (obrigatório):**
-- Migration adiciona `deleted_at TIMESTAMPTZ NULL`, `deleted_by UUID NULL`, `deleted_reason VARCHAR(50) NULL CHECK (deleted_reason IN ('manual','lgpd','smoke_cleanup'))`, `revert_metadata JSONB NULL` em `ingested_documents`
-- Migration amplia `ocg.change_type` para `VARCHAR(30)`
-- Avaliar índice composto: `idx_ingested_docs_status` é `(project_id, arguider_status)` — possivelmente precisa virar `(project_id, arguider_status, deleted_at)` para manter performance da listagem ativa
-- Confirmar comportamento das 4 FKs ON DELETE CASCADE existentes para `ingested_documents` (`ocg_individual`, `ocg_global`, `conflicts_pending_review`, `chunk_errors_pending_review`) — com soft-delete elas não acionam, validar que não há query que dependa do CASCADE acionar
-- Estimar custo de query do JOIN `ocg_individual JOIN ingested_documents ON deleted_at IS NULL` em projeto com 10/50/200 docs
+**Veredito:** ✅ Aprovado com ressalvas. 6 MUSTs + 5 SHOULDs incorporados. Surface real é **12 pontos** de query (Gate 2 mapeou 9, Gate 3 descobriu mais 3).
+
+### MUSTs Gate 3
+
+**DBA-M1 — Deduplicação por hash deve filtrar `deleted_at IS NULL` (CRÍTICO LGPD):** `ingestion_service.py:413` retorna duplicate=True para arquivo já soft-deleted, bloqueando re-ingestão de versão anonimizada. Bug LGPD direto.
+
+**DBA-M2 — Inventário expandido para 12 pontos** (Gate 2 mapeou 9, Gate 3 mapeou +3):
+
+| # | Arquivo | Linha | Ação |
+|---|---|---|---|
+| 1 | `ingestion_service.py:list_documents` | 1819 | Filtrar |
+| 2 | `ingestion_service.py:get_document_detail` | 1866 | Filtrar |
+| 3 | `ingestion_service.py:get_document_status` | 1913 | Filtrar |
+| 4 | `ingestion_service.py:deduplicação` | 413 | **Filtrar (DBA-M1)** |
+| 5 | `ingestion_service.py:processing_count` | 722 | Filtrar |
+| 6 | `ocg_updater_service.py:_load_persona_scores` | 714 | JOIN com filtro |
+| 7 | `global_spec_generator_service.py` | 375 | Filtrar |
+| 8 | `test_spec_generator_service.py` | 557 | Filtrar |
+| 9 | `live_doc_generator_service.py` | 399 | Filtrar |
+| 10 | `consistency_router.py` | 63 | Filtrar (NOVO Gate 3) |
+| 11 | `livedocs_router.py:changelog` | 122 | Filtrar (NOVO Gate 3) |
+| 12 | `code_generation.py` | 514 | **Filtrar (NOVO Gate 3 — LGPD compliance)** |
+
+**DBA-M3 — Migration idempotente:** `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS` em tudo. Padrão da migration 067.
+
+**DBA-M4 — Ordem da migration:** `ALTER TABLE ocg ALTER COLUMN change_type TYPE VARCHAR(30)` ANTES de `ADD COLUMN` em `ingested_documents`. Motivo: rolling deploy não pode falhar entre passos.
+
+**DBA-M5 — Job revert atinge tabelas adicionais:**
+- `conflicts_pending_review` do doc deletado → `status='archived_doc_deleted'` ou DELETE
+- `chunk_errors_pending_review` do doc deletado → idem
+- `persona_follow_up_questions` pendentes do doc → `status='expired'` (DBA-S2, valor já no enum)
+
+**DBA-M6 — Comentário explícito DT-086 no cabeçalho da migration:**
+```sql
+-- DT-086: purge físico de deleted_reason='lgpd' não implementado nesta migration.
+-- Campos pii_fields, ocg_individual.parecer e ocg_global.parecer_consolidated
+-- de docs lgpd-deletados permanecem no banco. Implementar scheduled purge em MVP futuro.
+```
+
+### SHOULDs Gate 3 (incorporados)
+
+**DBA-S1 — Índice parcial:** `CREATE INDEX idx_ingested_docs_active ON ingested_documents(project_id, arguider_status) WHERE deleted_at IS NULL`. Evita inclusão de docs deletados no plan independente de estatísticas.
+
+**DBA-S2 — `persona_follow_up_questions`:** já consolidado em DBA-M5.
+
+**DBA-S3 — `uploaded_by` ON DELETE SET NULL:** abrir **DT-087** (separada) — não bloqueia MVP 34, mas vira risco com tempo.
+
+**DBA-S4 — `ocg_global.parecer_consolidated`:** documentar no DT-086 que purge LGPD futuro inclui essa tabela também.
+
+**DBA-S5 — CHECK schema mínimo em `revert_metadata`:**
+```sql
+CHECK (revert_metadata IS NULL OR (
+    revert_metadata ? 'score_before' AND
+    revert_metadata ? 'score_after'
+))
+```
+
+### Atualização do critério de aceite
+
+18. ✅ Migration aplica em <5s (banco limpo) e <10s (banco dogfood)
+19. ✅ Migration idempotente: re-execução não falha
+20. ✅ Re-ingestão de arquivo soft-deleted é aceita (não 409 — DBA-M1)
+21. ✅ `consistency_router`, `livedocs_router`, `code_generation` não exibem docs deletados
+22. ✅ Job revert marca `conflicts_pending_review`, `chunk_errors_pending_review`, `persona_follow_up_questions` corretamente
+23. ✅ DT-086 referenciada no cabeçalho da migration
+24. ✅ DT-087 (`uploaded_by` ON DELETE SET NULL) registrada em GCA_MVP_PROGRESS
+
+### Dívidas registradas (sem MVP — só registro)
+
+- **DT-086 (Major)** — Purge físico de docs `deleted_reason='lgpd'` não implementado. `pii_fields`, `ocg_individual.parecer`, `ocg_global.parecer_consolidated` permanecem. Compliance LGPD parcial. Endereçar em MVP futuro de "scheduled purge".
+- **DT-087 (Minor)** — `ingested_documents.uploaded_by` sem `ON DELETE` declarado. Com soft-delete vivendo indefinidamente, RESTRICT implícito cresce como risco operacional.
+
+## 8. Próxima ação
+
+**Gate 4 — Dev Sênior:** implementar Fase 34.1 → 34.5 conforme plano. Todos os MUSTs dos 3 gates incorporados (3 GP + 5 Arq + 6 DBA = 14 MUSTs). Segue ordem:
+
+1. **34.1** (~0.5d) Migration `068_mvp34_soft_delete_document.sql` + ORM updates
+2. **34.2** (~1.5d) `document_revert_service.py` + Celery task + audit event
+3. **34.3** (~0.5d) Endpoint DELETE 202 + GET status + UI
+4. **34.4** (~0.5d) Testes (≥80% cobertura, 8 unit + 3 integração) + smoke E2E real
+5. **34.5** (~0.25d) CHANGELOG + CLAUDE.md §2.4 update + GCA_MVP_PROGRESS
+
+**Aguarda autorização explícita do GP humano** antes de iniciar Fase 34.1 (CLAUDE.md §2.6: "Cada fase de MVP exige autorização explícita do GP antes de codar").
