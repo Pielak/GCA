@@ -2,6 +2,102 @@
 
 All notable changes to GCA will be documented in this file.
 
+## [MVP 35 — Validação canônica do Questionário Técnico] - 2026-05-03
+
+### Entrega principal
+
+GP identificou 4 lacunas no fluxo Salvar/Validar/Submeter + necessidade de validação técnica de combos (FE×BE×DB×compliance×infra). MVP 35 entrega: máquina de estado canônica, validação 2 camadas (regras determinísticas + LLM), Q13 textarea condicional, IngestedDocument sintético na aba Ingestão, e cascata especial — deletar questionnaire = projeto volta à fase de configuração.
+
+### Estado canônico
+
+Enum `technical_questionnaires.status` ganha CHECK constraint:
+- `draft` — rascunho/auto-save
+- `validated` — passou Validar Escopo (Camada 1), pré-submit
+- `submitted` — terminal, dispara personas + cria IngestedDocument sintético (após Camada 2 LLM)
+- `archived` — deletado via Ingestão (volta projeto a setup)
+
+### Validação 2 camadas
+
+**Camada 1 — RulesEvaluator** (`backend/app/services/questionnaire_validation/`):
+- 30 regras DSL JSON em 5 temas (NoSQL×ACID, Stack runtime, FE×BE, Compliance×PII, Infra×escala)
+- Operadores: `Qx` (eq), `Qx_contains` (lista), AND implícito
+- Stateless, < 50ms para 30 regras
+- Endpoint `GET /api/v1/projects/technical-questionnaire/rules` (single source of truth)
+- Validate-on-blur 800ms debounced no frontend (preview, sem persistir)
+
+**Camada 2 — LLM sanity check** (apenas no submit):
+- Reusa `call_codegen_llm` (porta única DT-079 + AIKeyResolver §3.1)
+- Prompt mínimo: responses + conflicts_detected (não passa as 30 regras)
+- Em falha, **bloqueia submit** com 503 friendly (alinha §0 CLAUDE.md "sem fallback silencioso")
+
+### Pipeline canônico (ordem hierárquica)
+
+`_check_setup_status` agora exige (NESTA ORDEM):
+1. Repositório Git configurado
+2. Chave LLM válida
+3. Questionário **APROVADO E** submetido (sem `approved=True`, gate fica fechado)
+
+### IngestedDocument sintético
+
+Submit cria row em `ingested_documents`:
+- `file_type='questionnaire'` (com guard explícito no pipeline n8n + Celery — Arq-M1)
+- `file_hash = sha256(canonical(responses))` — idempotente (Arq-M2): listas com ordens diferentes geram mesmo hash
+- `arguider_status='completed'` — NÃO entra no pipeline
+- `filename=questionnaire-{id}.json` (sem arquivo físico)
+- Aparece na aba Ingestão para o GP gerenciar
+
+### Cascata especial: delete questionnaire = volta a setup
+
+Quando GP soft-deleta IngestedDocument tipo `questionnaire` (via aba Ingestão):
+- DocumentRevertService (MVP 34) cascata estendida (DBA-M6)
+- `TechnicalQuestionnaire.status` → `archived`
+- `Questionnaire.approved` → `False`
+- `setup_status.questionnaire_approved` → `False` → `ready_to_activate` → `False`
+- Pipeline n8n bloqueado até novo questionário submetido
+- Modal de delete diferenciado na UI (S1 Gate 1) com aviso explícito
+
+### Migration 069
+
+- 3 CHECK constraints em `technical_questionnaires` (status enum, submitted_at NOT NULL, validated_at NOT NULL)
+- UPDATE preventivo: legacy `ocg_generated`/`validated` → `submitted`
+- **Índice único parcial** `uq_ingested_doc_hash_active WHERE deleted_at IS NULL` (substitui UNIQUE regular) — permite re-submit pós-soft-delete sem `UniqueViolationError`
+
+### Q13 multi_select_with_other
+
+Textarea condicional `<textarea rows=3>` quando opção "Outros" marcada. Multi-line, resize-y, font mono, placeholder com exemplo concreto. Schema backend `Q13` já era `multiselect_with_other` (MVP 35 só refina UX).
+
+### Mudanças técnicas
+
+- `backend/app/services/questionnaire_validation/` (novo módulo): rules_catalog, rules_evaluator, llm_sanity_check, synthetic_document
+- `backend/app/services/document_revert_service.py`: cascata `file_type='questionnaire'` (DBA-M6)
+- `backend/app/services/ingestion_service.py`: guards Arq-M1 em `_dispatch_to_n8n` + dispatch Celery
+- `backend/app/routers/technical_questionnaire_router.py`: endpoint `validate` com Camada 2 + persistência `validated_at`, endpoint `GET /rules`, submit valida `status='validated'`, chama LLM, cria IngestedDocument
+- `backend/app/routers/project_setup_router.py`: gate canônico exige `approved AND submitted` (MVP 35)
+- `backend/migrations/069_mvp35_questionnaire_validation.sql`: CHECKs + índice único parcial
+- `frontend/src/hooks/useTechnicalQuestionnaire.ts`: tipo `archived`, `validateInline`, `useRulesCatalog`
+- `frontend/src/components/questionnaire/TechnicalQuestionnaireForm.tsx`: painel inline 3 níveis, Submeter condicional, Q13 textarea
+- `frontend/src/pages/projects/IngestionPage.tsx`: modal delete diferenciado para questionnaire
+
+### Decisões binárias autorizadas pelo GP
+
+1. Estado `draft → validated → submitted | archived`
+2. Submit cria IngestedDocument tipo questionnaire
+3. Frontend guia ordem repo→LLM→questionário
+4. Validar obrigatório antes de Submeter
+5. Delete questionnaire = volta a setup
+
+### Testes
+
+- 90/90 verdes (29 RulesEvaluator + 16 SyntheticDoc/LLM + 16 ValidationEndpoint + 13 MVP 32 não-regressão + 16 MVP 34 não-regressão)
+- 110/110 verdes na suite ampla (zero regressão MVP 32-35 + DT-079/080)
+- Smoke E2E real: delete questionnaire → cascata canônica completa, ready_to_activate=False
+
+### Sem dívidas técnicas novas
+
+DT-086 (purge LGPD) e DT-087 (uploaded_by ON DELETE) já registradas no MVP 34. MVP 35 não abre dívidas novas.
+
+---
+
 ## [MVP 34 — Reversão de propagação ao deletar documento] - 2026-05-03
 
 ### Entrega principal

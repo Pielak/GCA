@@ -1,8 +1,29 @@
 # MVP 35 — Validação canônica do Questionário Técnico
 
-**Status:** DEFINIDO 2026-05-03 — aguardando Gate 1.
+**Status:** ✅ FECHADO 2026-05-03. 3 Gates aprovados, 6 fases entregues, 90/90 testes Fase verdes, 110/110 suite ampla (zero regressão), smoke E2E real validado.
 **Branch:** `feat/mvp35-questionnaire-validation`
-**Origem:** GP identificou 4 lacunas no fluxo Salvar/Validar/Submeter + necessidade de validação técnica de itens (combos válidos/inválidos) + validação cruzada entre respostas + UI inline com sugestões + Q13 multi-select com "outros".
+**Origem:** GP identificou 4 lacunas no fluxo Salvar/Validar/Submeter + necessidade de validação técnica de itens (combos válidos/inválidos) + validação cruzada entre respostas + UI inline com sugestões + Q13 multi-select com "outros". Pós-decisões iniciais GP adicionou regra 5: deletar questionnaire na Ingestão = projeto volta a setup.
+
+## Resumo de entrega
+
+| Fase | Status | Commit |
+|---|---|---|
+| 35.1 — RulesEvaluator + 30 regras seed + GET /rules | ✅ | `a2801a2` |
+| 35.2 — Migration 069 + validate endpoint + persist validated_at + guard save | ✅ | (este branch) |
+| 35.3 — Frontend validate-on-blur + UI inline + Submeter condicional + modal questionnaire | ✅ | (este branch) |
+| 35.4 — Q13 textarea condicional 'Outros' | ✅ | (este branch) |
+| 35.5 — LLM camada 2 + IngestedDocument sintético + índice parcial | ✅ | (este branch) |
+| 35.6 — DocumentRevertService cascata + filtro `_questionnaire_state` + smoke E2E + CLAUDE.md | ✅ | (este commit) |
+
+**Smoke E2E real (AJA project):**
+- Doc sintético criado com `file_type='questionnaire'`, hash idempotente
+- Revert via DocumentRevertService → `questionnaire_reverted=True`
+- TechnicalQuestionnaire → `archived`
+- Questionnaire (legacy) → `approved=False`
+- `setup_status.ready_to_activate` → `False` (gate fechado)
+- Audit `DOCUMENT_REVERTED` emitido com hash chain íntegro
+
+**Bônus do MVP 35:** corrigiu bug latente no `_check_setup_status` que liberava pipeline mesmo com `questionnaire_approved=False`. Agora gate exige `approved AND submitted` (alinha decisão GP "questionário aprovado e submetido").
 
 ## Decisões binárias (autorizadas pelo GP)
 

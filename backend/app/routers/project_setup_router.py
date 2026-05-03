@@ -62,7 +62,12 @@ async def _questionnaire_state(db: AsyncSession, project_id: UUID) -> tuple[bool
     )
     q_old = result.scalar_one_or_none()
 
-    # Verificar TechnicalQuestionnaire novo (dinâmico)
+    # Verificar TechnicalQuestionnaire novo (dinâmico).
+    # MVP 35 (DBA-S3 + Gate 2 A-S3): filtro explícito status='submitted'
+    # já exclui 'archived' (deletado via Ingestão). Sem isso, ORDER BY
+    # status DESC poderia retornar archived acima de submitted vazio.
+    # Adicionalmente, NÃO conta 'validated' (pré-submit) como submitted —
+    # o questionário precisa estar terminal para liberar o pipeline.
     result = await db.execute(
         select(TechnicalQuestionnaire)
         .where(
@@ -88,13 +93,29 @@ async def _questionnaire_state(db: AsyncSession, project_id: UUID) -> tuple[bool
 
 
 async def _check_setup_status(db: AsyncSession, project_id: UUID) -> dict:
-    """Retorna status completo de configuracao do projeto."""
+    """Retorna status completo de configuracao do projeto.
+
+    MVP 35 (decisão GP): pipeline liberado nesta ordem hierárquica:
+      1. repo_configured (Git/similar)
+      2. llm_configured (chave LLM válida)
+      3. questionnaire_approved AND questionnaire_submitted (questionário
+         APROVADO E submetido — sem approved, o gate fecha mesmo com submitted=True)
+
+    Antes (pré-MVP 35): gate só exigia `submitted`. Quando GP deleta
+    questionnaire na Ingestão (MVP 35 cascata), Questionnaire.approved
+    vira False mas submitted continuava True por compatibilidade do
+    Questionnaire legacy. Resultado: ready_to_activate ficava True
+    erroneamente, pipeline continuava liberado. Fix: exigir approved+submitted.
+    """
     repo_configured = await _has_repo_configured(db, project_id)
     llm_configured = await _has_llm_configured(db, project_id)
     questionnaire_submitted, questionnaire_approved = await _questionnaire_state(db, project_id)
-    # Gate do pipeline só exige submetido (approved ainda pode chegar após
-    # correções). O frontend decide o visual pela combinação submitted+approved.
-    ready_to_activate = repo_configured and llm_configured and questionnaire_submitted
+    ready_to_activate = (
+        repo_configured
+        and llm_configured
+        and questionnaire_submitted
+        and questionnaire_approved  # MVP 35: precisa estar APROVADO também
+    )
     return {
         "repo_configured": repo_configured,
         "llm_configured": llm_configured,
