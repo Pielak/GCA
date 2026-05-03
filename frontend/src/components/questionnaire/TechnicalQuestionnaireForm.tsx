@@ -218,6 +218,11 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
     status,
     error,
     validationError,
+    // MVP 35 — inline validation
+    inlineConflicts,
+    inlineWarnings,
+    inlineInfo,
+    rulesCatalog,
   } = useTechnicalQuestionnaire(projectId)
 
   // Wrapper around saveNow with toast
@@ -395,6 +400,41 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
         ))}
       </div>
 
+      {/* MVP 35 — Painel inline de validação canônica */}
+      {(inlineConflicts.length > 0 || inlineWarnings.length > 0 || inlineInfo.length > 0) && (
+        <div className="mt-6 space-y-2">
+          {inlineConflicts.length > 0 && (
+            <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-300 dark:border-red-700 rounded">
+              <div className="flex items-center gap-2 font-semibold text-red-700 dark:text-red-300 mb-2">
+                <AlertCircle size={16} />
+                {inlineConflicts.length} conflito{inlineConflicts.length > 1 ? 's' : ''} bloqueante{inlineConflicts.length > 1 ? 's' : ''} — corrija antes de Submeter
+              </div>
+              <ul className="space-y-1 text-sm text-red-800 dark:text-red-200">
+                {inlineConflicts.map((c, i) => <li key={i}>• {c}</li>)}
+              </ul>
+            </div>
+          )}
+          {inlineWarnings.length > 0 && (
+            <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded">
+              <div className="flex items-center gap-2 font-semibold text-yellow-800 dark:text-yellow-300 mb-2">
+                <AlertCircle size={16} />
+                {inlineWarnings.length} aviso{inlineWarnings.length > 1 ? 's' : ''} — não bloqueia mas vale revisar
+              </div>
+              <ul className="space-y-1 text-sm text-yellow-800 dark:text-yellow-200">
+                {inlineWarnings.map((w, i) => <li key={i}>• {w}</li>)}
+              </ul>
+            </div>
+          )}
+          {inlineInfo.length > 0 && (
+            <div className="p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-300 dark:border-blue-700 rounded">
+              <ul className="space-y-1 text-sm text-blue-800 dark:text-blue-200">
+                {inlineInfo.map((info, i) => <li key={i}>ℹ {info}</li>)}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Botões de ação */}
       <div className="mt-8 flex gap-4">
         <button
@@ -406,30 +446,65 @@ export function TechnicalQuestionnaireForm({ projectId, onSubmitted }: Technical
           Salvar
         </button>
 
+        {/* MVP 35: Validar Escopo — habilitado apenas com progress>=70 e SEM conflicts inline */}
         <button
           onClick={handleValidate}
-          disabled={isValidating || progress < 70}
+          disabled={isValidating || progress < 70 || inlineConflicts.length > 0}
           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={
+            inlineConflicts.length > 0
+              ? `${inlineConflicts.length} conflito(s) bloqueia(m) Validar`
+              : progress < 70
+                ? 'Preencha pelo menos 70% para validar'
+                : 'Validar Escopo'
+          }
         >
           {isValidating ? <Loader2 className="animate-spin" size={18} /> : <CheckCircle2 size={18} />}
           Validar Escopo
+          {status === 'validated' && <span className="text-xs">✓</span>}
         </button>
 
+        {/* MVP 35: Submeter — exige status='validated' (DBA decisão #4) */}
         <button
           onClick={submit}
-          disabled={isSaving || progress < 70}
+          disabled={isSaving || status !== 'validated' || inlineConflicts.length > 0}
           className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          title={
+            status !== 'validated'
+              ? 'Clique em Validar Escopo primeiro'
+              : inlineConflicts.length > 0
+                ? 'Corrija os conflitos primeiro'
+                : 'Submeter questionário'
+          }
         >
           {isSaving ? <Loader2 className="animate-spin" size={18} /> : <Send size={18} />}
           Submeter
         </button>
-
       </div>
+
+      {/* Hint contextual sobre o estado canônico */}
+      {status === 'draft' && progress >= 70 && inlineConflicts.length === 0 && (
+        <div className="mt-3 text-sm text-blue-600 dark:text-blue-400">
+          💡 Pronto para validar. Clique em "Validar Escopo" para liberar Submeter.
+        </div>
+      )}
+      {status === 'validated' && (
+        <div className="mt-3 text-sm text-green-600 dark:text-green-400">
+          ✓ Escopo validado. Você pode Submeter agora — ou editar e re-validar.
+        </div>
+      )}
 
       {hasUnsavedChanges && (
         <div className="mt-4 p-3 bg-yellow-50 text-yellow-700 rounded text-sm flex items-center gap-2">
           <AlertCircle size={16} />
           Você tem alterações não salvas
+        </div>
+      )}
+
+      {/* Telemetria de regras (debug, escondido por padrão — útil em dev) */}
+      {rulesCatalog.length > 0 && (
+        <div className="mt-4 text-xs text-slate-500">
+          {rulesCatalog.length} regras de validação ativas
         </div>
       )}
     </div>

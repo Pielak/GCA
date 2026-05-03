@@ -214,10 +214,25 @@ export function IngestionPage() {
     const doc = documents.find(d => d.id === docId)
     const isProcessing = doc?.arguider_status === 'processing'
     // MVP 34: deleção dispara reversão automática de propagação no OCG.
-    // Mensagem deixa claro pro GP — não é mais hard-delete simples.
-    const msg = isProcessing
-      ? `Remover "${filename}"?\n\nA análise está em curso — remover cancela o processamento e reverte os efeitos no OCG. Prossigo?`
-      : `Remover "${filename}"?\n\nO OCG e o backlog serão recalculados em background ignorando este documento. Módulos sugeridos exclusivamente por ele serão arquivados. Esta ação fica registrada na auditoria.\n\nProssigo?`
+    // MVP 35 (S1 Gate 1): aviso DIFERENCIADO para questionnaire — projeto volta a setup.
+    const isQuestionnaire = (doc as any)?.file_type === 'questionnaire'
+
+    let msg: string
+    if (isQuestionnaire) {
+      msg = `⚠ ATENÇÃO — Você está deletando o QUESTIONÁRIO TÉCNICO "${filename}".\n\n` +
+            `Esta ação retornará o projeto à fase de configuração:\n` +
+            `  • O questionário atual ficará arquivado\n` +
+            `  • Você precisará preencher um novo questionário do zero\n` +
+            `  • O pipeline n8n ficará BLOQUEADO até o novo questionário ser submetido\n` +
+            `  • OCG, backlog e módulos derivados serão recalculados\n\n` +
+            `Esta ação não pode ser desfeita automaticamente.\n\n` +
+            `Deseja realmente continuar?`
+    } else if (isProcessing) {
+      msg = `Remover "${filename}"?\n\nA análise está em curso — remover cancela o processamento e reverte os efeitos no OCG. Prossigo?`
+    } else {
+      msg = `Remover "${filename}"?\n\nO OCG e o backlog serão recalculados em background ignorando este documento. Módulos sugeridos exclusivamente por ele serão arquivados. Esta ação fica registrada na auditoria.\n\nProssigo?`
+    }
+
     if (confirm(msg)) {
       deleteMutation.mutate({ documentId: docId, reason: 'manual' });
     }
