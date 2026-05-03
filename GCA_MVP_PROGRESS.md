@@ -9,7 +9,15 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
+**MVP 35 — Validação canônica do Questionário Técnico** — DEFINIDO 2026-05-03. Aguardando Gate 1. Plano em [`docs/MVP_35_QUESTIONNAIRE_VALIDATION.md`](docs/MVP_35_QUESTIONNAIRE_VALIDATION.md).
+
+**Escopo:** GP identificou 4 lacunas no fluxo Salvar/Validar/Submeter (ver §7 doc) + necessidade de validação técnica de combos (FE×BE×DB×infra) + UI inline com sugestões + Q13 multi-select com outros. Approach híbrido 2 camadas: regras determinísticas (DSL JSON, ~30 regras seed) inline + LLM sanity check no submit.
+
+**Decisões binárias autorizadas pelo GP:** estado `validated` no enum, submit cria IngestedDocument tipo questionnaire, ordem dos gates UX-guiada, Validar obrigatório.
+
+**5 fases (~2d):** rules engine → estado validated + endpoint → UI inline → Q13 fix → LLM camada 2 + smoke E2E.
+
+**Próxima ação:** Gate 1 (gerente-projetos-ti).
 
 ### MVP recém-fechado
 **MVP 34 — Reversão de propagação ao deletar documento** — FECHADO 2026-05-03. **3 gates aprovados** + 5 fases entregues + 15/15 testes verdes (89% cobertura) + smoke E2E real validado (OCG v8 → v9 via HTTP). Detalhe em [`docs/MVP_34_REVERT_DOCUMENT_DELETE.md`](docs/MVP_34_REVERT_DOCUMENT_DELETE.md).
