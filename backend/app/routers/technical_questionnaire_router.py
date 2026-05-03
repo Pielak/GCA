@@ -67,11 +67,17 @@ class TechnicalQuestionnaireDetailResponse(BaseModel):
 
 
 class ValidationResponse(BaseModel):
-    """Response: Validation result"""
+    """Response: Validation result. MVP 35 expandiu com warnings/info/persisted."""
     is_valid: bool
     progress_percent: int
     visible_questions: List[str]
-    conflicts: List[str]  # Mensagens de erro de validação cruzada
+    conflicts: List[str]  # blocker — schema legacy + RulesEvaluator severity=error
+    # MVP 35 — campos canônicos novos (com defaults para retrocompat)
+    warnings: List[str] = []  # severity=warning (UI alerta amarelo, não bloqueia)
+    info: List[str] = []  # severity=info (UI alerta neutro)
+    rules_evaluated: int = 0  # cobertura
+    evaluated_at_ms: int = 0  # latência camada 1
+    persisted: bool = False  # True se status='validated' foi gravado
 
 
 # ─── Endpoints ───
@@ -230,11 +236,21 @@ async def save_technical_questionnaire(
             progress=questionnaire.progress_percent,
         )
     else:
-        questionnaire.status = "draft"
+        # MVP 35 DBA-M5: guard contra regressão de status. Auto-save NUNCA
+        # sobrescreve estados terminais (submitted/archived). Pode regredir
+        # validated→draft (intencional — usuário editou após validar, precisa
+        # revalidar para reativar Submeter).
+        if questionnaire.status not in ("submitted", "archived"):
+            questionnaire.status = "draft"
+            # Limpa validated_at quando regride — CHECK constraint chk_tq_validated_at
+            # exige IS NOT NULL apenas em status='validated'.
+            questionnaire.validated_at = None
+            questionnaire.validated_by = None
         logger.info(
             "technical_questionnaire_auto_saved",
             project_id=str(project_id),
             progress=questionnaire.progress_percent,
+            preserved_status=questionnaire.status in ("submitted", "archived"),
         )
 
     await db.commit()
@@ -323,40 +339,105 @@ async def save_technical_questionnaire(
 async def validate_technical_questionnaire(
     project_id: UUID,
     req: TechnicalQuestionnaireRequest,
+    persist: bool = True,  # MVP 35: True por default — Validar persiste status='validated'
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user_from_token),
 ):
     """
-    Validate technical questionnaire for logical conflicts.
+    Validar questionário técnico (MVP 35 — escopo expandido).
 
-    Checks:
-    - Se Q3="Não" mas Q7-14 estão preenchidos → erro
-    - Todas as perguntas visíveis obrigatórias preenchidas → progresso >= 80%
+    Camada 1 — Validação visibilidade/conflitos lógicos do schema (legacy).
+    Camada 2 — Catálogo canônico de 30 regras técnicas (RulesEvaluator):
+      conflicts/warnings/info por combo (FE×BE×DB×compliance×infra).
 
-    Returns validation status, conflicts, progress, and visible questions.
+    Args:
+      persist: se True (default), persiste status='validated' + validated_at
+               quando is_valid=True. Se False, valida sem persistir
+               (modo "preview" para validate-on-blur frontend).
+
+    Returns:
+      is_valid: True se sem conflicts (warnings não bloqueiam)
+      conflicts: lista de blockers
+      warnings: lista não-bloqueante (UI alerta amarelo)
+      info: lista informativa (UI alerta neutro)
     """
+    from datetime import datetime, timezone
+
     # Verify project exists
     stmt = select(Project).where(Project.id == project_id)
     project = await db.scalar(stmt)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
 
-    # Validate
-    validation_result = validate_questionnaire(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
+    # Camada 1 — schema visibility/legacy
+    legacy_result = validate_questionnaire(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
     visible = calculate_visibility(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
+
+    # Camada 2 — RulesEvaluator (MVP 35 Fase 35.1)
+    from app.services.questionnaire_validation.rules_evaluator import (
+        evaluate_rules,
+        is_blocking,
+    )
+    rules_result = evaluate_rules(req.responses)
+
+    # Combina conflicts: legacy schema + rules engine (canônico)
+    combined_conflicts = list(legacy_result["conflicts"]) + [
+        f"{c['rule_id']}: {c['message']}" for c in rules_result["conflicts"]
+    ]
+    is_valid_combined = legacy_result["is_valid"] and not is_blocking(rules_result)
+
+    # Persiste status='validated' se passou e flag persist=True (DBA-M3)
+    persisted = False
+    if persist and is_valid_combined:
+        stmt = select(TechnicalQuestionnaire).where(
+            TechnicalQuestionnaire.project_id == project_id
+        ).order_by(TechnicalQuestionnaire.status.desc())
+        questionnaire = (await db.scalars(stmt)).first()
+
+        if questionnaire is None:
+            # Cria novo se não existir
+            questionnaire = TechnicalQuestionnaire(
+                project_id=project_id,
+                status="validated",
+                responses=req.responses,
+                progress_percent=legacy_result["progress"],
+                validated_at=datetime.now(timezone.utc),
+                validated_by=current_user,
+            )
+            db.add(questionnaire)
+        elif questionnaire.status not in ("submitted", "archived"):
+            # Só sobe pra validated se não está em estado terminal
+            questionnaire.status = "validated"
+            questionnaire.responses = req.responses
+            questionnaire.progress_percent = legacy_result["progress"]
+            # CHECK chk_tq_validated_at exige NOT NULL — DBA-M3
+            questionnaire.validated_at = datetime.now(timezone.utc)
+            questionnaire.validated_by = current_user
+
+        await db.commit()
+        persisted = True
 
     logger.info(
         "technical_questionnaire_validated",
         project_id=str(project_id),
-        is_valid=validation_result["is_valid"],
-        conflicts_count=len(validation_result["conflicts"]),
+        is_valid=is_valid_combined,
+        legacy_conflicts=len(legacy_result["conflicts"]),
+        rules_conflicts=len(rules_result["conflicts"]),
+        rules_warnings=len(rules_result["warnings"]),
+        persisted=persisted,
     )
 
     return ValidationResponse(
-        is_valid=validation_result["is_valid"],
-        progress_percent=validation_result["progress"],
+        is_valid=is_valid_combined,
+        progress_percent=legacy_result["progress"],
         visible_questions=visible,
-        conflicts=validation_result["conflicts"],
+        conflicts=combined_conflicts,
+        # MVP 35: campos extras canônicos
+        warnings=[f"{w['rule_id']}: {w['message']}" for w in rules_result["warnings"]],
+        info=[f"{i['rule_id']}: {i['message']}" for i in rules_result["info"]],
+        rules_evaluated=rules_result["rules_evaluated"],
+        evaluated_at_ms=rules_result["evaluated_at_ms"],
+        persisted=persisted,
     )
 
 
