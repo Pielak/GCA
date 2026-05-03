@@ -266,7 +266,7 @@ export function LoginPage() {
           setError('Resposta inesperada do servidor — tente novamente em instantes.')
         }
       } else {
-        setError('Selecione um projeto. Para entrar como administrador da instância, clique em "Admin" no canto superior direito.')
+        setError('Selecione um projeto para continuar. Se você é administrador, use o botão "Login Admin" no canto superior direito.')
       }
     } catch (err: unknown) {
       // O api.ts interceptor já achata o erro em { status, message, data }.
@@ -279,18 +279,23 @@ export function LoginPage() {
       } else if ((err as ApiError)?.status === 403) {
         // 403 com code='project_required' = não-admin tentou entrar sem projeto.
         if (detail && typeof detail === 'object' && !Array.isArray(detail) && detail.code === 'project_required') {
-          setError('Selecione seu projeto no combo acima — apenas administradores podem entrar sem projeto.')
+          setError('Selecione seu projeto no combo acima para continuar.')
         } else if (detailStr.toLowerCase().includes('membro')) {
-          setError('Você não é membro deste projeto. Verifique com o GP do projeto se foi adicionado à equipe.')
+          setError('Você ainda não foi adicionado a este projeto. Peça ao Gerente de Projetos para incluir você na equipe.')
+        } else if (mode === 'admin') {
+          setError('Você não tem permissão de administrador. Verifique com o responsável da instância.')
         } else {
-          setError(detailStr || 'Acesso negado. Contate o administrador.')
+          setError('Acesso negado. Verifique suas credenciais ou peça ajuda ao administrador.')
         }
       } else if ((err as ApiError)?.status === 404) {
-        setError('Projeto não encontrado.')
+        setError('Projeto não encontrado. Verifique se o link está correto.')
       } else if ((err as ApiError)?.status === 410) {
-        setError('Projeto arquivado.')
+        setError('Este projeto foi arquivado e não está mais disponível.')
+      } else if ((err as ApiError)?.status === 500 || (err as ApiError)?.status === 503) {
+        setError('Estamos com instabilidade no momento. Tente novamente em instantes.')
       } else {
-        setError(detailStr || getErrorMessage(err))
+        // Fallback: mensagem genérica friendly em vez de detalhe técnico cru.
+        setError('Não foi possível entrar agora. Tente novamente em instantes.')
       }
     } finally {
       setLoading(false)
@@ -534,13 +539,13 @@ export function LoginPage() {
               </div>
             )}
 
-            {/* Aviso visual em modo admin — deixa explícito que está num fluxo separado. */}
+            {/* Aviso visual em modo admin — copy amigável, sem jargão técnico. */}
             {mode === 'admin' && (
               <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 flex items-start gap-3">
                 <Shield className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
                 <div className="text-xs text-red-200 leading-relaxed">
-                  <strong className="block text-red-300 mb-1">Modo administrativo</strong>
-                  Login direto na instância (sem projeto). Apenas usuários com flag <code className="text-red-300">is_admin</code> conseguem entrar por aqui.
+                  <strong className="block text-red-300 mb-1">Acesso de Administrador</strong>
+                  Use suas credenciais de administrador. Você não precisa selecionar projeto — após entrar, terá acesso ao painel de gestão da instância.
                 </div>
               </div>
             )}
