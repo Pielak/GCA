@@ -41,7 +41,8 @@ from app.models.base import (
 )
 from app.services.audit_service import AuditEvents, AuditService
 from app.services.ocg_gate import SCORE_MATURIDADE
-from app.services.ocg_updater_service import _compute_status
+# _compute_status removido — agora delegamos a `_update_ocg_record`
+# (OCGUpdaterService) que ja calcula status canonico.
 
 logger = structlog.get_logger(__name__)
 
@@ -163,7 +164,10 @@ async def revert_document_propagation(
     delta_fields_reverted = _diff_pillars(pillar_before, new_pillar_scores)
 
     # ── 6. Versionamento canônico: OCG é UPDATE in-place (1 row por
-    #     projeto, version incrementa). Mesmo padrão de OCGUpdaterService. ──
+    #     projeto, version incrementa). Reusa _update_ocg_record do
+    #     OCGUpdaterService que ja faz toda a coerencia entre JSONB e colunas
+    #     (PILLAR_SCORES no formato canonico Pn_descritivo, COMPOSITE_SCORE,
+    #     APPROVAL_STATUS, governance_mode P1 owner-declared, status, etc). ──
     if ocg_now is None:
         # Caso degenerado: revert em projeto sem OCG. Não há base para recompute.
         # Marca apenas o doc como deletado e retorna.
@@ -175,42 +179,77 @@ async def revert_document_propagation(
         version_to = 0
         score_after = 0.0
     else:
-        # Atualiza ocg_data com novo PILLAR_SCORES
+        # Carrega ocg_data + reescreve PILLAR_SCORES no formato canonico
+        # canonico (Pn_descritivo) que _update_ocg_record entende.
         try:
             ocg_data = json.loads(ocg_now.ocg_data) if ocg_now.ocg_data else {}
         except (ValueError, TypeError):
             ocg_data = {}
 
-        # Override do PILLAR_SCORES com o agregado novo
-        ocg_data["PILLAR_SCORES"] = new_pillar_scores
-
-        # Status canônico (Active/At-Risk/Blocked)
-        pillar_floats = {
-            int(k.replace("p", "").split("_")[0]): v["score"]
-            for k, v in new_pillar_scores.items()
-            if k.startswith("p")
+        # Mapeia chaves curtas (p1_business_score) para canonicas
+        # (P1_business_case) que o _extract_pillar_score procura.
+        pillar_canonical_map = {
+            "p1_business_score": "P1_business_case",
+            "p2_rules_score": "P2_compliance",
+            "p3_features_score": "P3_scope",
+            "p4_nfr_score": "P4_performance",
+            "p5_architecture_score": "P5_architecture",
+            "p6_data_score": "P6_data",
+            "p7_security_score": "P7_security",
         }
-        new_status, new_blocking = _compute_status(pillar_floats, new_overall)
 
-        # UPDATE in-place + incrementa version (mesmo padrão do OCGUpdaterService).
-        # Constraint UNIQUE em questionnaire_id impede INSERT de nova row.
-        ocg_now.overall_score = new_overall
-        ocg_now.p1_business_score = new_pillar_scores.get("p1_business_score", {}).get("score")
-        ocg_now.p2_rules_score = new_pillar_scores.get("p2_rules_score", {}).get("score")
-        ocg_now.p3_features_score = new_pillar_scores.get("p3_features_score", {}).get("score")
-        ocg_now.p4_nfr_score = new_pillar_scores.get("p4_nfr_score", {}).get("score")
-        ocg_now.p5_architecture_score = new_pillar_scores.get("p5_architecture_score", {}).get("score")
-        ocg_now.p6_data_score = new_pillar_scores.get("p6_data_score", {}).get("score")
-        ocg_now.p7_security_score = new_pillar_scores.get("p7_security_score", {}).get("score")
-        ocg_now.status = new_status
-        ocg_now.is_blocking = new_blocking
-        ocg_now.ocg_data = json.dumps(ocg_data, ensure_ascii=False)
-        ocg_now.version = ocg_now.version + 1
-        ocg_now.change_type = "REVERT_DOCUMENT_DELETE"
-        await db.flush()
+        canonical_pillars: dict[str, dict[str, float]] = {}
+        for short_key, value in new_pillar_scores.items():
+            canonical_key = pillar_canonical_map.get(short_key, short_key)
+            canonical_pillars[canonical_key] = value
 
-        version_to = ocg_now.version
-        score_after = new_overall
+        ocg_data["PILLAR_SCORES"] = canonical_pillars
+
+        # Limpa campos LEGACY top-level (p*_*_score) que UI/CodeGen leem
+        # no lugar do PILLAR_SCORES novo. Mantem overall_score top-level
+        # como fallback explicito quando nao ha pillars (doc unico revertido)
+        # — _update_ocg_record so cai no fallback se PILLAR_SCORES vazio.
+        legacy_fields_to_clear = [
+            "p1_business_score", "p2_rules_score",
+            "p3_features_score", "p4_nfr_score", "p5_architecture_score",
+            "p6_data_score", "p7_security_score",
+        ]
+        for k in legacy_fields_to_clear:
+            ocg_data.pop(k, None)
+
+        # Override explicito do overall_score top-level com novo valor
+        # (caso pillars vazios, o fallback do _update_ocg_record usa este).
+        ocg_data["overall_score"] = new_overall
+
+        # Tambem zera direto na coluna em caso de pillars vazios — defesa
+        # extra caso o fallback seja silenciado por motivo desconhecido.
+        if not new_pillar_scores:
+            ocg_now.overall_score = 0.0
+            for col in ("p1_business_score", "p2_rules_score", "p3_features_score",
+                        "p4_nfr_score", "p5_architecture_score", "p6_data_score",
+                        "p7_security_score"):
+                setattr(ocg_now, col, None)
+
+        # Reset COMPOSITE_SCORE — _update_ocg_record vai recalcular
+        if "COMPOSITE_SCORE" in ocg_data and isinstance(ocg_data["COMPOSITE_SCORE"], dict):
+            ocg_data["COMPOSITE_SCORE"]["value"] = 0.0
+        else:
+            ocg_data["COMPOSITE_SCORE"] = {"value": 0.0}
+
+        # Delega TODA a logica de coerencia ao helper canonico do updater
+        # (recalcula colunas pN_*, overall_score, status, is_blocking,
+        # COMPOSITE_SCORE.value, APPROVAL_STATUS).
+        version_to = ocg_now.version + 1
+        await updater._update_ocg_record(
+            ocg=ocg_now,
+            updated_ocg=ocg_data,
+            change_type="REVERT_DOCUMENT_DELETE",
+            context_health={"depth": 0.5, "confidence": 0.5, "quality": 0.5},
+            version_to=version_to,
+        )
+
+        # Re-lê score apos _update_ocg_record (helper recalcula com pesos)
+        score_after = float(ocg_now.overall_score or 0)
 
         # ── 7. ocg_delta_log row ──────────────────────────────────────────
         await _insert_delta_log(
