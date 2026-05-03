@@ -201,14 +201,22 @@ async def execute_run(run_id: UUID) -> None:
     # DT-082: gate de maturidade do OCG na entrada do worker (defesa em
     # profundidade). Se algum caller futuro enfileirar a run sem passar pelo
     # endpoint HTTP que já chama check_ocg_maturity_gate, o worker recusa
-    # marcando run.status='blocked' (não levanta exceção — sem caller HTTP).
+    # sem levantar exceção (não tem caller HTTP).
+    #
+    # DT-083 (2026-05-03): originalmente DT-082 marcava `run.status='blocked'`,
+    # mas a CHECK constraint `scaffold_runs_status_check` só aceita
+    # {pending,planning,generating,completed,failed,applied,applying}. Para
+    # evitar migration de schema, usamos `status='failed'` + prefixo canônico
+    # `[ocg_gate:<level>]` no `error` — a métrica Prometheus
+    # `gca_codegen_blocked_total{block_level}` em metrics_service parseia o
+    # prefixo. Bloqueio do gate ainda é sinalizado por log canônico.
     async with AsyncSessionLocal() as db:
         gate_result = await evaluate_ocg_maturity(project_id_for_llm, db)
     if gate_result["blocked"]:
         async with AsyncSessionLocal() as db:
             run = await db.get(ScaffoldRun, run_id)
             if run:
-                run.status = "blocked"
+                run.status = "failed"
                 run.error = (
                     f"[ocg_gate:{gate_result['block_level']}] "
                     f"{gate_result['blocking_reason']}"

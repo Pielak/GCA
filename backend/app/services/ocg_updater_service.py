@@ -392,15 +392,39 @@ class OCGUpdaterService:
         # qualquer replace em PILLAR_SCORES.*.score onde value < old_value.
         deltas, blocked_negative = _filter_negative_score_deltas(deltas, current_ocg_data)
         if blocked_negative:
+            samples = [
+                {"path": d.get("path"), "old": d.get("old_value"), "tried": d.get("value")}
+                for d in blocked_negative[:5]
+            ]
             logger.info(
                 "ocg_updater.negative_score_blocked",
                 project_id=str(project_id),
                 count=len(blocked_negative),
-                samples=[
-                    {"path": d.get("path"), "old": d.get("old_value"), "tried": d.get("value")}
-                    for d in blocked_negative[:5]
-                ],
+                samples=samples,
             )
+            # DT-083: persistir evento via audit_log_global para que a métrica
+            # Prometheus `gca_ocg_negative_delta_blocked_total{project}` consiga
+            # derivar a contagem por query (sem prometheus_client).
+            try:
+                from app.services.audit_service import AuditEvents, AuditService
+
+                await AuditService(self.db).log_event(
+                    event_type=AuditEvents.OCG_NEGATIVE_DELTA_BLOCKED,
+                    resource_type="ocg",
+                    resource_id=project_id,
+                    actor_id=actor_id,
+                    details={
+                        "project_id": str(project_id),
+                        "count": len(blocked_negative),
+                        "samples": samples,
+                    },
+                )
+            except Exception as audit_err:  # noqa: BLE001
+                logger.warning(
+                    "ocg_updater.audit_negative_delta_emit_failed",
+                    project_id=str(project_id),
+                    error=str(audit_err),
+                )
 
         # 4. Aplicar deltas localmente (deterministic, sem LLM, com optimistic concurrency)
         updated_ocg, applied, rejected = apply_deltas(current_ocg_data, deltas)
