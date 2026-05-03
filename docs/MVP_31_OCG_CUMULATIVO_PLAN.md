@@ -291,7 +291,7 @@ Veredito: **Aprovado com ressalvas** (DBA, 2026-05-02). Decisões críticas:
 8. **`ocg_delta_log.ocg_snapshot`** cresce sem limite — DT futura para particionamento/TTL.
 9. **`ocg_individual.status`** sem CHECK constraint — DT futura (CR-DB-02).
 
-## 14. Próximo passo
+## 14. Próximo passo (histórico — supercedido pelo §15)
 
 **Gate 4 — Dev Sênior** com mandato específico:
 
@@ -304,3 +304,29 @@ Veredito: **Aprovado com ressalvas** (DBA, 2026-05-02). Decisões críticas:
 - Constante `TRIGGER_N8N = "document_ingestion_n8n"` em `ocg_updater_service.py` (não literal).
 - Smoke test E2E (135s) deve continuar verde após cada fase entregue (não-regressão).
 - Pipeline n8n permanece intocado.
+
+---
+
+## 15. Status final (2026-05-02)
+
+MVP 31 entregue — todas as fases implementadas e aprovadas pelo Gate 5 (Tester/QA):
+
+- Fase 31.1 (commits `3ede8ff` + `d19b96b`) — migration 066 + 067 + modelos ORM `OCGIndividual`, `OCGGlobal`, stubs `OCGIndividualRefined`, `PersonaFollowUpQuestion`
+- Fase 31.2 (commit `eac3bff`) — handler n8n delega ao `OCGUpdaterService` + persiste histórico imutável em `ocg_individual` e `ocg_global`
+- Fase 31.3 (commit `de6f272`) — política lixo descartado: personas falhas ficam em `ocg_individual` com `status='failed'` mas NÃO entram no merge cumulativo
+- Fase 31.4 (commit `465dc3d`) — CodeGen gate em 6 entry points HTTP + `start_scaffold_run` async com 3 níveis (`hard_block`, `insufficient`, `immature`)
+- Fase 31.5 (este commit) — testes E2E cumulativos + doc atualizado + métricas Prometheus (DT-083 aberta — infraestrutura não existe no projeto)
+
+Métricas finais:
+- Suíte MVP 31: **35/35 verdes** (`test_mvp31_models_and_migration` + `phase2` + `phase3` + `phase4` + `phase5`)
+- Smoke n8n contracts: **2 passed, 7 skipped** (comportamento esperado)
+- Não-regressão: suíte completa verde em 10.88s
+
+Dívidas remanescentes (registradas, fora do escopo deste MVP):
+- **DT-079** (Major): Hardcode Anthropic em CodeGen (`module_codegen_service.py`, `codegen_prompt_builder.py`, `code_generation.py`). Viola §3.1 do contrato canônico.
+- **DT-080** (Major): ORM stubs `ocg_individual_refined` e `persona_follow_up_questions` sem corpo funcional.
+- **DT-081** (Major): `OCGUpdaterService` fallback `_load_persona_scores` busca em `gatekeeper_persona_response` (Gatekeeper v1) em vez de `ocg_individual` (pipeline n8n). Prompt ainda cita contração de score.
+- **DT-082** (Minor): Gate de maturidade ausente no worker Celery (caminho legado).
+- **DT-083** (Minor): Métricas Prometheus não implementadas — projeto usa texto Prometheus manual (`metrics_service.py`) sem `prometheus_client`. Criar contadores `gca_ocg_delta_applied_total`, `gca_ocg_negative_delta_blocked_total`, `gca_codegen_blocked_total` no próximo MVP.
+
+Próximo passo: skill `preparar-release` para checklist final antes de merge em `master`.

@@ -149,6 +149,24 @@ Regras obrigatórias (atualizadas em 2026-04-30 — substituem versão anterior)
 
 Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine` em `.claude/skills/gca-ocg-engine/SKILL.md`.
 
+### 5.1 Caminho n8n: handler delega ao OCGUpdaterService (MVP 31)
+
+Desde MVP 31 (entregue 2026-05-02), o caminho de ingestão via n8n
+(`POST /api/v1/webhooks/ingestion-complete`, handler em `webhooks.py`)
+**delega obrigatoriamente** ao `OCGUpdaterService.update_ocg_from_arguider`.
+Não é mais permitido fazer `UPDATE ocg SET ocg_data=...` direto.
+
+Invariantes preservadas:
+- OCG só cresce (`_filter_negative_score_deltas` bloqueia delta negativo)
+- Histórico imutável em `ocg_individual` (1 row/persona/doc) e `ocg_global`
+  (1 row/doc) com unique constraint
+- Versionamento + hash chain em `ocg_delta_log` (anti-tamper)
+- Personas falhas (G4 reprovou) ficam em `ocg_individual` com
+  `status='failed'` para auditoria, mas **NÃO** entram no merge cumulativo
+- CodeGen tem gate de maturidade em 3 níveis (`hard_block`,
+  `insufficient`, `immature`) nos 6 entry points HTTP + `start_scaffold_run`
+  async — gate liberado quando `overall_score >= 95` e `is_blocking=false`
+
 ---
 
 ## 6. Política canônica de IA

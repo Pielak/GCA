@@ -204,8 +204,12 @@ Backend tem `/internal/hmac/sign` e `/internal/hmac/verify` (`backend/app/router
 | Workflows v2 antigos (`gca-normalizer-v2`, `a3f7c2e1...`) deactivated mas presentes | n8n SQLite | Confunde inventário. Apagar manualmente quando seguro. |
 | DOCX não tem extrator nativo no Normalizer (`extractionMethod: 'pending_external'`) | `01-gca-normalizer.json` "Detectar formato e extrair texto" | Docs `.docx` falham em G1 ("texto vazio"). Tratar via OCR fallback ou lib mammoth. |
 | `Log Erro` do Pipeline Logger pode falhar silenciosamente | `16-gca-pipeline-logger.json` | Errors não logados ficam só no n8n executions. |
-| **Backend `/ingestion-complete` faz UPDATE cru no `ocg`, não chama `OCGUpdaterService`** | `webhooks.py:391` | OCG sobrescreve em vez de acumular. **Esse é o gap principal — vai virar MVP.** |
-| **CodeGen não consulta `ocg.is_blocking`** | `module_codegen_service.py`, `codegen_prompt_builder.py` | Geração roda mesmo com OCG bloqueado. |
+| ~~**Backend `/ingestion-complete` faz UPDATE cru no `ocg`, não chama `OCGUpdaterService`**~~ | — | **RESOLVIDA pelo MVP 31 Fase 31.2** (2026-05-02). Handler em `webhooks.py` agora delega obrigatoriamente ao `OCGUpdaterService.update_ocg_from_arguider`. Histórico imutável em `ocg_individual` e `ocg_global` populado a cada doc. Política OCG-só-cresce via `_filter_negative_score_deltas` em vigor. |
+| ~~**CodeGen não consulta `ocg.is_blocking`**~~ | — | **RESOLVIDA pelo MVP 31 Fase 31.4** (2026-05-02). Gate de maturidade (`check_ocg_maturity_gate`) implementado em `app/services/ocg_gate.py` e aplicado nos 6 entry points HTTP + `start_scaffold_run` async. 3 níveis: `hard_block`, `insufficient`, `immature`. |
+| **DT-079**: Hardcode Anthropic em CodeGen (`_call_llm`, `generate_module_code`, etc.) | `module_codegen_service.py`, `codegen_prompt_builder.py` | (Major) Viola §3.1 do contrato — cliente não pode mudar provider de CodeGen sem código. Registrada para próximo MVP. |
+| **DT-080**: ORM stubs `ocg_individual_refined` e `persona_follow_up_questions` sem corpo | `backend/app/models/base.py` | (Major) Tabelas existem no banco sem modelo funcional. Persistência via estas tabelas não funciona. |
+| **DT-081**: OCGUpdaterService fallback `_load_persona_scores` quebrado + prompt sub-ótimo | `ocg_updater_service.py` | (Major) Fallback busca em `gatekeeper_persona_response` (Gatekeeper v1) em vez de `ocg_individual` (pipeline n8n). LLM prompt ainda cita contração de score (removida em 2026-04-25). |
+| **DT-082**: Defesa em profundidade — gate ausente no worker Celery | `ingestion_service.py`, tasks Celery | (Minor) Caminho Celery não tem gate de maturidade de CodeGen. Risco baixo (caminho legado), mas inconsistência na política. |
 
 ---
 
