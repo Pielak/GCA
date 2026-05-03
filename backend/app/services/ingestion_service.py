@@ -409,10 +409,13 @@ class IngestionService:
         file_hash = hashlib.sha256(file_bytes).hexdigest()
 
         # Verificar duplicata
+        # MVP 34 (DBA-M1): filtra docs soft-deleted — caso contrário, re-ingestão
+        # de versão anonimizada de doc deletado por LGPD seria bloqueada.
         existing = await self.db.execute(
             select(IngestedDocument).where(
                 IngestedDocument.project_id == project_id,
                 IngestedDocument.file_hash == file_hash,
+                IngestedDocument.deleted_at.is_(None),
             )
         )
         dup = existing.scalar_one_or_none()
@@ -718,11 +721,13 @@ class IngestionService:
         from app.core.config import settings
 
         # Checar se há outro doc em processamento neste projeto
+        # MVP 34: ignora docs soft-deleted no contador de fila.
         processing_count = await self.db.scalar(
             select(func.count(IngestedDocument.id)).where(
                 and_(
                     IngestedDocument.project_id == project_id,
                     IngestedDocument.arguider_status == "processing",
+                    IngestedDocument.deleted_at.is_(None),
                 )
             )
         )
@@ -1814,11 +1819,13 @@ class IngestionService:
         """Lista documentos do projeto com tokens_used da análise Arguidor."""
         from sqlalchemy import outerjoin
 
-        # LEFT JOIN com ArguiderAnalysis pra pegar tokens_used
+        # LEFT JOIN com ArguiderAnalysis pra pegar tokens_used.
+        # MVP 34: filtra docs soft-deleted — UI lista apenas docs ativos.
         result = await self.db.execute(
             select(IngestedDocument, ArguiderAnalysis.tokens_used)
             .outerjoin(ArguiderAnalysis, IngestedDocument.id == ArguiderAnalysis.document_id)
             .where(IngestedDocument.project_id == project_id)
+            .where(IngestedDocument.deleted_at.is_(None))
             .order_by(IngestedDocument.created_at.desc())
         )
         rows = result.all()
@@ -1861,11 +1868,17 @@ class IngestionService:
         ]
 
     async def get_document_detail(self, project_id: UUID, document_id: UUID) -> dict | None:
-        """Documento completo + análise do Arguidor."""
+        """Documento completo + análise do Arguidor.
+
+        MVP 34: docs soft-deleted retornam None (não acessíveis via UI).
+        Endpoint pode chamar `get_document_detail_including_deleted` se
+        precisar inspecionar deletados (audit/admin).
+        """
         result = await self.db.execute(
             select(IngestedDocument).where(
                 IngestedDocument.id == document_id,
                 IngestedDocument.project_id == project_id,
+                IngestedDocument.deleted_at.is_(None),
             )
         )
         doc = result.scalar_one_or_none()
@@ -1908,11 +1921,15 @@ class IngestionService:
         return detail
 
     async def get_document_status(self, project_id: UUID, document_id: UUID) -> dict | None:
-        """Status para polling."""
+        """Status para polling.
+
+        MVP 34: docs soft-deleted retornam None (frontend para de poll quando recebe 404).
+        """
         result = await self.db.execute(
             select(IngestedDocument).where(
                 IngestedDocument.id == document_id,
                 IngestedDocument.project_id == project_id,
+                IngestedDocument.deleted_at.is_(None),
             )
         )
         doc = result.scalar_one_or_none()

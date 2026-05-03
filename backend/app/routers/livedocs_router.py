@@ -117,10 +117,12 @@ async def get_changelog(
 
     changelog = []
 
-    # Documentos ingeridos
+    # Documentos ingeridos.
+    # MVP 34: ignora docs soft-deleted — changelog não exibe docs deletados.
     result = await db.execute(
         select(IngestedDocument)
         .where(IngestedDocument.project_id == project_id)
+        .where(IngestedDocument.deleted_at.is_(None))
         .order_by(IngestedDocument.created_at.desc())
         .limit(50)
     )

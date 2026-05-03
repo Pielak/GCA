@@ -553,10 +553,12 @@ async def _load_ocg_context(db: AsyncSession, project_id: UUID) -> dict[str, Any
         data = {}
 
     # Docs ingeridos considerados: todos os que viraram análise do projeto.
+    # MVP 34: ignora docs soft-deleted — test specs não devem ser geradas a partir deles.
     docs_rows = await db.execute(
         select(IngestedDocument.id).where(
             IngestedDocument.project_id == project_id,
             IngestedDocument.arguider_status == "completed",
+            IngestedDocument.deleted_at.is_(None),
         )
     )
     doc_ids = [str(r[0]) for r in docs_rows.all()]

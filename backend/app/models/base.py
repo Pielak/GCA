@@ -862,7 +862,7 @@ class OCG(Base):
     version = Column(Integer, default=1, nullable=False)  # Versão incremental do OCG
     schema_version = Column(String(20), default="1.0.0", nullable=False)  # Versão do schema JSON
     context_health = Column(Text, nullable=True, default="{}")  # JSON: {depth, confidence, quality}
-    change_type = Column(String(20), nullable=True, default="INITIAL")  # INITIAL, EXPAND, CONTRACT
+    change_type = Column(String(30), nullable=True, default="INITIAL")  # INITIAL, EXPAND, CONTRACT, REVERT_DOCUMENT_DELETE (MVP 34, ampliado pela migration 068)
 
     # Full OCG as JSON
     ocg_data = Column(String, nullable=False)  # JSON string - complete OCG object
@@ -1058,6 +1058,17 @@ class IngestedDocument(Base):
         nullable=True,
     )
 
+    # ─── MVP 34 — Soft-delete + reversão de propagação OCG (migration 068) ───
+    # Doc soft-deleted permanece no banco (deleted_at NOT NULL) para preservar
+    # auditoria + permitir undelete via API. Queries de listagem/processing
+    # devem filtrar `WHERE deleted_at IS NULL`. Recompute do OCG ignora docs
+    # soft-deleted via JOIN em `_load_persona_scores` (ocg_updater_service).
+    # Ver docs/MVP_34_REVERT_DOCUMENT_DELETE.md.
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+    deleted_by = Column(UUID(as_uuid=True), nullable=True)  # users.id (sem FK declarada — DT-087)
+    deleted_reason = Column(String(50), nullable=True)  # 'manual'|'lgpd'|'smoke_cleanup' (CHECK constraint no DB)
+    revert_metadata = Column(JSONB, nullable=True)  # payload do Celery job; CHECK schema mínimo no DB
+
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])
     route_maps = relationship("DocumentRouteMap", back_populates="document", cascade="all, delete-orphan")
@@ -1065,6 +1076,12 @@ class IngestedDocument(Base):
     __table_args__ = (
         Index("idx_ingested_docs_project", project_id),
         Index("idx_ingested_docs_status", project_id, arguider_status),
+        # MVP 34 — índice parcial para listagem ativa (ignora docs soft-deleted)
+        Index(
+            "idx_ingested_docs_active",
+            project_id, arguider_status,
+            postgresql_where=(deleted_at.is_(None)),
+        ),
         UniqueConstraint("project_id", "file_hash", name="uq_ingested_doc_hash"),
     )
 

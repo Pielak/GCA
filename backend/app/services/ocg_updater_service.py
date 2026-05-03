@@ -704,16 +704,25 @@ class OCGUpdaterService:
         Substitui a versão legacy que dependia de GatekeeperPersonaResponse +
         DocumentRouteMap (DT-081 — DocumentRouteMap não tem project_id).
 
+        MVP 34 (Arq-S1/DBA): JOIN com `ingested_documents` filtrando
+        `deleted_at IS NULL`. Pareceres de docs soft-deleted continuam em
+        `ocg_individual` (sem cascade), mas não devem influenciar OCG.
+
         Retorna dict no formato Pillar Scores. Provider-agnóstico.
         """
-        from app.models.base import OCGIndividual
+        from app.models.base import IngestedDocument, OCGIndividual
         from app.services.ocg_consolidator_service import PERSONA_TO_PILLAR
 
         try:
             stmt = (
                 select(OCGIndividual)
+                .join(
+                    IngestedDocument,
+                    OCGIndividual.document_id == IngestedDocument.id,
+                )
                 .where(OCGIndividual.project_id == project_id)
                 .where(OCGIndividual.status == "completed")  # exclui personas falhas
+                .where(IngestedDocument.deleted_at.is_(None))  # MVP 34: ignora docs soft-deleted
                 .order_by(OCGIndividual.created_at.desc())
             )
             result = await self.db.execute(stmt)
