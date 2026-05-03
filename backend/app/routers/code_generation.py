@@ -862,6 +862,8 @@ async def start_scaffold_run(
     project_id = request.project_id
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
+    # Gate de maturidade do OCG (MVP 31 Fase 31.4 — proteção do caminho assíncrono)
+    await check_ocg_maturity_gate(project_id=project_id, db=db)
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")

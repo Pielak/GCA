@@ -189,6 +189,7 @@ Feito em 2026-04-20 pela Fase 13.5. **ATUALIZADO 2026-04-28** — os 3 pontos do
 
 | ID | Severidade | Tema | Descrição | Origem | Status |
 |---|---|---|---|---|---|
+| DT-082 | Minor | CodeGen — defesa em profundidade do gate no worker Celery | Após Fase 31.4 do MVP 31, todos os 6 entry points HTTP do CodeGen + `start_scaffold_run` chamam `check_ocg_maturity_gate`. Mas o worker Celery `execute_run` em `scaffold_run_service.py` não tem gate próprio — confia que ninguém enfileira sem passar pelo endpoint. Se algum caller futuro enfileirar diretamente (ex: cron, debug), gate é bypassado. Defesa em profundidade: adicionar gate em `execute_run` que marca `run.status='blocked'` em vez de HTTPException (worker não tem caller HTTP). Não bloqueia MVP 31 — endpoint atual é o único caminho. | Gate 5 MVP 31 Fase 31.4 2026-05-02 | **Aberta** |
 | DT-010 | Minor | Terminologia | Uso inconsistente de termos como tenant, projeto, instância e cliente. | Docs históricos | **Quitada 2026-04-17** — ver §4 |
 | DT-011 | Minor | Narrativa de produto | Parte da documentação promocional está mais madura que o contrato técnico real. | README / manual | **Quitada 2026-04-17** — ver §4 |
 | DT-027 | Minor | DB / cascade | FK `project_member_roles.member_id → project_members.id` não era `ON DELETE CASCADE`. Descoberto ao apagar FinanceHub Pro 2026-04-17: o DELETE do projeto cascateava members mas não os roles atribuídos, exigindo cleanup manual antes de qualquer remoção de projeto. | Dogfood MVP 2 2026-04-17 | **Quitada 2026-04-17** — ver §4 |

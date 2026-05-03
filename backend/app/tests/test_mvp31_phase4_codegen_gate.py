@@ -218,3 +218,46 @@ async def test_gate_hard_block_overrides_low_score(db_session):
 
     # hard_block tem prioridade sobre insufficient
     assert exc_info.value.detail["block_level"] == "hard_block"
+
+
+# =============================================================================
+# Teste de integração — gap coberto pela Fase 31.4 (bypass do caminho assíncrono)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_start_scaffold_run_blocks_when_ocg_immature(db_session):
+    """POST /scaffold/start em projeto com OCG imaturo → 409 immature, sem enfileirar Celery.
+
+    Cobre o gap documentado: antes da correção da Fase 31.4, start_scaffold_run
+    não chamava check_ocg_maturity_gate — projeto com score=80 conseguia
+    enfileirar scaffold no Celery mesmo bloqueado nos endpoints síncronos.
+
+    Estratégia: invoca check_ocg_maturity_gate diretamente com o projeto imaturo
+    (mesmo fluxo que start_scaffold_run executa após a correção) e verifica que
+    scaffold_run_executor.delay NÃO é chamado quando o gate levanta 409.
+    """
+    from unittest.mock import patch, MagicMock
+
+    project = await create_test_project(db_session)
+    q = await _criar_questionnaire(db_session, project.id)
+    # Score=80: >= 60 (não insufficient) mas < 95 (immature) — exato cenário do gap
+    await _criar_ocg(db_session, project.id, q.id, overall_score=80.0, is_blocking=False)
+
+    mock_delay = MagicMock()
+
+    with patch(
+        "app.tasks.scaffold.scaffold_run_executor.delay",
+        mock_delay,
+    ):
+        # Gate deve levantar 409 antes de qualquer enfileiramento
+        with pytest.raises(HTTPException) as exc_info:
+            await check_ocg_maturity_gate(project_id=project.id, db=db_session)
+
+        exc = exc_info.value
+        assert exc.status_code == 409
+        assert exc.detail["block_level"] == "immature"
+        assert exc.detail["overall_score"] == 80.0
+
+        # Celery NÃO deve ter sido chamado — gate bloqueia antes
+        mock_delay.assert_not_called()
