@@ -775,25 +775,31 @@ function RenderQuestion({ question, value, onChange, error, disabled }: any) {
                   </label>
 
                   {opt === 'Outro' && isOtherChecked && (
-                    <input
-                      type="text"
-                      placeholder="Descreva outras opções..."
-                      value={(() => {
-                        const outro = (value || []).find((v: any) => typeof v === 'string' && v.startsWith('Outro:'))
-                        return outro ? outro.substring(6).trim() : ''
-                      })()}
-                      onChange={(e) => {
-                        const selected = (value || []).filter((v: any) => !v.startsWith('Outro:'))
-                        const texto = e.target.value.trim()
-                        if (texto) {
-                          onChange([...selected, `Outro: ${texto}`])
-                        } else {
-                          onChange([...selected, 'Outro:'])
-                        }
-                      }}
-                      disabled={disabled}
-                      className="ml-6 mt-1 w-full px-2 py-1 border border-gray-300 rounded text-sm text-gray-900"
-                    />
+                    <div className="ml-6 mt-2 space-y-1">
+                      <label className="block text-xs text-slate-400">
+                        Descreva outras opções (use vírgulas ou quebras de linha para separar):
+                      </label>
+                      <textarea
+                        rows={3}
+                        placeholder={`Ex.:\n• Kerberos\n• Certificados X.509 internos\n• SSO via SAML 2.0`}
+                        value={(() => {
+                          const outro = (value || []).find((v: any) => typeof v === 'string' && v.startsWith('Outro:'))
+                          return outro ? outro.substring(6).trim() : ''
+                        })()}
+                        onChange={(e) => {
+                          const selected = (value || []).filter((v: any) => !v.startsWith('Outro:'))
+                          const texto = e.target.value
+                          if (texto.trim()) {
+                            // Preserva espaços internos do textarea (multi-line) — só trim externo
+                            onChange([...selected, `Outro: ${texto}`])
+                          } else {
+                            onChange([...selected, 'Outro:'])
+                          }
+                        }}
+                        disabled={disabled}
+                        className="w-full px-3 py-2 border border-gray-300 rounded text-sm text-gray-900 resize-y min-h-[80px] font-mono"
+                      />
+                    </div>
                   )}
                 </div>
               )
