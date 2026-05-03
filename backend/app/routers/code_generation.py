@@ -592,31 +592,25 @@ async def generate_scaffold(
         design_tokens=design_tokens,
     )
 
-    # 5. Chamar LLM
-    api_key = app_settings.ANTHROPIC_API_KEY
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API key do Anthropic não configurada. Configure em Admin > Configurações.",
-        )
+    # 5. Chamar LLM via porta única (DT-079: AIKeyResolver, sem hardcode Anthropic).
+    # Budget herdado de settings.ANTHROPIC_MAX_TOKENS (legado MVP 3 — não toca
+    # provider, apenas o número). clamp_max_tokens dentro do helper respeita
+    # o cap real do model resolvido.
+    from app.services.codegen_llm import call_codegen_llm
 
     try:
-        from anthropic import AsyncAnthropic
-
-        client = AsyncAnthropic(api_key=api_key)
-        response = await client.messages.create(
-            model=app_settings.ANTHROPIC_MODEL,
-            max_tokens=app_settings.ANTHROPIC_MAX_TOKENS,
+        raw_text = await call_codegen_llm(
+            db=db,
+            project_id=project_id,
+            user_prompt=prompt,
+            max_tokens=getattr(app_settings, "ANTHROPIC_MAX_TOKENS", 8192),
             temperature=0.3,
-            messages=[{"role": "user", "content": prompt}],
+            log_context="scaffold.llm",
         )
-
-        raw_text = response.content[0].text
 
         logger.info(
             "scaffold.llm_response",
             project_id=str(project_id),
-            tokens_used=response.usage.output_tokens,
             response_length=len(raw_text),
         )
 
@@ -1699,31 +1693,24 @@ async def generate_scaffold_plan(
         arguider_modules=[],
     )
 
-    api_key = app_settings.ANTHROPIC_API_KEY
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API key do Anthropic não configurada. Configure em Admin > Configurações.",
-        )
-
-    from anthropic import AsyncAnthropic
-    client = AsyncAnthropic(api_key=api_key)
+    # DT-079: porta única AIKeyResolver. Sem hardcode Anthropic.
     # max_tokens 16384: 4096 estourava com >50 arquivos no plano (cada item
-    # JSON ~80 tokens). 16384 cobre ~200 itens com folga. LLM nunca cuspe
-    # mais que isso pra um plan; se chegar perto do teto, é sinal de prompt
-    # quebrado, não de falta de espaço.
-    response = await client.messages.create(
-        model=app_settings.ANTHROPIC_MODEL,
+    # JSON ~80 tokens). 16384 cobre ~200 itens com folga. clamp_max_tokens
+    # interno respeita o cap do model escolhido (Opus=32k, DeepSeek=8k).
+    from app.services.codegen_llm import call_codegen_llm
+
+    raw_text = await call_codegen_llm(
+        db=db,
+        project_id=project_id,
+        user_prompt=prompt,
         max_tokens=16384,
         temperature=0.2,
-        messages=[{"role": "user", "content": prompt}],
+        log_context="scaffold_plan.llm",
     )
-    raw_text = response.content[0].text
 
     logger.info(
         "scaffold_plan.llm_response",
         project_id=str(project_id),
-        tokens_used=response.usage.output_tokens,
         response_length=len(raw_text),
     )
 
@@ -1847,21 +1834,17 @@ async def generate_scaffold_item(
         design_tokens=design_tokens,
     )
 
-    api_key = app_settings.ANTHROPIC_API_KEY
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="API key do Anthropic não configurada.",
-        )
+    # DT-079: porta única AIKeyResolver. Sem hardcode Anthropic.
+    from app.services.codegen_llm import call_codegen_llm
 
-    from anthropic import AsyncAnthropic
-    client = AsyncAnthropic(api_key=api_key)
     try:
-        response = await client.messages.create(
-            model=app_settings.ANTHROPIC_MODEL,
+        raw_text = await call_codegen_llm(
+            db=db,
+            project_id=project_id,
+            user_prompt=prompt,
             max_tokens=8192,
             temperature=0.3,
-            messages=[{"role": "user", "content": prompt}],
+            log_context="scaffold_item.llm",
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning(
@@ -1876,14 +1859,14 @@ async def generate_scaffold_item(
             error_message=f"LLM falhou: {str(exc)[:200]}",
         )
 
-    raw_text = response.content[0].text
-    tokens = response.usage.output_tokens
+    # DT-079: tokens não vêm pelo helper (provider-agnóstico) — mantemos 0.
+    # Métricas de tokens já são contabilizadas em ai_usage_log via call_llm.
+    tokens = 0
 
     logger.info(
         "scaffold_item.llm_response",
         project_id=str(project_id),
         path=request.path,
-        tokens_used=tokens,
     )
 
     stripped = raw_text.strip()
@@ -2367,28 +2350,13 @@ async def review_code_by_ai(
     Revisão de código pela IA antes de salvar.
     Verifica gaps, erros, práticas da empresa e discrepâncias.
     """
-    try:
-        from anthropic import AsyncAnthropic
-        from app.core.config import settings as app_settings
+    # DT-079: porta única AIKeyResolver. Sem hardcode Anthropic.
+    # Comportamento canônico preservado: quando provider não está configurado
+    # ou LLM falha, retorna review aprovado com warning — não bloqueia o
+    # caminho de salvar (best-effort).
+    from app.services.codegen_llm import call_codegen_llm
 
-        if not app_settings.ANTHROPIC_API_KEY:
-            return {
-                "review": {
-                    "approved": True,
-                    "gaps": [],
-                    "errors": [],
-                    "warnings": ["Revisão IA indisponível (API key não configurada)"],
-                    "suggestions": [],
-                }
-            }
-
-        client = AsyncAnthropic(api_key=app_settings.ANTHROPIC_API_KEY)
-
-        response = await client.messages.create(
-            model=app_settings.ANTHROPIC_MODEL,
-            max_tokens=2048,
-            temperature=0.1,
-            system="""Você é um revisor de código sênior do GCA. Analise o código abaixo e identifique:
+    system_prompt = """Você é um revisor de código sênior do GCA. Analise o código abaixo e identifique:
 1. ERROS: bugs, problemas de sintaxe, falhas de lógica
 2. GAPS: funcionalidades faltantes, tratamento de erro ausente
 3. AVISOS: práticas ruins, código não seguro, problemas de performance
@@ -2408,18 +2376,22 @@ Responda SOMENTE com JSON válido:
   "gaps": ["..."],
   "warnings": ["..."],
   "suggestions": ["..."]
-}""",
-            messages=[
-                {
-                    "role": "user",
-                    "content": f"Arquivo: {req.file_path}\n\nCódigo:\n```\n{req.code[:8000]}\n```",
-                }
-            ],
+}"""
+
+    try:
+        text = await call_codegen_llm(
+            db=db,
+            project_id=req.project_id,
+            user_prompt=f"Arquivo: {req.file_path}\n\nCódigo:\n```\n{req.code[:8000]}\n```",
+            system_prompt=system_prompt,
+            max_tokens=2048,
+            temperature=0.1,
+            log_context="codegen.review",
         )
 
-        import json, re
+        import json
+        import re
 
-        text = response.content[0].text
         try:
             review = json.loads(text)
         except json.JSONDecodeError:
@@ -2431,6 +2403,20 @@ Responda SOMENTE com JSON válido:
             )
 
         return {"review": review}
+
+    except HTTPException as http_exc:
+        # 503 (sem provider) → degrade graceful, mantém UX antiga.
+        if http_exc.status_code == status.HTTP_503_SERVICE_UNAVAILABLE:
+            return {
+                "review": {
+                    "approved": True,
+                    "gaps": [],
+                    "errors": [],
+                    "warnings": ["Revisão IA indisponível (provedor não configurado)"],
+                    "suggestions": [],
+                }
+            }
+        raise
 
     except Exception as e:
         return {
@@ -2513,21 +2499,18 @@ async def regenerate_single_file(
         design_tokens=design_tokens,
     )
 
-    api_key = app_settings.ANTHROPIC_API_KEY
-    if not api_key:
-        raise HTTPException(status_code=503, detail="API key do Anthropic não configurada.")
+    # DT-079: porta única AIKeyResolver. Sem hardcode Anthropic.
+    from app.services.codegen_llm import call_codegen_llm
 
     try:
-        from anthropic import AsyncAnthropic
-
-        client = AsyncAnthropic(api_key=api_key)
-        response = await client.messages.create(
-            model=app_settings.ANTHROPIC_MODEL,
+        raw_text = await call_codegen_llm(
+            db=db,
+            project_id=project_id,
+            user_prompt=prompt,
             max_tokens=4096,
             temperature=0.3,
-            messages=[{"role": "user", "content": prompt}],
+            log_context="codegen.regenerate_file",
         )
-        raw_text = response.content[0].text
 
         # Parse JSON com fallbacks
         parsed = None
