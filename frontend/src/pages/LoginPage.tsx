@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
-import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, X } from 'lucide-react'
+import { Lock, Mail, Eye, EyeOff, Loader2, FolderPlus, ArrowRight, X, Shield, Users } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthStore } from '@/stores/authStore'
 import { useCodeGenProgressStore } from '@/stores/codeGenProgressStore'
@@ -172,6 +172,16 @@ interface ProjectOption {
 
 const LAST_PROJECT_KEY = 'gca:last_project_slug'
 
+// Modos de login canônicos:
+//  - 'gp': fluxo padrão para Gerente de Projetos / membros (combo de projeto + senha).
+//  - 'admin': login da instância (sem combo de projeto, vai direto para /admin).
+// O fluxo admin SEMPRE precisa ser explícito — o botão "Admin" no topo
+// alterna entre os modos. Antes (até 2026-05-03), o botão tentava
+// `navigate('/admin')` antes do login, caía no RequireAdmin guard com
+// user=null, redirecionava para /projects, AppLayout via que não está
+// logado e voltava para /login → loop infinito.
+type LoginMode = 'gp' | 'admin'
+
 export function LoginPage() {
   const navigate = useNavigate()
   const { login, projectLogin } = useAuth()
@@ -186,6 +196,7 @@ export function LoginPage() {
   const [expandedCard, setExpandedCard] = useState<string | null>(null)
   const [projects, setProjects] = useState<ProjectOption[]>([])
   const [selectedSlug, setSelectedSlug] = useState<string>('')
+  const [mode, setMode] = useState<LoginMode>('gp')
 
   useEffect(() => {
     const t = setTimeout(() => setMounted(true), 50)
@@ -231,9 +242,17 @@ export function LoginPage() {
     setLoading(true)
 
     try {
-      // Branch principal: projeto selecionado → projectLogin (valida membership)
-      // Sem projeto selecionado → login (só funciona pra admin)
-      if (selectedSlug) {
+      // Mode 'admin': SEMPRE chama /auth/login (sem slug). Backend recusa
+      // com 403 se o user não for admin — UX não vaza pra fluxo errado.
+      // Mode 'gp': exige slug obrigatório — projectLogin valida membership.
+      if (mode === 'admin') {
+        const ok = await login(email, password)
+        if (ok) {
+          navigate('/')
+        } else {
+          setError('Email ou senha incorretos')
+        }
+      } else if (selectedSlug) {
         const result = await projectLogin(email, password, selectedSlug)
         // Sucesso = backend devolveu access_token + project.id. projectLogin
         // joga em caso de 4xx — então cair aqui sem project_id é bug,
@@ -247,12 +266,7 @@ export function LoginPage() {
           setError('Resposta inesperada do servidor — tente novamente em instantes.')
         }
       } else {
-        const ok = await login(email, password)
-        if (ok) {
-          navigate('/')
-        } else {
-          setError('Email ou senha incorretos')
-        }
+        setError('Selecione um projeto. Para entrar como administrador da instância, clique em "Admin" no canto superior direito.')
       }
     } catch (err: unknown) {
       // O api.ts interceptor já achata o erro em { status, message, data }.
@@ -397,13 +411,28 @@ export function LoginPage() {
         </div>
       </div>
 
-      {/* ═══ ADMIN ACCESS BUTTON — Top Right ═══ */}
+      {/* ═══ MODE TOGGLE — Top Right ═══
+          Alterna entre login GP (com combo de projeto) e login Admin
+          (sem combo). Não navega — só muda o modo do form. Após login
+          admin bem-sucedido, IndexRedirect joga para /admin automaticamente. */}
       <button
-        onClick={() => navigate('/admin')}
-        className="absolute top-6 right-6 z-20 px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg flex items-center gap-2 shadow-lg transition-all transform hover:scale-105"
+        type="button"
+        onClick={() => {
+          setMode(prev => (prev === 'admin' ? 'gp' : 'admin'))
+          setError(null)
+          // Em modo admin, esquece projeto selecionado.
+          if (mode !== 'admin') setSelectedSlug('')
+        }}
+        className={`
+          absolute top-6 right-6 z-20 px-4 py-2 text-sm font-semibold rounded-lg
+          flex items-center gap-2 shadow-lg transition-all transform hover:scale-105
+          ${mode === 'admin'
+            ? 'bg-violet-600 hover:bg-violet-700 text-white'
+            : 'bg-red-600 hover:bg-red-700 text-white'}
+        `}
       >
-        <Lock size={16} />
-        🔐 Admin
+        {mode === 'admin' ? <Users size={16} /> : <Shield size={16} />}
+        {mode === 'admin' ? 'Login do Projeto (GP)' : 'Login Admin'}
       </button>
 
       {/* ═══ RIGHT PANEL — Login ═══ */}
@@ -424,11 +453,22 @@ export function LoginPage() {
             <span className="text-white font-display text-xl font-bold">GCA</span>
           </div>
 
-          {/* Heading */}
+          {/* Heading — muda conforme o modo */}
           <div className="mb-8">
-            <h2 className="font-display text-2xl font-bold text-white">Acesse o GCA</h2>
+            <h2 className="font-display text-2xl font-bold text-white flex items-center gap-2">
+              {mode === 'admin' ? (
+                <>
+                  <Shield className="w-6 h-6 text-red-400" />
+                  Acesso Administrativo
+                </>
+              ) : (
+                'Acesse o GCA'
+              )}
+            </h2>
             <p className="mt-2 text-slate-400 text-sm">
-              Suas credenciais protegidas com criptografia end-to-end.
+              {mode === 'admin'
+                ? 'Login da instância — gestão de usuários, projetos globais e configurações.'
+                : 'Suas credenciais protegidas com criptografia end-to-end.'}
             </p>
           </div>
 
@@ -442,8 +482,10 @@ export function LoginPage() {
             </div>
           )}
 
-          {/* Admin button — visible only to admins */}
-          {user?.is_admin && (
+          {/* Admin redirect — se user já está logado como admin, oferece atalho.
+              Toggle do topo cuida da entrada inicial; este card só aparece
+              em sessão já autenticada (raro nessa página, mas mantém UX). */}
+          {user?.is_admin && mode === 'gp' && (
             <div className="mb-6">
               <button
                 type="button"
@@ -451,44 +493,57 @@ export function LoginPage() {
                 className="w-full bg-gradient-to-r from-red-600 to-orange-600 hover:from-red-700 hover:to-orange-700 text-white font-semibold py-3 px-6 rounded-xl flex items-center justify-center gap-3 shadow-lg hover:shadow-xl transition-all transform hover:scale-105"
               >
                 <Lock size={20} />
-                🔐 Painel de Administração
+                Ir para Painel de Administração
               </button>
-              <p className="text-slate-500 text-xs mt-2 text-center">Gerencie toda a instância GCA (usuários, projetos globais, configurações)</p>
+              <p className="text-slate-500 text-xs mt-2 text-center">Você já está autenticado como admin.</p>
             </div>
           )}
 
           {/* Form */}
           <form onSubmit={handleLogin} className="space-y-5">
-            {/* Projeto (combo) — obrigatório para membros */}
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">
-                <FolderPlus className="w-3.5 h-3.5" />
-                PROJETO
-              </label>
-              <select
-                value={selectedSlug}
-                onChange={e => setSelectedSlug(e.target.value)}
-                disabled={loading}
-                className="
-                  w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-3.5
-                  text-sm text-white
-                  focus:outline-none focus:border-violet-500/50 focus:bg-white/[0.08]
-                  transition-all duration-300 appearance-none cursor-pointer
-                "
-              >
-                <option value="" className="bg-[#1c1c34]">Selecione um projeto</option>
-                {projects.map(p => (
-                  <option key={p.id} value={p.slug} className="bg-[#1c1c34]">
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              <p className="text-[10px] text-slate-600">
-                {selectedSlug
-                  ? 'Suas credenciais serão validadas neste projeto.'
-                  : 'Selecione seu projeto para continuar. Administradores podem usar o painel acima.'}
-              </p>
-            </div>
+            {/* Projeto (combo) — apenas em modo GP. Admin entra sem combo. */}
+            {mode === 'gp' && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                  <FolderPlus className="w-3.5 h-3.5" />
+                  PROJETO
+                </label>
+                <select
+                  value={selectedSlug}
+                  onChange={e => setSelectedSlug(e.target.value)}
+                  disabled={loading}
+                  className="
+                    w-full bg-white/[0.05] border border-white/[0.08] rounded-xl px-4 py-3.5
+                    text-sm text-white
+                    focus:outline-none focus:border-violet-500/50 focus:bg-white/[0.08]
+                    transition-all duration-300 appearance-none cursor-pointer
+                  "
+                >
+                  <option value="" className="bg-[#1c1c34]">Selecione um projeto</option>
+                  {projects.map(p => (
+                    <option key={p.id} value={p.slug} className="bg-[#1c1c34]">
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-600">
+                  {selectedSlug
+                    ? 'Suas credenciais serão validadas neste projeto.'
+                    : 'Selecione seu projeto para continuar.'}
+                </p>
+              </div>
+            )}
+
+            {/* Aviso visual em modo admin — deixa explícito que está num fluxo separado. */}
+            {mode === 'admin' && (
+              <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 flex items-start gap-3">
+                <Shield className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
+                <div className="text-xs text-red-200 leading-relaxed">
+                  <strong className="block text-red-300 mb-1">Modo administrativo</strong>
+                  Login direto na instância (sem projeto). Apenas usuários com flag <code className="text-red-300">is_admin</code> conseguem entrar por aqui.
+                </div>
+              </div>
+            )}
 
             {/* Email */}
             <div className="space-y-2">

@@ -143,3 +143,4 @@ questionario_governance_*.pdf
 .claude/audit.log.lock
 .claude/settings.json.bak.*
 .claude.bak.*
+backups/
