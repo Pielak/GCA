@@ -9,7 +9,10 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
+**Nenhum MVP em execução.** Gate §6 aberto.
+
+### MVP recém-fechado
+**MVP 35 — Validação canônica do Questionário Técnico** — FECHADO 2026-05-03. **3 gates aprovados** + 6 fases entregues + 90/90 testes Fase + 110/110 suite ampla (zero regressão) + smoke E2E real validado. Detalhe em [`docs/MVP_35_QUESTIONNAIRE_VALIDATION.md`](docs/MVP_35_QUESTIONNAIRE_VALIDATION.md). CLAUDE.md §2.4 atualizado com cascata especial `file_type='questionnaire'` + ordem hierárquica do pipeline.
 
 ### MVP recém-fechado
 **MVP 34 — Reversão de propagação ao deletar documento** — FECHADO 2026-05-03. **3 gates aprovados** + 5 fases entregues + 15/15 testes verdes (89% cobertura) + smoke E2E real validado (OCG v8 → v9 via HTTP). Detalhe em [`docs/MVP_34_REVERT_DOCUMENT_DELETE.md`](docs/MVP_34_REVERT_DOCUMENT_DELETE.md).

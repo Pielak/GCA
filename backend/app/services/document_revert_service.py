@@ -269,6 +269,49 @@ async def revert_document_propagation(
     # ── 9. Auto-archive de module_candidates órfãos (DBA-S3) ──────────────
     modules_archived = await _archive_orphan_modules(db, document_id)
 
+    # ── 9.5. MVP 35 (DBA-M6): cascata extra para file_type='questionnaire' ──
+    # Quando o doc deletado é um questionnaire sintético (criado pelo router de
+    # submit do questionário técnico), volta o projeto à fase de configuração:
+    #   - TechnicalQuestionnaire.status='archived' (preserva histórico, força novo)
+    #   - Questionnaire.approved=False (gate de pipeline marca não-aprovado)
+    questionnaire_reverted = False  # default — só vira True quando cascata roda
+    if doc.file_type == "questionnaire":
+        from sqlalchemy import update
+        from app.models.base import Questionnaire, TechnicalQuestionnaire
+
+        # Marca TechnicalQuestionnaire como archived. submitted_at preservado
+        # (CHECK chk_tq_submitted_at exige NOT NULL para archived).
+        result = await db.execute(
+            update(TechnicalQuestionnaire)
+            .where(
+                TechnicalQuestionnaire.project_id == project_id,
+                TechnicalQuestionnaire.status == "submitted",
+            )
+            .values(status="archived")
+        )
+        tq_count = result.rowcount or 0
+
+        # Marca Questionnaire (legacy, FK do OCG) como não-aprovado.
+        result = await db.execute(
+            update(Questionnaire)
+            .where(
+                Questionnaire.project_id == project_id,
+                Questionnaire.approved.is_(True),
+            )
+            .values(approved=False)
+        )
+        q_count = result.rowcount or 0
+
+        await db.flush()
+        questionnaire_reverted = (tq_count > 0 or q_count > 0)
+        logger.info(
+            "document_revert.questionnaire_cascade",
+            project_id=str(project_id),
+            document_id=str(document_id),
+            technical_questionnaires_archived=tq_count,
+            questionnaires_unapproved=q_count,
+        )
+
     # ── 10. Aviso de regressão de maturidade (M3) ─────────────────────────
     maturity_warning = None
     if score_after < SCORE_MATURIDADE:
@@ -309,6 +352,8 @@ async def revert_document_propagation(
         "modules_archived": [str(mid) for mid in modules_archived],
         "maturity_warning": maturity_warning,
         "completed_at": datetime.now(timezone.utc).isoformat(),
+        # MVP 35: True se cascata extra de questionnaire foi disparada
+        "questionnaire_reverted": questionnaire_reverted,
     }
     doc.revert_metadata = revert_payload
     await db.flush()

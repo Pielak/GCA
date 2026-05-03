@@ -163,6 +163,33 @@ Complementa — **não viola** — a regra "OCG não contrai por ingestão". A r
 
 Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine`. Detalhe operacional do MVP 34: [`docs/MVP_34_REVERT_DOCUMENT_DELETE.md`](docs/MVP_34_REVERT_DOCUMENT_DELETE.md).
 
+#### Cascata especial para `file_type='questionnaire'` (MVP 35, 2026-05-03)
+
+Quando o doc deletado é o IngestedDocument sintético do questionário técnico (criado no submit), a cascata estende:
+
+- ✅ `TechnicalQuestionnaire.status` → `archived` (preserva histórico, força novo questionário)
+- ✅ `Questionnaire.approved` (legacy, FK do OCG) → `False`
+- ✅ `setup_status.questionnaire_approved` → `False` → `ready_to_activate` → `False`
+- ✅ Pipeline n8n bloqueado até novo questionário ser submetido
+- ✅ Frontend redireciona para `/settings?tab=questionario`
+
+Pipeline canônico, NESTA ORDEM (MVP 35 §_check_setup_status):
+1. **Repositório Git** (ou similar) configurado
+2. **Chave LLM** válida e validada
+3. **Questionário técnico** APROVADO E SUBMETIDO (sem aprovação, gate fica fechado)
+
+Estado canônico do Questionário Técnico (MVP 35):
+- `draft` — rascunho/auto-save
+- `validated` — passou Validar Escopo (Camada 1 = 30 regras DSL determinísticas), pré-submit
+- `submitted` — terminal, dispara personas + cria IngestedDocument sintético (após Camada 2 LLM sanity check)
+- `archived` — deletado via Ingestão (volta projeto a setup)
+
+Validação canônica (2 camadas):
+- **Camada 1 — RulesEvaluator** (`backend/app/services/questionnaire_validation/`): 30 regras DSL JSON em 5 temas (NoSQL×ACID, Stack runtime, FE×BE, Compliance×PII, Infra×escala). Stateless, determinístico, < 50ms. Espelha frontend via `GET /api/v1/projects/technical-questionnaire/rules`.
+- **Camada 2 — LLM sanity check** (apenas no submit): detecta incoerências semânticas. Em falha, **bloqueia submit** (sem fallback silencioso, alinha §0 deste arquivo).
+
+Detalhe operacional do MVP 35: [`docs/MVP_35_QUESTIONNAIRE_VALIDATION.md`](docs/MVP_35_QUESTIONNAIRE_VALIDATION.md).
+
 ### 2.5. Política de criticidade de IA (3 níveis)
 
 - **Baixa**: local/barato (Ollama ou modelo econômico).
