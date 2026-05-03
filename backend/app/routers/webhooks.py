@@ -395,7 +395,7 @@ async def ingestion_complete(
                 # parecer: o objeto completo da persona (sem o campo error_message isolado)
                 parecer = {k: v for k, v in persona_output.items() if k != "error_message"}
 
-                await db.execute(text("""
+                ocg_row = await db.execute(text("""
                     INSERT INTO ocg_individual
                         (id, project_id, document_id, persona_id, persona_name,
                          parecer, status, error_message, completed_at, created_at)
@@ -408,6 +408,7 @@ async def ingestion_complete(
                         status         = EXCLUDED.status,
                         error_message  = EXCLUDED.error_message,
                         completed_at   = EXCLUDED.completed_at
+                    RETURNING id
                 """), {
                     "project_id": project_id,
                     "document_id": doc_id,
@@ -417,6 +418,48 @@ async def ingestion_complete(
                     "status": persona_status,
                     "error_message": error_msg,
                 })
+                ocg_individual_id = ocg_row.scalar_one()
+
+                # HITL — extrair questions[] do PersonaOutput-v2 e persistir.
+                # Filosofia "Assistida": persona detectou lacuna no insumo e perguntou.
+                # DELETE só de pending: respostas já dadas (status='answered') preservadas.
+                questions = persona_output.get("questions") or []
+                if questions and not failed:
+                    await db.execute(text("""
+                        DELETE FROM persona_follow_up_questions
+                        WHERE document_id = :doc_id
+                          AND persona_id = :persona_id
+                          AND status = 'pending'
+                    """), {"doc_id": doc_id, "persona_id": persona_tag})
+                    for idx, q in enumerate(questions):
+                        if isinstance(q, dict):
+                            qtext = q.get("question") or q.get("text") or q.get("pergunta") or ""
+                            qctx = q.get("context") or q.get("rationale") or q.get("contexto")
+                        else:
+                            qtext = str(q)
+                            qctx = None
+                        qtext = (qtext or "").strip()
+                        if not qtext:
+                            continue
+                        await db.execute(text("""
+                            INSERT INTO persona_follow_up_questions
+                                (id, project_id, document_id, ocg_individual_id,
+                                 persona_id, persona_name, question_text, context,
+                                 question_order, status, created_at, updated_at)
+                            VALUES
+                                (gen_random_uuid(), :project_id, :doc_id, :ocg_id,
+                                 :persona_id, :persona_name, :qtext, :qctx,
+                                 :qorder, 'pending', NOW(), NOW())
+                        """), {
+                            "project_id": project_id,
+                            "doc_id": doc_id,
+                            "ocg_id": ocg_individual_id,
+                            "persona_id": persona_tag,
+                            "persona_name": persona_name,
+                            "qtext": qtext[:5000],
+                            "qctx": (qctx or "")[:500] or None,
+                            "qorder": idx,
+                        })
 
             # --- Fase 31.3: conjunto de personas falhas (reutilizado abaixo) ---
             # Construído uma única vez para evitar duplicidade entre Tarefa 1 e 2.

@@ -352,14 +352,38 @@ class IngestionService:
         }
         mime_type = mime_map.get(file_type, "application/octet-stream")
 
+        # DOCX: Normalizer n8n não tem extrator (sem require()). Pré-extraímos
+        # texto aqui via python-docx e enviamos como text/plain para o pipeline
+        # ter conteúdo a analisar.
+        payload_bytes = file_bytes
+        if file_type == "docx" and file_bytes:
+            try:
+                from app.services.rich_docx_extractor import extract_rich_text
+                docx_text = extract_rich_text(file_bytes) or ""
+                if docx_text.strip() and not docx_text.startswith("["):
+                    payload_bytes = docx_text.encode("utf-8")
+                    mime_type = "text/plain"
+                else:
+                    logger.warning(
+                        "ingestion.docx_extract_empty",
+                        doc_id=str(doc_id),
+                        sample=docx_text[:120],
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.docx_extract_failed",
+                    doc_id=str(doc_id),
+                    error=str(exc),
+                )
+
         n8n_payload = {
             "ingestion_id": str(doc_id),
             "project_id": str(project_id),
-            "document_bytes_base64": base64.b64encode(file_bytes).decode() if file_bytes else "",
+            "document_bytes_base64": base64.b64encode(payload_bytes).decode() if payload_bytes else "",
             "document_metadata": {
                 "filename": (doc.original_filename if doc else "") or (doc.filename if doc else ""),
                 "mime_type": mime_type,
-                "size_bytes": len(file_bytes) if file_bytes else 0,
+                "size_bytes": len(payload_bytes) if payload_bytes else 0,
                 "uploaded_by": str(doc.uploaded_by) if doc else "",
                 "uploaded_by_role": "GP",
                 "declared_purpose": "upload",

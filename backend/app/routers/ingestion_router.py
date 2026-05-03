@@ -759,6 +759,54 @@ async def get_extraction_report(
             detail="Conteúdo do documento perdido — não é possível gerar relatório.",
         )
 
+    # Documento sintético do questionário: não tem arquivo no storage.
+    # Relatório vem direto de TechnicalQuestionnaire.responses, em shape
+    # compatível com ExtractionReportCard (chars, paragraphs, warnings, etc).
+    if doc.file_type == "questionnaire":
+        from app.models.base import TechnicalQuestionnaire
+        from sqlalchemy import select as _sel
+        tq = (
+            await db.execute(
+                _sel(TechnicalQuestionnaire)
+                .where(TechnicalQuestionnaire.project_id == project_id)
+                .order_by(TechnicalQuestionnaire.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        responses = (tq.responses if tq else {}) or {}
+        answered = [(k, v) for k, v in responses.items() if v not in (None, "", [], {})]
+        sample_lines = []
+        for key, val in sorted(answered)[:15]:
+            val_str = ", ".join(map(str, val)) if isinstance(val, list) else str(val)
+            sample_lines.append(f"{key}: {val_str[:120]}")
+        text_sample = "\n".join(sample_lines)
+        return {
+            "document_id": str(document_id),
+            "original_filename": doc.original_filename,
+            "file_type": "questionnaire",
+            "ok": len(answered) > 0,
+            "chars": len(text_sample),
+            "paragraphs": len(answered),
+            "tables_detected": 0,
+            "text_boxes": 0,
+            "headers_footers": 0,
+            "pdf_layers": [],
+            "pdf_pages_with_text": 0,
+            "acroform_fields": 0,
+            "requirements_functional": [],
+            "requirements_non_functional": [],
+            "module_hints": [],
+            "implicit_requirements": [],
+            "deliverables_hints": [],
+            "phases_hints": [],
+            "warnings": (
+                []
+                if tq and tq.status == "submitted"
+                else [f"Questionário em status '{tq.status if tq else 'inexistente'}' — não submetido."]
+            ),
+            "text_sample": text_sample,
+        }
+
     file_bytes = read_ingested(project_id, doc.filename)
     if file_bytes is None:
         raise HTTPException(
