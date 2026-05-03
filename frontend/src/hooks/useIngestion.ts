@@ -223,27 +223,94 @@ export const useUploadDocument = (projectId: string | undefined) => {
   })
 }
 
-// Deletar documento
+// Deletar documento (MVP 34: soft-delete + reversão assíncrona).
+// Aceita reason: 'manual' | 'lgpd' | 'smoke_cleanup'. Default 'manual'.
+// Endpoint retorna 202 + revert_job_id; consumer decide se faz polling.
+export interface DeleteDocumentArgs {
+  documentId: string
+  reason?: 'manual' | 'lgpd' | 'smoke_cleanup'
+}
+
+export interface DeleteDocumentResponse {
+  success: boolean
+  revert_job_id?: string
+  message?: string
+}
+
 export const useDeleteDocument = (projectId: string | undefined) => {
   const queryClient = useQueryClient()
   const toast = useToast()
 
   return useMutation({
-    mutationFn: async (documentId: string) => {
-      const response = await apiClient.delete(`/projects/${projectId}/ingestion/${documentId}`)
+    mutationFn: async (args: DeleteDocumentArgs | string): Promise<DeleteDocumentResponse> => {
+      // Retrocompat: aceita string (documentId) direto.
+      const docId = typeof args === 'string' ? args : args.documentId
+      const reason = typeof args === 'string' ? 'manual' : (args.reason || 'manual')
+      const response = await apiClient.delete(
+        `/projects/${projectId}/ingestion/${docId}?reason=${encodeURIComponent(reason)}`,
+      )
       return response.data
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
+      // Invalida ingestão E OCG (recompute em background pode mudar score).
       queryClient.invalidateQueries({ queryKey: ['ingestion', projectId] })
-      toast.success('Documento removido com sucesso')
+      queryClient.invalidateQueries({ queryKey: ['ocg', projectId] })
+      queryClient.invalidateQueries({ queryKey: ['roadmap', projectId] })
+      toast.success(
+        data.message ||
+        'Documento removido. OCG está sendo recalculado em background.',
+      )
     },
     onError: (error: unknown) => {
       const msg = getErrorMessage(error)
-      // Erros 500 com traceback viram mensagem inutil. Normaliza.
       const friendly = msg.includes('Internal Server Error') || msg.includes('500')
         ? 'Falha ao remover no servidor (veja logs do backend). Tente novamente em alguns segundos.'
         : msg
       toast.error(`Falha ao remover: ${friendly}`)
+    },
+  })
+}
+
+// MVP 34: polling do status do job de revert.
+export interface RevertJobStatus {
+  job_id: string
+  state: 'pending' | 'running' | 'completed' | 'failed' | 'unknown'
+  raw_state: string
+  result?: {
+    status: 'reverted' | 'already_reverted' | 'not_found' | 'lease_busy'
+    score_before?: number
+    score_after?: number
+    version_from?: number
+    version_to?: number
+    delta_fields_reverted?: string[]
+    modules_archived?: string[]
+    maturity_warning?: string | null
+    completed_at?: string
+    duration_ms?: number
+    message?: string
+  }
+  error?: string
+}
+
+export const useRevertJobStatus = (
+  projectId: string | undefined,
+  jobId: string | undefined,
+  enabled = true,
+) => {
+  return useQuery<RevertJobStatus>({
+    queryKey: ['revert-job', projectId, jobId],
+    queryFn: async () => {
+      const response = await apiClient.get(
+        `/projects/${projectId}/revert-jobs/${jobId}/status`,
+      )
+      return response.data
+    },
+    enabled: !!projectId && !!jobId && enabled,
+    // Polling enquanto não está em estado terminal
+    refetchInterval: (query) => {
+      const state = query.state.data?.state
+      if (state === 'completed' || state === 'failed') return false
+      return 1500  // 1.5s
     },
   })
 }

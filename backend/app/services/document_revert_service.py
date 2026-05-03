@@ -86,6 +86,10 @@ async def revert_document_propagation(
         AlreadyRevertedError: doc já marcado deleted_at (caller decide UX).
     """
     # ── 1. Carregar doc + validar idempotência (Arq-S2 layer 2) ───────────
+    # IMPORTANTE: idempotência via `revert_metadata IS NOT NULL` (job COMPLETO),
+    # não via `deleted_at`. O endpoint `delete_document` já marca `deleted_at`
+    # sync antes de enfileirar (necessário para LGPD — doc some imediato das
+    # queries). Se usássemos `deleted_at` aqui, o job nunca processaria.
     doc = await db.get(IngestedDocument, document_id)
     if doc is None:
         raise DocumentNotFoundError(f"Documento {document_id} não encontrado")
@@ -93,15 +97,15 @@ async def revert_document_propagation(
         raise DocumentNotFoundError(
             f"Documento {document_id} não pertence ao projeto {project_id}"
         )
-    if doc.deleted_at is not None:
+    if doc.revert_metadata is not None:
         logger.info(
             "document_revert.already_reverted",
             document_id=str(document_id),
             project_id=str(project_id),
-            deleted_at=doc.deleted_at.isoformat(),
+            completed_at=doc.revert_metadata.get("completed_at"),
         )
         raise AlreadyRevertedError(
-            f"Documento {document_id} já foi revertido em {doc.deleted_at.isoformat()}"
+            f"Documento {document_id} já foi revertido em {doc.revert_metadata.get('completed_at')}"
         )
 
     # ── 2. Snapshot do OCG atual (score_before, version_from) ─────────────
@@ -120,13 +124,16 @@ async def revert_document_propagation(
         version_from=version_from,
     )
 
-    # ── 3. SOFT-DELETE do doc (precisa estar antes do recompute para que
-    #     `_load_persona_scores` já exclua via JOIN deleted_at IS NULL) ────
-    deleted_at = datetime.now(timezone.utc)
-    doc.deleted_at = deleted_at
-    doc.deleted_by = actor_id
-    doc.deleted_reason = reason
-    await db.flush()
+    # ── 3. SOFT-DELETE do doc (idempotente: se endpoint já marcou via
+    #     `IngestionService.delete_document`, mantém os valores existentes.
+    #     Se chamado via outro caller, marca aqui). Precisa estar antes do
+    #     recompute para que `_load_persona_scores` já exclua via JOIN
+    #     deleted_at IS NULL. ──
+    if doc.deleted_at is None:
+        doc.deleted_at = datetime.now(timezone.utc)
+        doc.deleted_by = actor_id
+        doc.deleted_reason = reason
+        await db.flush()
 
     # ── 4. Recompute do OCG ignorando o doc soft-deleted ──────────────────
     # `_load_persona_scores` (MVP 34) faz JOIN com IngestedDocument WHERE

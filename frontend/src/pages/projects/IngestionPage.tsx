@@ -213,11 +213,13 @@ export function IngestionPage() {
   const handleDelete = useCallback((docId: string, filename: string) => {
     const doc = documents.find(d => d.id === docId)
     const isProcessing = doc?.arguider_status === 'processing'
+    // MVP 34: deleção dispara reversão automática de propagação no OCG.
+    // Mensagem deixa claro pro GP — não é mais hard-delete simples.
     const msg = isProcessing
-      ? `Remover "${filename}"?\n\nA análise está em curso — remover cancela o processamento. Prossigo?`
-      : `Remover "${filename}"?`
+      ? `Remover "${filename}"?\n\nA análise está em curso — remover cancela o processamento e reverte os efeitos no OCG. Prossigo?`
+      : `Remover "${filename}"?\n\nO OCG e o backlog serão recalculados em background ignorando este documento. Módulos sugeridos exclusivamente por ele serão arquivados. Esta ação fica registrada na auditoria.\n\nProssigo?`
     if (confirm(msg)) {
-      deleteMutation.mutate(docId);
+      deleteMutation.mutate({ documentId: docId, reason: 'manual' });
     }
   }, [deleteMutation, documents]);
 

@@ -134,16 +134,94 @@ async def get_document_status(
 async def delete_document(
     project_id: UUID,
     document_id: UUID,
+    reason: str = "manual",
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Remove documento. GP apenas."""
+    """Soft-delete + reversão assíncrona de propagação no OCG (MVP 34).
+
+    BREAKING CHANGE vs pré-MVP 34: agora retorna **202 Accepted** com
+    `revert_job_id` em vez de **200 OK** síncrono. Frontend deve fazer
+    polling via `GET /projects/{pid}/revert-jobs/{job_id}/status`.
+
+    Query params:
+      - `reason`: 'manual' (default) | 'lgpd' | 'smoke_cleanup'.
+        Define rastreabilidade no audit_log_global e em revert_metadata.
+
+    Validações canônicas:
+      - 404 se doc não existe ou não pertence ao projeto
+      - 409 se doc já foi soft-deleted ou está em processamento
+      - 409 se algum módulo APROVADO depende deste doc
+      - 400 se reason inválido
+    """
     service = IngestionService(db)
-    result = await service.delete_document(project_id, document_id)
+    result = await service.delete_document(
+        project_id=project_id,
+        document_id=document_id,
+        actor_id=current_user_id,
+        reason=reason,
+    )
     sc = result.pop("status_code", 200)
     if sc >= 400:
         raise HTTPException(status_code=sc, detail=result.get("error", ""))
-    return result
+    # 202 Accepted: job em background, frontend faz polling.
+    from fastapi import Response
+    import json as _json
+    return Response(
+        content=_json.dumps(result, ensure_ascii=False),
+        status_code=sc,
+        media_type="application/json",
+    )
+
+
+@router.get("/projects/{project_id}/revert-jobs/{job_id}/status")
+async def revert_job_status(
+    project_id: UUID,
+    job_id: str,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """Polling do status do Celery job de revert (MVP 34 Fase 34.3).
+
+    Estados:
+      - `pending` — job enfileirado, ainda não pegou worker
+      - `running` — worker está processando
+      - `completed` — terminou com sucesso (payload em `result`)
+      - `failed` — exceção (payload em `error`)
+      - `unknown` — task_id não encontrado (TTL Celery expirado)
+
+    Quando `completed`, payload `result` contém:
+      - `status`: 'reverted' | 'already_reverted' | 'not_found' | 'lease_busy'
+      - `score_before`, `score_after`, `version_from`, `version_to`
+      - `delta_fields_reverted`, `modules_archived`, `maturity_warning`
+    """
+    from app.celery_app import celery_app
+    from celery.result import AsyncResult
+
+    async_result: AsyncResult = AsyncResult(job_id, app=celery_app)
+    state = async_result.state  # PENDING, STARTED, SUCCESS, FAILURE, RETRY, REVOKED
+
+    state_map = {
+        "PENDING": "pending",
+        "STARTED": "running",
+        "RETRY": "running",
+        "SUCCESS": "completed",
+        "FAILURE": "failed",
+        "REVOKED": "failed",
+    }
+    canonical = state_map.get(state, "unknown")
+
+    response = {
+        "job_id": job_id,
+        "state": canonical,
+        "raw_state": state,
+    }
+    if canonical == "completed":
+        response["result"] = async_result.result
+    elif canonical == "failed":
+        response["error"] = str(async_result.result) if async_result.result else "Erro desconhecido"
+
+    return response
 
 
 @router.post("/projects/{project_id}/ingestion/{document_id}/cancel")
