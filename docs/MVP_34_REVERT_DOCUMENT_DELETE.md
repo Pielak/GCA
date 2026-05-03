@@ -62,6 +62,11 @@ MVP 34 endereça caso diferente: **deleção legítima da fonte pelo GP** (opera
 - **Não** propagar reversão para integrações externas (Jira/Trello/Slack) — escopo separado
 - **Não** suportar batch delete (DELETE de N docs em uma transação) — MVP futuro
 - **Não** mudar comportamento de `quarantine_status` (ortogonal)
+- **Não** purgar conteúdo indexado em FTS5/livedocs (S1)
+
+### S1 — Placeholder roadmap: MVP futuro de purge FTS5/livedocs
+
+Para LGPD ficar completo, conteúdo do documento que foi indexado em FTS5 (Help/livedocs) também precisa ser removido. Hoje MVP 34 cobre OCG/backlog/audit, mas chunks indexados continuam pesquisáveis. **Decisão consciente:** LGPD parcial neste MVP, completo em MVP futuro de "FTS5/livedocs purge" (~1d). Registrar como dívida pós-merge se a equipe optar por não criar MVP separado: nova **DT-086** seria aberta automaticamente.
 
 ### Granularidade do REVERT
 
@@ -86,7 +91,8 @@ Operação atômica por documento:
 ### Fase 34.1 — Schema + soft-delete (~0.5d) — **DBA gate obrigatório**
 - Migration SQL plain: adicionar `deleted_at TIMESTAMPTZ NULL`, `deleted_by UUID NULL`, `deleted_reason VARCHAR(50) NULL` em `ingested_documents`
 - Migration: estender CHECK constraint do `ocg.change_type` para aceitar `REVERT_DOCUMENT_DELETE`
-- Atualizar todas as queries de `ingested_documents` que listam para o GP/UI: filtrar `WHERE deleted_at IS NULL` (cuidado com regressão silenciosa)
+- **M2 — Inventário obrigatório de queries impactadas (Gate 1):** rodar `grep -rn "ingested_documents" backend/app/ | grep -E "FROM|JOIN|select.*IngestedDocument"` antes de codar. Cada ponto que LISTA documentos para o GP/UI deve ganhar `WHERE deleted_at IS NULL`. Pontos que CONTAM total histórico (auditoria, métricas) ficam sem o filtro intencionalmente — declarar caso a caso. Resultado do grep entra como apêndice deste doc na Fase 34.1.
+- **S4 — CHECK constraint em `deleted_reason`:** valores aceitos `'manual'|'lgpd'|'smoke_cleanup'`. Migration inclui constraint canônica para evitar valor livre futuro. DBA já vai cobrar.
 
 ### Fase 34.2 — Celery job + service (~1.5d)
 - Novo `app/services/document_revert_service.py::revert_document_propagation(doc_id, actor_id, reason)`
@@ -94,18 +100,40 @@ Operação atômica por documento:
 - Re-agrega via `_load_persona_scores` (já existente, MVP 33)
 - Calcula novo `PILLAR_SCORES` + `overall_score`
 - Cria nova versão OCG com `change_type='REVERT_DOCUMENT_DELETE'`
-- Audit event `DOCUMENT_REVERTED` (novo `AuditEvents`)
+- Audit event `DOCUMENT_REVERTED` (novo `AuditEvents`) — preenche `details` com `actor_id`, `project_id`, `document_id`, `deleted_reason`, `score_before`, `score_after`, `delta_fields_reverted[]`
 - Auto-archive `module_candidates` órfãos
+- **M3 — Aviso de regressão de maturidade:** quando `overall_score` pós-revert cair abaixo do threshold de maturidade do projeto (atual `>=95` por §6.2 do contrato), o job DEVE preencher campo `maturity_warning` no `revert_jobs.result_payload` com mensagem legível em PT-BR (ex: "OCG regrediu de score 98 para 42 — CodeGen volta a ser bloqueado pelo gate de maturidade"). Endpoint GET status retorna esse campo.
+- **S2 — Notificação passiva à equipe:** o audit event `DOCUMENT_REVERTED` já é exibido no painel de audit; sem notificação push adicional. GP precisa informar equipe via canal próprio se for relevante. Documentar no UI da Fase 34.3 (tooltip no botão Apagar).
 
 ### Fase 34.3 — Endpoint HTTP + UI (~0.5d)
 - `DELETE /api/v1/projects/{pid}/ingestion/{doc_id}?reason=manual|lgpd|smoke_cleanup` retorna 202 Accepted com `revert_job_id`
-- `GET /api/v1/projects/{pid}/revert-jobs/{job_id}/status` para polling
-- UI: botão "🗑 Apagar com reversão" na tabela de Ingestão (substitui DELETE atual que é hard-delete sem reversão)
+- `GET /api/v1/projects/{pid}/revert-jobs/{job_id}/status` para polling — payload inclui `maturity_warning` (M3)
+- UI: botão "Apagar com reversão" na tabela de Ingestão (substitui DELETE atual). Tooltip explica: "Reverte propagação no OCG e arquiva módulos órfãos. Equipe é notificada via auditoria."
+- **S3 — Verificar uso do DELETE atual em outros fluxos (Gate 2):** arquiteto deve confirmar via grep se o DELETE hard atual é chamado por admin cleanup, scripts, ou apenas pela UI de ingestão. Se houver outros callers, declarar como breaking change no changelog ou criar endpoint paralelo. Decisão fica com Gate 2.
 
 ### Fase 34.4 — Testes + smoke E2E real (~0.5d)
-- Unit: revert_document_propagation com fixture multi-doc
-- Integração: endpoint DELETE → Celery → DB consistente
-- Smoke E2E real: deletar doc 9825e89b do AJA, confirmar OCG v5 → v6 com score recalculado a partir do zero (provavelmente vai pra zero pois é o único doc analisado nesse projeto)
+
+**M1 — Critério de testes desmembrado (Gate 1):**
+
+Cobertura mínima do `document_revert_service.py`: **≥80%** (medido por `pytest --cov=app.services.document_revert_service`).
+
+Cenários unit obrigatórios (mínimo 8):
+1. `revert_document_propagation` em projeto com doc único → OCG zera + audit event emitido
+2. `revert_document_propagation` em projeto com N docs (N>1) → recalcula a partir dos N-1 restantes
+3. Idempotência: chamar 2x sobre o mesmo `doc_id` → 2ª chamada vira no-op (`already_reverted` no log)
+4. `deleted_reason='lgpd'` → audit event ganha tag específica
+5. `deleted_reason='smoke_cleanup'` → caminho aceito, mesmo audit event
+6. `module_candidates` com `source_document_ids = [doc_id]` apenas → archived
+7. `module_candidates` com múltiplas fontes incluindo `doc_id` → permanece, mas remove `doc_id` da lista de fontes
+8. `maturity_warning` populado quando `score_after < SCORE_MATURIDADE` (M3)
+
+Cenários de integração obrigatórios (mínimo 3):
+- Endpoint DELETE → 202 + `revert_job_id` válido
+- Polling GET status → progride de `pending` → `running` → `completed`
+- Doc já marcado `deleted_at` → endpoint retorna 409 Conflict (não 404)
+
+**Smoke E2E real (opt-in MVP34_REAL_LLM=1):**
+- Deletar doc 9825e89b do AJA, confirmar OCG v5 → v6 com `change_type='REVERT_DOCUMENT_DELETE'`, `overall_score` recalculado (provavelmente 0 pois é único doc analisado nesse projeto), `ocg_delta_log` com row de revert, `audit_log_global` com `DOCUMENT_REVERTED`
 
 ### Fase 34.5 — Doc canônico + CLAUDE.md update (~0.25d)
 - Atualizar §2.4 do CLAUDE.md com a regra complementar de reversão
@@ -137,11 +165,19 @@ Operação atômica por documento:
 7. ✅ `ingested_documents` row marcada `deleted_at IS NOT NULL` (não removida fisicamente)
 8. ✅ `ocg_individual` rows do doc continuam no DB mas não influenciam mais (filter `WHERE document.deleted_at IS NULL`)
 9. ✅ `audit_log_global` row com `event_type='DOCUMENT_REVERTED'` e hash chain íntegro
-10. ✅ Suite de testes verde (unit + integração + smoke E2E real)
+10. ✅ Suite de testes verde — **detalhada na Fase 34.4**: cobertura ≥80% do `document_revert_service.py`, ≥8 cenários unit obrigatórios, ≥3 cenários de integração obrigatórios, smoke E2E real opt-in
 11. ✅ Não-regressão: pipeline n8n continua ingerindo + atualizando OCG normalmente
+12. ✅ **M3 — Aviso de regressão de maturidade:** quando `score_after < SCORE_MATURIDADE` (limiar §6.2), `revert_jobs.result_payload.maturity_warning` populado com mensagem PT-BR legível. Endpoint GET status retorna o campo. Smoke E2E valida texto.
 
 ---
 
 ## 6. Próxima ação
 
-**Gate 1 (gerente-projetos-ti):** validar escopo, aceite, viabilidade e dependências de negócio. Após aprovação → Gate 2 (arquiteto-projetos).
+**Gate 1 (gerente-projetos-ti):** ✅ Aprovado com ressalvas em 2026-05-03 — 3 MUSTs (M1, M2, M3) incorporados ao doc; 3 SHOULDs (S1, S2, S4) incorporados; S3 fica para Gate 2 decidir.
+
+**Gate 2 (arquiteto-projetos):** validar:
+- **R1 — Lock assíncrono:** `_get_project_lock(project_id)` é `asyncio.Lock` no processo do FastAPI. Celery roda em processo separado — o lock NÃO protege o job. Decidir entre: (a) lock distribuído via Redis, (b) advisory lock no PostgreSQL (`pg_advisory_xact_lock`), (c) repensar idempotência para tolerar concorrência.
+- **M2 — Surface das queries:** confirmar grep de `ingested_documents` e validar lista de pontos a filtrar `WHERE deleted_at IS NULL`.
+- **S3 — Hard-delete atual:** investigar callers do `DELETE /ingestion/{id}` existente. Se houver scripts/admin/API direta usando, declarar breaking change ou criar endpoint paralelo (`/ingestion/{id}/revert`).
+- **Recompute incremental vs full:** decidir se o job recalcula OCG do zero (mais simples, mais seguro) ou aplica delta inverso (mais rápido em projetos grandes, mais frágil).
+- **Granularidade do `ocg_individual` órfão:** soft-delete via `deleted_at` na tabela ou usar JOIN com `ingested_documents.deleted_at IS NULL`?
