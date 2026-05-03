@@ -69,6 +69,15 @@ export function useTechnicalQuestionnaire(projectId?: string) {
       )
       return res.data
     },
+    onSuccess: (data) => {
+      setHasUnsavedChanges(false)
+      if (data.progress_percent !== undefined) {
+        setProgress(data.progress_percent)
+      }
+      if (data.visible_questions !== undefined) {
+        setVisibleQuestions(data.visible_questions)
+      }
+    },
   })
 
   // Validate mutation
@@ -104,7 +113,6 @@ export function useTechnicalQuestionnaire(projectId?: string) {
           responses: newResponses,
           submit: false,
         })
-        setHasUnsavedChanges(false)
       }, AUTO_SAVE_DELAY_MS)
     },
     [responses]
@@ -123,13 +131,15 @@ export function useTechnicalQuestionnaire(projectId?: string) {
 
   // Submit questionnaire
   const submit = useCallback(async () => {
-    await saveMutation.mutateAsync({
+    const result = await saveMutation.mutateAsync({
       responses,
       submit: true,
     })
-    setHasUnsavedChanges(false)
+    // onSuccess callback já chama setHasUnsavedChanges(false)
     await refetch()
-  }, [responses, saveMutation, refetch])
+    // Retorna o ID do questionário
+    return questionnaire?.id || result.id
+  }, [responses, saveMutation, refetch, questionnaire])
 
   // Save immediately without auto-save delay
   const saveNow = useCallback(async () => {

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import uuid4, UUID
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 
@@ -304,6 +304,78 @@ class IngestionService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    async def _dispatch_to_n8n(self, doc_id, project_id, file_type, file_bytes):
+        """Dispara o pipeline de ingestão via webhook n8n (feature flag INGESTION_VIA_N8N)."""
+        import base64
+        import json as _json
+        import hmac
+        import hashlib
+        import httpx
+        from datetime import datetime, timezone
+        from app.core.config import settings
+        from app.services.ai_key_resolver import AIKeyResolver
+        from app.services.personas.prompts_registry import PERSONA_PROMPTS
+
+        provider_chain = await AIKeyResolver.resolve_project_provider_chain(
+            self.db, project_id, include_api_key=True
+        )
+        chain_data = [
+            {"provider": p.get("provider", ""), "model": p.get("model", ""), "api_key": p.get("api_key", "")}
+            for p in (provider_chain or [])
+        ]
+
+        # Pegar metadata do doc recém-criado
+        from app.models.base import IngestedDocument
+        doc = await self.db.get(IngestedDocument, doc_id)
+
+        # Mime type a partir do file_type
+        mime_map = {
+            "pdf": "application/pdf",
+            "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "markdown": "text/markdown",
+            "text": "text/plain",
+            "code": "text/plain",
+        }
+        mime_type = mime_map.get(file_type, "application/octet-stream")
+
+        n8n_payload = {
+            "ingestion_id": str(doc_id),
+            "project_id": str(project_id),
+            "document_bytes_base64": base64.b64encode(file_bytes).decode() if file_bytes else "",
+            "document_metadata": {
+                "filename": (doc.original_filename if doc else "") or (doc.filename if doc else ""),
+                "mime_type": mime_type,
+                "size_bytes": len(file_bytes) if file_bytes else 0,
+                "uploaded_by": str(doc.uploaded_by) if doc else "",
+                "uploaded_by_role": "GP",
+                "declared_purpose": "upload",
+            },
+            "provider_chain": chain_data,
+            "persona_prompts": dict(PERSONA_PROMPTS),
+            "callback_url": f"{getattr(settings, 'GCA_CALLBACK_BASE_URL', 'http://gca-backend:8000')}/api/v1/webhooks/ingestion-complete",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        n8n_url = getattr(settings, "N8N_BASE_URL", "http://n8n:5678")
+        webhook_secret = getattr(settings, "GCA_WEBHOOK_SECRET", "")
+        body_bytes = _json.dumps(n8n_payload).encode()
+        sig = "sha256=" + hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+
+        # Marcar status processing
+        doc.arguider_status = "processing"
+        doc.arguider_stage = "n8n_pipeline"
+        await self.db.commit()
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{n8n_url}/webhook/gca-normalizer",
+                content=body_bytes,
+                headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+            )
+            if resp.status_code not in (200, 202):
+                logger.error("ingestion.n8n_dispatch_failed", status=resp.status_code, body=resp.text[:200])
+                raise RuntimeError(f"n8n dispatch falhou: {resp.status_code}")
 
     async def upload_document(
         self,
@@ -639,12 +711,57 @@ class IngestionService:
                 ),
             }
 
-        # MVP 13 Fase 13.3b: upload dispara via Celery. Bytes já foram
-        # persistidos via write_ingested antes desta linha; task lê
-        # via read_ingested. Timeout + error handling via retry policy
-        # da task. Watchdog DT-073 continua como rede de segurança.
+        # MVP X Fase X.Y — Processamento sequencial de documentos por projeto.
+        # Enfileira APENAS se não há outro documento em processamento no projeto.
+        # Reduz tokens (análise paralela pesada) + risco de alucinação.
         from app.tasks.pipeline import pipeline_ingest_task
-        pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+        from app.core.config import settings
+
+        # Checar se há outro doc em processamento neste projeto
+        processing_count = await self.db.scalar(
+            select(func.count(IngestedDocument.id)).where(
+                and_(
+                    IngestedDocument.project_id == project_id,
+                    IngestedDocument.arguider_status == "processing",
+                )
+            )
+        )
+
+        use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
+
+        try:
+            # Se nenhum em processamento, dispara pipeline (n8n ou Celery)
+            if processing_count == 0:
+                if use_n8n:
+                    await self._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
+                else:
+                    pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
+                logger.info(
+                    "ingestion.document_enqueued",
+                    document_id=str(doc_id),
+                    project_id=str(project_id),
+                    position="first",
+                    pipeline="n8n" if use_n8n else "celery",
+                )
+            else:
+                # Há outro em processamento — este ficará na fila (pending) até callback do anterior
+                logger.info(
+                    "ingestion.document_queued_waiting",
+                    document_id=str(doc_id),
+                    project_id=str(project_id),
+                    position="waiting_sequential",
+                )
+        except Exception as exc:
+            # Se enfileiramento falhar (Celery/Redis indisponível),
+            # registra erro explícito + watchdog (DT-073) reconsiliaará.
+            logger.error(
+                "ingestion.celery_enqueue_failed",
+                document_id=str(doc_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            # Continua mesmo que falhe — watchdog vai reprocessar
 
         logger.info(
             "ingestion.document_uploaded",
@@ -905,6 +1022,8 @@ class IngestionService:
             )
             return
         doc.arguider_stage = stage
+        if doc.arguider_status == "pending":
+            doc.arguider_status = "processing"
         if percent is None:
             percent = cls._STAGE_PERCENTS.get(stage, doc.arguider_progress_percent)
         # Não regride (exceto se caller explicitamente passar valor menor)
@@ -1381,54 +1500,37 @@ class IngestionService:
                                 model=model or "(default)")
 
                     try:
-                        # DT-065 — Checkpoint: se a análise do Arguidor já
-                        # foi gravada em tentativa anterior (mesmo provider
-                        # ou outro), pular o call LLM e ir direto pro OCG.
-                        # Evita re-custear a mesma inferência quando o
-                        # fallback é acionado no OCG updater e não no
-                        # próprio Arguidor.
-                        existing_analysis = (await db.execute(
-                            select(ArguiderAnalysis).where(
-                                ArguiderAnalysis.document_id == document_id
-                            )
-                        )).scalar_one_or_none()
+                        # FASE 1 Refactor — AuditorOrchestratorService
+                        # Replace Arguidor with new orchestrator pipeline:
+                        # 1. Chunk documento → DocumentRouteMap
+                        # 2. Auditor análise inicial → AuditorOutput
+                        # 3. 7 personas em paralelo → personas_responses
+                        # 4. OCGConsolidator → OCG updates + conflicts
+                        from app.services.auditor_orchestrator_service import AuditorOrchestratorService
+                        from app.services.llm_client import create_llm_client
 
-                        arguider = ArguiderService(
-                            db,
-                            project_api_key=project_api_key,
+                        await IngestionService._update_stage(db, document_id, "analyzing")
+
+                        llm_client = create_llm_client(
                             provider=provider,
+                            api_key=project_api_key,
                             model=model,
                             base_url=base_url,
                         )
-                        if existing_analysis is not None:
-                            # Preserva análise anterior — apenas marca o
-                            # documento como completed (se já não está) e
-                            # avança pro OCG updater.
-                            logger.info(
-                                "ingestion.analysis_reused_from_previous_attempt",
-                                document_id=str(document_id),
-                                provider=provider,
-                                previous_analysis_id=str(existing_analysis.id),
+
+                        orchestrator = AuditorOrchestratorService(db, llm_client)
+                        orchestration_result = await orchestrator.orchestrate(
+                            document_id=document_id,
+                            project_id=project_id,
+                            document_text=doc_text,
+                            file_type=file_type,
+                        )
+
+                        if not orchestration_result.get("success"):
+                            raise RuntimeError(
+                                f"Orchestration failed: {orchestration_result.get('error')}"
                             )
-                            _d = await db.get(IngestedDocument, document_id)
-                            if _d and _d.arguider_status != "completed":
-                                _d.arguider_status = "completed"
-                                await db.commit()
-                            # Pula direto pro estágio updating_ocg (70%)
-                            await IngestionService._update_stage(
-                                db, document_id, "updating_ocg", percent=70,
-                            )
-                        else:
-                            # MVP 8 Fase 1 — marcar estágio "analyzing"
-                            await IngestionService._update_stage(db, document_id, "analyzing")
-                            await arguider.analyze_document(
-                                document_id=document_id,
-                                project_id=project_id,
-                                document_text=doc_text,
-                                current_ocg=_current_ocg,
-                                previous_analyses=_prev_analyses,
-                                canonical=doc_canonical,  # MVP 29 Fase 3
-                            )
+
                         successful_provider = provider
                         if idx > 0:
                             logger.warning(
@@ -1574,6 +1676,20 @@ class IngestionService:
                                     actor_id=doc.uploaded_by if doc else None,
                                     trigger_source="document_ingestion",
                                 )
+
+                                # DT-AUDITORIA-002: "awaiting_ocg" significa
+                                # que OCG (legacy, do questionário) não está
+                                # disponível. Isso é ok — em Phase B (personas
+                                # diretas via documento), pode não haver OCG.
+                                # Log e continua (não bloqueia completion).
+                                if update_result and update_result.get("status") == "awaiting_ocg":
+                                    logger.info(
+                                        "ingestion.awaiting_ocg",
+                                        document_id=str(document_id),
+                                        project_id=str(project_id),
+                                        retry_at=update_result.get("retry_at"),
+                                    )
+
                                 ocg_successful_provider = ocg_provider
                                 if ocg_idx > 0:
                                     logger.warning(
@@ -1695,13 +1811,18 @@ class IngestionService:
                 pass
 
     async def list_documents(self, project_id: UUID) -> list[dict]:
-        """Lista documentos do projeto."""
+        """Lista documentos do projeto com tokens_used da análise Arguidor."""
+        from sqlalchemy import outerjoin
+
+        # LEFT JOIN com ArguiderAnalysis pra pegar tokens_used
         result = await self.db.execute(
-            select(IngestedDocument)
+            select(IngestedDocument, ArguiderAnalysis.tokens_used)
+            .outerjoin(ArguiderAnalysis, IngestedDocument.id == ArguiderAnalysis.document_id)
             .where(IngestedDocument.project_id == project_id)
             .order_by(IngestedDocument.created_at.desc())
         )
-        docs = result.scalars().all()
+        rows = result.all()
+
         return [
             {
                 "id": str(d.id),
@@ -1733,8 +1854,10 @@ class IngestionService:
                     d.arguider_stage_updated_at.isoformat()
                     if getattr(d, "arguider_stage_updated_at", None) else None
                 ),
+                # MVP X Fase X.Y — tokens usado na análise Arguidor (custo LLM)
+                "tokens_used": tokens_used,
             }
-            for d in docs
+            for d, tokens_used in rows
         ]
 
     async def get_document_detail(self, project_id: UUID, document_id: UUID) -> dict | None:

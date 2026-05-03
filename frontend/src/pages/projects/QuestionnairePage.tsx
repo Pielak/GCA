@@ -1,15 +1,19 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  ClipboardList, Download, FileUp, Loader2, CheckCircle2,
+  ClipboardList, Loader2, CheckCircle2,
   AlertTriangle, AlertCircle, Clock, Lightbulb, ShieldAlert, Wand2,
 } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { questionLabel } from '@/data/questionLabels'
 import { QUESTION_SCHEMA, type QuestionDef } from '@/data/questionSchema'
-import { getErrorMessage, type ApiError } from '@/lib/errors'
+import { getErrorMessage } from '@/lib/errors'
 import { formatDateTimeBR } from '@/lib/datetime'
+import { TechnicalQuestionnaireForm } from '@/components/questionnaire/TechnicalQuestionnaireForm'
+import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
+import { DiscrepancyBoard } from '@/components/questionnaire/DiscrepancyBoard'
+import { PipelineQuestionsSection } from '@/components/questionnaire/PipelineQuestionsSection'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -64,9 +68,6 @@ export function QuestionnairePage() {
   }
   const [existing, setExisting] = useState<ExistingQuestionnaire | null>(null)
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
-  const [downloading, setDownloading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const fetchExisting = async () => {
     if (!projectId) return
@@ -76,53 +77,22 @@ export function QuestionnairePage() {
     } catch { /* sem questionário ainda */ }
   }
 
+  const triggerDiscrepancyDetection = async () => {
+    if (!projectId || !existing) return
+    try {
+      await fetch(
+        `/api/projects/${projectId}/technical-questionnaire/${existing.id}/detect-discrepancies`,
+        { method: 'POST', credentials: 'include' }
+      )
+    } catch (err) {
+      console.error('Failed to detect discrepancies:', err)
+    }
+  }
+
   useEffect(() => {
     if (!projectId) { setLoading(false); return }
     fetchExisting().finally(() => setLoading(false))
   }, [projectId])
-
-  const handleDownload = async () => {
-    if (!projectId) return
-    setDownloading(true)
-    try {
-      const res = await apiClient.get(
-        `/projects/${projectId}/questionnaire/pdf`,
-        { responseType: 'blob' },
-      )
-      const url = URL.createObjectURL(new Blob([res.data as BlobPart]))
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `Questionario_GCA_${projectId}.pdf`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (err: unknown) {
-      alert(`Erro ao baixar PDF: ${getErrorMessage(err)}`)
-    } finally {
-      setDownloading(false)
-    }
-  }
-
-  const handleUpload = async (file: File) => {
-    if (!projectId) return
-    setUploading(true)
-    const form = new FormData()
-    form.append('file', file)
-    try {
-      const res = await apiClient.post<{ message?: string }>(
-        `/projects/${projectId}/questionnaire/upload-pdf`,
-        form,
-      )
-      alert(res?.data?.message || 'Questionário submetido para análise.')
-      invalidateSetup()
-      window.location.reload()
-    } catch (err: unknown) {
-      const detail = (err as ApiError)?.data?.detail || getErrorMessage(err)
-      alert(`Erro: ${detail}`)
-    } finally {
-      setUploading(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
-    }
-  }
 
   // ─── Renderização ────────────────────────────────────────────────
 
@@ -152,6 +122,38 @@ export function QuestionnairePage() {
       {/* Status card (se já submetido) */}
       {existing && <StatusCard q={existing} />}
 
+      {/* MVP B — Persona Board (avaliação em tempo real) */}
+      {existing?.submitted_at && projectId && (
+        <div className="mt-8 pt-6 border-t border-slate-700 space-y-6">
+          <PersonaBoard
+            projectId={projectId}
+            questionnaireId={existing.id}
+            pollInterval={2000}
+            onBoardUpdate={(allCompleted) => {
+              if (allCompleted) {
+                // Trigger discrepancy detection when all personas complete
+                triggerDiscrepancyDetection()
+                // Refresh questionnaire status when all personas complete
+                fetchExisting()
+              }
+            }}
+          />
+
+          {/* MVP C — Discrepancy Board (após personas completarem) */}
+          <DiscrepancyBoard
+            projectId={projectId}
+            questionnaireId={existing.id}
+            pollInterval={2000}
+            onDiscrepanciesUpdate={(unresolvedCount) => {
+              // Pode-se disparar OCG consolidado quando todas discrepâncias forem resolvidas
+              if (unresolvedCount === 0) {
+                // Todos os conflitos resolvidos
+              }
+            }}
+          />
+        </div>
+      )}
+
       {/* Painel de correção inline — só aparece quando há bloqueadores */}
       {existing && projectId && (existing.blocking_issues?.length ?? 0) > 0 && (
         <InlineFixPanel
@@ -162,63 +164,25 @@ export function QuestionnairePage() {
         />
       )}
 
-      {/* Ações — SEMPRE disponíveis; reenvio atualiza responses */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
-        <div>
-          <h2 className="text-slate-100 text-base font-semibold mb-1">
-            {existing ? 'Reenviar questionário' : 'Começar'}
-          </h2>
-          <p className="text-slate-400 text-xs">
-            {existing
-              ? 'Você pode reenviar o PDF atualizado. As novas respostas substituem as anteriores.'
-              : 'Baixe o PDF, preencha no seu leitor de PDF favorito (Adobe, Preview, Foxit) e envie quando estiver pronto.'}
-          </p>
-        </div>
+      {/* Formulário técnico inline — renderiza 15 perguntas com validação,
+          ajuda e auto-save. Substitui o fluxo anterior de download/upload PDF. */}
+      {projectId && (
+        <TechnicalQuestionnaireForm
+          projectId={projectId}
+          onSubmitted={async () => {
+            // Após submissão, refetch do questionário e invalidação do setup
+            await fetchExisting()
+            invalidateSetup()
+          }}
+        />
+      )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <button
-            onClick={handleDownload}
-            disabled={downloading}
-            className="flex items-center justify-center gap-2 px-4 py-3 bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {downloading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
-            {downloading ? 'Baixando…' : 'Baixar PDF editável'}
-          </button>
-
-          <label
-            className={`flex items-center justify-center gap-2 px-4 py-3 text-sm font-medium rounded-lg transition-colors ${
-              uploading
-                ? 'bg-slate-700 text-slate-400 cursor-not-allowed'
-                : 'bg-emerald-600 hover:bg-emerald-500 text-white cursor-pointer'
-            }`}
-          >
-            {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <FileUp className="w-4 h-4" />}
-            {uploading ? 'Processando…' : 'Enviar PDF preenchido'}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,application/pdf"
-              className="hidden"
-              disabled={uploading}
-              onChange={(e) => {
-                const f = e.target.files?.[0]
-                if (f) handleUpload(f)
-              }}
-            />
-          </label>
-        </div>
-
-        <div className="bg-violet-950/20 border border-violet-800/30 rounded-lg p-3 text-xs text-slate-300 space-y-1">
-          <p className="font-semibold text-violet-300">Como funciona</p>
-          <ol className="list-decimal list-inside space-y-0.5 text-slate-400">
-            <li>Baixe o PDF. Ele tem campos editáveis (AcroForm).</li>
-            <li>Abra no Adobe Reader ou similar. Preencha as 49 perguntas.</li>
-            <li>Salve o PDF preenchido.</li>
-            <li>Clique em "Enviar PDF preenchido" e escolha o arquivo salvo.</li>
-            <li>O sistema analisa tecnicamente. Se aprovado, gera o OCG automaticamente.</li>
-          </ol>
-        </div>
-      </div>
+      {/* MVP-XX: Seção de perguntas do pipeline para validação humana.
+          Exibe perguntas geradas pelo Auditor e personas durante a ingestão.
+          Respostas disparam re-análise (Passada 2). */}
+      {projectId && (
+        <PipelineQuestionsSection projectId={projectId} />
+      )}
     </div>
   )
 }

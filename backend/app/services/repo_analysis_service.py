@@ -1050,7 +1050,7 @@ Retorne APENAS um JSON válido (sem markdown, sem comentários, sem preamble) co
 }}"""
 
         provider_enum = self._resolve_ai_provider(ai_provider)
-        model = "deepseek-chat" if ai_provider == "deepseek" else "claude-sonnet-4-6"
+        model = "deepseek-v4-flash" if ai_provider == "deepseek" else "claude-sonnet-4-6"
 
         success, response, error = await AIService.query(
             prompt=prompt,
@@ -1315,7 +1315,7 @@ Documente de forma clara e completa em Português-BR.
 Gere um documento de análise completo e estruturado em Markdown."""
 
         provider_enum = self._resolve_ai_provider(ai_provider)
-        model = "deepseek-chat" if ai_provider == "deepseek" else "claude-sonnet-4-6"
+        model = "deepseek-v4-flash" if ai_provider == "deepseek" else "claude-sonnet-4-6"
 
         success, response, error = await AIService.query(
             prompt=prompt,

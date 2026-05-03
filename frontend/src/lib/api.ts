@@ -21,6 +21,7 @@ export function getApiBaseUrl(): string {
 // e uploads de arquivo param de funcionar.
 const api = axios.create({
   baseURL: getApiBaseUrl(),
+  timeout: 30000,  // 30 segundos máximo por requisição
 })
 
 // Request interceptor: Add JWT token to all requests

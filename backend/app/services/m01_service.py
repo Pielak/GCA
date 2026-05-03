@@ -3,10 +3,11 @@ M01 Service — Questionnaire Generator from Requirements Document
 Reads requirements document, extracts context, generates dynamic 30-50 questions to fill gaps
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 import json
 from dataclasses import dataclass
 from anthropic import Anthropic
+import requests
 
 # ============================================================================
 # SCHEMAS
@@ -120,15 +121,50 @@ M01_USER_PROMPT_TEMPLATE = """You are analyzing a requirements document for proj
 class M01Service:
     """Questionnaire Generator from Requirements Documents"""
 
-    def __init__(self, anthropic_client: Anthropic = None):
+    def __init__(
+        self,
+        provider: str = "anthropic",
+        model: str = None,
+        api_key: str = None,
+        base_url: str = None,
+        anthropic_client: Anthropic = None,
+    ):
         """
-        Initialize M01 service
+        Initialize M01 service with dynamic IA configuration
 
         Args:
-            anthropic_client: Anthropic client instance. If None, creates new instance.
+            provider: LLM provider ("anthropic", "openai", "deepseek", etc). Default: "anthropic"
+            model: Model name (e.g., "claude-sonnet-4-6", "gpt-4o", "deepseek-chat")
+            api_key: API key for the provider. If None, reads from env for Anthropic.
+            base_url: Base URL for OpenAI-compatible providers (DeepSeek, Ollama, etc)
+            anthropic_client: Pre-configured Anthropic client (for legacy compatibility)
         """
-        self.client = anthropic_client or Anthropic()
-        self.model = "claude-sonnet-4-6-20250514"  # Use Sonnet 4.6 as per decision
+        self.provider = (provider or "anthropic").lower()
+        self.base_url = base_url
+
+        # Default models per provider
+        if not model:
+            defaults = {
+                "anthropic": "claude-sonnet-4-6-20250514",
+                "openai": "gpt-4o",
+                "deepseek": "deepseek-v4-flash",
+            }
+            model = defaults.get(self.provider, "claude-sonnet-4-6-20250514")
+
+        self.model = model
+
+        # Initialize client based on provider
+        if self.provider == "anthropic":
+            self.client = anthropic_client or Anthropic(api_key=api_key) if api_key else Anthropic()
+        else:
+            # OpenAI-compatible providers use requests
+            self.client = None
+            self.api_key = api_key
+            self.endpoint_url = base_url or {
+                "openai": "https://api.openai.com/v1",
+                "deepseek": "https://api.deepseek.com/v1",
+                "ollama": "http://localhost:11434/v1",
+            }.get(self.provider, base_url)
 
     def generate_questionnaire(
         self,
@@ -177,18 +213,36 @@ class M01Service:
             document_text=document_text
         )
 
-        # Call Claude to generate questionnaire
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=4096,
-            system=M01_SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": user_prompt}
-            ]
-        )
-
-        # Parse response
-        response_text = message.content[0].text
+        # Call LLM to generate questionnaire (provider-agnostic)
+        if self.provider == "anthropic":
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=4096,
+                system=M01_SYSTEM_PROMPT,
+                messages=[
+                    {"role": "user", "content": user_prompt}
+                ]
+            )
+            response_text = message.content[0].text
+        else:
+            # OpenAI-compatible providers (OpenAI, DeepSeek, Ollama, etc)
+            response = requests.post(
+                f"{self.endpoint_url}/chat/completions",
+                json={
+                    "model": self.model,
+                    "max_tokens": 4096,
+                    "temperature": 0.2,
+                    "messages": [
+                        {"role": "system", "content": M01_SYSTEM_PROMPT},
+                        {"role": "user", "content": user_prompt}
+                    ]
+                },
+                headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
+                timeout=60,
+            )
+            response.raise_for_status()
+            response_data = response.json()
+            response_text = response_data["choices"][0]["message"]["content"]
 
         # Try to extract JSON from response
         try:

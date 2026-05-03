@@ -14,6 +14,14 @@ from app.middleware.auth import get_current_user_from_token
 from app.dependencies.require_project_setup import require_project_setup_complete
 from pydantic import BaseModel
 
+from app.core.exceptions import NotFoundError
+from app.routers.pipeline_questions_router import (
+    router as pipeline_questions_router,
+    get_pipeline_questions,
+    submit_pipeline_answers,
+    AnswersRequest,
+)
+
 logger = structlog.get_logger(__name__)
 router = APIRouter(tags=["ingestion"])
 
@@ -74,6 +82,10 @@ async def upload_document(
     sc = result.pop("status_code", 200)
     if sc >= 400:
         raise HTTPException(status_code=sc, detail=result.get("error", result.get("message", "")))
+
+    # Fase 2 Simplificação: Personas da ingestão removidas.
+    # Pipeline agora: Questionário → 5 Personas (questionnaire.py) → OCG → Gatekeeper.
+    # A ingestão apenas armazena documentos para referência.
     return result
 
 
@@ -293,15 +305,68 @@ async def reanalyze_document(
     doc.ocg_updated = False
     await db.commit()
 
-    # MVP 13 Fase 13.3a — dispara via Celery (persiste no broker se
-    # worker cair; retry bounded via task config). Watchdog DT-073
-    # continua cobrindo até 13.3b/c migrarem os demais 7 pontos.
-    from app.tasks.pipeline import pipeline_ingest_task
-    pipeline_ingest_task.delay(
-        str(document_id),
-        str(project_id),
-        doc.file_type or "",
-    )
+    # Feature flag: INGESTION_VIA_N8N migra orquestração para n8n
+    from app.core.config import settings
+    use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
+
+    if use_n8n:
+        import httpx
+        import base64
+        from app.services.ai_key_resolver import AIKeyResolver
+
+        provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id, include_api_key=True)
+        chain_data = []
+        for p in (provider_chain or []):
+            chain_data.append({
+                "provider": p.get("provider", ""),
+                "model": p.get("model", ""),
+                "api_key": p.get("api_key", ""),
+            })
+
+        n8n_payload = {
+            "ingestion_id": str(document_id),
+            "project_id": str(project_id),
+            "document_bytes_base64": base64.b64encode(file_bytes).decode() if file_bytes else "",
+            "document_metadata": {
+                "filename": doc.original_filename or doc.filename,
+                "mime_type": doc.file_type or "application/octet-stream",
+                "size_bytes": doc.file_size_bytes or 0,
+                "uploaded_by": str(doc.uploaded_by or ""),
+                "uploaded_by_role": "GP",
+                "declared_purpose": "reanalyze",
+            },
+            "provider_chain": chain_data,
+            "callback_url": f"{getattr(settings, 'GCA_CALLBACK_BASE_URL', 'http://localhost:8000')}/api/v1/webhooks/ingestion-complete",
+            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+        }
+
+        n8n_url = getattr(settings, "N8N_BASE_URL", "http://localhost:5678")
+        webhook_secret = getattr(settings, "GCA_WEBHOOK_SECRET", "")
+        body_bytes = __import__("json").dumps(n8n_payload).encode()
+        sig = "sha256=" + __import__("hmac").new(
+            webhook_secret.encode(), body_bytes, __import__("hashlib").sha256
+        ).hexdigest()
+
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(
+                f"{n8n_url}/webhook/gca-normalizer",
+                content=body_bytes,
+                headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+            )
+            if resp.status_code not in (200, 202):
+                logger.error("ingestion.n8n_dispatch_failed", status=resp.status_code, body=resp.text[:200])
+                raise HTTPException(status_code=502, detail=f"n8n dispatch falhou: {resp.status_code}")
+
+        doc.arguider_status = "processing"
+        doc.arguider_stage = "n8n_pipeline"
+        await db.commit()
+    else:
+        from app.tasks.pipeline import pipeline_ingest_task
+        pipeline_ingest_task.delay(
+            str(document_id),
+            str(project_id),
+            doc.file_type or "",
+        )
 
     logger.info(
         "ingestion.reanalyze_dispatched",
@@ -314,6 +379,198 @@ async def reanalyze_document(
         "success": True,
         "message": "Reanálise disparada. Status será atualizado em segundo plano.",
         "document_id": str(document_id),
+    }
+
+
+@router.get("/projects/{project_id}/ingestion/{document_id}/conflicts-pending-review")
+async def get_conflicts_pending_user_decision(
+    project_id: UUID,
+    document_id: UUID,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """NOVO — FASE 1 Auditor Orquestrador.
+
+    Retorna conflitos detectados durante consolidação de OCG que precisam
+    de decisão humana (user final escolhe entre opções).
+
+    Exemplo: 2+ personas sugeriram backends diferentes (PostgreSQL vs MongoDB).
+    System não consegue decidir sozinho → user decide.
+    """
+    from sqlalchemy import select
+    from app.models.base import ConflictPendingReview, ProjectMember
+
+    # Validar que user é membro do projeto (compartimentalização §2.2)
+    member_stmt = select(ProjectMember).where(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == current_user_id,
+        ProjectMember.is_active == True,
+    )
+    member = await db.scalar(member_stmt)
+    if not member:
+        raise HTTPException(status_code=403, detail="Acesso negado ao projeto")
+
+    # Buscar conflitos pendentes do documento
+    conflicts_stmt = select(ConflictPendingReview).where(
+        ConflictPendingReview.project_id == project_id,
+        ConflictPendingReview.document_id == document_id,
+        ConflictPendingReview.status == "pending",
+    )
+    conflicts = await db.scalars(conflicts_stmt)
+    conflicts_list = conflicts.all()
+
+    logger.info(
+        "hitl.get_conflicts",
+        project_id=str(project_id),
+        document_id=str(document_id),
+        conflicts_count=len(conflicts_list),
+    )
+
+    return {
+        "document_id": str(document_id),
+        "conflicts": [
+            {
+                "conflict_id": str(c.id),
+                "field": c.field_name,
+                "personas_involved": c.personas_involved,
+                "values_by_persona": c.values_by_persona,
+                "conflict_reason": c.conflict_reason,
+            }
+            for c in conflicts_list
+        ],
+        "total_conflicts": len(conflicts_list),
+        "awaiting_user_decision": len(conflicts_list) > 0,
+    }
+
+
+class ConflictResolution(BaseModel):
+    """Resolução de conflito por usuário."""
+    field: str
+    selected_value: str
+    justification: Optional[str] = None
+
+
+@router.post("/projects/{project_id}/ingestion/{document_id}/conflict/{conflict_id}/resolve")
+async def resolve_conflict(
+    project_id: UUID,
+    document_id: UUID,
+    conflict_id: str,
+    resolution: ConflictResolution,
+    current_user_id: UUID = Depends(get_current_user_from_token),
+    db: AsyncSession = Depends(get_db),
+):
+    """NOVO — FASE 1 Auditor Orquestrador.
+
+    User resolve um conflito pendente escolhendo entre opções.
+    Consequência: OCG é atualizado com decisão + justificativa.
+    Propagação em cascata dispara (Gatekeeper, CodeGen, Backlog).
+    """
+    from sqlalchemy import select
+    from datetime import datetime, timezone
+    from app.models.base import ConflictPendingReview, ProjectMember, OCG, Questionnaire
+    from app.services.audit_service import AuditService
+
+    # 1. Validar que user é GP ou Admin do projeto
+    member_stmt = select(ProjectMember).where(
+        ProjectMember.project_id == project_id,
+        ProjectMember.user_id == current_user_id,
+        ProjectMember.is_active == True,
+    )
+    member = await db.scalar(member_stmt)
+    if not member or member.role not in ["gp", "admin"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas GP ou Admin podem resolver conflitos",
+        )
+
+    # 2. Buscar ConflictPendingReview
+    try:
+        conflict_uuid = UUID(conflict_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="conflict_id inválido")
+
+    conflict = await db.get(ConflictPendingReview, conflict_uuid)
+    if not conflict or conflict.status != "pending":
+        raise HTTPException(status_code=404, detail="Conflito não encontrado ou já resolvido")
+
+    if conflict.project_id != project_id:
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    # 3. Registrar resolução no ConflictPendingReview
+    conflict.status = "resolved"
+    conflict.resolved_by = current_user_id
+    conflict.resolved_at = datetime.now(timezone.utc)
+    conflict.resolved_value = {"value": resolution.selected_value}
+    conflict.resolution_justification = resolution.justification
+    db.add(conflict)
+    await db.flush()
+
+    # 4. Aplicar resolução ao OCG
+    questionnaire_stmt = select(Questionnaire).where(
+        Questionnaire.project_id == project_id
+    ).order_by(Questionnaire.created_at.desc()).limit(1)
+    questionnaire = await db.scalar(questionnaire_stmt)
+    if not questionnaire:
+        raise HTTPException(status_code=400, detail="Projeto sem questionário")
+
+    ocg_stmt = select(OCG).where(
+        OCG.questionnaire_id == questionnaire.id
+    ).order_by(OCG.version.desc()).limit(1)
+    ocg = await db.scalar(ocg_stmt)
+    if not ocg:
+        raise HTTPException(status_code=400, detail="Projeto sem OCG")
+
+    # Update OCG field com resolved value
+    if hasattr(ocg, conflict.field_name):
+        try:
+            # Try to convert resolved_value to appropriate type
+            setattr(ocg, conflict.field_name, float(resolution.selected_value))
+        except ValueError:
+            # If not numeric, set as-is
+            setattr(ocg, conflict.field_name, resolution.selected_value)
+
+    ocg.version += 1
+    ocg.updated_at = datetime.now(timezone.utc)
+    db.add(ocg)
+    await db.flush()
+
+    # 5. Registrar em auditoria
+    audit = AuditService(db)
+    await audit.log_event(
+        event_type="CONFLICT_RESOLVED",
+        resource_type="conflict_pending_review",
+        resource_id=conflict_uuid,
+        details={
+            "project_id": str(project_id),
+            "field": conflict.field_name,
+            "resolved_value": resolution.selected_value,
+            "justification": resolution.justification,
+            "personas_involved": conflict.personas_involved,
+        },
+    )
+
+    # 6. Disparar propagação em cascata
+    from app.services.propagation_service import PropagationService
+    propagator = PropagationService(db)
+    # Note: PropagationService.trigger não é async, chama em background se necessário
+    logger.info(
+        "hitl.conflict_resolved",
+        project_id=str(project_id),
+        conflict_id=str(conflict_id),
+        field=conflict.field_name,
+        resolved_value=resolution.selected_value,
+    )
+
+    await db.commit()
+
+    return {
+        "success": True,
+        "message": "Conflito resolvido. OCG atualizado.",
+        "document_id": str(document_id),
+        "conflict_id": str(conflict_uuid),
+        "field": conflict.field_name,
+        "resolution_applied": resolution.selected_value,
+        "ocg_version": ocg.version,
     }
 
 
@@ -673,3 +930,55 @@ async def generate_m01_questionnaire(
     except Exception as e:
         logger.error(f"Erro ao gerar M01 questionnaire: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Erro ao gerar questionnaire: {str(e)}")
+
+
+# ─── Follow-up Questions (Legacy) ───
+# MVP-XX: Pontes para os novos endpoints pipeline-questions.
+# O componente FollowUpQuestionnaire.tsx chama estas rotas.
+# Redirecionam a lógica para o pipeline_questions_router.
+
+
+@router.get(
+    "/projects/{project_id}/ingestion/{document_id}/follow-up-questions",
+)
+async def legacy_follow_up_questions(
+    project_id: UUID,
+    document_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_from_token),
+):
+    """Legacy: retorna perguntas de follow-up para um documento.
+
+    Redireciona para o endpoint pipeline-questions filtrando pelo
+    documento. Mantido para compatibilidade com FollowUpQuestionnaire.tsx.
+    """
+    result = await get_pipeline_questions(project_id, db, current_user)
+    # Filtrar pelo document_id específico
+    pending = [
+        q for q in result.pending_questions
+        if q.document_id == str(document_id)
+    ]
+    answered = [
+        q for q in result.answered_questions
+        if q.document_id == str(document_id)
+    ]
+    return {"pending_questions": pending, "answered_questions": answered, "document_id": str(document_id)}
+
+
+@router.post(
+    "/projects/{project_id}/ingestion/{document_id}/follow-up-answers",
+)
+async def legacy_follow_up_answers(
+    project_id: UUID,
+    document_id: UUID,
+    req: AnswersRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user_from_token),
+):
+    """Legacy: submete respostas de follow-up para um documento.
+
+    Redireciona para o novo endpoint pipeline-questions/answers.
+    Mantido para compatibilidade com FollowUpQuestionnaire.tsx.
+    """
+    result = await submit_pipeline_answers(project_id, req, db, current_user)
+    return {"document_id": str(document_id), "stored": result.stored, "reprocessed": result.documents_reprocessed}

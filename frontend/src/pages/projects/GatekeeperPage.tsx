@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2 } from 'lucide-react'
+import { Shield, AlertTriangle, XCircle, Zap, Lock, Info, Loader2, AlertCircle } from 'lucide-react'
 import { RadarChart, PolarGrid, PolarAngleAxis, Radar, ResponsiveContainer, Tooltip } from 'recharts'
 import { HelpTooltip } from '@/components/ui/HelpTooltip'
 import { apiClient } from '@/lib/api'
@@ -40,6 +40,7 @@ export function GatekeeperPage() {
   const { user } = useAuthStore()
   const [data, setData] = useState<GatekeeperData | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
   const [showOverride, setShowOverride] = useState(false)
   const [overrideReason, setOverrideReason] = useState('')
   // Índice do pilar com detalhes expandidos; -1 = nenhum aberto.
@@ -48,6 +49,8 @@ export function GatekeeperPage() {
   useEffect(() => {
     const load = async () => {
       try {
+        setLoading(true)
+        setError(null)
         const res = await apiClient.get(`/projects/${id}/gatekeeper`)
         const raw = res.data
 
@@ -74,7 +77,9 @@ export function GatekeeperPage() {
           module_candidates: raw.module_candidates,
           ocg_health: raw.ocg?.health || {},
         } as unknown as GatekeeperData)
-      } catch {
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Erro ao carregar Gatekeeper'
+        setError(msg)
         setData(null)
       } finally {
         setLoading(false)
@@ -83,7 +88,36 @@ export function GatekeeperPage() {
     if (id) load()
   }, [id])
 
-  if (loading) return <div className="flex items-center justify-center h-64"><Loader2 className="w-6 h-6 text-violet-400 animate-spin" /></div>
+  if (error) {
+    return (
+      <div className="p-6">
+        <div className="flex items-center justify-center h-32 bg-red-950/20 border border-red-800/40 rounded-xl">
+          <div className="text-center">
+            <XCircle className="w-8 h-8 text-red-400 mx-auto mb-2" />
+            <p className="text-red-300 text-sm">Erro ao carregar Gatekeeper</p>
+            <p className="text-red-400/70 text-xs mt-1">{error}</p>
+            <button
+              onClick={() => window.location.reload()}
+              className="mt-3 px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-xs"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-6 h-6 text-violet-400 animate-spin mx-auto mb-2" />
+          <p className="text-slate-400 text-sm">Carregando Gatekeeper...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (!data || !data.pillars || data.pillars.length === 0) {
     return (
@@ -130,6 +164,7 @@ export function GatekeeperPage() {
             <HelpTooltip text="O Gatekeeper é o controle de qualidade automático do GCA. Antes de qualquer módulo ser commitado no repositório do projeto, o código gerado passa por avaliação simultânea nos 7 Pilares de qualidade. Cada pilar recebe um score de 0 a 100. O pilar P1 (Conformidade) é bloqueante: score < 60 impede aprovação automática e manual. Os demais pilares apenas geram avisos e recomendações." />
           </div>
           <p className="text-slate-500 text-sm mt-0.5">Avaliação dos 7 pilares com scoring formal</p>
+          <p className="text-slate-600 text-xs mt-1">Portão de Qualidade — libera/bloqueia módulos para CodeGen. Nota do pipeline simplificado: Questionário → 5 Personas → OCG → Gatekeeper → Backlog → CodeGen.</p>
         </div>
         <div className="flex items-center gap-3">
           <span className={`text-xs px-3 py-1 rounded-full font-medium ${
@@ -166,12 +201,7 @@ export function GatekeeperPage() {
             <span className="flex items-center gap-1 text-amber-400"><AlertTriangle className="w-3.5 h-3.5" />{warnings.length} warning{warnings.length !== 1 ? 's' : ''}</span>
           </div>
           {!isBlocked && (
-            <button
-              onClick={() => navigate(`/projects/${id}/codegen`)}
-              className="mt-4 flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-white text-sm font-medium transition-colors"
-            >
-              Gerar Código
-            </button>
+            <p className="mt-4 text-emerald-500/70 text-xs text-center">Score liberado para geração de código. Use a aba CodeGen.</p>
           )}
           {isBlocked && (
             <p className="mt-4 text-red-400 text-xs text-center">Segurança insuficiente. Corrija os findings de P7 antes de gerar código.</p>
@@ -235,11 +265,11 @@ export function GatekeeperPage() {
               <div className="ml-7 mt-2 flex gap-2 flex-wrap">
                 <button
                   type="button"
-                  onClick={() => navigate(`/projects/${id}/arguider`)}
-                  title="Abrir Arguidor para revisar perguntas dirigidas deste pilar"
+                  onClick={() => navigate(`/projects/${id}/settings?tab=questionario`)}
+                  title="Ir para o Questionário Técnico — perguntas do pipeline aguardam sua resposta"
                   className="flex items-center gap-1.5 px-2.5 py-1 rounded text-xs bg-violet-900/30 text-violet-400 hover:bg-violet-900/50 transition-colors"
                 >
-                  <Zap className="w-3 h-3" /> Acionar Arguidor
+                  <Zap className="w-3 h-3" /> Responder Perguntas
                 </button>
                 {pillar.status === 'blocker' && (
                   <button

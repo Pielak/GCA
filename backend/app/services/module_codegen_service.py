@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4, UUID
 
 from app.utils.retry import gca_retry
+from app.services.ocg_gate import check_ocg_maturity_gate
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -131,6 +132,9 @@ class ModuleCodegenService:
         Returns:
             UUID do GeneratedModule criado ou None se falhar
         """
+        # Gate de maturidade do OCG (MVP 31 Fase 31.4)
+        await check_ocg_maturity_gate(project_id=project_id, db=self.db)
+
         try:
             # 1. Buscar candidato
             candidate = await self._fetch_candidate(project_id, module_candidate_id)

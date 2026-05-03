@@ -19,6 +19,19 @@ Ele existe para:
 
 Em caso de conflito, este documento prevalece sobre manual, tutorial, análises, mocks, README e demais documentos históricos.
 
+### 1.1 Pipeline canônico (referência)
+
+O fluxo de dados do pipeline está documentado em [`docs/PIPELINE_FLOW.md`](docs/PIPELINE_FLOW.md).
+Este documento define:
+- diagrama de fluxo canônico com dependências entre estágios;
+- guardrails (DT-AUDITORIA-002) em cada serviço;
+  - DT-AUDITORIA-003 removido na Simplificação Fase 2 (2026-05-01)
+    junto com OCGIndividual/OCGGlobal
+- race conditions conhecidas e seus comportamentos;
+- logging e alertas recomendados.
+
+O `PIPELINE_FLOW.md` é atualizado sempre que a arquitetura do pipeline muda.
+
 ---
 
 ## 2. Definição canônica do produto
@@ -126,13 +139,33 @@ Podem existir como:
 
 O **OCG** é a fonte única de verdade do projeto.
 
-Regras obrigatórias:
+Regras obrigatórias (atualizadas em 2026-04-30 — substituem versão anterior):
 - o OCG nasce do questionário aprovado;
 - o OCG é evolutivo e auditável;
-- boa ingestão expande contexto;
-- ingestão ruim ou conflitante contrai confiança;
+- **o OCG só expande quando recebe informação de valor; nunca contrai**;
+- ingestão ruim ou conflitante: documento vai para **quarentena** e **não afeta o OCG** (não há mais "contração de confiança" como behavior do motor);
 - módulos não podem assumir defaults invisíveis quando o OCG estiver incompleto;
 - toda mudança relevante deve gerar versionamento e trilha de auditoria.
+
+Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine` em `.claude/skills/gca-ocg-engine/SKILL.md`.
+
+### 5.1 Caminho n8n: handler delega ao OCGUpdaterService (MVP 31)
+
+Desde MVP 31 (entregue 2026-05-02), o caminho de ingestão via n8n
+(`POST /api/v1/webhooks/ingestion-complete`, handler em `webhooks.py`)
+**delega obrigatoriamente** ao `OCGUpdaterService.update_ocg_from_arguider`.
+Não é mais permitido fazer `UPDATE ocg SET ocg_data=...` direto.
+
+Invariantes preservadas:
+- OCG só cresce (`_filter_negative_score_deltas` bloqueia delta negativo)
+- Histórico imutável em `ocg_individual` (1 row/persona/doc) e `ocg_global`
+  (1 row/doc) com unique constraint
+- Versionamento + hash chain em `ocg_delta_log` (anti-tamper)
+- Personas falhas (G4 reprovou) ficam em `ocg_individual` com
+  `status='failed'` para auditoria, mas **NÃO** entram no merge cumulativo
+- CodeGen tem gate de maturidade em 3 níveis (`hard_block`,
+  `insufficient`, `immature`) nos 6 entry points HTTP + `start_scaffold_run`
+  async — gate liberado quando `overall_score >= 95` e `is_blocking=false`
 
 ---
 
@@ -246,6 +279,39 @@ Regras duras:
 5. Em escopo e fora de escopo são obrigatórios no momento da criação — não se começa trabalho com escopo difuso.
 6. Numeração é monotônica crescente. Não há renumeração retroativa.
 7. Releases do produto amarram-se a uma lista de MVPs fechados e tickets (MVP 6) entregues — ver MVP 7.
+
+### 7.31 MVP 31 — OCG Cumulativo + CodeGen Gate
+
+**Estado:** Definido — não iniciado (Gate 1 aprovado com ressalvas em 2026-05-02 por gerente-projetos-ti).
+**Plano completo:** [`docs/MVP_31_OCG_CUMULATIVO_PLAN.md`](docs/MVP_31_OCG_CUMULATIVO_PLAN.md).
+
+**Em escopo (MUST entregar):**
+- Caminho `n8n → backend` (handler `webhooks.py:ingestion_complete`) deixa de fazer UPDATE cru no `ocg` e passa a delegar ao `OCGUpdaterService.update_ocg_from_arguider` — mesmas invariantes do caminho Celery (não-contrai, `_filter_negative_score_deltas`, `hash_chain` em `ocg_delta_log`).
+- Modelos SQLAlchemy `OCGIndividual` e `OCGGlobal` em `backend/app/models/base.py` espelhando schema vivo + migration Alembic (stamp ou consolidação).
+- Tabelas `ocg_individual` (1 row por persona/doc) e `ocg_global` (1 row consolidada/doc) populadas a cada documento ingerido via n8n.
+- "Lixo descartado": PersonaOutput inválido (G4 reprovou) **não entra** no merge cumulativo, mas fica registrado em `ocg_individual` com `status='failed'` para auditoria.
+- CodeGen ganha gate de maturidade do OCG em 3 níveis:
+  - `is_blocking=true` → 409 `block_level=hard_block`
+  - `overall_score < 60` → 409 `block_level=insufficient`
+  - `overall_score < 95` → 409 `block_level=immature` (precisa amadurecer ingerindo mais docs)
+- Cláusula explícita em §5 deste contrato: *"no caminho n8n, handler `/ingestion-complete` delega ao `OCGUpdaterService`"* (atualizada na Fase 31.5).
+
+**Fora de escopo (não entregar neste MVP):**
+- Refatorar o `OCGUpdaterService` (reusa como está).
+- Adicionar novas personas LLM (12 estáveis no Conjunto B §0.5).
+- Mudar formato do PersonaOutput v2.
+- Implementar revogação manual de score por owner (parked).
+- Migrar caminho Celery (já correto). Continua funcional como fallback.
+- **Corrigir hardcode de provider Anthropic em `module_codegen_service.py:164-165`** — registrado como nova DT no `GCA_MVP_PROGRESS.md §3` para próximo MVP.
+- **Adicionar `audit_log` no CodeGen** — DT já listada em `GCA_MVP_PROGRESS.md §3.0`, fora deste escopo.
+
+**Princípios canônicos reafirmados pelo GP em 2026-05-02:**
+- *"O OCG não sobrescreve, não contrai. Só cresce com informação útil. Informação inútil é descartada. OCG fica estático e só cresce com informação útil."*
+- *"CodeGen só é liberado para gerar código quando OCG está maduro, com >=95% de contexto."*
+
+**Estimativa:** ~6 dias (Gate 1 revisou de 5 para 6 por dívida ORM/migration descoberta na Fase 31.1).
+
+**Próximo gate:** arquiteto-projetos (Gate 2) com mandato específico definido em §11 do plano.
 
 ## MVP Registry — histórico arquivado
 

@@ -199,7 +199,6 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}`} label="Dashboard" icon={<Activity className="w-3 h-3" />} end />
                         {/* Fluxo canônico do projeto (MVP 26 — ordem do contrato) */}
                         <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionário" icon={<ClipboardList className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/technical-questionnaire`} label="Questionários Técnicos" icon={<ClipboardList className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ingestion`} label="Ingestão" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="Gatekeeper" icon={<Shield className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/arguider`} label="Arguidor" icon={<Zap className="w-3 h-3" />} />

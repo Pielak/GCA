@@ -1,0 +1,236 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gca.code-auditor.com.br/schemas/PersonaOutput-v2.json",
+  "title": "PersonaOutput",
+  "description": "Schema canônico de saída de qualquer especialista do GCA Ingestion Pipeline. Todo workflow especialista (12 personas) DEVE retornar exatamente esta estrutura. O Consolidador valida cada item contra este schema antes de incluir no merge.",
+  "type": "object",
+  "required": [
+    "ingestion_id",
+    "persona_tag",
+    "persona_name",
+    "execution_metadata",
+    "score",
+    "score_rationale",
+    "blocking",
+    "findings",
+    "recommendations",
+    "ocg_contributions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "PersonaOutput-v2",
+      "description": "Versionamento explícito; Consolidador rejeita versões desconhecidas"
+    },
+    "ingestion_id": {
+      "type": "string",
+      "format": "uuid",
+      "description": "UUID v4 da ingestão originária do GCA Backend"
+    },
+    "persona_tag": {
+      "type": "string",
+      "enum": ["AUD", "GP", "ARQ", "DBA", "DEV", "QA", "UX", "UI", "SEG", "CONF", "LGPD", "NEG"],
+      "description": "Tag canônica da persona. DEVE coincidir com o workflow que gerou o output"
+    },
+    "persona_name": {
+      "type": "string",
+      "description": "Nome humano-legível da persona (ex: 'Auditor de Qualidade Documental')"
+    },
+    "execution_metadata": {
+      "type": "object",
+      "required": ["started_at", "completed_at", "model_used", "tokens_consumed"],
+      "additionalProperties": false,
+      "properties": {
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "model_used": {"type": "string", "description": "ID do modelo Anthropic (ex: claude-sonnet-4-6)"},
+        "tokens_consumed": {
+          "type": "object",
+          "required": ["input", "output"],
+          "additionalProperties": false,
+          "properties": {
+            "input": {"type": "integer", "minimum": 0},
+            "output": {"type": "integer", "minimum": 0}
+          }
+        },
+        "chunk_index": {"type": "integer", "minimum": 0, "default": 0},
+        "total_chunks": {"type": "integer", "minimum": 1, "default": 1},
+        "extraction_source_format": {
+          "type": "string",
+          "enum": ["txt", "md", "html", "pdf_text", "pdf_scanned", "docx", "image", "email", "json"],
+          "description": "Formato original do documento antes do normalizador (rastreabilidade)"
+        }
+      }
+    },
+    "score": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 100,
+      "description": "Score absoluto desta persona, 0-100"
+    },
+    "score_rationale": {
+      "type": "string",
+      "maxLength": 280,
+      "description": "Justificativa concisa do score, até 280 chars"
+    },
+    "blocking": {
+      "type": "boolean",
+      "description": "Se true, esta persona bloqueia a ingestão. Apenas CONF pode emitir blocking=true em condições normais"
+    },
+    "blocking_reason": {
+      "type": ["string", "null"],
+      "description": "Razão do bloqueio se blocking=true; null caso contrário"
+    },
+    "status": {
+      "type": "string",
+      "enum": ["completed", "partial", "failed"],
+      "default": "completed",
+      "description": "Estado de execução da persona. partial = chunks faltaram; failed = erro de execução (G3 ainda assim emitido para destravar Consolidador)"
+    },
+    "findings": {
+      "type": "array",
+      "description": "Lista de achados (gaps, riscos, problemas detectados)",
+      "items": {
+        "type": "object",
+        "required": ["id", "severity", "category", "title", "description"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9-]+$", "description": "Slug único dentro deste output"},
+          "severity": {"type": "string", "enum": ["info", "low", "medium", "high", "critical"]},
+          "category": {"type": "string", "description": "Subcategoria livre dentro do escopo da persona"},
+          "title": {"type": "string", "maxLength": 120},
+          "description": {"type": "string"},
+          "location_hint": {"type": "string", "description": "Onde no documento (seção, parágrafo, linha)"},
+          "evidence_excerpt": {"type": "string", "description": "Trecho LITERAL do documento que evidencia o achado"},
+          "regulatory_reference": {"type": "string", "description": "Apenas para CONF/LGPD — referência normativa (ex: 'LGPD art. 7º, IX')"}
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "description": "Lista de ações recomendadas, ordenadas por prioridade",
+      "items": {
+        "type": "object",
+        "required": ["id", "priority", "action", "expected_impact"],
+        "additionalProperties": false,
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9-]+$"},
+          "priority": {"type": "string", "enum": ["low", "medium", "high", "urgent"]},
+          "action": {"type": "string", "description": "Ação específica e acionável (não genérica)"},
+          "expected_impact": {"type": "string"},
+          "estimated_effort": {"type": "string", "enum": ["trivial", "small", "medium", "large"]},
+          "linked_finding_ids": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "IDs dos findings que esta recomendação endereça"
+          }
+        }
+      }
+    },
+    "ocg_contributions": {
+      "type": "object",
+      "required": ["individual", "global_delta"],
+      "additionalProperties": false,
+      "description": "Contribuições aos dois níveis de OCG. individual = OCG do especialista para esta ingestão. global_delta = delta a ser mesclado no OCG global do projeto.",
+      "properties": {
+        "individual": {
+          "type": "object",
+          "description": "Estrutura específica da persona. OCG individual do especialista para esta ingestão. Validado contra schema persona-específico (ver seção 7 do spec).",
+          "additionalProperties": true
+        },
+        "global_delta": {
+          "type": "object",
+          "description": "Delta a ser mesclado pelo Consolidador no OCG global do projeto. Estrutura específica da persona.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "validation_self_report": {
+      "type": "object",
+      "description": "Auto-validação do especialista antes do callback (G3)",
+      "additionalProperties": false,
+      "properties": {
+        "schema_version_check": {"type": "boolean"},
+        "score_in_range": {"type": "boolean"},
+        "evidence_excerpts_present": {"type": "boolean", "description": "Todos os findings têm evidence_excerpt não-vazio quando severity >= medium"},
+        "ocg_individual_non_empty": {"type": "boolean"},
+        "ocg_global_delta_non_empty": {"type": "boolean"}
+      }
+    }
+  },
+  "examples": [
+    {
+      "schema_version": "PersonaOutput-v2",
+      "ingestion_id": "550e8400-e29b-41d4-a716-446655440000",
+      "persona_tag": "LGPD",
+      "persona_name": "Encarregado de Proteção de Dados",
+      "execution_metadata": {
+        "started_at": "2026-05-01T14:30:00Z",
+        "completed_at": "2026-05-01T14:30:08Z",
+        "model_used": "claude-sonnet-4-6",
+        "tokens_consumed": {"input": 4520, "output": 1340},
+        "chunk_index": 0,
+        "total_chunks": 1,
+        "extraction_source_format": "pdf_text"
+      },
+      "score": 65,
+      "score_rationale": "Tratamento de dados pessoais identificado, mas base legal não declarada explicitamente em 2 das 3 operações.",
+      "blocking": false,
+      "blocking_reason": null,
+      "status": "completed",
+      "findings": [
+        {
+          "id": "missing-legal-basis-onboarding",
+          "severity": "high",
+          "category": "base_legal",
+          "title": "Base legal não declarada para onboarding",
+          "description": "Coleta de CPF, RG e endereço durante onboarding sem indicação de base legal aplicável.",
+          "location_hint": "Seção 3.2 — Cadastro inicial",
+          "evidence_excerpt": "O cliente fornecerá CPF, RG e comprovante de endereço para validação.",
+          "regulatory_reference": "LGPD art. 7º"
+        }
+      ],
+      "recommendations": [
+        {
+          "id": "declare-legal-basis-contract-execution",
+          "priority": "high",
+          "action": "Declarar base legal 'execução de contrato' (LGPD art. 7º, V) na seção 3.2 do documento.",
+          "expected_impact": "Conformidade com princípio de transparência (art. 6º, VI) e pré-requisito para auditoria ANPD.",
+          "estimated_effort": "small",
+          "linked_finding_ids": ["missing-legal-basis-onboarding"]
+        }
+      ],
+      "ocg_contributions": {
+        "individual": {
+          "data_inventory": [
+            {"data_element": "CPF", "category": "comum", "purpose": "validação de identidade", "evidence_excerpt": "O cliente fornecerá CPF..."}
+          ],
+          "legal_basis_per_processing": [
+            {"processing_operation": "cadastro inicial", "declared_basis": null, "compliant": false}
+          ],
+          "data_subject_rights_coverage": {
+            "confirmation": false, "access": false, "correction": false, "anonymization": false,
+            "portability": false, "deletion": false, "consent_revocation": false
+          },
+          "ripd_indication": {"needed": false, "rationale": "Volume e sensibilidade não justificam RIPD obrigatório"}
+        },
+        "global_delta": {
+          "project_data_subjects": [{"subject_type": "cliente final", "context": "onboarding"}],
+          "project_data_categories_master": [
+            {"category": "comum", "first_seen_in": "this_document"}
+          ],
+          "dpo_signals": [],
+          "international_transfers": []
+        }
+      },
+      "validation_self_report": {
+        "schema_version_check": true,
+        "score_in_range": true,
+        "evidence_excerpts_present": true,
+        "ocg_individual_non_empty": true,
+        "ocg_global_delta_non_empty": true
+      }
+    }
+  ]
+}

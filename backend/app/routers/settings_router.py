@@ -540,7 +540,7 @@ async def validate_llm_settings(
         "deepseek": {
             "url": "https://api.deepseek.com/v1/models",
             "headers": {"Authorization": f"Bearer {api_key}"},
-            "default_model": "deepseek-chat",
+            "default_model": "deepseek-v4-flash",
         },
         "grok": {
             "url": "https://api.x.ai/v1/models",

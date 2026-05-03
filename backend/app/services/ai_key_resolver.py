@@ -111,12 +111,17 @@ class AIKeyResolver:
     async def resolve_project_provider_chain(
         db: AsyncSession,
         project_id: UUID,
+        include_api_key: bool = False,
     ) -> list[dict]:
         """DT-064 — Retorna a cadeia de providers configurados no projeto
         em ordem de preferência (default primeiro, depois os outros
         validados mais recentemente). Cada entrada tem:
 
-            {"provider": "openai", "model": "...", "base_url": "..."|None}
+            {"provider": "openai", "model": "...", "base_url": "..."|None, "api_key": "..."|None}
+
+        Se include_api_key=True (padrão False para segurança), também retorna
+        a chave do vault para cada provider. Usado internamente por ingestion_router
+        para passar ao n8n com o payload criptografado via HMAC.
 
         Uso: caller tenta cada provider em sequência quando encontra
         erro transiente (rate limit, quota esgotada, 503). Implementa
@@ -124,6 +129,7 @@ class AIKeyResolver:
         """
         from sqlalchemy import text
         import json
+        from app.services.vault_service import VaultService
 
         result = await db.execute(
             text(
@@ -144,11 +150,16 @@ class AIKeyResolver:
         if not providers:
             # Formato legado single-provider
             if data.get("provider"):
-                return [{
+                chain_item = {
                     "provider": data["provider"],
                     "model": data.get("model_preference"),
                     "base_url": data.get("base_url"),
-                }]
+                }
+                if include_api_key:
+                    vault = VaultService()
+                    api_key = await vault.get_secret(db, project_id, "llm_api_key", data["provider"])
+                    chain_item["api_key"] = api_key or ""
+                return [chain_item]
             return []
 
         # Default primeiro, depois os demais. Dentro de cada grupo, os
@@ -168,14 +179,23 @@ class AIKeyResolver:
             return (0 if is_def else 1, 0 if ok else 1, "9" + ts if ok else ts)
 
         chain = sorted(providers, key=sort_key)
-        return [
-            {
+        result_chain = []
+        vault = VaultService() if include_api_key else None
+
+        for p in chain:
+            if not p.get("provider"):
+                continue
+            chain_item = {
                 "provider": p.get("provider"),
                 "model": p.get("model"),
                 "base_url": p.get("base_url"),
             }
-            for p in chain if p.get("provider")
-        ]
+            if include_api_key and vault:
+                api_key = await vault.get_secret(db, project_id, "llm_api_key", p.get("provider"))
+                chain_item["api_key"] = api_key or ""
+            result_chain.append(chain_item)
+
+        return result_chain
 
     @staticmethod
     def should_fallback_to_next_provider(error_message: str) -> bool:

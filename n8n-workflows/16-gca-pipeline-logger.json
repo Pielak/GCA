@@ -1,0 +1,88 @@
+{
+  "id": "gca-pipeline-logger",
+  "name": "16 - GCA Pipeline Logger (Error Workflow)",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "node-error-trigger",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "alwaysOutputData": true,
+      "parameters": {}
+    },
+    {
+      "id": "node-extrair-info",
+      "name": "Extrair Info do Erro",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "jsCode": "// Extrai informações estruturadas do erro capturado pelo Error Trigger\n// $json aqui contém o contexto do erro fornecido pelo n8n\nconst errorData = $json;\n\nconst workflowName = (errorData.workflow && errorData.workflow.name) ? errorData.workflow.name : 'desconhecido';\nconst lastNode = (errorData.execution && errorData.execution.lastNodeExecuted) ? errorData.execution.lastNodeExecuted : 'desconhecido';\nconst errorMessage = (errorData.execution && errorData.execution.error && errorData.execution.error.message)\n  ? errorData.execution.error.message\n  : 'erro desconhecido';\nconst executionId = (errorData.execution && errorData.execution.id) ? String(errorData.execution.id) : '';\n\n// Tenta extrair ingestion_id do contexto de dados da execução com falha\nlet ingestionId = '';\nif (errorData.execution && errorData.execution.data && errorData.execution.data.resultData) {\n  const resultData = errorData.execution.data.resultData;\n  if (resultData.runData) {\n    const nodeNames = Object.keys(resultData.runData);\n    for (let i = 0; i < nodeNames.length; i++) {\n      const nodeRuns = resultData.runData[nodeNames[i]];\n      if (Array.isArray(nodeRuns) && nodeRuns.length > 0) {\n        const firstRun = nodeRuns[0];\n        if (firstRun.data && firstRun.data.main && firstRun.data.main[0] && firstRun.data.main[0][0]) {\n          const item = firstRun.data.main[0][0];\n          if (item.json && item.json.ingestion_id) {\n            ingestionId = item.json.ingestion_id;\n            break;\n          }\n          if (item.json && item.json.personaOutput && item.json.personaOutput.ingestion_id) {\n            ingestionId = item.json.personaOutput.ingestion_id;\n            break;\n          }\n        }\n      }\n    }\n  }\n}\n\nreturn [{ json: {\n  ts: new Date().toISOString(),\n  ingestion_id: ingestionId,\n  workflow: workflowName,\n  node: lastNode,\n  event: 'error',\n  persona_tag: 'PIPELINE',\n  duration_ms: 0,\n  detail: 'execution_id=' + executionId,\n  error: errorMessage\n} }];"
+      }
+    },
+    {
+      "id": "node-log-erro",
+      "name": "Log Erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        300
+      ],
+      "alwaysOutputData": true,
+      "parameters": {
+        "method": "POST",
+        "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extrair Info do Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair Info do Erro": {
+      "main": [
+        [
+          {
+            "node": "Log Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

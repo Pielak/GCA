@@ -138,9 +138,10 @@ def classify_item(code: str, data: dict[str, Any]) -> SectionKey:
       1. RNF-S-* → security
       2. RNF-C-* → legal
       3. RNF-P-*, RNF-A-* → capacity
-      4. data.pillar match (P2→legal, P4→capacity, P5/P6→architecture, P7→security, P1→governance)
-      5. keyword match em data.text / data.description / data.question
-      6. fallback → governance
+      4. data.rnf_category / data.category match
+      5. data.pillar match (P2→legal, P4→capacity, P5/P6→architecture, P7→security, P1→governance)
+      6. keyword match em data.text / data.description / data.question
+      7. fallback → governance
     """
     code_upper = (code or "").upper()
     if code_upper.startswith("RNF-S"):
@@ -149,6 +150,20 @@ def classify_item(code: str, data: dict[str, Any]) -> SectionKey:
         return "legal"
     if code_upper.startswith(("RNF-P", "RNF-A")):
         return "capacity"
+
+    # Check rnf_category (from rnf_arguider_service)
+    rnf_category = str(data.get("rnf_category", "")).lower().replace(" ", "")
+    if rnf_category in ("security", "compliance"):
+        return "security" if rnf_category == "security" else "legal"
+    if rnf_category in ("performance", "availability"):
+        return "capacity"
+
+    # Check generic category (from other sources)
+    category = str(data.get("category", "")).lower().replace(" ", "")
+    if category == "compliance" or "compliance" in category:
+        return "legal"
+    if category == "security" or "security" in category:
+        return "security"
 
     pillar = str(data.get("pillar", "")).upper().replace(" ", "")
     if pillar in ("P2", "P2_COMPLIANCE", "REGRAS", "COMPLIANCE"):

@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap, Code2, Shield, X, TestTube2, GitBranch } from 'lucide-react'
+import { ClipboardList, RefreshCw, Loader2, Filter, AlertTriangle, CheckCircle, Clock, Zap, Code2, Shield, X, TestTube2, GitBranch, GripVertical } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { apiClient } from '@/lib/api'
 import { RoleAssumptionPrompt } from '@/components/projects/RoleAssumptionPrompt'
 import { BacklogIssuePanel } from '@/components/projects/BacklogIssuePanel'
@@ -69,11 +70,43 @@ export function BacklogPage() {
   const [refreshing, setRefreshing] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [priorityFilter, setPriorityFilter] = useState('all')
+  const [reordering, setReordering] = useState(false)
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null)
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type })
     setTimeout(() => setToast(null), 4000)
+  }
+
+  const handleDragEnd = async (result: DropResult) => {
+    const { source, destination, draggableId } = result
+
+    if (!destination) return
+    if (source.index === destination.index) return
+
+    setReordering(true)
+    try {
+      const newItems = Array.from(items)
+      const [movedItem] = newItems.splice(source.index, 1)
+      newItems.splice(destination.index, 0, movedItem)
+
+      const reorderPayload = newItems.map((item, index) => ({
+        id: item.id,
+        display_order: index,
+      }))
+
+      await apiClient.patch(`/projects/${projectId}/backlog/reorder`, {
+        reorder: reorderPayload,
+      })
+
+      setItems(newItems)
+      showToast('Ordem atualizada com sucesso', 'success')
+    } catch (err) {
+      showToast(getErrorMessage(err) || 'Erro ao reordenar', 'error')
+      await loadData()
+    } finally {
+      setReordering(false)
+    }
   }
 
   const loadData = useCallback(async () => {
@@ -233,17 +266,35 @@ export function BacklogPage() {
         </div>
       )}
 
-      {/* Lista de itens */}
+      {/* Lista de itens com drag-and-drop */}
       {filtered.length > 0 ? (
-        <div className="space-y-2">
-          {filtered.map(item => {
-            const cat = CATEGORY_CONFIG[item.category] || CATEGORY_CONFIG.other
-            const pri = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.medium
-            const st = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending
-            return (
-              <div key={item.id} className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                <div className="flex items-start gap-3">
-                  <span className="text-lg flex-shrink-0 mt-0.5">{cat.icon}</span>
+        <DragDropContext onDragEnd={handleDragEnd}>
+          <Droppable droppableId="backlog-items">
+            {(provided, snapshot) => (
+              <div
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+                className={`space-y-2 ${snapshot.isDraggingOver ? 'bg-slate-800/50 rounded-lg p-2' : ''}`}
+              >
+                {filtered.map((item, index) => {
+                  const cat = CATEGORY_CONFIG[item.category] || CATEGORY_CONFIG.other
+                  const pri = PRIORITY_CONFIG[item.priority] || PRIORITY_CONFIG.medium
+                  const st = STATUS_CONFIG[item.status] || STATUS_CONFIG.pending
+                  return (
+                    <Draggable key={item.id} draggableId={item.id} index={index}>
+                      {(provided, snapshot) => (
+                        <div
+                          ref={provided.innerRef}
+                          {...provided.draggableProps}
+                          className={`bg-slate-900 border border-slate-800 rounded-xl p-4 transition-all ${
+                            snapshot.isDragging ? 'bg-slate-800 border-violet-600 shadow-lg shadow-violet-600/20' : ''
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div {...provided.dragHandleProps} className="flex-shrink-0 mt-0.5 cursor-grab active:cursor-grabbing">
+                              <GripVertical className="h-5 w-5 text-slate-600 hover:text-slate-400" />
+                            </div>
+                            <span className="text-lg flex-shrink-0 mt-0.5">{cat.icon}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <p className="text-slate-200 text-sm font-medium">{item.title}</p>
@@ -377,12 +428,18 @@ export function BacklogPage() {
                         issuesResolved={item.issues_resolved}
                       />
                     )}
-                  </div>
-                </div>
+                        </div>
+                        </div>
+                        </div>
+                      )}
+                    </Draggable>
+                  )
+                })}
+                {provided.placeholder}
               </div>
-            )
-          })}
-        </div>
+            )}
+          </Droppable>
+        </DragDropContext>
       ) : items.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-8 text-center">
           <ClipboardList className="w-12 h-12 text-slate-600 mx-auto mb-4" />

@@ -7,8 +7,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import structlog
 from app.core.config import settings
+from app.core.error_handlers import register_exception_handlers
 from app.db.database import init_db
-from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, admin_gca_router, setup, qa_router, external_repos_router, notifications_router, deliverables_router, public_requests_router
+from app.routers import auth, projects, onboarding, admin, evaluation, code_generation, dashboard, validation, github, questionnaires, webhooks, agents, git_router, settings_router, ingestion_router, gatekeeper_router, module_router, livedocs_router, roadmap_router, admin_gca_router, setup, qa_router, external_repos_router, notifications_router, deliverables_router, public_requests_router, discrepancies_router
+from app.routers.pipeline_questions_router import router as pipeline_questions_router
+from app.routers.gatekeeper_passada import router as gatekeeper_passada_router
 from app.routers.initial_questionnaire_router import router as initial_questionnaire_router
 from app.routers.technical_questionnaire_router import router as technical_questionnaire_router
 from app.routers.admin_gp_router import router as admin_gp_router
@@ -45,6 +48,7 @@ from app.routers.release_router import (
 )
 from app.routers.iterative_questionnaire_router import router as iterative_questionnaire_router
 from app.routers.applied_defaults_router import router as applied_defaults_router
+from app.routers.pilares_vivos_router import router as pilares_vivos_router
 
 logger = structlog.get_logger(__name__)
 
@@ -176,6 +180,7 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
+register_exception_handlers(app)
 
 # MVP 12 Fase 12.1 — Rate limit (slowapi) anti-abuse em endpoints públicos.
 # Limiter fica acessível globalmente via `app.state.limiter` e os routers
@@ -223,7 +228,12 @@ app.include_router(agents.router, prefix=f"{settings.API_PREFIX}", tags=["agents
 app.include_router(git_router.router, prefix=f"{settings.API_PREFIX}", tags=["git"])
 app.include_router(settings_router.router, prefix=f"{settings.API_PREFIX}", tags=["settings"])
 app.include_router(ingestion_router.router, prefix=f"{settings.API_PREFIX}", tags=["ingestion"])
+app.include_router(pipeline_questions_router, prefix=f"{settings.API_PREFIX}", tags=["pipeline-questions"])
+app.include_router(discrepancies_router.router, prefix=f"{settings.API_PREFIX}", tags=["discrepancies"])
+# 2026-05-01: analysis_dashboard_router e ocg_override_router removidos
+# na Fase 2 Simplificação (personas da ingestão + OCGGlobal eliminados)
 app.include_router(gatekeeper_router.router, prefix=f"{settings.API_PREFIX}", tags=["gatekeeper"])
+app.include_router(gatekeeper_passada_router, prefix=f"{settings.API_PREFIX}", tags=["gatekeeper-passada"])
 app.include_router(module_router.router, prefix=f"{settings.API_PREFIX}", tags=["modules"])
 app.include_router(livedocs_router.router, prefix=f"{settings.API_PREFIX}", tags=["livedocs"])
 app.include_router(roadmap_router.router, prefix=f"{settings.API_PREFIX}", tags=["roadmap"])
@@ -265,6 +275,7 @@ app.include_router(initial_questionnaire_router, prefix=f"{settings.API_PREFIX}"
 app.include_router(technical_questionnaire_router, prefix=f"{settings.API_PREFIX}", tags=["technical-questionnaire"])
 app.include_router(applied_defaults_router, prefix=f"{settings.API_PREFIX}", tags=["applied-defaults"])
 app.include_router(metrics_router, tags=["metrics"])
+app.include_router(pilares_vivos_router, prefix=f"{settings.API_PREFIX}", tags=["pilares-vivos"])
 
 
 @app.get("/health")

@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 from app.utils.retry import gca_retry
 from uuid import uuid4, UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from anthropic import AsyncAnthropic
 import structlog
@@ -220,7 +220,7 @@ class DocumentExtractor:  # noqa: E302
             client = self.client  # Reutiliza client com chave do projeto
             b64 = base64.b64encode(image_bytes).decode("ascii")
             response = await client.messages.create(
-                model=settings.ANTHROPIC_MODEL,
+                model=self.model,  # Usa modelo do projeto, não hardcoded
                 max_tokens=2048,
                 messages=[{
                     "role": "user",
@@ -392,12 +392,12 @@ class ArguiderService:
         _default_models = {
             "anthropic": "claude-haiku-4-5-20251001",
             "openai": "gpt-4o-mini",
-            "deepseek": "deepseek-chat",
+            "deepseek": "deepseek-v4-flash",
             "grok": "grok-2",
             "gemini": "gemini-2.0-flash",
             "ollama": "llama3.1:8b",
         }
-        self.model = model or _default_models.get(self.provider, "deepseek-chat")
+        self.model = model or _default_models.get(self.provider, "deepseek-v4-flash")
         # Client Anthropic só quando for o provider — para o resto, httpx.
         self.client = AsyncAnthropic(api_key=project_api_key) if self.provider == "anthropic" else None
         # DocumentExtractor ainda recebe o client Anthropic por compatibilidade
@@ -504,12 +504,17 @@ class ArguiderService:
     ) -> dict:
         """Executa análise completa do Arguidor para um documento.
 
+        Fase 2 Simplificação: Guardrail DT-AUDITORIA-003 removido porque
+        personas da ingestão (OCGIndividual) foram removidas. Pipeline agora
+        usa apenas OCG legacy do questionário.
+
         MVP 29: quando `canonical` (DocumentCanonical) é fornecido, o
         prompt é construído a partir da versão estruturada (3-5× menos
         tokens que texto bruto). `document_text` permanece aceito como
         fallback pra casos onde canonização não é possível (XLSX/IMAGE
         no MVP, ou falha na canonização).
         """
+
         try:
             # Atualizar status
             doc = await self.db.execute(

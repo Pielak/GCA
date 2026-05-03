@@ -19,6 +19,8 @@ interface Props {
   projectId: string
   documentId: string
   enabled?: boolean
+  docStatus?: string
+  ocgUpdated?: boolean
 }
 
 const PILLAR_LABELS: Record<number, string> = {
@@ -63,12 +65,13 @@ function PillarRow({ p }: { p: OCGPillarDelta }) {
   )
 }
 
-export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
+export function OCGDeltaCard({ projectId, documentId, enabled = true, docStatus, ocgUpdated }: Props) {
   const [open, setOpen] = useState(false)
   const { data, isLoading, error } = useOCGDeltaForDocument(projectId, documentId, enabled && open)
 
   const hasDelta = data?.has_delta === true
   const overallDelta = data?.overall_delta ?? null
+  const isComplete = docStatus === 'completed'
 
   const borderClass = !open
     ? 'border-slate-700'
@@ -87,9 +90,9 @@ export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
         onClick={() => setOpen(v => !v)}
         className="w-full flex items-center justify-between px-3 py-2 text-left hover:bg-slate-800/40"
       >
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-medium text-slate-200">Impacto no OCG</span>
-          <span className="text-[10px] text-slate-500">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-xs font-medium text-slate-200 truncate">Impacto no OCG</span>
+          <span className="text-[10px] text-slate-500 truncate">
             (antes × depois por pilar)
           </span>
           {open && hasDelta && overallDelta !== null && (
@@ -115,7 +118,12 @@ export function OCGDeltaCard({ projectId, documentId, enabled = true }: Props) {
 
           {!isLoading && !error && data && !hasDelta && (
             <div className="text-xs text-slate-400 py-3 leading-relaxed">
-              {data.message ?? 'O OCG ainda não foi atualizado com base neste documento.'}
+              {isComplete
+                ? (ocgUpdated
+                    ? 'Documento processado. O OCG foi atualizado (consulte o painel OCG para detalhes).'
+                    : 'Documento processado. Nenhum impacto detectado no OCG para este documento.'
+                  )
+                : (data.message ?? 'O OCG ainda não foi atualizado com base neste documento.')}
             </div>
           )}
 

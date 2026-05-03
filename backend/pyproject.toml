@@ -105,6 +105,24 @@ target-version = ['py311']
 profile = "black"
 line_length = 120
 
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "B",
+    "BLE",   # blind-except
+    "TRY",   # tryceratops
+    "LOG",   # logging best-practices
+    "G",     # logging-format
+    "RET",   # return inconsistente
+]
+ignore = [
+    "TRY003",  # permitir mensagens longas em raise
+    "TRY300",  # else-block é estilo, não obrigatório
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**" = ["BLE", "TRY"]
+"backend/alembic/**" = ["BLE", "TRY"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"

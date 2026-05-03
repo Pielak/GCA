@@ -89,6 +89,9 @@ celery_app = Celery(
         "app.tasks.questionnaire",
         # 2026-04-25 — scaffold server-side persistido (camada A).
         "app.tasks.scaffold",
+        # 2026-05-01 — removido (Fase 2 Simplificação: 5 personas via questionnaire.py)
+        # 2026-05-01 — task de Pilares Vivos (regeneração pós-questionário)
+        "app.tasks.pilares_vivos_task",
     ],
 )
 

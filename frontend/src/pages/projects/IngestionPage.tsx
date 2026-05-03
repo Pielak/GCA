@@ -353,19 +353,19 @@ export function IngestionPage() {
         </div>
 
         {/* Table Header */}
-        <div className="grid grid-cols-[1fr_80px_80px_120px_140px_40px] gap-4 px-5 py-2 border-b border-slate-800 text-xs text-slate-500 font-medium">
+        <div className="grid grid-cols-[1fr_80px_80px_120px_1fr_80px] gap-4 px-5 py-2 border-b border-slate-800 text-xs text-slate-500 font-medium">
           <span>Nome</span>
-          <span>Tipo</span>
-          <span>Tamanho</span>
-          <span>Upload</span>
-          <span className="flex items-center gap-1">
+          <span className="text-center">Tipo</span>
+          <span className="text-center">Tamanho</span>
+          <span className="text-center">Upload</span>
+          <span className="flex items-center gap-1 pl-8">
             Status Arguidor
             <HelpTooltip
               text="Status do processamento pelo Arguidor: ⚪ Aguardando = na fila de análise; ⏳ Processando = sendo analisado pelo LLM agora; ✅ Processado = extraído e adicionado ao OCG com sucesso; ❌ Erro = falha na análise. Erros são retentados automaticamente até 3 vezes (self-healing). Se persistir, verifique se o arquivo está corrompido."
               maxWidth="max-w-96"
             />
           </span>
-          <span></span>
+          <span className="text-center">Ações</span>
         </div>
 
         {isLoading ? (
@@ -385,14 +385,14 @@ export function IngestionPage() {
               const piiFields = doc.pii_fields || [];
               return (
               <div key={doc.id}>
-                <div className="grid grid-cols-[1fr_80px_80px_120px_140px_80px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
+                <div className="grid grid-cols-[1fr_80px_80px_120px_1fr_80px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-4 h-4 text-slate-400" />
                     </div>
                     {doc.content_status === 'lost' ? (
                       <span
-                        className="text-slate-500 text-sm font-medium truncate line-through cursor-not-allowed"
+                        className="text-slate-500 text-[11px] font-medium truncate line-through cursor-not-allowed"
                         title="Conteúdo perdido — bytes não disponíveis para visualização"
                       >
                         {doc.original_filename}
@@ -408,7 +408,7 @@ export function IngestionPage() {
                             alert(`Falha ao abrir documento: ${getErrorMessage(err)}`)
                           }
                         }}
-                        className="text-slate-200 text-sm font-medium truncate hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
+                        className="text-slate-200 text-[11px] font-medium truncate hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
                         title="Abrir documento (read-only)"
                       >
                         {doc.original_filename}
@@ -434,13 +434,22 @@ export function IngestionPage() {
                       </span>
                     )}
                   </div>
-                  <span className="text-slate-400 text-xs">{fileTypeLabel(doc.file_type)}</span>
-                  <span className="text-slate-400 text-xs">{formatFileSize(doc.file_size_bytes)}</span>
-                  <span className="text-slate-500 text-xs">{formatDateBR(doc.created_at)}</span>
-                  <div className="flex flex-col gap-1 text-xs min-w-[180px]">
+                  <span className="text-slate-400 text-[10px] text-center">{fileTypeLabel(doc.file_type)}</span>
+                  <span className="text-slate-400 text-[10px] text-center">{formatFileSize(doc.file_size_bytes)}</span>
+                  <span className="text-slate-500 text-[10px] text-center">{formatDateBR(doc.created_at)}</span>
+                  {doc.tokens_used ? (
+                    <span className="text-slate-600 text-[10px] text-center" title="Tokens usados na análise Arguidor">
+                      {doc.tokens_used.toLocaleString()} tk
+                    </span>
+                  ) : (
+                    <span className="text-slate-700 text-[10px] opacity-0 text-center">— tk</span>
+                  )}
+                  <div className="flex flex-col gap-1 text-[10px] pl-8">
                     <div className="flex items-center gap-2">
                       {doc.arguider_status === 'processing' ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                      ) : doc.arguider_stage === 'completed' && doc.arguider_status === 'pending' ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-400" />
                       ) : (
                         <span title={st.label}>{st.icon}</span>
                       )}
@@ -454,6 +463,24 @@ export function IngestionPage() {
                         percent={doc.arguider_progress_percent ?? 0}
                         stageUpdatedAt={doc.arguider_stage_updated_at ?? null}
                       />
+                    )}
+                    {/* MVP X — Aguardando análise (sequencial: na fila esperando sua vez) */}
+                    {doc.arguider_status === 'pending' && doc.arguider_stage !== 'completed' && (
+                      <div className="text-slate-500 text-[11px] leading-tight">
+                        <span className="inline-block">⏳ Aguardando análise...</span>
+                        <div className="text-slate-600/70 text-[10px] mt-0.5">
+                          Em fila. Processamento sequencial, um documento por vez.
+                        </div>
+                      </div>
+                    )}
+                    {/* Feedback visual quando aguardando OCG — personas analisando em background */}
+                    {doc.arguider_stage === 'completed' && doc.arguider_status === 'pending' && (
+                      <div className="text-violet-400 text-[11px] leading-tight">
+                        <span className="inline-block animate-pulse">◆ Analisando em background...</span>
+                        <div className="text-violet-500/70 text-[10px] mt-0.5">
+                          Personas avaliando questionário técnico. Retry automático a cada 30s.
+                        </div>
+                      </div>
                     )}
                   </div>
                   {/* Actions — wrapper único pra contar como 1 cell do grid
@@ -534,7 +561,12 @@ export function IngestionPage() {
                   doc.content_status !== 'lost' && projectId && (
                   <div className="px-5 pb-3 -mt-1 space-y-2">
                     <ExtractionReportCard projectId={projectId} documentId={doc.id} />
-                    <OCGDeltaCard projectId={projectId} documentId={doc.id} />
+                    <OCGDeltaCard
+                      projectId={projectId}
+                      documentId={doc.id}
+                      docStatus={doc.arguider_status}
+                      ocgUpdated={doc.ocg_updated}
+                    />
                   </div>
                 )}
                 {isQuarantined && (

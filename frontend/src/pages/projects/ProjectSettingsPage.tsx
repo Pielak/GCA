@@ -69,8 +69,10 @@ const MODELS_BY_PROVIDER: Record<string, { value: string; label: string }[]> = {
     { value: 'gpt-4o-mini', label: 'GPT-4o mini (barato)' },
   ],
   deepseek: [
-    { value: 'deepseek-chat', label: 'DeepSeek Chat (V3)' },
-    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1)' },
+    { value: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro (premium, 1M contexto)' },
+    { value: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash (rápido + barato)' },
+    { value: 'deepseek-chat', label: 'DeepSeek Chat (V3 — depreciado)' },
+    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1 — depreciado)' },
   ],
   grok: [
     { value: 'grok-2', label: 'Grok 2' },

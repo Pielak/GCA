@@ -81,8 +81,8 @@ def test_generate_pdf_prefills_project_name_and_slug():
         project_slug="meu-projeto",
     )
     answers = extract_answers_from_pdf(pdf_bytes)
-    assert answers.get("1") == "Meu Projeto"
-    assert answers.get("2") == "meu-projeto"
+    assert answers.get("Q1") == "Meu Projeto"
+    assert answers.get("Q2") == "meu-projeto"
 
 
 # ─── extract_answers_from_pdf ────────────────────────────────────────
@@ -106,9 +106,9 @@ def test_extract_reads_text_and_single_fields():
         },
     )
     answers = extract_answers_from_pdf(filled)
-    assert answers["1"] == "Nome do Projeto Preenchido"
-    assert answers["5"] == "Alta"
-    assert answers["6"] == "Confidencial"
+    assert answers["Q1"] == "Nome do Projeto Preenchido"
+    assert answers["Q5"] == "Alta"
+    assert answers["Q6"] == "Confidencial"
 
 
 def test_extract_reads_multi_checkboxes():
@@ -119,8 +119,8 @@ def test_extract_reads_multi_checkboxes():
     filled = _fill_pdf(pdf_bytes, values)
 
     answers = extract_answers_from_pdf(filled)
-    assert set(answers["15"]) == {"Aplicação web", "API"}
-    assert set(answers["16"]) == {"Monólito modular", "Clean Architecture"}
+    assert set(answers["Q15"]) == {"Aplicação web", "API"}
+    assert set(answers["Q16"]) == {"Monólito modular", "Clean Architecture"}
 
 
 def test_extract_ignores_unselected_single_placeholder():
@@ -128,7 +128,7 @@ def test_extract_ignores_unselected_single_placeholder():
     pdf_bytes = generate_pdf(project_name="", deliverable_type="", project_slug="")
     # Sem fill, q5 mantém "Selecione..." default
     answers = extract_answers_from_pdf(pdf_bytes)
-    assert "5" not in answers
+    assert "Q5" not in answers
 
 
 def test_extract_full_cycle_preserves_all_answer_types():
@@ -146,12 +146,12 @@ def test_extract_full_cycle_preserves_all_answer_types():
     filled = _fill_pdf(pdf_bytes, values)
 
     answers = extract_answers_from_pdf(filled)
-    assert answers["1"] == "Projeto Final"
-    assert answers["3"] == "Não"
-    assert answers["5"] == "Alta"
-    assert answers["24"] == "TypeScript"
-    assert answers["4"] == ["Novo sistema"]
-    assert set(answers["22"]) == {"Web SPA", "Portal autenticado"}
+    assert answers["Q1"] == "Projeto Final"
+    assert answers["Q3"] == "Não"
+    assert answers["Q5"] == "Alta"
+    assert answers["Q24"] == "TypeScript"
+    assert answers["Q4"] == ["Novo sistema"]
+    assert set(answers["Q22"]) == {"Web SPA", "Portal autenticado"}
 
 
 # ─── extract_answers_from_text (fallback) ────────────────────────────
@@ -159,17 +159,17 @@ def test_extract_full_cycle_preserves_all_answer_types():
 def test_extract_from_text_reads_simple_qn_format():
     text = "Q1. Nome do projeto: Foo\nQ3. Altera existente: Não\nQ15. Entregável: API, Microserviço"
     answers = extract_answers_from_text(text)
-    assert answers["1"].startswith("Nome do projeto:")  # regex greedy — ok por ser fallback
-    assert "Não" in answers["3"]
+    assert answers["Q1"].startswith("Nome do projeto:")  # regex greedy — ok por ser fallback
+    assert "Não" in answers["Q3"]
 
 
 def test_extract_from_text_splits_multi_on_commas():
     """Quando o tipo da pergunta é `multi` e há vírgulas, divide em lista."""
     text = "Q15. API, Microserviço"
     answers = extract_answers_from_text(text)
-    assert isinstance(answers["15"], list)
-    assert "API" in answers["15"]
-    assert "Microserviço" in answers["15"]
+    assert isinstance(answers["Q15"], list)
+    assert "API" in answers["Q15"]
+    assert "Microserviço" in answers["Q15"]
 
 
 def test_extract_from_text_returns_empty_on_no_matches():

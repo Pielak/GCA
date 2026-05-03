@@ -5,11 +5,15 @@ Cada Persona (GP, Arquiteto, DBA, Dev Sr, QA) valida respostas do M01.
 Saída: aprovação OU novas questões de clarificação.
 """
 
-from typing import List, Dict, Optional, TypeVar
+from typing import List, Dict, Optional, TypeVar, Any
 from dataclasses import dataclass, field
 from abc import ABC, abstractmethod
 from anthropic import Anthropic
 import json
+import structlog
+from uuid import UUID
+
+logger = structlog.get_logger(__name__)
 
 # ============================================================================
 # SCHEMAS
@@ -39,12 +43,67 @@ class ConsolidatedValidation:
 # PERSONA VALIDATORS (5 CONCRETAS)
 # ============================================================================
 
-class PersonaValidator(ABC):
-    """Abstract base class para todas as Personas"""
+async def get_ia_client_for_project(project_id: UUID, db: Any) -> tuple[str, str, Any]:
+    """Fetch IA provider configuration from ProjectSettings and return (provider, model, client).
 
-    def __init__(self, anthropic_client: Anthropic = None):
+    Returns:
+        Tuple of (provider_name, model_name, client_instance)
+        - provider_name: "anthropic" | "deepseek" | "openai" | "gemini"
+        - model_name: e.g. "claude-sonnet-4-6", "deepseek-chat", "gpt-4"
+        - client_instance: initialized client for the provider
+    """
+    from app.models.base import ProjectSettings
+
+    # Fetch project settings (LLM configuration)
+    stmt = "SELECT settings_json FROM project_settings WHERE project_id = :pid AND setting_type = 'llm' LIMIT 1"
+    result = await db.execute(f"SELECT settings_json FROM project_settings WHERE project_id = '{project_id}' AND setting_type = 'llm' LIMIT 1")
+    row = result.scalar_one_or_none() if hasattr(result, 'scalar_one_or_none') else None
+
+    # Default to Anthropic if not configured
+    if not row:
+        return "anthropic", "claude-sonnet-4-6-20250514", Anthropic()
+
+    settings = json.loads(row) if isinstance(row, str) else row
+    provider = settings.get("provider", "anthropic").lower()
+    model = settings.get("model", "claude-sonnet-4-6-20250514")
+
+    if provider == "deepseek":
+        # Initialize DeepSeek client
+        import requests
+        from requests.adapters import HTTPAdapter
+        api_key = settings.get("api_key", "")
+        # DeepSeek uses OpenAI-compatible API
+        deepseek_client = requests.Session()
+        deepseek_client.headers.update({
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        })
+        return provider, model, deepseek_client
+    elif provider == "openai":
+        # Initialize OpenAI client
+        from openai import OpenAI as OpenAIClient
+        api_key = settings.get("api_key", "")
+        openai_client = OpenAIClient(api_key=api_key)
+        return provider, model, openai_client
+    elif provider == "gemini":
+        # Initialize Gemini client
+        import google.generativeai as genai
+        api_key = settings.get("api_key", "")
+        genai.configure(api_key=api_key)
+        return provider, model, genai
+    else:
+        # Default to Anthropic
+        return "anthropic", model, Anthropic()
+
+
+class PersonaValidator(ABC):
+    """Abstract base class para todas as Personas com suporte a múltiplos providers IA"""
+
+    def __init__(self, anthropic_client: Anthropic = None, project_id: UUID = None, provider: str = None, model: str = None):
         self.client = anthropic_client or Anthropic()
-        self.model = "claude-sonnet-4-6-20250514"
+        self.model = model or "claude-sonnet-4-6-20250514"
+        self.provider = provider or "anthropic"
+        self.project_id = project_id
 
     @abstractmethod
     def get_persona_name(self) -> str:
@@ -55,6 +114,44 @@ class PersonaValidator(ABC):
     def get_validation_prompt(self) -> str:
         """Retorna prompt de validação específico da Persona"""
         pass
+
+    async def _call_llm(self, system_prompt: str, user_prompt: str) -> str:
+        """Call LLM based on provider type. Retorna text response."""
+        if self.provider == "anthropic":
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            return message.content[0].text
+        elif self.provider == "deepseek":
+            # DeepSeek uses OpenAI-compatible API
+            import json as stdlib_json
+            response = self.client.post(
+                "https://api.deepseek.com/v1/chat/completions",
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    "temperature": 0.7,
+                    "max_tokens": 2048
+                },
+                timeout=30
+            )
+            result = response.json()
+            return result["choices"][0]["message"]["content"]
+        else:
+            # Default to Anthropic
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=2048,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}]
+            )
+            return message.content[0].text
 
     def validate(
         self,
@@ -115,16 +212,54 @@ Retorne JSON com:
 }}
 """
 
-        # Chamar Claude
-        message = self.client.messages.create(
-            model=self.model,
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}]
-        )
-
-        # Parse resposta
-        response_text = message.content[0].text
+        try:
+            if self.provider == "anthropic":
+                message = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=2048,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}]
+                )
+                response_text = message.content[0].text
+            elif self.provider == "deepseek":
+                # DeepSeek uses requests session
+                response = self.client.post(
+                    "https://api.deepseek.com/v1/chat/completions",
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": user_prompt}
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 2048
+                    },
+                    timeout=30
+                )
+                result = response.json()
+                response_text = result["choices"][0]["message"]["content"]
+            else:
+                # Fallback to Anthropic
+                message = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=2048,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}]
+                )
+                response_text = message.content[0].text
+        except Exception as exc:
+            logger.error(
+                "persona_validator.llm_call_failed",
+                persona=persona_name,
+                provider=self.provider,
+                error=str(exc)
+            )
+            return ValidationResult(
+                persona=persona_name,
+                status="needs_clarification",
+                decision="Erro ao chamar IA — peça clarificação",
+                severity="critical"
+            )
 
         try:
             if "```json" in response_text:
@@ -136,7 +271,11 @@ Retorne JSON com:
 
             parsed = json.loads(json_str)
         except json.JSONDecodeError:
-            # Se falhar parsing, assumir que precisa clarificação
+            logger.warning(
+                "persona_validator.json_parse_failed",
+                persona=persona_name,
+                response=response_text[:200]
+            )
             return ValidationResult(
                 persona=persona_name,
                 status="needs_clarification",
@@ -260,15 +399,18 @@ Se tudo OK → agregue ao OCG em "Qualidade & Testes".
 # ============================================================================
 
 class PersonasConsolidator:
-    """Consolida validações de todas as 5 Personas"""
+    """Consolida validações de todas as Personas (5 base + 2 adicionais para MVP B)"""
 
-    def __init__(self):
+    def __init__(self, project_id: UUID = None, provider: str = None, model: str = None):
+        self.project_id = project_id
+        self.provider = provider or "anthropic"
+        self.model = model
         self.personas = [
-            GPValidator(),
-            ArquitetoValidator(),
-            DBAValidator(),
-            DevSrValidator(),
-            QAValidator()
+            GPValidator(project_id=project_id, provider=provider, model=model),
+            ArquitetoValidator(project_id=project_id, provider=provider, model=model),
+            DBAValidator(project_id=project_id, provider=provider, model=model),
+            DevSrValidator(project_id=project_id, provider=provider, model=model),
+            QAValidator(project_id=project_id, provider=provider, model=model)
         ]
 
     def validate_all(
@@ -278,7 +420,7 @@ class PersonasConsolidator:
         document_domain: str = "software"
     ) -> ConsolidatedValidation:
         """
-        Roda validação de todas as 5 Personas (em paralelo se possível)
+        Roda validação de todas as Personas
 
         Args:
             responses: Respostas do questionário
@@ -290,7 +432,6 @@ class PersonasConsolidator:
         """
         results = []
 
-        # TODO: Paralelizar com asyncio/gather se performance for crítica
         for persona in self.personas:
             result = persona.validate(
                 responses=responses,
@@ -301,7 +442,7 @@ class PersonasConsolidator:
 
         # Consolidar
         approved_count = sum(1 for r in results if r.status == "approved")
-        all_approved = approved_count == 5
+        all_approved = approved_count == len(self.personas)
 
         if all_approved:
             next_action = "aggregate_to_ocg"
@@ -326,9 +467,19 @@ class PersonasConsolidator:
 
 
 # ============================================================================
-# HELPER FUNCTION
+# HELPER FUNCTIONS
 # ============================================================================
 
-def create_personas_consolidator() -> PersonasConsolidator:
-    """Factory para criar PersonasConsolidator com defaults"""
-    return PersonasConsolidator()
+def create_personas_consolidator(project_id: UUID = None, provider: str = None, model: str = None) -> PersonasConsolidator:
+    """Factory para criar PersonasConsolidator com configuração do projeto"""
+    return PersonasConsolidator(project_id=project_id, provider=provider, model=model)
+
+
+def create_single_persona_validator(
+    persona_class,
+    project_id: UUID = None,
+    provider: str = None,
+    model: str = None
+) -> PersonaValidator:
+    """Factory para criar uma Persona única com configuração do projeto"""
+    return persona_class(project_id=project_id, provider=provider, model=model)

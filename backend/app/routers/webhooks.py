@@ -1,9 +1,16 @@
 """Webhooks Router — n8n Integration"""
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Request, status, Depends
 from pydantic import BaseModel
 from typing import Dict, Any, List, Optional
+from uuid import UUID
+from sqlalchemy.ext.asyncio import AsyncSession
 import structlog
 import json
+import hmac
+import hashlib
+
+from app.db.database import get_db
+from app.services.ocg_updater_service import OCGUpdaterService, TRIGGER_N8N
 
 logger = structlog.get_logger(__name__)
 
@@ -293,3 +300,563 @@ async def ocg_result_callback(payload: Dict[str, Any]) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao processar resultado OCG: {str(e)}",
         )
+
+
+# ============================================================================
+# n8n Pipeline v2 — Ingestão via Personas distribuídas
+# ============================================================================
+
+def _verify_hmac(body: bytes, signature: str, secret: str) -> bool:
+    expected = "sha256=" + hmac.new(
+        secret.encode(), body, hashlib.sha256
+    ).hexdigest()
+    return hmac.compare_digest(expected, signature or "")
+
+
+class IngestionCompletePayload(BaseModel):
+    ingestion_id: str
+    project_id: str
+    status: str  # completed|failed|partial
+    overall_score: Optional[int] = None
+    blocked: bool = False
+    blocking_reason: Optional[str] = None
+    personas_executed: List[str] = []
+    personas_failed: List[str] = []
+    ocg_individual: Dict[str, Any] = {}
+    ocg_global_delta: Dict[str, Any] = {}
+    conflicts_resolved: List[Dict[str, Any]] = []
+    consolidated_findings: List[Dict[str, Any]] = []
+    consolidated_recommendations: List[Dict[str, Any]] = []
+    execution_summary: Dict[str, Any] = {}
+
+
+@router.post("/ingestion-complete")
+async def ingestion_complete(
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+):
+    """Callback do Consolidador n8n — recebe resultado final da ingestão."""
+    from app.core.config import settings
+    body = await request.body()
+    signature = request.headers.get("x-n8n-signature", "") or request.headers.get("X-N8N-Signature", "")
+    secret = getattr(settings, "N8N_CALLBACK_SECRET", "")
+
+    # Validação HMAC é opcional se não houver signature (fallback para desenvolvimento)
+    if signature and secret:
+        if not _verify_hmac(body, signature, secret):
+            logger.warning("webhook.ingestion_complete_hmac_failed")
+            raise HTTPException(status_code=401, detail="HMAC inválido")
+    elif secret and not signature:
+        # Secret configurado mas signature ausente — warn mas permite
+        logger.warning("webhook.ingestion_complete_hmac_missing", detail="N8N_CALLBACK_SECRET configured but no signature provided")
+
+    payload = IngestionCompletePayload(**json.loads(body))
+
+    logger.info(
+        "webhook.ingestion_complete",
+        ingestion_id=payload.ingestion_id,
+        project_id=payload.project_id,
+        status=payload.status,
+        overall_score=payload.overall_score,
+        personas_ok=len(payload.personas_executed),
+        personas_failed=len(payload.personas_failed),
+        blocked=payload.blocked,
+    )
+
+    from sqlalchemy import text
+    from datetime import datetime, timezone
+    from uuid import UUID as _UUID
+
+    try:
+        doc_id = payload.ingestion_id
+        project_id = payload.project_id
+
+        if payload.status in ("completed", "partial"):
+            # --- Atualizar status do documento ---
+            await db.execute(text("""
+                UPDATE ingested_documents SET
+                    arguider_status = :status,
+                    arguider_stage = 'completed',
+                    arguider_progress_percent = 100,
+                    arguider_completed_at = NOW(),
+                    ocg_updated = TRUE,
+                    updated_at = NOW()
+                WHERE id = :doc_id
+            """), {"doc_id": doc_id, "status": "completed"})
+
+            # --- Persistir histórico imutável por persona (ocg_individual) ---
+            # Upsert idempotente: ON CONFLICT garante re-tentativas seguras
+            for persona_tag, persona_output in (payload.ocg_individual or {}).items():
+                failed = persona_tag in (payload.personas_failed or [])
+                persona_status = "failed" if failed else "completed"
+                error_msg = persona_output.get("error_message") if failed else None
+                # persona_name: pega do output ou usa a tag como fallback
+                persona_name = persona_output.get("persona_name") or persona_output.get("name") or persona_tag
+                # parecer: o objeto completo da persona (sem o campo error_message isolado)
+                parecer = {k: v for k, v in persona_output.items() if k != "error_message"}
+
+                await db.execute(text("""
+                    INSERT INTO ocg_individual
+                        (id, project_id, document_id, persona_id, persona_name,
+                         parecer, status, error_message, completed_at, created_at)
+                    VALUES
+                        (gen_random_uuid(), :project_id, :document_id, :persona_id,
+                         :persona_name, cast(:parecer as jsonb), :status, :error_message,
+                         NOW(), NOW())
+                    ON CONFLICT (document_id, persona_id) DO UPDATE SET
+                        parecer        = EXCLUDED.parecer,
+                        status         = EXCLUDED.status,
+                        error_message  = EXCLUDED.error_message,
+                        completed_at   = EXCLUDED.completed_at
+                """), {
+                    "project_id": project_id,
+                    "document_id": doc_id,
+                    "persona_id": persona_tag,
+                    "persona_name": persona_name,
+                    "parecer": json.dumps(parecer, ensure_ascii=False),
+                    "status": persona_status,
+                    "error_message": error_msg,
+                })
+
+            # --- Fase 31.3: conjunto de personas falhas (reutilizado abaixo) ---
+            # Construído uma única vez para evitar duplicidade entre Tarefa 1 e 2.
+            failed_set = set(payload.personas_failed or [])
+
+            # --- Persistir parecer consolidado (ocg_global) ---
+            # Fase 31.3 — Tarefa 2: parecer_consolidated exclui personas falhas.
+            # Lixo descartado: output de persona falha não contamina o consenso global.
+            # Tradeoff documentado: consensus_fields/voting_results são produzidos
+            # pelo consolidador n8n; se vierem com referências a personas falhas,
+            # filtrar aqui também (caso comum: chegam {} — protegido pelo json.dumps).
+            parecer_consolidated_clean = {
+                tag: data
+                for tag, data in (payload.ocg_individual or {}).items()
+                if tag not in failed_set
+            }
+            ocg_global_payload = {
+                "overall_score": payload.overall_score,
+                "blocked": payload.blocked,
+                "blocking_reason": payload.blocking_reason,
+                "personas_executed": payload.personas_executed,
+                "personas_failed": payload.personas_failed,
+                "personas_excluded_from_consensus": sorted(failed_set),
+                "ocg_global_delta": payload.ocg_global_delta,
+                "consolidated_findings": payload.consolidated_findings,
+                "consolidated_recommendations": payload.consolidated_recommendations,
+                "execution_summary": payload.execution_summary,
+                # Pareceres individuais filtrados — sem contaminação de falhas
+                "parecer_por_persona": parecer_consolidated_clean,
+            }
+            await db.execute(text("""
+                INSERT INTO ocg_global
+                    (id, project_id, document_id, parecer_consolidated,
+                     consensus_fields, conflicting_fields, voting_results,
+                     consolidated_at, created_at)
+                VALUES
+                    (gen_random_uuid(), :project_id, :document_id,
+                     cast(:parecer_consolidated as jsonb),
+                     cast(:consensus_fields as jsonb),
+                     cast(:conflicting_fields as jsonb),
+                     cast(:voting_results as jsonb),
+                     NOW(), NOW())
+                ON CONFLICT (document_id) DO UPDATE SET
+                    parecer_consolidated = EXCLUDED.parecer_consolidated,
+                    consensus_fields     = EXCLUDED.consensus_fields,
+                    conflicting_fields   = EXCLUDED.conflicting_fields,
+                    voting_results       = EXCLUDED.voting_results,
+                    consolidated_at      = EXCLUDED.consolidated_at
+            """), {
+                "project_id": project_id,
+                "document_id": doc_id,
+                "parecer_consolidated": json.dumps(ocg_global_payload, ensure_ascii=False),
+                # consensus_fields e voting_results expandidos em MVP futuro (HITL)
+                "consensus_fields": json.dumps({}, ensure_ascii=False),
+                "conflicting_fields": json.dumps({}, ensure_ascii=False),
+                "voting_results": json.dumps({}, ensure_ascii=False),
+            })
+
+            # --- Política de maioria falhou: não chamar o updater ---
+            # Se ≥50% das personas falharam, não há dados confiáveis para mesclar ao OCG.
+            # ocg_individual já foi populado para auditoria mesmo assim.
+            # Lógica de contagem:
+            #   1. n_total = len(ocg_individual) — inclui OK e falhados
+            #   2. Fallback: len(personas_executed) se ocg_individual estiver vazio
+            #   3. Caso-degenerado: personas_executed vazio E personas_failed > 0 → tudo falhou
+            n_total = len(payload.ocg_individual or {})
+            n_failed = len(payload.personas_failed or [])
+            n_executed = len(payload.personas_executed or [])
+            if n_total == 0:
+                n_total = n_executed
+            # Caso-degenerado: nenhuma executada com sucesso e há falhas → tudo falhou
+            if n_total == 0 and n_failed > 0:
+                majority_failed = True
+            else:
+                # Maioria = ≥50% das personas falharam
+                majority_failed = n_failed > 0 and n_total > 0 and (n_failed * 2 >= n_total)
+
+            if majority_failed:
+                logger.warning(
+                    "webhook.ingestion_complete_majority_failed",
+                    ingestion_id=str(doc_id),
+                    project_id=str(project_id),
+                    n_failed=n_failed,
+                    n_executed=n_executed,
+                )
+                await db.execute(text("""
+                    UPDATE ingested_documents SET
+                        arguider_status = 'partial',
+                        updated_at = NOW()
+                    WHERE id = :doc_id
+                """), {"doc_id": doc_id})
+                await db.commit()
+                logger.info(
+                    "webhook.ingestion_complete_processed",
+                    ingestion_id=doc_id,
+                    status="partial_skipped_updater",
+                )
+                return {"status": "processed", "ingestion_id": doc_id}
+
+            # --- Adapter n8n → formato arguider_analysis esperado pelo OCGUpdaterService ---
+            # Fase 31.3 — Tarefa 1: filtra personas falhas antes de entregar ao updater.
+            # Lixo descartado: persona com falha não contamina o OCG cumulativo.
+            # Tradeoff documentado: ocg_global_delta é agregado pelo consolidador n8n;
+            # se ele não excluir falhas do delta, MVP futuro filtra aqui também.
+            ocg_individual_filtered = {
+                tag: out
+                for tag, out in (payload.ocg_individual or {}).items()
+                if tag not in failed_set
+            }
+            personas_excluded_count = len(failed_set)
+
+            arguider_analysis = {
+                "overall_score": payload.overall_score,
+                "blocked": payload.blocked,
+                "blocking_reason": payload.blocking_reason,
+                "personas_executed": payload.personas_executed,
+                "personas_failed": payload.personas_failed,
+                "personas_excluded_count": personas_excluded_count,  # auditoria
+                "ocg_individual": ocg_individual_filtered,
+                "ocg_global_delta": payload.ocg_global_delta,
+                # Mapeamento sugerido pelo Gate 2 (CR-2): findings consolidados → categorias
+                # análogas ao Arguidor antigo (gaps/show_stoppers/recommendations).
+                "gaps": [
+                    f for f in (payload.consolidated_findings or [])
+                    if f.get("type") == "gap"
+                ],
+                "show_stoppers": [
+                    f for f in (payload.consolidated_findings or [])
+                    if f.get("type") == "blocker"
+                ],
+                "recommendations": payload.consolidated_recommendations or [],
+            }
+
+            # Resolver actor_id a partir do documento (uploaded_by)
+            # Fallback explícito: None (acordado no Gate 1, refinement #3)
+            actor_id_row = (await db.execute(
+                text("SELECT uploaded_by FROM ingested_documents WHERE id = :doc_id"),
+                {"doc_id": doc_id},
+            )).first()
+            actor_id = actor_id_row[0] if actor_id_row else None
+
+            # Commit do histórico antes de chamar o updater (que usa lock próprio)
+            await db.commit()
+
+            # --- Delegar ao OCGUpdaterService ---
+            updater = OCGUpdaterService(db)
+            update_result = await updater.update_ocg_from_arguider(
+                project_id=_UUID(project_id),
+                arguider_analysis=arguider_analysis,
+                document_id=_UUID(doc_id),
+                actor_id=actor_id,
+                trigger_source=TRIGGER_N8N,
+            )
+
+            # awaiting_ocg: OCG ainda não existe — tratar como warn (igual caminho Celery)
+            if update_result and update_result.get("status") == "awaiting_ocg":
+                logger.info(
+                    "webhook.ingestion_complete.awaiting_ocg",
+                    ingestion_id=str(doc_id),
+                    project_id=str(project_id),
+                    retry_at=update_result.get("retry_at"),
+                )
+
+            # Falha de LLM no updater → marca ocg_pending (não corrompe OCG)
+            if update_result and update_result.get("status") == "ocg_pending":
+                await db.execute(text("""
+                    UPDATE ingested_documents SET
+                        arguider_status = 'ocg_pending',
+                        arguider_error_message = :error,
+                        updated_at = NOW()
+                    WHERE id = :doc_id
+                """), {
+                    "doc_id": doc_id,
+                    "error": update_result.get("error", "OCG update failed"),
+                })
+                await db.commit()
+
+        else:
+            await db.execute(text("""
+                UPDATE ingested_documents SET
+                    arguider_status = 'error',
+                    arguider_stage = 'failed',
+                    arguider_error_message = :error,
+                    updated_at = NOW()
+                WHERE id = :doc_id
+            """), {
+                "doc_id": doc_id,
+                "error": f"Pipeline n8n: {payload.status}. Failed: {payload.personas_failed}",
+            })
+            await db.commit()
+
+        logger.info(
+            "webhook.ingestion_complete_processed",
+            ingestion_id=doc_id,
+            status=payload.status,
+        )
+
+        return {"status": "processed", "ingestion_id": doc_id}
+
+    except Exception as e:
+        logger.error("webhook.ingestion_complete_error", error=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class AccumulatePayload(BaseModel):
+    persona_result: Dict[str, Any]
+    persona_tag: str
+    valid: bool
+
+
+@router.post("/internal/ingestion/{ingestion_id}/accumulate")
+async def accumulate_persona_result(
+    ingestion_id: str,
+    payload: AccumulatePayload,
+    db: AsyncSession = Depends(get_db),
+):
+    """Accumulator para resultados de personas — usado pelo Consolidador n8n.
+
+    Armazena resultado no Redis, incrementa contador, retorna se todos chegaram.
+    """
+    import redis
+    from app.core.config import settings
+
+    r = redis.Redis(
+        host=getattr(settings, "REDIS_HOST", "redis"),
+        port=int(getattr(settings, "REDIS_PORT", 6379)),
+        db=int(getattr(settings, "N8N_REDIS_DB", 2)),
+    )
+
+    result_json = json.dumps(payload.persona_result, ensure_ascii=False)
+    r.rpush(f"gca:ingestion:{ingestion_id}:results", result_json)
+    received = r.incr(f"gca:ingestion:{ingestion_id}:received_count")
+    expected = int(r.get(f"gca:ingestion:{ingestion_id}:expected_count") or 0)
+    project_id = (r.get(f"gca:ingestion:{ingestion_id}:project_id") or b"").decode()
+
+    all_received = received >= expected and expected > 0
+
+    logger.info(
+        "webhook.accumulate",
+        ingestion_id=ingestion_id,
+        persona_tag=payload.persona_tag,
+        valid=payload.valid,
+        received=received,
+        expected=expected,
+        all_received=all_received,
+    )
+
+    callback_url = (r.get(f"gca:ingestion:{ingestion_id}:callback_url") or b"").decode()
+
+    all_results = []
+    if all_received:
+        raw_results = r.lrange(f"gca:ingestion:{ingestion_id}:results", 0, -1)
+        all_results = [json.loads(rr) for rr in raw_results]
+        r.delete(
+            f"gca:ingestion:{ingestion_id}:results",
+            f"gca:ingestion:{ingestion_id}:received_count",
+            f"gca:ingestion:{ingestion_id}:expected_count",
+            f"gca:ingestion:{ingestion_id}:project_id",
+            f"gca:ingestion:{ingestion_id}:shared_context",
+            f"gca:ingestion:{ingestion_id}:callback_url",
+        )
+
+    return {
+        "ingestion_id": ingestion_id,
+        "received_count": received,
+        "expected_count": expected,
+        "all_received": all_received,
+        "all_results": all_results,
+        "project_id": project_id,
+        "callback_url": callback_url,
+    }
+
+
+# ============================================================================
+# Endpoints internos para n8n — HMAC, Redis, Logging
+# ============================================================================
+
+import logging
+from logging.handlers import TimedRotatingFileHandler
+from pathlib import Path
+from datetime import datetime
+
+_pipeline_log_handler = None
+
+def _get_pipeline_logger():
+    global _pipeline_log_handler
+    pl = logging.getLogger("gca.pipeline")
+    if not _pipeline_log_handler:
+        log_dir = Path("/home/luiz/GCA/logs")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        _pipeline_log_handler = TimedRotatingFileHandler(
+            log_dir / "pipeline.log",
+            when="D",
+            interval=1,
+            backupCount=3,
+            encoding="utf-8",
+        )
+        _pipeline_log_handler.setFormatter(
+            logging.Formatter("%(message)s")
+        )
+        pl.addHandler(_pipeline_log_handler)
+        pl.setLevel(logging.INFO)
+    return pl
+
+
+class PipelineLogEntry(BaseModel):
+    ts: Optional[str] = None
+    ingestion_id: Optional[str] = None
+    workflow: Optional[str] = None
+    node: Optional[str] = None
+    event: str  # success|error|gate_passed|gate_failed|dispatched|callback_sent|started|completed
+    persona_tag: Optional[str] = None
+    duration_ms: Optional[int] = None
+    detail: Optional[str] = None
+    error: Optional[str] = None
+    extra: Optional[Dict[str, Any]] = None
+
+
+@router.post("/internal/pipeline-log")
+async def pipeline_log(entries: List[PipelineLogEntry] | PipelineLogEntry):
+    """Recebe log entries do pipeline n8n e appenda no arquivo rotativo.
+
+    Formato humanly-readable:
+    [DD/MM/YYYY HH:MM:SS] [WORKFLOW/NODE] EVENT (persona) ingestion=ID — detalhe
+    """
+    pl = _get_pipeline_logger()
+    if isinstance(entries, PipelineLogEntry):
+        entries = [entries]
+
+    EVENT_ICONS = {
+        "started": "▶",
+        "completed": "✓",
+        "success": "✓",
+        "failed": "✗",
+        "error": "✗",
+        "gate_passed": "✓",
+        "gate_failed": "✗",
+        "dispatched": "→",
+        "callback_sent": "↩",
+        "persona_result_received": "←",
+    }
+
+    for entry in entries:
+        # Parse timestamp ISO → DD/MM/YYYY HH:MM:SS local
+        ts_str = entry.ts or datetime.utcnow().isoformat() + "Z"
+        try:
+            dt = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+            ts_human = dt.strftime("%d/%m/%Y %H:%M:%S")
+        except (ValueError, TypeError):
+            ts_human = ts_str
+
+        icon = EVENT_ICONS.get(entry.event, "•")
+        wf = entry.workflow or "?"
+        node = entry.node or "?"
+        persona = f" [{entry.persona_tag}]" if entry.persona_tag else ""
+        ingestion = f" ingestion={entry.ingestion_id}" if entry.ingestion_id else ""
+        duration = f" ({entry.duration_ms}ms)" if entry.duration_ms else ""
+
+        # Linha principal
+        msg = f"[{ts_human}] {icon} {wf}/{node}{persona} {entry.event.upper()}{ingestion}{duration}"
+        if entry.detail:
+            msg += f" — {entry.detail}"
+        if entry.error:
+            msg += f" | ERROR: {entry.error}"
+
+        pl.info(msg)
+
+    return {"logged": len(entries)}
+
+
+class HmacVerifyRequest(BaseModel):
+    body_raw: str
+    signature: str
+    secret_name: str  # GCA_WEBHOOK_SECRET|NORMALIZER_SECRET|CONFERENTE_SECRET|SPECIALIST_SECRET|N8N_CALLBACK_SECRET
+
+
+class HmacSignRequest(BaseModel):
+    body_raw: str
+    secret_name: str
+
+
+_SECRETS_MAP = None
+
+def _load_secrets():
+    global _SECRETS_MAP
+    if _SECRETS_MAP is None:
+        from app.core.config import settings
+        _SECRETS_MAP = {
+            "GCA_WEBHOOK_SECRET": getattr(settings, "GCA_WEBHOOK_SECRET", ""),
+            "NORMALIZER_SECRET": getattr(settings, "NORMALIZER_SECRET", ""),
+            "CONFERENTE_SECRET": getattr(settings, "CONFERENTE_SECRET", ""),
+            "SPECIALIST_SECRET": getattr(settings, "SPECIALIST_SECRET", ""),
+            "N8N_CALLBACK_SECRET": getattr(settings, "N8N_CALLBACK_SECRET", ""),
+        }
+    return _SECRETS_MAP
+
+
+@router.post("/internal/hmac/verify")
+async def hmac_verify(req: HmacVerifyRequest):
+    """Verifica HMAC sem que o n8n precise de crypto ou $env."""
+    secrets = _load_secrets()
+    secret = secrets.get(req.secret_name, "")
+    if not secret:
+        return {"valid": False, "error": f"Secret '{req.secret_name}' não configurado"}
+    expected = "sha256=" + hmac.new(
+        secret.encode(), req.body_raw.encode(), hashlib.sha256
+    ).hexdigest()
+    valid = hmac.compare_digest(expected, req.signature or "")
+    return {"valid": valid}
+
+
+@router.post("/internal/hmac/sign")
+async def hmac_sign(req: HmacSignRequest):
+    """Assina body com HMAC sem que o n8n precise de crypto ou $env."""
+    secrets = _load_secrets()
+    secret = secrets.get(req.secret_name, "")
+    if not secret:
+        raise HTTPException(status_code=400, detail=f"Secret '{req.secret_name}' não configurado")
+    sig = "sha256=" + hmac.new(
+        secret.encode(), req.body_raw.encode(), hashlib.sha256
+    ).hexdigest()
+    return {"signature": sig}
+
+
+class RedisBulkSetRequest(BaseModel):
+    keys: Dict[str, str]
+    ttl_seconds: int = 3600
+
+
+@router.post("/internal/redis/bulk-set")
+async def redis_bulk_set(req: RedisBulkSetRequest):
+    """Seta múltiplas chaves no Redis (para Conferente setar expected_count, etc.)."""
+    import redis as redis_lib
+    from app.core.config import settings
+
+    r = redis_lib.Redis(
+        host=getattr(settings, "REDIS_HOST", "redis"),
+        port=int(getattr(settings, "REDIS_PORT", 6379)),
+        db=int(getattr(settings, "N8N_REDIS_DB", 2)),
+    )
+    for key, value in req.keys.items():
+        r.setex(key, req.ttl_seconds, value)
+    return {"set": len(req.keys), "ttl": req.ttl_seconds}

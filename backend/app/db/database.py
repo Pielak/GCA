@@ -129,3 +129,17 @@ async def init_db() -> None:
     except Exception as e:
         logger.error("database.initialization_failed", error=str(e))
         raise
+
+
+# ============================================================================
+# IMPORT ALL MODELS (ensure they're registered with Base before init_db)
+# ============================================================================
+# Existing models are in app.models.base
+# New models for Phase A (Personas v2):
+try:
+    from app.models.document_route_map import DocumentRouteMap
+    from app.models.auditor_output import AuditorOutput
+    from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
+    from app.models.human_answer import HumanAnswer
+except ImportError:
+    pass  # Models may not be created yet during initial setup

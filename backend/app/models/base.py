@@ -16,7 +16,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    email = Column(String(255), unique=True, nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=True, index=True)  # NULL for engine personas
     password_hash = Column(String(255), nullable=False)
     full_name = Column(String(255))
     is_active = Column(Boolean, default=True, index=True)
@@ -25,6 +25,7 @@ class User(Base):
     # Admin HERDA Support: verificação em código é (is_admin OR is_support).
     # Support nunca vira Admin por essa via.
     is_support = Column(Boolean, default=False, nullable=False)
+    is_engine = Column(Boolean, default=False, nullable=False)  # System IA_* personas (skip notifications)
     first_access_completed = Column(Boolean, default=False, index=True)  # Tracks if first password change done
     password_changed_at = Column(DateTime(timezone=True), nullable=True)  # Last password change timestamp
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
@@ -39,7 +40,7 @@ class User(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "email ~ '^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Z|a-z]{2,}$'",
+            "(email IS NULL) OR (email ~ '^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Z|a-z]{2,}$')",
             name="email_format"
         ),
     )
@@ -492,6 +493,9 @@ class BacklogItem(Base):
     generated_tests_path = Column(String(500), nullable=True)  # Caminho dos testes gerados
     commit_sha = Column(String(64), nullable=True)  # SHA do commit no repo
     branch_name = Column(String(200), nullable=True)  # Branch temporaria
+
+    # Drag-and-drop order (default 0, updated by user reordering)
+    display_order = Column(Integer, nullable=False, default=0)
 
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -1056,6 +1060,7 @@ class IngestedDocument(Base):
 
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])
+    route_maps = relationship("DocumentRouteMap", back_populates="document", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("idx_ingested_docs_project", project_id),
@@ -1377,6 +1382,126 @@ class OCGDeltaLog(Base):
         Index("idx_ocg_delta_source", project_id, source),
         Index("idx_ocg_delta_persona", project_id, persona_id),
     )
+
+
+class OCGIndividual(Base):
+    """Parecer individual de uma persona LLM para um documento ingerido.
+
+    Gerado pelo pipeline n8n (fan-out de 12 personas). Uma linha por
+    combinação (document_id, persona_id). persona_id é a tag canônica
+    da persona (ex: "AUD", "GP", "ARQ") — não é FK para users.id.
+
+    MVP 31 Fase 31.1 — substituiu UUID FK→users pelo VARCHAR(20) tag.
+    """
+    __tablename__ = "ocg_individual"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id = Column(
+        UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ", "DBA", "DEV", etc.)
+    # VARCHAR(20) — NÃO é FK para users.id (Conjunto B, §0.5 do CLAUDE.md)
+    persona_id = Column(String(20), nullable=False)
+    persona_name = Column(String(100), nullable=False)  # Nome exibível da persona
+    parecer = Column(JSONB, nullable=False)  # Estrutura: {titulo, analise, riscos, recomendacoes, criticidade}
+    status = Column(String(20), nullable=False)  # pending, processing, completed, error
+    error_message = Column(Text, nullable=True)
+    ai_provider = Column(String(50), nullable=True)  # Provedor de IA usado (auditoria)
+    ai_model = Column(String(100), nullable=True)  # Modelo exato usado (auditoria)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("document_id", "persona_id", name="uq_ocg_individual_per_document_persona"),
+        Index("idx_ocg_individual_project", project_id),
+        Index("idx_ocg_individual_document", document_id),
+        Index("idx_ocg_individual_persona", persona_id),
+        Index("idx_ocg_individual_status", status),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCGIndividual document={self.document_id} persona={self.persona_id} status={self.status}>"
+
+
+class OCGGlobal(Base):
+    """Parecer consolidado de todas as personas para um documento ingerido.
+
+    Gerado pelo Consolidador n8n após receber todos os pareceres
+    individuais via Redis accumulator. Uma linha por document_id.
+
+    MVP 31 Fase 31.1 — modelo ORM espelhando schema pós-migration 062.
+    """
+    __tablename__ = "ocg_global"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    document_id = Column(
+        UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False
+    )
+    parecer_consolidated = Column(JSONB, nullable=False)  # Parecer unificado após votação
+    consensus_fields = Column(JSONB, nullable=False)  # Campos com consenso entre personas
+    conflicting_fields = Column(JSONB, nullable=False)  # Campos com divergência (entrada p/ HITL)
+    voting_results = Column(JSONB, nullable=False)  # Resultado da votação por campo
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    consolidated_at = Column(DateTime(timezone=True), nullable=True)
+    consolidated_by = Column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("document_id", name="uq_ocg_global_per_document"),
+        Index("idx_ocg_global_project", project_id),
+        Index("idx_ocg_global_document", document_id),
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCGGlobal document={self.document_id} project={self.project_id}>"
+
+
+class OCGIndividualRefined(Base):
+    """Refinamento humano do parecer individual de uma persona (HITL).
+
+    DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
+    Por ora apenas espelha o schema da tabela para que o ORM não quebre.
+    """
+    __tablename__ = "ocg_individual_refined"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    ocg_individual_id = Column(
+        UUID(as_uuid=True), ForeignKey("ocg_individual.id", ondelete="CASCADE"), nullable=False
+    )
+
+    def __repr__(self) -> str:
+        return f"<OCGIndividualRefined ocg_individual={self.ocg_individual_id}>"
+
+
+class PersonaFollowUpQuestion(Base):
+    """Pergunta de follow-up gerada por persona LLM para complementação humana (HITL).
+
+    DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
+    Por ora apenas espelha o schema mínimo para que o ORM não quebre.
+
+    Migration 067 corrigiu persona_id: era uuid FK → users.id (errado).
+    Agora é VARCHAR(20) com tag canônica da persona LLM ("AUD", "GP", etc.).
+    """
+    __tablename__ = "persona_follow_up_questions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(
+        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+    )
+    # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ") — não FK para users
+    # Migration 067 converteu uuid → VARCHAR(20). Corrige gap da migration 066.
+    persona_id = Column(String(20), nullable=False)  # tag canônica (AUD, GP, etc.) — não FK
+
+    def __repr__(self) -> str:
+        return f"<PersonaFollowUpQuestion project={self.project_id}>"
 
 
 class AppPreviewSession(Base):
@@ -2155,4 +2280,304 @@ class TechnicalQuestionnaire(Base):
         Index("idx_technical_questionnaire_project", project_id),
         Index("idx_technical_questionnaire_status", project_id, status),
         Index("idx_technical_questionnaire_submitted_by", submitted_by),
+    )
+
+
+class PersonaResponse(Base):
+    """Resposta de uma Persona para validação de questionário técnico.
+
+    Rastreia avaliação de cada persona (GP, Arquiteto, DBA, Dev Sr, QA, etc)
+    em tempo real, permitindo:
+    - Board visual com status de cada persona
+    - Consolidação paralela de OCGs
+    - Detecção de discrepâncias entre personas
+    - Histórico de decisões por persona
+    """
+    __tablename__ = "persona_responses"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    technical_questionnaire_id = Column(UUID(as_uuid=True), ForeignKey("technical_questionnaires.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Qual persona avaliou: "gp" | "arquiteto" | "dba" | "dev_sr" | "qa"
+    persona_name = Column(String(50), nullable=False)
+
+    # Status da avaliação
+    status = Column(String(20), nullable=False, default="pending")  # pending, evaluating, completed, error
+
+    # Resultado da validação
+    decision = Column(String, nullable=True)  # Texto da decisão (1-2 frases)
+    ocg_delta = Column(JSONB, nullable=False, default={})  # Seção OCG a agregar
+    followup_questions = Column(JSONB, nullable=True, default=None)  # Array de perguntas de clarificação
+    severity = Column(String(20), nullable=False, default="info")  # info, warning, critical
+
+    # Rastreabilidade temporal
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    started_at = Column(DateTime(timezone=True), nullable=True)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Tratamento de erros
+    error_message = Column(String, nullable=True)
+
+    # Qual IA provider foi usado
+    ai_provider_used = Column(String(50), nullable=True)  # "anthropic", "deepseek", etc
+    ai_model_used = Column(String(100), nullable=True)  # "claude-sonnet-4-6", "deepseek-chat", etc
+
+    __table_args__ = (
+        Index("idx_persona_response_project", project_id),
+        Index("idx_persona_response_questionnaire", technical_questionnaire_id),
+        Index("idx_persona_response_status", technical_questionnaire_id, status),
+        Index("idx_persona_response_persona", technical_questionnaire_id, persona_name),
+        UniqueConstraint("technical_questionnaire_id", "persona_name", name="uq_persona_response_per_questionnaire"),
+    )
+
+
+class Discrepancy(Base):
+    """Conflito entre avaliações de personas.
+
+    Quando 2+ personas discordam sobre campo específico do OCG,
+    sistema detecta e permite team resolver (votação, override, arbitragem).
+
+    Exemplos:
+    - P1 (GP) diz "escopo crítico" vs P5 (QA) diz "escopo médio"
+    - P2 (Arquiteto) recomenda "microserviços" vs P4 (Dev Sr) diz "monolito"
+    """
+    __tablename__ = "discrepancies"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    technical_questionnaire_id = Column(UUID(as_uuid=True), ForeignKey("technical_questionnaires.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Campo em conflito (ex: "escopo", "arquitetura.stack", "dados.retention_policy")
+    field_path = Column(String(200), nullable=False)
+
+    # Personas envolvidas (JSONB array de persona_names, ex: ["gp", "qa", "dev_sr"])
+    conflicting_personas = Column(JSONB, nullable=False, default=[])
+
+    # Valores em conflito (JSONB object: {"gp": "crítico", "qa": "baixa", "dev_sr": "média"})
+    conflicting_values = Column(JSONB, nullable=False, default={})
+
+    # Categorização do conflito
+    severity = Column(String(20), nullable=False, default="medium")  # low, medium, high, critical
+    category = Column(String(50), nullable=True)  # "scope", "architecture", "performance", "data", etc
+
+    # Status da resolução
+    status = Column(String(20), nullable=False, default="unresolved")  # unresolved, voted, overridden, arbitrated, resolved
+
+    # Rastreamento de resolução
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    detected_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Contexto/anotações
+    context = Column(String, nullable=True)  # Descrição da discrepância
+    resolution_notes = Column(String, nullable=True)  # Como foi resolvida
+
+    __table_args__ = (
+        Index("idx_discrepancy_project", project_id),
+        Index("idx_discrepancy_questionnaire", technical_questionnaire_id),
+        Index("idx_discrepancy_status", technical_questionnaire_id, status),
+    )
+
+
+class Resolution(Base):
+    """Registro de como uma discrepância foi resolvida.
+
+    Permite rastreamento de: votação (team), override (GP), arbitragem (Admin).
+    """
+    __tablename__ = "resolutions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    discrepancy_id = Column(UUID(as_uuid=True), ForeignKey("discrepancies.id", ondelete="CASCADE"), nullable=False, index=True)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Qual valor foi escolhido (pode ser um dos conflitantes ou novo)
+    resolved_value = Column(Text, nullable=False)
+
+    # Como foi resolvido
+    resolution_type = Column(String(50), nullable=False)  # "vote", "override", "arbitration", "compromise"
+
+    # Votação: {"gp": "microserviços", "qa": "monolito", "dev_sr": "microserviços"}
+    # Resultado: "microserviços" (venceu com 2/3)
+    vote_details = Column(JSONB, nullable=True, default={})
+
+    # Quem resolveu
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    resolved_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Justificativa
+    justification = Column(String, nullable=True)
+
+    __table_args__ = (
+        Index("idx_resolution_discrepancy", discrepancy_id),
+        Index("idx_resolution_project", project_id),
+    )
+
+
+class PilaresVivos(Base):
+    """Documento consolidado vivo com análise de 7 personas sobre projeto.
+
+    Pilares Vivos substitui documentos estáticos por análise dinâmica regenerável.
+    Cada vez que ingestão ocorre, o documento é regenerado com novas análises das 7 personas.
+
+    Estrutura do documento: {
+      "P4_Arquiteto": {ocg_individual_json},
+      "P1_DBA": {ocg_individual_json},
+      "P2_Compliance": {ocg_individual_json},
+      "P3_Seguranca": {ocg_individual_json},
+      "P5_Dev": {ocg_individual_json},
+      "P6_Tester": {ocg_individual_json},
+      "P7_QA": {ocg_individual_json}
+    }
+    """
+    __tablename__ = "pilares_vivos"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+
+    # Documento consolidado: análise de cada persona
+    documento = Column(JSONB, nullable=False, default={})
+
+    # Contexto usado para gerar
+    gatekeeper_summary = Column(JSONB, nullable=True, default=None)  # Resumo dos 87 Gatekeeper items
+    questionnaire_responses = Column(JSONB, nullable=True, default=None)  # Respostas do Questionário Técnico
+
+    # Rastreamento
+    gerado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gerado_em = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    regenerado_em = Column(DateTime(timezone=True), nullable=True)  # Data da última regeneração
+
+    # Timestamps
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("idx_pilares_vivos_project", project_id),
+        Index("idx_pilares_vivos_gerado_por", gerado_por),
+        Index("idx_pilares_vivos_gerado_em", gerado_em),
+    )
+
+
+class PilaresVivosHistory(Base):
+    """Histórico de versões anteriores de Pilares Vivos para rastreabilidade.
+
+    Armazena versões anteriores para que seja possível visualizar evolução
+    e comparar mudanças entre regenerações.
+    """
+    __tablename__ = "pilares_vivos_history"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    pilares_vivos_id = Column(UUID(as_uuid=True), ForeignKey("pilares_vivos.id", ondelete="CASCADE"), nullable=False, index=True)
+
+    # Documento da versão anterior
+    documento = Column(JSONB, nullable=False, default={})
+
+    # Contexto usado
+    gatekeeper_summary = Column(JSONB, nullable=True, default=None)
+    questionnaire_responses = Column(JSONB, nullable=True, default=None)
+
+    # Rastreamento
+    gerado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    gerado_em = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    archived_em = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    # Mudanças detectadas
+    personas_modificadas = Column(JSONB, nullable=True, default=[])  # ["P1_DBA", "P3_Seguranca"]
+    resumo_mudancas = Column(String(500), nullable=True)
+
+    __table_args__ = (
+        Index("idx_pilares_history_project", project_id),
+        Index("idx_pilares_history_current", pilares_vivos_id),
+        Index("idx_pilares_history_gerado_em", gerado_em),
+    )
+
+
+class PilaresVivosJob(Base):
+    """Rastreamento de jobs assíncronos para regeneração de Pilares Vivos.
+
+    Converte endpoint síncrono /pilares/regenerar para padrão async com Celery.
+    Frontend faz poll até job completar (status: completed/failed).
+    """
+    __tablename__ = "pilares_vivos_jobs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="queued")  # queued, processing, completed, failed
+
+    resultado_json = Column(JSONB, nullable=True)
+
+    iniciado_em = Column(DateTime(timezone=True), nullable=True)
+    concluido_em = Column(DateTime(timezone=True), nullable=True)
+    tempo_total_segundos = Column(Numeric(8, 2), nullable=True)
+
+    criado_em = Column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+    criado_por = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    celery_task_id = Column(String(255), nullable=True, index=True)
+    erro_mensagem = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_pilares_vivos_jobs_project", project_id),
+        Index("idx_pilares_vivos_jobs_status", status),
+        Index("idx_pilares_vivos_jobs_created", "criado_em"),
+    )
+
+
+class ConflictPendingReview(Base):
+    """Conflito entre personas aguardando decisão humana (HITL — Human-In-The-Loop)."""
+    __tablename__ = "conflicts_pending_review"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    route_map_id = Column(UUID(as_uuid=True), ForeignKey("document_route_maps.id", ondelete="CASCADE"), nullable=False)
+
+    # O que as personas discordam
+    field_name = Column(String(255), nullable=False)  # ex: "p1_business_score", "architecture_recommendation"
+    personas_involved = Column(JSONB, nullable=False)  # list[str] ex: ["gp", "arq", "dev"]
+    values_by_persona = Column(JSONB, nullable=False)  # {persona_tag: value} ex: {"gp": 80, "arq": 60, "dev": 70}
+    conflict_reason = Column(Text, nullable=True)  # Por que discordam?
+
+    # Status da resolução
+    status = Column(String(20), nullable=False, default="pending")  # pending, resolved
+    resolved_value = Column(JSONB, nullable=True)  # Valor escolhido pelo usuário
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolution_justification = Column(Text, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_conflict_project", project_id),
+        Index("idx_conflict_status", status),
+        Index("idx_conflict_document", document_id),
+    )
+
+
+class ChunkErrorPendingReview(Base):
+    """Chunk com erro durante auditoria — aguardando revisão humana (HITL)."""
+    __tablename__ = "chunk_errors_pending_review"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    project_id = Column(UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(UUID(as_uuid=True), ForeignKey("ingested_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    chunk_id = Column(String(64), nullable=False)  # "chunk_001", "chunk_123", etc
+    error_type = Column(String(30), nullable=False)  # json_invalid, timeout, llm_refusal, schema_validation, unknown
+    error_message = Column(Text, nullable=False)
+    retry_count = Column(Integer, nullable=False, default=0)
+    recovery_attempted = Column(Boolean, nullable=False, default=False)
+    suggested_fallback = Column(Text, nullable=True)  # Sugestão de fallback (conteúdo padrão / omitir chunk)
+    status = Column(String(20), nullable=False, default="pending")  # pending, resolved, escalated
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolved_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolution_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False, index=True)
+
+    __table_args__ = (
+        Index("idx_chunk_error_project", project_id),
+        Index("idx_chunk_error_document", document_id),
+        Index("idx_chunk_error_status", status),
     )

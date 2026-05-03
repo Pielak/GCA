@@ -75,12 +75,86 @@ class AuthService:
             await db.refresh(user)
 
             logger.info("auth.bootstrap_admin_created", user_id=str(user.id), email=email)
+
+            # Criar 7 Personas IA_* canônicas
+            await AuthService.bootstrap_personas(db)
+
             return True, user, None
 
         except Exception as e:
             await db.rollback()
             logger.error("auth.bootstrap_admin_failed", error=str(e))
             return False, None, str(e)
+
+    @staticmethod
+    async def bootstrap_personas(db: AsyncSession) -> None:
+        """Cria 7 usuários IA_* canônicos (Personas especializadas, sem email)."""
+        import secrets
+        import hashlib
+        from sqlalchemy import text
+
+        personas = [
+            ("Persona - DBA",),
+            ("Persona - Compliance",),
+            ("Persona - Segurança",),
+            ("Persona - Arquiteto",),
+            ("Persona - Desenvolvedor",),
+            ("Persona - Tester",),
+            ("Persona - QA",),
+        ]
+
+        for (full_name,) in personas:
+            # Verificar se já existe
+            result = await db.execute(select(User).where(User.full_name == full_name))
+            existing = result.scalar_one_or_none()
+            if existing:
+                logger.info("auth.persona_already_exists", persona=full_name)
+                continue
+
+            try:
+                # Criar usuário engine (sem email — é robô, não recebe notificações)
+                temp_password = secrets.token_urlsafe(32)
+                user = User(
+                    email=None,  # Personas não têm email
+                    full_name=full_name,
+                    password_hash=hash_password(temp_password),
+                    is_active=True,
+                    is_admin=False,
+                    is_engine=True,
+                    first_access_completed=True,
+                    password_changed_at=datetime.now(timezone.utc),
+                    last_login_at=datetime.now(timezone.utc),
+                )
+                db.add(user)
+                await db.flush()
+
+                # Gerar API key
+                api_key = f"gca_{secrets.token_urlsafe(32)}"
+                api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+                # Criptografar API key no BD
+                master_key = settings.GCA_MASTER_KEY
+                await db.execute(
+                    text("""
+                        INSERT INTO user_api_keys (user_id, api_key_hash, api_key_encrypted, is_active)
+                        VALUES (:user_id, :hash, pgp_sym_encrypt(:api_key, :master_key), TRUE)
+                    """),
+                    {
+                        "user_id": str(user.id),
+                        "hash": api_key_hash,
+                        "api_key": api_key,
+                        "master_key": master_key,
+                    },
+                )
+
+                logger.info("auth.persona_created", persona=full_name, user_id=str(user.id))
+
+            except Exception as e:
+                await db.rollback()
+                logger.error("auth.persona_creation_failed", persona=full_name, error=str(e))
+                continue
+
+        await db.commit()
 
     @staticmethod
     async def login(
