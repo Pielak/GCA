@@ -137,6 +137,91 @@ Gate 1 ✅ Aprovado com ressalvas. 3 MUSTs + 5 SHOULDs incorporados.
 15. ✅ Delete IngestedDocument tipo questionnaire na UI exibe modal explícito (não o genérico).
 16. ✅ `uq_ingested_doc_hash` + DBA-M1 (filtro `deleted_at IS NULL`) permite re-submit pós-delete sem violação. Hash idêntico para respostas idênticas (idempotência).
 
+## Decisões pós-Gate 2 (2026-05-03)
+
+Gate 2 ✅ Aprovado com ressalvas. 3 MUSTs (A-M) + 4 SHOULDs (A-S) + 7 critérios técnicos.
+
+### MUSTs Arquiteto
+
+**A-M1 — Guard pipeline n8n para `file_type='questionnaire'`** (CRÍTICO):
+- `IngestionService._dispatch_to_n8n` + `pipeline_ingest_task.delay` ganham guard `if file_type == 'questionnaire': return`
+- IngestedDocument do questionário criado **direto no router de submit** com `arguider_status='completed'` + `arguider_stage='questionnaire_synthetic'` — NÃO passa por `IngestionService.upload_document` (sem dispatch automático)
+- Comentário no model `base.py:1015` lista `questionnaire` no enum de file_type
+
+**A-M2 — Hash canônico com normalização de listas** (idempotência GP):
+```python
+def _canonical_responses(responses: dict) -> dict:
+    return {k: sorted(v) if isinstance(v, list) else v
+            for k, v in responses.items()}
+
+file_hash = hashlib.sha256(
+    json.dumps(_canonical_responses(responses), sort_keys=True).encode()
+).hexdigest()
+```
+Sem isso, multiselect com ordens diferentes gera hashes diferentes (viola critério 16).
+
+**A-M3 — TypeScript union inclui `archived`**:
+`useTechnicalQuestionnaire.ts:13` → `'draft' | 'validated' | 'submitted' | 'archived'`. Sem isso, compilador TS não detecta erros de guard.
+
+### SHOULDs Arquiteto
+
+**A-S1** — Endpoint `GET /technical-questionnaire/rules` expõe catálogo (single source of truth). Frontend carrega 1× no mount. Elimina bundle TS duplicado.
+
+**A-S2** — NFR mensurável Camada 2 LLM: latência p95 ≤ 8s; custo/submit ≤ R$0,005; timeout 15s. Adicionado ao critério de aceite.
+
+**A-S3** — `_questionnaire_state` em `project_setup_router.py:68` filtra `status != 'archived'` explicitamente. Blindagem contra ORDER BY DESC retornar archived acima de draft.
+
+**A-S4** — `validated_at` populado ao entrar em `validated`. Migration 055 já tem CHECK `status='validated' → validated_at IS NOT NULL`. Sem populated, INSERT falha silenciosamente.
+
+### DSL refinado
+
+`when` operadores canônicos:
+- `"Qx": "valor"` — igualdade scalar
+- `"Qx_contains": "valor"` — inclusão em lista (multiselect)
+- `"when_any": [{...},{...}]` — OR opcional (só se 4+ regras seed precisarem)
+
+`RulesEvaluator` em `backend/app/services/questionnaire_validation/rules_evaluator.py`. Stateless. Regras como constante Python (lista importada). Sem hot-reload — restart canônico do worker.
+
+### Endpoint validate-field refinado
+
+Recebe `responses` completo (não single field) — evita N+1. Retorna conflicts de TODOS os campos afetados pela mudança. Payload:
+```json
+{
+  "conflicts": [{"rule_id", "field", "severity", "message", "suggestions"}],
+  "warnings": [...],
+  "evaluated_at_ms": 12
+}
+```
+
+### Camada 2 LLM — prompt canônico
+
+Não passa as 30 regras (Camada 1 já aplicou). Payload mínimo:
+```json
+{
+  "responses": {...},
+  "conflicts_detected": [...],
+  "context": "questionário técnico GCA"
+}
+```
+Pede ao LLM detectar incoerências semânticas (ex: equipe-2 + microsserviços + K8s + ACID).
+
+## 7 critérios técnicos extra (Gate 2)
+
+A1-A7 — ver doc Gate 2. Foco: guard n8n, hash canônico, CHECK constraint, IngestedDocument com `arguider_status='completed'`, revert task → archived.
+
+## 6 fases revisadas (~3d ainda)
+
+Sem mudança de fases — apenas escopo das fases existentes ganha:
+- 35.1: + endpoint `GET /rules` (A-S1)
+- 35.2: + CHECK constraint canônica + UPDATE preventivo + populate `validated_at` (A-S4)
+- 35.3: + TS union `archived` (A-M3)
+- 35.5: + guard n8n (A-M1) + hash canônico (A-M2) + IngestedDocument direto no router
+- 35.6: + filtro `status != 'archived'` em `_questionnaire_state` (A-S3) + cascata extra para `file_type='questionnaire'` no DocumentRevertService
+
 ## Próxima ação
 
-Gate 2 (arquiteto-projetos).
+Gate 3 (DBA) — foco em:
+1. Número da migration (069 ou 070?)
+2. CHECK constraint `status IN ('draft','validated','submitted','archived')` — DEFERRABLE necessário?
+3. `uq_ingested_doc_hash` cobre `(project_id, file_hash)` mas filtro de dup usa código com `WHERE deleted_at IS NULL` — confirmar ou propor índice único parcial
+4. Trigger/view sobre `technical_questionnaires.status` que invalide UPDATE preventivo de `ocg_generated` → `submitted`?
