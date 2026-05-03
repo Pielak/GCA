@@ -648,57 +648,75 @@ class OCGUpdaterService:
         return None
 
     async def _load_persona_scores(self, project_id: UUID) -> dict:
-        """Carrega scores das gatekeeper_persona_responses como fallback.
+        """Carrega scores das personas a partir de ocg_individual (cumulativo, MVP 31).
 
-        Usado quando o LLM do OCG updater falha. Extrai os scores médios
-        das personas e retorna como dict no formato Pillar S cores.
-        Provider-agnóstico: funciona independentemente do modelo.
+        Substitui a versão legacy que dependia de GatekeeperPersonaResponse +
+        DocumentRouteMap (DT-081 — DocumentRouteMap não tem project_id).
+
+        Retorna dict no formato Pillar Scores. Provider-agnóstico.
         """
-        from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
-        from app.models.document_route_map import DocumentRouteMap
+        from app.models.base import OCGIndividual
+        from app.services.ocg_consolidator_service import PERSONA_TO_PILLAR
 
         try:
-            stmt = select(GatekeeperPersonaResponse).join(
-                DocumentRouteMap,
-                GatekeeperPersonaResponse.route_map_id == DocumentRouteMap.id,
-            ).where(
-                DocumentRouteMap.project_id == project_id,
-            ).order_by(GatekeeperPersonaResponse.created_at.desc())
-
+            stmt = (
+                select(OCGIndividual)
+                .where(OCGIndividual.project_id == project_id)
+                .where(OCGIndividual.status == "completed")  # exclui personas falhas
+                .order_by(OCGIndividual.created_at.desc())
+            )
             result = await self.db.execute(stmt)
-            responses = result.scalars().all()
+            rows = result.scalars().all()
 
-            if not responses:
+            if not rows:
+                logger.info(
+                    "ocg_updater.no_ocg_individual_rows",
+                    project_id=str(project_id),
+                    detail="Pipeline n8n não populou ocg_individual ainda — projeto novo ou Celery-only",
+                )
                 return {}
 
-            # Agrupar scores por pillar
-            # Mapeamento persona_tag → pillar
-            from app.services.ocg_consolidator_service import PERSONA_TO_PILLAR
+            pillar_scores: dict[str, list[float]] = {}
+            conf_blocking_detected = False
 
-            pillar_scores: dict[int, list[float]] = {}
-            for resp in responses:
-                persona_tag = resp.persona_tag
-                if persona_tag not in PERSONA_TO_PILLAR:
+            for row in rows:
+                persona_tag_lower = (row.persona_id or "").lower()  # normaliza case (MUST Gate 2)
+
+                parecer = row.parecer or {}
+                score = parecer.get("score", parecer.get("avg_score", 50))
+                if not isinstance(score, (int, float)):
+                    score = 50
+
+                # Log distinto para CONF bloqueante ANTES do skip (MUST Gate 2).
+                # CONF pode não estar em PERSONA_TO_PILLAR (MVP 33 vai mapear),
+                # mas o alerta de bloqueio DEVE ser emitido independente do mapeamento.
+                if persona_tag_lower == "conf" and score < 60:
+                    conf_blocking_detected = True
+                    logger.warning(
+                        "ocg_updater.conf_blocking_score",
+                        project_id=str(project_id),
+                        score=score,
+                        detail="CONF persona com score<60 detectada no fallback",
+                    )
+
+                if persona_tag_lower not in PERSONA_TO_PILLAR:
+                    # Personas sem mapeamento (seg/conf/lgpd/neg/aud) — ignoradas para pillar score.
+                    # MVP 33 vai expandir PERSONA_TO_PILLAR.
                     continue
-                pillars = PERSONA_TO_PILLAR[persona_tag]
-                scores = resp.scores or {}
-                # Cada persona contribui para múltiplos pillars
-                for pillar_num in pillars:
-                    score = scores.get("overall", scores.get(pillar_num, 50))
-                    if not isinstance(score, (int, float)):
-                        score = 50
-                    pillar_scores.setdefault(pillar_num, []).append(float(score))
+
+                pillar_key = PERSONA_TO_PILLAR[persona_tag_lower]
+                pillar_scores.setdefault(pillar_key, []).append(float(score))
 
             if not pillar_scores:
                 return {}
 
-            # Calcular média por pillar
+            # Média por pillar
             result_data = {}
-            for pillar_num, scores_list in pillar_scores.items():
+            for pillar_key, scores_list in pillar_scores.items():
                 avg = sum(scores_list) / len(scores_list)
-                result_data[f"P{pillar_num}"] = {"score": round(avg, 1)}
+                result_data[pillar_key] = {"score": round(avg, 1)}
 
-            # Calcular overall
+            # Overall
             all_scores = [v["score"] for v in result_data.values()]
             if all_scores:
                 result_data["overall_score"] = round(sum(all_scores) / len(all_scores), 1)
@@ -706,13 +724,19 @@ class OCGUpdaterService:
             logger.info(
                 "ocg_updater.persona_scores_loaded",
                 project_id=str(project_id),
-                pillars=len(result_data),
-                persona_responses=len(responses),
+                pillars=len(pillar_scores),
+                personas_used=len(rows),
+                conf_blocking=conf_blocking_detected,
             )
             return result_data
 
         except Exception as e:
-            logger.exception("ocg_updater.load_persona_scores_failed")
+            logger.error(
+                "ocg_updater.load_persona_scores_failed",
+                project_id=str(project_id),
+                error=str(e),
+                exc_info=True,
+            )
             return {}
 
     async def _call_llm(
@@ -961,16 +985,23 @@ class OCGUpdaterService:
         current_ocg: Dict[str, Any],
         arguider_analysis: Dict[str, Any],
     ) -> str:
+        from app.services.arguider_compactor import compact_arguider_for_prompt
+
         # Compactar OCG para prompts longos: trima textos verbosos (rationale,
         # description, mitigation, etc.) sem mexer em scores/listas/items.
         # Compactor é no-op se o OCG for pequeno o suficiente.
         compact_ocg = compact_ocg_for_prompt(current_ocg)
         ocg_str = json.dumps(compact_ocg, ensure_ascii=False, indent=2)
-        arguider_str = json.dumps(arguider_analysis, ensure_ascii=False, indent=2)
+
+        # Compactar arguider_analysis (DT-081 MVP 32) — payload n8n pode chegar com 23KB.
+        # Preserva imunes (criticidade='critica' e CONF score<60) + top-K por criticidade.
+        arguider_compacted = compact_arguider_for_prompt(arguider_analysis, max_findings=20)
+        arguider_str = json.dumps(arguider_compacted, ensure_ascii=False, indent=2)
+
         return (
             "## OCG ATUAL DO PROJETO (textos longos compactados; valores/scores intactos)\n\n"
             f"{ocg_str}\n\n"
-            "## ANÁLISE DO ARGUIDOR\n\n"
+            "## ANÁLISE DO ARGUIDOR (compactada — top findings por criticidade)\n\n"
             f"{arguider_str}\n\n"
             "Com base na análise do Arguidor, gere o **delta** (lista de operações replace/append) "
             "que reflete as mudanças necessárias no OCG. Retorne apenas o JSON no formato especificado pelo system prompt."
