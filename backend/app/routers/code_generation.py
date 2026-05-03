@@ -14,6 +14,7 @@ from typing import Optional, Dict, Any, List
 from uuid import UUID
 
 from app.db.database import get_db
+from app.services.ocg_gate import check_ocg_maturity_gate
 from app.services.code_generation_service import CodeGenerationService
 from app.services.llm_service import LLMProvider, LLMServiceFactory
 from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
@@ -489,6 +490,9 @@ async def generate_scaffold(
     project_id = request.project_id
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
+
+    # Gate de maturidade do OCG (MVP 31 Fase 31.4)
+    await check_ocg_maturity_gate(project_id=project_id, db=db)
 
     # DT-043: análise de adequação do provedor ao CodeGen (contrato §7).
     # Warning se provider é média/baixa criticidade. Não bloqueia.
@@ -1594,6 +1598,9 @@ async def generate_scaffold_plan(
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
+    # Gate de maturidade do OCG (MVP 31 Fase 31.4)
+    await check_ocg_maturity_gate(project_id=project_id, db=db)
+
     project = await db.get(Project, project_id)
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
@@ -1803,6 +1810,9 @@ async def generate_scaffold_item(
     project_id = request.project_id
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
+
+    # Gate de maturidade do OCG (MVP 31 Fase 31.4)
+    await check_ocg_maturity_gate(project_id=project_id, db=db)
 
     project = await db.get(Project, project_id)
     if not project:
@@ -2148,6 +2158,9 @@ async def generate_project_code(
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
 
+    # Gate de maturidade do OCG (MVP 31 Fase 31.4)
+    await check_ocg_maturity_gate(project_id=project_id, db=db)
+
     try:
         provider = LLMProvider(request.llm_provider.lower())
     except ValueError:
@@ -2220,6 +2233,9 @@ async def generate_module_code(
     project_id = request.project_id
     await _require_code_action("code:write", project_id, user_id, db)
     await assert_project_setup_complete(db, project_id)
+
+    # Gate de maturidade do OCG (MVP 31 Fase 31.4)
+    await check_ocg_maturity_gate(project_id=project_id, db=db)
 
     try:
         provider = LLMProvider(request.llm_provider.lower())
