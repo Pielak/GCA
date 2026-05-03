@@ -77,6 +77,23 @@ class ValidationResponse(BaseModel):
 # ─── Endpoints ───
 
 
+@router.get("/technical-questionnaire/rules")
+async def get_validation_rules(
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """MVP 35 Fase 35.1 — Catálogo de regras de validação canônicas (single source of truth).
+
+    Frontend carrega 1× no mount + cache local. Elimina necessidade de
+    bundle TS espelhado (Arq-S1). Não filtra por projeto — regras são globais.
+    """
+    from app.services.questionnaire_validation.rules_catalog import RULES_CATALOG
+    return {
+        "rules": RULES_CATALOG,
+        "count": len(RULES_CATALOG),
+        "themes": ["nosql_acid", "stack", "fe_be", "compliance", "infra"],
+    }
+
+
 @router.get("/{project_id}/technical-questionnaire", response_model=TechnicalQuestionnaireDetailResponse)
 async def get_technical_questionnaire(
     project_id: UUID,
