@@ -306,11 +306,38 @@ class OCGUpdaterService:
             persona_scores = await self._load_persona_scores(project_id)
             if persona_scores:
                 current_ocg_data.update(persona_scores)
+                # DT-081 fix: garante estrutura PILLAR_SCORES existe no current_ocg_data
+                # antes de gerar deltas. ocg_data legado (pré-MVP 31) pode não ter — caso
+                # em que apply_deltas com op="replace" falha com "segmento não encontrado".
+                # Inicializa com baseline 50 para cada PX que vai receber delta.
+                if "PILLAR_SCORES" not in current_ocg_data or not isinstance(
+                    current_ocg_data.get("PILLAR_SCORES"), dict
+                ):
+                    current_ocg_data["PILLAR_SCORES"] = {}
+                for key, value in persona_scores.items():
+                    if key == "overall_score" or not isinstance(value, dict):
+                        continue
+                    if key not in current_ocg_data["PILLAR_SCORES"]:
+                        current_ocg_data["PILLAR_SCORES"][key] = {"score": 50}
+                # Constrói deltas canônicos (op=replace funciona porque path agora existe)
+                # NOTA: chave canônica é "new_value", não "value" — _apply_replace
+                # do ocg_delta_applier lê delta.get("new_value")
+                fallback_deltas = []
+                for key, value in persona_scores.items():
+                    if key == "overall_score":
+                        continue
+                    if isinstance(value, dict) and "score" in value:
+                        fallback_deltas.append({
+                            "op": "replace",
+                            "path": f"PILLAR_SCORES.{key}.score",
+                            "new_value": value["score"],
+                        })
                 llm_result = {
+                    "_from_fallback": True,  # marcador — _parse_llm_response detecta
                     "updated_ocg": current_ocg_data,
-                    "changes": [{"field": k, "new": v} for k, v in persona_scores.items()],
-                    "change_type": "persona_fallback",
-                    "context_health": {},
+                    "deltas": fallback_deltas,  # formato canônico (não 'changes')
+                    "change_type": "EXPAND",  # fallback sempre EXPAND (OCG só cresce)
+                    "context_health": {"depth": 0.5, "confidence": 0.4, "quality": 0.5},
                 }
             else:
                 logger.warning(
@@ -1016,7 +1043,25 @@ class OCGUpdaterService:
         Retorna: (deltas, change_type, context_health)
         Em caso de erro de parse, levanta ValueError — caller marca OCG como
         ocg_pending e preserva versão atual.
+
+        DT-081 hot-fix (2026-05-02): quando llm_result vem do fallback de
+        persona_scores (marcador `_from_fallback=True`), os deltas já estão
+        no formato canônico — retorna direto sem tentar parse de raw_text.
         """
+        # Fast-path: fallback já produz deltas canônicos
+        if llm_result.get("_from_fallback"):
+            deltas = llm_result.get("deltas", []) or []
+            change_type = llm_result.get("change_type", "EXPAND") or "EXPAND"
+            context_health = llm_result.get("context_health") or {
+                "depth": 0.5, "confidence": 0.5, "quality": 0.5,
+            }
+            logger.info(
+                "ocg_updater.parsed_from_fallback",
+                deltas_count=len(deltas),
+                change_type=change_type,
+            )
+            return deltas, change_type, context_health
+
         raw_text = llm_result.get("raw_text", "")
 
         # Tenta extrair JSON da resposta (pode ter markdown code fences)
