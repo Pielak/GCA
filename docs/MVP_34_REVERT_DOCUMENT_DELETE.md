@@ -171,13 +171,57 @@ Cenários de integração obrigatórios (mínimo 3):
 
 ---
 
-## 6. Próxima ação
+## 6. Decisões arquiteturais (Gate 2 — 2026-05-03)
 
-**Gate 1 (gerente-projetos-ti):** ✅ Aprovado com ressalvas em 2026-05-03 — 3 MUSTs (M1, M2, M3) incorporados ao doc; 3 SHOULDs (S1, S2, S4) incorporados; S3 fica para Gate 2 decidir.
+**Veredito:** ✅ Aprovado com ressalvas. 5 MUSTs + 5 SHOULDs incorporados abaixo.
 
-**Gate 2 (arquiteto-projetos):** validar:
-- **R1 — Lock assíncrono:** `_get_project_lock(project_id)` é `asyncio.Lock` no processo do FastAPI. Celery roda em processo separado — o lock NÃO protege o job. Decidir entre: (a) lock distribuído via Redis, (b) advisory lock no PostgreSQL (`pg_advisory_xact_lock`), (c) repensar idempotência para tolerar concorrência.
-- **M2 — Surface das queries:** confirmar grep de `ingested_documents` e validar lista de pontos a filtrar `WHERE deleted_at IS NULL`.
-- **S3 — Hard-delete atual:** investigar callers do `DELETE /ingestion/{id}` existente. Se houver scripts/admin/API direta usando, declarar breaking change ou criar endpoint paralelo (`/ingestion/{id}/revert`).
-- **Recompute incremental vs full:** decidir se o job recalcula OCG do zero (mais simples, mais seguro) ou aplica delta inverso (mais rápido em projetos grandes, mais frágil).
-- **Granularidade do `ocg_individual` órfão:** soft-delete via `deleted_at` na tabela ou usar JOIN com `ingested_documents.deleted_at IS NULL`?
+### MUSTs Gate 2 (todos resolvidos no escopo)
+
+**Arq-M1 — Unificar caminhos de deleção (CRÍTICO):** já existe `IngestionService.delete_document` (`ingestion_service.py:1933-2154`) que faz hard-delete + reversão via `_contract_ocg_for_deleted_document` baseado em `ocg_delta_log`. O MVP 34 substitui esse caminho:
+- `delete_document` é refatorado para chamar `DocumentRevertService.revert_document_propagation` em vez de hard-delete síncrono.
+- Método legado `_contract_ocg_for_deleted_document` é descomissionado (deletado).
+- Endpoint `DELETE /api/v1/projects/{pid}/ingestion/{doc_id}` (router atual) passa a retornar 202 + `revert_job_id` em vez de 200 síncrono. **Breaking change documentado em CHANGELOG (Fase 34.5).**
+
+**Arq-M2 — Lock distribuído via `_try_claim_task_lease`:** mecanismo Redis já existe em `app/tasks/pipeline.py:115` (usado em 3 tasks). MVP 34 reusa com chave `gca:task:revert_document:{project_id}:{doc_id}` e `ttl_seconds=120`. NÃO usar `asyncio.Lock` (não atravessa processos).
+
+**Arq-M3 — Filtro `deleted_at IS NULL` em 3 geradores adicionais:**
+- `global_spec_generator_service.py:375-377`
+- `test_spec_generator_service.py:557-559`
+- `live_doc_generator_service.py:399-401`
+
+Os três fazem JOIN com `ingested_documents` para buscar docs `completed`. Sem filtro, doc deletado continua alimentando specs/livedocs depois do revert. **Inventário M2 atualizado para 9 pontos (não 3).**
+
+**Arq-M4 — Ampliar `ocg.change_type` para VARCHAR(30):** valor `REVERT_DOCUMENT_DELETE` tem 23 caracteres; coluna atual é `VARCHAR(20)` (`base.py:865`). DBA migra na mesma migration que adiciona `deleted_at` no `ingested_documents`.
+
+**Arq-M5 — Não criar tabela `revert_jobs`:** decisão arquitetural — usar `IngestedDocument.revert_metadata JSONB NULL` (nova coluna) para armazenar resultado do job (`maturity_warning`, `score_before`, `score_after`, `delta_fields_reverted`). Endpoint GET status retorna esse campo. Job tracking via Celery `AsyncResult.task_id` para `revert_job_id`. Evita nova tabela e migration adicional.
+
+### SHOULDs Gate 2 (incorporados)
+
+**Arq-S1 — Opção B confirmada:** `_load_persona_scores` (`ocg_updater_service.py:677`) ganha JOIN com `ingested_documents` filtrando `WHERE deleted_at IS NULL`. NÃO adicionar `deleted_at` em `ocg_individual` (terceira superfície de soft-delete = bug).
+
+**Arq-S2 — Idempotência dupla:**
+- Layer 1: `_try_claim_task_lease` bloqueia execução simultânea
+- Layer 2: job verifica `ingested_documents.deleted_at IS NOT NULL` no início e retorna `already_reverted` se já marcado
+
+**Arq-S3 — Parse JSON em Python para `source_document_ids`:** coluna é `TEXT JSON` (não array PostgreSQL). Job lê via `json.loads`, decide entre `archived` (única fonte) ou remover `doc_id` da lista (múltiplas fontes). Não usar `.contains(str(uuid))` — frágil.
+
+**Arq-S4 — NFR numérico para 10 docs:** critério novo de aceite (item 13): "full-recompute para projeto com 10 docs × 12 personas (120 rows) completa em <60s" — medido via test de carga sintético.
+
+**Arq-S5 — `DOCUMENT_REVERTED` no catálogo `AuditEvents`:** adicionar em `audit_service.py:19` antes de usar literal string. Já é convenção canônica do projeto.
+
+### Atualização do critério de aceite
+
+13. ✅ Performance: full-recompute para projeto com 10 docs × 12 personas completa em <60s
+14. ✅ Inventário M2: 9 pontos de query identificados (3 service-existentes + 3 geradores spec/livedoc + 3 service-uso interno) com filtro `deleted_at IS NULL` aplicado conforme matriz Gate 2
+15. ✅ Lock distribuído: `_try_claim_task_lease` ativo no job (chave `gca:task:revert_document:{project_id}:{doc_id}`)
+16. ✅ Idempotência: 2ª chamada sobre mesmo doc retorna `already_reverted` no payload
+17. ✅ Breaking change DELETE 200→202 documentado em CHANGELOG e validado em smoke
+
+## 7. Próxima ação
+
+**Gate 3 — DBA (obrigatório):**
+- Migration adiciona `deleted_at TIMESTAMPTZ NULL`, `deleted_by UUID NULL`, `deleted_reason VARCHAR(50) NULL CHECK (deleted_reason IN ('manual','lgpd','smoke_cleanup'))`, `revert_metadata JSONB NULL` em `ingested_documents`
+- Migration amplia `ocg.change_type` para `VARCHAR(30)`
+- Avaliar índice composto: `idx_ingested_docs_status` é `(project_id, arguider_status)` — possivelmente precisa virar `(project_id, arguider_status, deleted_at)` para manter performance da listagem ativa
+- Confirmar comportamento das 4 FKs ON DELETE CASCADE existentes para `ingested_documents` (`ocg_individual`, `ocg_global`, `conflicts_pending_review`, `chunk_errors_pending_review`) — com soft-delete elas não acionam, validar que não há query que dependa do CASCADE acionar
+- Estimar custo de query do JOIN `ocg_individual JOIN ingested_documents ON deleted_at IS NULL` em projeto com 10/50/200 docs
