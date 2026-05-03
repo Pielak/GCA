@@ -2,6 +2,73 @@
 
 All notable changes to GCA will be documented in this file.
 
+## [MVP 34 — Reversão de propagação ao deletar documento] - 2026-05-03
+
+### Entrega principal
+
+Quando GP soft-deleta um `ingested_documents`, os efeitos cumulativos do doc no OCG, backlog e tabelas auxiliares são automaticamente revertidos. **Não viola §2.4 ("OCG não contrai por ingestão")** — complementa: deleção legítima da fonte (smoke fixture, erro humano, PII LGPD, doc obsoleto) agora tem caminho canônico de limpeza, com auditoria preservada.
+
+### Mudanças técnicas
+
+- **Migration 068**: 4 colunas novas em `ingested_documents` (`deleted_at`, `deleted_by`, `deleted_reason` com CHECK, `revert_metadata` JSONB com CHECK schema mínimo). `ocg.change_type` ampliado para VARCHAR(30). Índice parcial `WHERE deleted_at IS NULL`.
+- **`document_revert_service.py` (novo)**: operação atômica em 12 passos — soft-delete + recompute OCG + cleanup auxiliares + auto-archive backlog + audit + payload em `revert_metadata`.
+- **Celery task `revert_document_propagation_task`** com lease distribuído Redis (`gca:task:revert_document:{pid}:{did}`, TTL 120s).
+- **Endpoint `DELETE /ingestion/{did}?reason=` refatorado**: retorna **202 Accepted** + `revert_job_id` (breaking change vs 200 OK síncrono pré-MVP 34).
+- **Endpoint `GET /revert-jobs/{job_id}/status`** novo — polling do Celery AsyncResult.
+- **12 pontos de query** com filtro `deleted_at IS NULL`: `ingestion_service` (5), `ocg_updater_service._load_persona_scores` (JOIN), 3 generators (spec global, test spec, livedoc), 3 routers (consistency, livedocs, code_generation — CRÍTICO LGPD).
+- **AuditEvents.DOCUMENT_REVERTED** novo no catálogo canônico, hash chain íntegro.
+- **Frontend**: hook `useDeleteDocument` aceita `{documentId, reason}`, novo hook `useRevertJobStatus` com polling 1.5s, `IngestionPage` com confirm() amigável.
+- **CLAUDE.md §2.4** atualizado com a regra complementar de reversão por deleção legítima.
+
+### Decisões binárias autorizadas pelo GP
+
+- Soft delete (`deleted_at`) — permite undelete via API
+- Recompute background (Celery) — não bloqueia UX
+- Backlog auto-archive de módulos órfãos
+- LGPD usa mesmo fluxo (`deleted_reason='lgpd'`)
+
+### Testes
+
+- 15/15 verdes em `test_mvp34_document_revert.py` (8 unit obrigatórios M1 + 5 extras + 2 guards estáticos)
+- **89% cobertura** do `document_revert_service.py` (≥80% exigido pelo Gate 1 M1)
+- Suite ampla: 409 passed, 0 failed
+- Smoke E2E real via HTTP validado: OCG v8 → v9, `change_type=REVERT_DOCUMENT_DELETE`, `duration_ms=189`
+
+### Dívidas técnicas registradas
+
+- **DT-086 (Major)** — Purge físico LGPD não coberto. `pii_fields`, `ocg_individual.parecer`, `ocg_global.parecer_consolidated` permanecem após soft-delete. Compliance LGPD parcial. MVP futuro de "scheduled purge" cobre.
+- **DT-087 (Minor)** — `ingested_documents.uploaded_by` sem `ON DELETE` declarado. Migration posterior declara `ON DELETE SET NULL`.
+
+### Breaking changes
+
+- `DELETE /api/v1/projects/{pid}/ingestion/{did}` retorna **202 Accepted** com `revert_job_id` em vez de **200 OK** síncrono. Frontend deve fazer polling via `GET /revert-jobs/{job_id}/status`. Hook `useDeleteDocument` já invalida queries `ocg`/`roadmap` automaticamente.
+
+### Métricas
+
+| Item | Valor |
+|---|---|
+| Esforço real | ~1.5d (estimativa original 3-4d) |
+| Gates Gatekeeper | 3 aprovados (GP + Arquiteto + DBA) |
+| MUSTs incorporados | 14 (3 GP + 5 Arq + 6 DBA) |
+| Critérios de aceite | 24 testáveis |
+| Pontos de query atualizados | 12 |
+| Cobertura nova | 89% |
+| Testes novos | 15 |
+| Testes não-regressão | 409 |
+
+### Validação E2E real
+
+Doc 9825e89b-31dc-4ef9-ac0d-23897e1e67dc do projeto Assistente Judicial para Advogados:
+- DELETE 202 → `revert_job_id`
+- GET status → `state=completed`, `result.status=reverted`
+- OCG v8 → v9
+- `change_type=REVERT_DOCUMENT_DELETE`
+- `audit_log_global` row com hash chain íntegro
+- `ocg_delta_log` row com `trigger_source=document_revert`
+- `maturity_warning` populado em PT-BR
+
+---
+
 ## [MVP 33 — Expansão PERSONA_TO_PILLAR para 12 personas LLM] - 2026-05-02
 
 ### Entrega principal

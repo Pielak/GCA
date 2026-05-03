@@ -9,7 +9,10 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 34 — Reversão de propagação ao deletar documento** — DEFINIDO 2026-05-03. **3 gates aprovados com ressalvas (todas incorporadas):** Gate 1 ✅ (3 MUSTs), Gate 2 ✅ (5 MUSTs), Gate 3 ✅ (6 MUSTs). Total 14 MUSTs incorporados, 24 critérios de aceite testáveis. Plano completo em [`docs/MVP_34_REVERT_DOCUMENT_DELETE.md`](docs/MVP_34_REVERT_DOCUMENT_DELETE.md). **Aguardando autorização do GP humano** para iniciar Fase 34.1 (Dev Sênior).
+**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
+
+### MVP recém-fechado
+**MVP 34 — Reversão de propagação ao deletar documento** — FECHADO 2026-05-03. **3 gates aprovados** + 5 fases entregues + 15/15 testes verdes (89% cobertura) + smoke E2E real validado (OCG v8 → v9 via HTTP). Detalhe em [`docs/MVP_34_REVERT_DOCUMENT_DELETE.md`](docs/MVP_34_REVERT_DOCUMENT_DELETE.md).
 
 **Escopo:** GP identificou que smoke fixture do MVP 32 ficou contaminando OCG do projeto Assistente Judicial sem caminho canônico de limpeza. Regra §2.4 "OCG não contrai" cobre ingestão ruim mas não cobre deleção legítima. MVP 34 complementa: deletar `ingested_documents` → soft-delete + Celery job recompute do OCG (ignora doc deletado) + auto-archive módulos órfãos no backlog + cleanup de tabelas relacionadas (conflicts, chunk_errors, follow_up_questions) + audit event canônico `DOCUMENT_REVERTED`.
 

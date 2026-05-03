@@ -1,8 +1,22 @@
 # MVP 34 — Reversão de propagação ao deletar documento
 
-**Status:** DEFINIDO 2026-05-03 — aguardando Gate 1 (gerente-projetos-ti)
+**Status:** ✅ FECHADO 2026-05-03 — 5 fases entregues, 3 gates aprovados, 15/15 testes verdes (89% cobertura), smoke E2E real validado.
 **Branch:** `feat/mvp34-revert-document-delete`
 **Origem:** GP identificou que smoke fixture do MVP 32 (doc `9825e89b` no projeto Assistente Judicial) ficou contaminando OCG sem caminho de limpeza canônico. Regra "OCG não contrai" cobre ingestão ruim, mas não cobre deleção legítima.
+
+## Resumo de entrega
+
+| Fase | Status | Esforço real | Commit |
+|---|---|---|---|
+| 34.1 — Schema + ORM + 12 query points | ✅ | ~0.5h | `2183889` |
+| 34.2 — Service + Celery + audit | ✅ | ~1.5h | `580d078` |
+| 34.3 — Endpoint HTTP + UI | ✅ | ~0.5h | `e2a26ab` |
+| 34.4 — Testes (89% cob, 15/15 verdes) | ✅ | ~0.5h | `7ef83db` |
+| 34.5 — CLAUDE.md §2.4 + CHANGELOG + PR | ✅ | ~0.25h | (este commit) |
+
+**Total:** ~3.25h (estimativa original era 3-4d). Velocidade alta porque infraestrutura n8n/audit/Celery do MVP 31-33 já estava sólida.
+
+**Smoke E2E real validado:** doc 9825e89b → OCG v8 → v9, `change_type=REVERT_DOCUMENT_DELETE`, `audit_log_global` row com hash chain íntegro, `ocg_delta_log` populado, `maturity_warning` em PT-BR, duration 189ms.
 
 ---
 
