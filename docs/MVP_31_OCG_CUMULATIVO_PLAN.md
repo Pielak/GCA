@@ -325,7 +325,7 @@ Métricas finais:
 Dívidas remanescentes (registradas, fora do escopo deste MVP):
 - **DT-079** (Major): Hardcode Anthropic em CodeGen (`module_codegen_service.py`, `codegen_prompt_builder.py`, `code_generation.py`). Viola §3.1 do contrato canônico.
 - **DT-080** (Major): ORM stubs `ocg_individual_refined` e `persona_follow_up_questions` sem corpo funcional.
-- **DT-081** (Major): `OCGUpdaterService` fallback `_load_persona_scores` busca em `gatekeeper_persona_response` (Gatekeeper v1) em vez de `ocg_individual` (pipeline n8n). Prompt ainda cita contração de score.
+- ~~**DT-081** (Major)~~: ✅ **RESOLVIDA pelo MVP 32** (commits `506e1c0` + `80851d3`) — `_load_persona_scores` reescrito para ler de `ocg_individual` + `arguider_compactor.py` reduz payload 217KB→7.8KB. Ver `docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md`.
 - **DT-082** (Minor): Gate de maturidade ausente no worker Celery (caminho legado).
 - **DT-083** (Minor): Métricas Prometheus não implementadas — projeto usa texto Prometheus manual (`metrics_service.py`) sem `prometheus_client`. Criar contadores `gca_ocg_delta_applied_total`, `gca_ocg_negative_delta_blocked_total`, `gca_codegen_blocked_total` no próximo MVP.
 

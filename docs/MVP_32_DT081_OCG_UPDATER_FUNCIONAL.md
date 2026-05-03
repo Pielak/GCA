@@ -143,10 +143,10 @@ LLM se perde com 23KB. Precisa truncar/sumarizar inteligentemente.
 | Gate | Persona | Status |
 |---|---|---|
 | 1 | gerente-projetos-ti | ✅ Aprovado com ressalvas (3 MUSTs) |
-| 2 | arquiteto-projetos | Pendente |
-| 3 | dba | **Pular** (sem mudança de schema — confirmar com Arquiteto) |
-| 4 | dev-senior | Pendente |
-| 5 | tester-qa | Pendente |
+| 2 | arquiteto-projetos | ✅ Aprovado com ressalvas (2026-05-02) |
+| 3 | dba | ✅ Pulado (confirmado pelo Arquiteto — sem mudança de schema) |
+| 4 | dev-senior | ✅ Concluído (commits `506e1c0` + `80851d3` + este) |
+| 5 | tester-qa | ✅ Aprovado — 53/53 verdes (fases 32.1+32.2) |
 | skill `preparar-release` | — | Pendente |
 
 ## 8. Refinamentos do Gate 1 (aplicados em 2026-05-02)
@@ -190,3 +190,22 @@ Veredito: **Aprovado com ressalvas** (arquiteto-projetos, 2026-05-02). Decisões
 3. Refatorar `_build_user_prompt` para chamar `compact_arguider_for_prompt` antes de serializar (não implementar truncamento inline).
 4. Adicionar log `ocg_updater.conf_blocking_score` quando fallback detectar CONF score<60.
 5. Testes conforme §5 Fase 32.3 + caso adicional de normalização de case + caso de CONF imune ao corte.
+
+> ✅ **Gate 4 concluído** — todos os itens acima implementados nos commits `506e1c0` + `80851d3`. Fase 32.3 encerra o MVP 32.
+
+---
+
+## 12. Status final (2026-05-02)
+
+MVP 32 entregue:
+- Fase 32.1 ✓ (commit `506e1c0`) — `_load_persona_scores` reescrito com OCGIndividual
+- Fase 32.2 ✓ (commit `506e1c0` + `80851d3`) — `arguider_compactor.py` + tuning
+- Fase 32.3 ✓ (este commit) — testes E2E reais opt-in + doc final
+
+Métricas:
+- 18/18 testes unit verdes (MVP 32)
+- 53/53 com não-regressão MVP 31
+- 1 teste E2E real (`MVP32_REAL_LLM=1`, custo ~R$0,05)
+- Compactor: 217KB → 7.8KB (96.4% redução)
+
+Próximo: skill `preparar-release`.
