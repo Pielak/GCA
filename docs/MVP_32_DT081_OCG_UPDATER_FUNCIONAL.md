@@ -170,10 +170,23 @@ LLM se perde com 23KB. Precisa truncar/sumarizar inteligentemente.
 | R3 | `OCGIndividual.parecer` (JSONB persona-específico) não bate com formato esperado pelo prompt | Média | Sumarização extrai apenas score/approved/blocking/findings_count — formato uniforme |
 | R4 | Custo de tokens em teste E2E real | Baixa | Opt-in via env var `MVP32_REAL_LLM=1`, custo total ~R$0,05 |
 
-## 10. Próximo passo
+## 10. Refinamentos do Gate 2 (aplicados em 2026-05-02)
 
-**Gate 2 — arquiteto-projetos** com mandato:
-- Validar reuso de `OCGIndividual` como fonte do fallback (acoplamento updater↔n8n é aceitável dado que ambos são propriedade GCA?)
-- Confirmar que `OCGIndividual.parecer` (JSONB) tem informação suficiente para derivar pillar_scores equivalentes ao `GatekeeperPersonaResponse.scores`
-- Decidir entre tuning inline vs estratégia de compactação reutilizável (futuras chamadas LLM)
-- Confirmar que **Gate 3 (DBA) pode ser pulado** (sem mudança de schema)
+Veredito: **Aprovado com ressalvas** (arquiteto-projetos, 2026-05-02). Decisões críticas:
+
+1. **R-CRÍTICO detectado e endossado como MUST**: `PERSONA_TO_PILLAR` em `ocg_consolidator_service.py:25-33` usa tags **lowercase** (`"gp"`, `"arq"`) com 7 entradas legacy. `OCGIndividual.persona_id` armazena **uppercase** (`"GP"`, `"ARQ"`) com 12 personas. Sem normalização, fallback retorna `{}` silenciosamente. **Fix obrigatório**: normalizar `persona_tag.lower()` antes do lookup em `_load_persona_scores`.
+2. **`arguider_compactor.py` como módulo separado** (não inline): seguir convenção do `ocg_compactor.compact_ocg_for_prompt` existente. Função `compact_arguider_for_prompt(arguider_analysis, max_findings=20)` com critério de prioridade.
+3. **Log distinto `ocg_updater.conf_blocking_score`** quando fallback encontrar CONF score<60 — alinhado com §6.2 do contrato.
+4. **`PERSONA_TO_PILLAR` tem só 7 entradas** — 5 personas novas (SEG, CONF, LGPD, NEG, AUD) sem mapeamento. Aceitável para MVP 32 com documentação explícita; expansão fica para MVP 33.
+5. **Acoplamento updater↔ocg_individual aprovado**: ambos GCA-domain, fluxo unidirecional `n8n → ocg_individual → updater → ocg`. Sem ciclo. Fallback dual (`ocg_individual` + `gatekeeper_persona_responses`) **NÃO** recomendado — manutenção paralela infinita.
+6. **Gate 3 (DBA) PULADO**: confirmado pelo Arquiteto. Sem mudança de schema, sem nova migration, sem query nova de escrita.
+
+## 11. Próximo passo
+
+**Gate 4 — Dev Sênior** com mandato específico:
+
+1. Implementar `_load_persona_scores` com query em `ocg_individual` + normalização `persona_tag.lower()` antes do lookup em `PERSONA_TO_PILLAR` (MUST).
+2. Criar `backend/app/services/arguider_compactor.py` seguindo padrão do `ocg_compactor.py`. Função `compact_arguider_for_prompt(arguider_analysis, max_findings=20)`. Critério de prioridade por `criticidade` — `criticidade='critica'` e CONF `score<60` imunes ao corte (MUST).
+3. Refatorar `_build_user_prompt` para chamar `compact_arguider_for_prompt` antes de serializar (não implementar truncamento inline).
+4. Adicionar log `ocg_updater.conf_blocking_score` quando fallback detectar CONF score<60.
+5. Testes conforme §5 Fase 32.3 + caso adicional de normalização de case + caso de CONF imune ao corte.
