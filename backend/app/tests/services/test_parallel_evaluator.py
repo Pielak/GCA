@@ -123,10 +123,11 @@ async def test_parallel_evaluator_passada_1_with_mock_llm():
 
     llm.complete = AsyncMock(return_value=mock_response)
 
-    # Create mock database and evaluator
+    # Create mock database and evaluator (DT-084: db.commit precisa ser AsyncMock
+    # — o serviço chama `await self.db.commit()` desde a migração para async).
     db = MagicMock()
     db.add = MagicMock()
-    db.commit = MagicMock()
+    db.commit = AsyncMock()
 
     evaluator = ParallelEvaluator(llm, db)
 
@@ -207,10 +208,11 @@ async def test_parallel_evaluator_passada_1_with_multiple_personas():
 
     llm.complete = mock_complete
 
-    # Create mock database and evaluator
+    # Create mock database and evaluator (DT-084: db.commit precisa ser AsyncMock
+    # — o serviço chama `await self.db.commit()` desde a migração para async).
     db = MagicMock()
     db.add = MagicMock()
-    db.commit = MagicMock()
+    db.commit = AsyncMock()
 
     evaluator = ParallelEvaluator(llm, db)
 

@@ -1,28 +1,18 @@
 """Testes FASE 1 — Auditor Orchestrator.
 
-Valida pipeline de orquestração:
-  1. Chunking de documento
-  2. Análise por Auditor
-  3. 7 personas em paralelo
-  4. Consolidação OCG + detecção de conflitos
-  5. HITL endpoints
+DT-084 (2026-05-03): SUITE LEGADA SUSPENSA.
+Importa `DocumentRouteMap` de `app.models.base`, que foi removido durante
+refactor (Personas v2 + n8n pipeline tornaram o caminho legacy obsoleto).
+Marcado como skipped (com `allow_module_level=True`) para que o ImportError
+não dispare na coleta.
 """
 import pytest
-from uuid import uuid4
-from unittest.mock import AsyncMock, MagicMock, patch
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.auditor_orchestrator_service import AuditorOrchestratorService
-from app.services.ocg_consolidator_service import OCGConsolidatorService
-from app.models.base import (
-    IngestedDocument,
-    DocumentRouteMap,
-    OCG,
-    ConflictPendingReview,
+pytest.skip(
+    "DT-084: DocumentRouteMap removido (substituído por ocg_individual). "
+    "Reescrever para o pipeline n8n se ressuscitar.",
+    allow_module_level=True,
 )
-from app.models.auditor_output import AuditorOutput
-from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
-from app.schemas.chunk import Chunk
 
 
 @pytest.fixture
