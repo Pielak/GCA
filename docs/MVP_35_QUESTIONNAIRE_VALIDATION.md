@@ -10,6 +10,15 @@
 2. **Submit cria `IngestedDocument`** tipo `questionnaire` — aparece na aba Ingestão.
 3. **Ordem dos gates UX-guiada** — frontend libera aba Questionário só após repo+LLM ok.
 4. **Validar obrigatório** — botão Submeter desabilitado se nunca validou OU validação falhou.
+5. **Deletar questionário na Ingestão = volta a fase configuração** (decisão GP 2026-05-03 pós-confirmação inicial). Quando GP soft-deleta `IngestedDocument` tipo `questionnaire`:
+   - `TechnicalQuestionnaire.status` reverte de `submitted` → `archived` (não `draft` — preserva histórico, força novo)
+   - `Questionnaire.approved` → `False` (FK do OCG marcada como não-aprovada)
+   - `_check_setup_status.questionnaire_submitted` → `False`
+   - `_check_setup_status.ready_to_activate` → `False`
+   - Projeto volta a fase configuração: setup checklist mostra Questionário como pendente
+   - Frontend redireciona próxima sessão para `/projects/{id}/settings?tab=questionario` com novo questionário em branco (não recupera o archived)
+   - Pipeline n8n bloqueado até novo questionário submetido
+   - Cascata canônica via DocumentRevertService (MVP 34) — não duplica lógica
 
 ## Approach de validação (autorizado)
 
@@ -26,7 +35,7 @@
 - Prompt: detectar incoerências técnicas que regras determinísticas não pegam.
 - Custo: ~R$0.001/submit (DeepSeek). Latência aceitável (não-inline).
 
-## 5 fases (~2d)
+## 6 fases (~2.5d)
 
 | Fase | Esforço | Entregável |
 |---|---|---|
@@ -34,7 +43,8 @@
 | 35.2 | 0.5d | Migration: estado `validated` no enum status. Endpoint `validate-field`. Refactor save: status nunca regride sem flag. |
 | 35.3 | 0.5d | Frontend: validate-on-blur + UI inline (warning amarelo + dropdown sugestões). Botão Submeter desabilitado sem `validated`. |
 | 35.4 | 0.25d | Q13 multi_select_with_other no schema + UI checkbox + outros field. Validar Q15 (LGPD) tem mesmo padrão. |
-| 35.5 | 0.25d | Camada 2 LLM no submit. `IngestedDocument` tipo questionnaire criado. Testes + smoke E2E. |
+| 35.5 | 0.25d | Camada 2 LLM no submit. `IngestedDocument` tipo questionnaire criado. |
+| 35.6 | 0.5d | Hook `DocumentRevertService` para tipo `questionnaire`: archive TechnicalQuestionnaire + mark Questionnaire.approved=False. Backend gate retorna `ready_to_activate=False`. Frontend redirect setup. Smoke E2E real (delete questionnaire → projeto volta a setup). |
 
 ## Schema regras DSL
 
@@ -70,6 +80,9 @@
 7. ✅ LLM camada 2 chamado 1× no submit, payload coerente
 8. ✅ Suite ampla 0 regressão
 9. ✅ Smoke E2E real: GP preenche AJA → Validar → conflito mock → corrige → Validar OK → Submete → status `submitted` + IngestedDocument criado
+10. ✅ Delete IngestedDocument tipo questionnaire → TechnicalQuestionnaire `archived` + Questionnaire.approved=False + setup_status.ready_to_activate=False
+11. ✅ Smoke E2E real revert: deletar questionnaire do AJA → consultar setup-status → ready_to_activate=False + questionnaire_submitted=False
+12. ✅ Frontend redireciona para `/settings?tab=questionario` quando ready_to_activate=False após delete questionnaire
 
 ## Próxima ação
 
