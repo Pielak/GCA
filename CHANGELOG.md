@@ -2,6 +2,34 @@
 
 All notable changes to GCA will be documented in this file.
 
+## [MVP 33 — Expansão PERSONA_TO_PILLAR para 12 personas LLM] - 2026-05-02
+
+### Entrega principal
+
+`PERSONA_TO_PILLAR` (em `ocg_consolidator_service.py`) expandido de 7 para 11 entradas. Personas SEG, CONF, LGPD e NEG agora contribuem com seus scores ao OCG cumulativo — antes eram silenciosamente descartadas no fallback `_load_persona_scores`. P2 (rules) e P7 (security) agora ficam populadas mesmo no caminho de fallback (sem LLM).
+
+### Mudanças técnicas
+
+- `PERSONA_TO_PILLAR`: +SEG→P7, +CONF→P2, +LGPD→P2, +NEG→P1 (média com GP). AUD continua fora (router/classificador, sem score próprio).
+- Comentários "MVP 33 vai mapear/expandir" removidos do `ocg_updater_service.py`.
+
+### Testes
+
+- 10 testes novos (mapping puro + fallback agregação por pillar).
+- 24 testes não-regressão verdes (18 MVP 32 + 6 hot-fix DT-081).
+
+### Dívidas registradas
+
+- **DT-084 (Minor)** — 5 testes legado falhando + 4 com `ImportError: SessionLocal`, todos pré-existentes em master (independentes do MVP 33). Endereçamento em MVP cleanup futuro.
+
+### Não impacta
+
+- Schema (apenas dict Python).
+- Migrations (nenhuma).
+- E2E real (caminho de fallback validado no hot-fix DT-081 do MVP 32; MVP 33 herda).
+
+---
+
 ## [MVP 32 — DT-081 OCG Updater funcional com payload n8n] - 2026-05-02
 
 ### Entrega principal

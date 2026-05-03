@@ -9,20 +9,14 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 32 — DT-081 (OCG Updater funcional com payload n8n)** — DEFINIDO 2026-05-02. Gate 1 (gerente-projetos-ti) **Aprovado com ressalvas** (3 MUSTs incorporados ao plano). Plano completo em [`docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md`](docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md).
+**Nenhum MVP em execução.** Gate §6 aberto para avaliação de próximo marco.
 
-**Escopo:** Fechar a DT-081 descoberta no smoke E2E do MVP 31 — `OCGUpdaterService._load_persona_scores` quebrado (AttributeError em DocumentRouteMap.project_id) + prompt sub-ótimo (~23KB do payload n8n com 9 personas faz DeepSeek retornar JSON sem updated_ocg/changes). Sem essas correções, OCG fica eternamente em `ocg_pending` em produção, CodeGen permanente bloqueado por `immature`. Reescrever fallback para usar `ocg_individual` (cumulativo, populado pelo MVP 31) + tuning de prompt com truncamento por criticidade.
+### MVPs anteriores fechados (ordem cronológica reversa)
 
-**3 fases (~2-3d):**
-- 32.1: Reescrever `_load_persona_scores` com `OCGIndividual` (~0.5d)
-- 32.2: Tuning `_build_user_prompt` com truncamento por criticidade (~1d)
-- 32.3: Testes E2E reais (sem mock LLM, opt-in) + doc (~1d)
+**MVP 33 — Expansão do PERSONA_TO_PILLAR para 12 personas LLM** — FECHADO 2026-05-02. 10/10 testes verdes, 24 testes não-regressão (MVP 31/32) verdes. `PERSONA_TO_PILLAR` expandido de 7 para 11 entradas (SEG→P7, CONF/LGPD→P2, NEG→P1). AUD continua fora (router/classificador). Comentários "MVP 33 vai mapear/expandir" removidos do `ocg_updater_service.py`. Doc curto em [`docs/MVP_33_PERSONA_PILLAR_EXPANSION.md`](docs/MVP_33_PERSONA_PILLAR_EXPANSION.md). Sem mudança de schema, sem migration. **Nova dívida: DT-084** (5 testes legado falhando + 4 com erro de import — pré-existentes, independentes do MVP 33).
 
-**Não-objetivos:** refactor amplo do updater, DT-079/080/082/083, mudança de schema.
+**MVP 32 — DT-081 (OCG Updater funcional com payload n8n)** — FECHADO 2026-05-02 (PR #4 mergeado, commit `4a626c9`; hot-fix PR #5 mergeado, commit `a500a48`). 3 fases entregues + 1 hot-fix DT-081 (3 bugs em cascata: parser sem `raw_text`, `PILLAR_SCORES` ausente em ocg_data legado, chave delta `value`→`new_value`). E2E real validado com DeepSeek: OCG v4→v5, `ocg_delta_log` populado, `change_type=EXPAND`. Plano em [`docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md`](docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md).
 
-**Próxima ação:** Gate 2 (arquiteto-projetos) — validar reuso de `OCGIndividual` como fonte de fallback, confirmar suficiência do JSONB `parecer`, decidir tuning inline vs estratégia reutilizável.
-
-### MVP anterior fechado
 **MVP 31 — OCG Cumulativo + CodeGen Gate** — FECHADO 2026-05-02 (PR #3 mergeado, commit `41b6f3a`). 5 fases entregues, 35/35 testes verdes, 4 dívidas registradas (DT-079, DT-080, DT-081, DT-082, DT-083). Caminho n8n agora respeita invariantes canônicas do OCG (não-contrai, histórico imutável em `ocg_individual`+`ocg_global`, hash chain). CodeGen ganha gate de maturidade em 3 níveis (hard_block/insufficient/immature) em 7 entry points. Pipeline n8n permanece intocado.
 
 **Escopo:** Caminho n8n → backend deixa de fazer UPDATE cru no `ocg` e passa a delegar ao `OCGUpdaterService` (que já respeita as invariantes canônicas: não-contrai, filter_negative_score_deltas, hash_chain). Tabelas `ocg_individual` e `ocg_global` ganham modelo ORM e populam por doc. CodeGen ganha gate de maturidade do OCG em 3 níveis: hard_block (CONF/is_blocking), insufficient (overall_score<60), immature (<95).
@@ -205,6 +199,7 @@ Feito em 2026-04-20 pela Fase 13.5. **ATUALIZADO 2026-04-28** — os 3 pontos do
 |---|---|---|---|---|---|
 | DT-082 | Minor | CodeGen — defesa em profundidade do gate no worker Celery | Após Fase 31.4 do MVP 31, todos os 6 entry points HTTP do CodeGen + `start_scaffold_run` chamam `check_ocg_maturity_gate`. Mas o worker Celery `execute_run` em `scaffold_run_service.py` não tem gate próprio — confia que ninguém enfileira sem passar pelo endpoint. Se algum caller futuro enfileirar diretamente (ex: cron, debug), gate é bypassado. Defesa em profundidade: adicionar gate em `execute_run` que marca `run.status='blocked'` em vez de HTTPException (worker não tem caller HTTP). Não bloqueia MVP 31 — endpoint atual é o único caminho. | Gate 5 MVP 31 Fase 31.4 2026-05-02 | **Aberta** |
 | DT-083 | Minor | Observabilidade Prometheus para OCG + CodeGen Gate | Fase 31.5 do MVP 31 previa contadores Prometheus (`gca_ocg_delta_applied_total{project,trigger_source}`, `gca_ocg_negative_delta_blocked_total{project}`, `gca_codegen_blocked_total{block_level}`). Projeto não tem `prometheus_client` instrumentado — `metrics_service.py` produz texto Prometheus manual. Implementar contadores integrados ao `metrics_service.py` em MVP futuro. Não bloqueia MVP 31 — métricas são nice-to-have, não invariantes. | Gate 5 MVP 31 Fase 31.5 2026-05-02 | **Aberta** |
+| DT-084 | Minor | Suite legada com testes quebrados | MVP 33 detectou 5 testes falhando + 4 arquivos com `ImportError: SessionLocal` em master, todos pré-existentes (não regressão MVP 33). Lista: `test_persona_evaluation.py` (3 SQL errors em `gatekeeper_persona_responses`), `test_mvp10_fase107_live_docs.py::test_module_doc_provenance_inclui_ocg_llm_hash`, `test_parallel_evaluator.py::test_parallel_evaluator_passada_1_with_multiple_personas` (MagicMock async); imports quebrados em `test_phase_b3_integration.py`, `test_fase1_auditor_orchestrator.py`, `test_mvp10_fase102_spec_generator.py`, `test_mvp9_fase92_module_details.py`. Não bloqueia MVPs novos — esses testes não cobrem código alterado pelo MVP 33. Endereçamento em MVP cleanup futuro: corrigir imports + fixtures + adapters de async mock. | MVP 33 2026-05-02 | **Aberta** |
 | DT-010 | Minor | Terminologia | Uso inconsistente de termos como tenant, projeto, instância e cliente. | Docs históricos | **Quitada 2026-04-17** — ver §4 |
 | DT-011 | Minor | Narrativa de produto | Parte da documentação promocional está mais madura que o contrato técnico real. | README / manual | **Quitada 2026-04-17** — ver §4 |
 | DT-027 | Minor | DB / cascade | FK `project_member_roles.member_id → project_members.id` não era `ON DELETE CASCADE`. Descoberto ao apagar FinanceHub Pro 2026-04-17: o DELETE do projeto cascateava members mas não os roles atribuídos, exigindo cleanup manual antes de qualquer remoção de projeto. | Dogfood MVP 2 2026-04-17 | **Quitada 2026-04-17** — ver §4 |

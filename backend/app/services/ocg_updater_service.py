@@ -715,8 +715,8 @@ class OCGUpdaterService:
                     score = 50
 
                 # Log distinto para CONF bloqueante ANTES do skip (MUST Gate 2).
-                # CONF pode não estar em PERSONA_TO_PILLAR (MVP 33 vai mapear),
-                # mas o alerta de bloqueio DEVE ser emitido independente do mapeamento.
+                # CONF está em PERSONA_TO_PILLAR (P2 desde MVP 33) mas o alerta
+                # de bloqueio DEVE ser emitido independente do mapeamento.
                 if persona_tag_lower == "conf" and score < 60:
                     conf_blocking_detected = True
                     logger.warning(
@@ -727,8 +727,7 @@ class OCGUpdaterService:
                     )
 
                 if persona_tag_lower not in PERSONA_TO_PILLAR:
-                    # Personas sem mapeamento (seg/conf/lgpd/neg/aud) — ignoradas para pillar score.
-                    # MVP 33 vai expandir PERSONA_TO_PILLAR.
+                    # Apenas AUD (router/classificador) fica de fora — não é validador.
                     continue
 
                 pillar_key = PERSONA_TO_PILLAR[persona_tag_lower]
