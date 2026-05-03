@@ -84,6 +84,59 @@
 11. ✅ Smoke E2E real revert: deletar questionnaire do AJA → consultar setup-status → ready_to_activate=False + questionnaire_submitted=False
 12. ✅ Frontend redireciona para `/settings?tab=questionario` quando ready_to_activate=False após delete questionnaire
 
+## Decisões pós-Gate 1 (2026-05-03)
+
+Gate 1 ✅ Aprovado com ressalvas. 3 MUSTs + 5 SHOULDs incorporados.
+
+### MUSTs
+
+**M1 — Colisão de `validated`:** falso alarme. DB hoje tem só `draft|submitted` (sem CHECK constraint). Único valor extra é `ocg_generated` em `questionnaire_service.py:717` (legacy provavelmente morto). Decisão: migration adiciona CHECK constraint canônica `status IN ('draft','validated','submitted','archived')`. Valor legacy `ocg_generated` é mapeado para `submitted` na migration (UPDATE preventivo).
+
+**M2 — Comportamento LLM falha no submit:** **bloqueia** com erro friendly. Alinha §0 CLAUDE.md ("sem fallback silencioso"). Mensagem: "Validação automática de IA indisponível agora. Tente novamente em instantes." HTTPException 503. Botão Submeter mostra retry option.
+
+**M3 — `file_hash`/`file_type` do IngestedDocument sintético:**
+- `file_type = 'questionnaire'` (estende comentário no model — sem CHECK formal pré-existente, então sem migration de CHECK extra)
+- `file_hash = sha256(json.dumps(responses, sort_keys=True))` — idempotência canônica
+- `original_filename = "Questionário Técnico — {project.name}"`
+- `filename = "questionnaire-{questionnaire.id}.json"` (sem arquivo físico — payload em `responses` JSONB)
+- `file_size_bytes = len(json.dumps(responses).encode())`
+- Re-submit com respostas idênticas: `uq_ingested_doc_hash` + filtro DBA-M1 (`WHERE deleted_at IS NULL`, MVP 34) garante dup-detection sem bloquear delete+resubmit
+
+### SHOULDs
+
+**S1 — Modal diferenciado de delete questionnaire:** Frontend exibe aviso explícito antes do confirm: "⚠ Deletar este questionário retornará o projeto à fase de configuração. Você precisará preencher um novo questionário, e o pipeline n8n ficará bloqueado até que o novo seja submetido. Esta ação não pode ser desfeita automaticamente. Deseja continuar?"
+
+**S2 — 30 grupos de regras seed (5 grupos temáticos):**
+1. **NoSQL × ACID** (5 regras) — MongoDB+ACID, DynamoDB+JOIN, Cassandra+transação multi-tabela, Redis-as-DB+rollback, Elasticsearch+consistência forte
+2. **Stack runtime** (6 regras) — Node+IO-bound vs Python+CPU-bound, Java+microsserviços-pequenos, Go+ML, Rust+protótipo-rápido, PHP+real-time, Ruby+throughput-alto
+3. **Frontend × Backend** (5 regras) — Next.js+SPA-puro, React+SSR-sem-Next, Angular+API-REST-leve, Vue+monolito-Java, Svelte+app-grande
+4. **Compliance × dados pessoais** (6 regras) — LGPD+sem-criptografia, GDPR+log-IP-clear, HIPAA+cloud-pública-sem-BAA, PCI-DSS+sem-tokenização, SOC2+sem-trilha-auditoria, LGPD+armazenamento-EUA-sem-cláusulas
+5. **Infra × escala/custo** (8 regras) — Kubernetes+1k-users, serverless+long-running, on-prem+escala-elástica, monolito+10-devs, microsserviços+team-de-2, SQLite+produção-multi-region, container+secret-em-env, edge+stateful-session
+
+**S3 — OCG cascata no delete questionnaire:** DocumentRevertService (MVP 34) já cobre — service detecta `file_type='questionnaire'` e adiciona cascata extra (TechnicalQuestionnaire→archived, Questionnaire.approved=False). Aviso de regressão de maturidade já existe (MVP 34).
+
+**S4 — Migração projetos antigos:** simples. Registros existentes com `status='submitted'` permanecem. Registros com `status='validated'` ou `status='ocg_generated'` (raros — viu-se 1 em legacy) viram `submitted` via UPDATE no script da migration. Documentado no header do SQL.
+
+**S5 — Estimativa 3d (não 2.5d):** ajustado.
+
+## 6 fases (~3d revisado)
+
+| Fase | Esforço | Entregável |
+|---|---|---|
+| 35.1 | 0.5d | DSL rules schema + 30 regras seed agrupadas em 5 temas + engine `RulesEvaluator` + 30 testes unit |
+| 35.2 | 0.5d | Migration: enum status com CHECK + UPDATE de legacy + endpoint `validate-field` |
+| 35.3 | 0.75d | Frontend: validate-on-blur + UI inline + Submeter condicional + modal diferenciado de delete |
+| 35.4 | 0.25d | Q13 frontend (textarea condicional) + Q15 verificação (não muda) |
+| 35.5 | 0.5d | Camada 2 LLM no submit (bloqueio em falha) + criar IngestedDocument sintético + idempotência via hash |
+| 35.6 | 0.5d | Hook DocumentRevertService p/ tipo questionnaire + smoke E2E real |
+
+## Critério de aceite (16 itens, ampliado pelo Gate 1)
+
+13. ✅ Migration: CHECK constraint canônica em `technical_questionnaires.status`. UPDATE preventivo de legacy `ocg_generated`/`validated`(antigo) → `submitted`. 0 registros corrompidos.
+14. ✅ Submit com provider LLM indisponível: bloqueia com 503 + mensagem friendly. UI mostra opção de retry.
+15. ✅ Delete IngestedDocument tipo questionnaire na UI exibe modal explícito (não o genérico).
+16. ✅ `uq_ingested_doc_hash` + DBA-M1 (filtro `deleted_at IS NULL`) permite re-submit pós-delete sem violação. Hash idêntico para respostas idênticas (idempotência).
+
 ## Próxima ação
 
-Gate 1 (gerente-projetos-ti).
+Gate 2 (arquiteto-projetos).
