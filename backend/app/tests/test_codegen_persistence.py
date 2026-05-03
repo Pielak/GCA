@@ -189,8 +189,10 @@ async def test_regenerate_file_412_when_setup_incomplete():
 def _build_anthropic_mock(json_payload: dict, output_tokens: int = 100) -> MagicMock:
     """Constrói um mock do AsyncAnthropic que devolve um JSON serializado.
 
-    O endpoint faz `response.content[0].text` e `response.usage.output_tokens`,
-    então precisamos cobrir essas duas leituras.
+    DT-079 (2026-05-03) substituiu AsyncAnthropic direto por
+    `call_codegen_llm`. Helper mantido para retrocompat de testes que ainda
+    patcham `anthropic.AsyncAnthropic` (no-op pós-DT-079, mas não quebra).
+    Para mockar a porta única, use `_codegen_llm_response`.
     """
     response = MagicMock()
     response.content = [MagicMock(text=json.dumps(json_payload))]
@@ -200,6 +202,16 @@ def _build_anthropic_mock(json_payload: dict, output_tokens: int = 100) -> Magic
     client.messages = MagicMock()
     client.messages.create = AsyncMock(return_value=response)
     return client
+
+
+def _codegen_llm_response(json_payload: dict) -> str:
+    """Constrói o texto cru que `call_codegen_llm` retornaria.
+
+    DT-085 (2026-05-03): porta única `call_codegen_llm` retorna `str` (texto
+    do LLM). Endpoints parseiam JSON desse texto. Helper monta a string para
+    mockar via `patch("...code_generation.call_codegen_llm", return_value=...)`.
+    """
+    return json.dumps(json_payload)
 
 
 async def _make_user_org_project_with_full_setup(
@@ -218,11 +230,16 @@ async def _make_user_org_project_with_full_setup(
 
     Retorna (user_id, org_id, project_id, git_id, settings_id, q_id)
     para cleanup.
+
+    DT-085 (2026-05-03): também cria OCG maduro (overall_score=100) para
+    passar pelo `check_ocg_maturity_gate` introduzido pelo MVP 31. Sem isso,
+    todos os endpoints de CodeGen levantam HTTPException 404/409 antes da
+    lógica sob teste.
     """
     from app.db.database import AsyncSessionLocal
     from app.models.base import (
         User, Organization, Project, ProjectGitConfig,
-        ProjectSettings, Questionnaire, ProjectMember,
+        ProjectSettings, Questionnaire, ProjectMember, OCG,
     )
 
     uid = uuid4()
@@ -231,6 +248,7 @@ async def _make_user_org_project_with_full_setup(
     git_id = uuid4()
     settings_id = uuid4()
     q_id = uuid4()
+    ocg_id = uuid4()  # DT-085
 
     async with AsyncSessionLocal() as session:
         async with session.begin():
@@ -315,12 +333,32 @@ async def _make_user_org_project_with_full_setup(
                     joined_at=datetime.utcnow(),
                 )
             )
+            # DT-085: OCG maduro para passar pelo check_ocg_maturity_gate (MVP 31).
+            # Cascateia via questionnaire_id_fkey ON DELETE CASCADE — sem cleanup
+            # explícito necessário (FK ocg.questionnaire_id é CASCADE no DB).
+            session.add(
+                OCG(
+                    id=ocg_id,
+                    questionnaire_id=q_id,
+                    project_id=project_id,
+                    overall_score=100,  # >= SCORE_MATURIDADE (95)
+                    status="active",
+                    is_blocking=False,
+                    ocg_data="{}",
+                    version=1,
+                )
+            )
 
     return uid, org_id, project_id, git_id, settings_id, q_id
 
 
 async def _cleanup_user_org_project_full(uid, org_id, project_id, git_id, settings_id, q_id):
-    """Limpa fixture criado por _make_user_org_project_with_full_setup."""
+    """Limpa fixture criado por _make_user_org_project_with_full_setup.
+
+    DT-085: OCG criado pelo helper cascateia automaticamente via
+    `ocg_questionnaire_id_fkey ON DELETE CASCADE` quando questionnaire é
+    deletado. Sem cleanup explícito necessário.
+    """
     from app.db.database import AsyncSessionLocal
     from app.models.base import (
         User, Organization, Project, ProjectGitConfig,
@@ -385,8 +423,10 @@ async def test_scaffold_preview_returns_files_no_commits():
     token = create_access_token(data={"sub": str(uid)})
 
     try:
+        # DT-079/085: porta única call_codegen_llm em vez de AsyncAnthropic.
         with patch(
-            "anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)
+            "app.services.codegen_llm.call_codegen_llm",
+            new=AsyncMock(return_value=_codegen_llm_response(_SCAFFOLD_LLM_PAYLOAD)),
         ), patch(
             "app.services.git_service.GitService.commit_file", new=fake_commit
         ):
@@ -474,8 +514,10 @@ async def test_scaffold_legacy_dry_run_false_commits_directly():
     token = create_access_token(data={"sub": str(uid)})
 
     try:
+        # DT-079/085: porta única call_codegen_llm em vez de AsyncAnthropic.
         with patch(
-            "anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)
+            "app.services.codegen_llm.call_codegen_llm",
+            new=AsyncMock(return_value=_codegen_llm_response(_SCAFFOLD_LLM_PAYLOAD)),
         ), patch(
             "app.services.git_service.GitService.commit_file", new=fake_commit
         ):
@@ -523,8 +565,10 @@ async def test_regenerate_file_happy_path_commits():
     token = create_access_token(data={"sub": str(uid)})
 
     try:
+        # DT-079/085: porta única call_codegen_llm em vez de AsyncAnthropic.
         with patch(
-            "anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(llm_payload)
+            "app.services.codegen_llm.call_codegen_llm",
+            new=AsyncMock(return_value=_codegen_llm_response(llm_payload)),
         ), patch(
             "app.services.git_service.GitService.commit_file", new=fake_commit
         ):
@@ -669,7 +713,11 @@ async def test_scaffold_premium_provider_has_no_warning():
     token = create_access_token(data={"sub": str(uid)})
 
     try:
-        with patch("anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)):
+        # DT-079/085: porta única call_codegen_llm em vez de AsyncAnthropic.
+        with patch(
+            "app.services.codegen_llm.call_codegen_llm",
+            new=AsyncMock(return_value=_codegen_llm_response(_SCAFFOLD_LLM_PAYLOAD)),
+        ):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(
@@ -698,7 +746,11 @@ async def test_scaffold_medium_provider_triggers_warning():
     token = create_access_token(data={"sub": str(uid)})
 
     try:
-        with patch("anthropic.AsyncAnthropic", return_value=_build_anthropic_mock(_SCAFFOLD_LLM_PAYLOAD)):
+        # DT-079/085: porta única call_codegen_llm em vez de AsyncAnthropic.
+        with patch(
+            "app.services.codegen_llm.call_codegen_llm",
+            new=AsyncMock(return_value=_codegen_llm_response(_SCAFFOLD_LLM_PAYLOAD)),
+        ):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
                 resp = await client.post(

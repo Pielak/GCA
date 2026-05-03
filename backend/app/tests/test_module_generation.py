@@ -1,9 +1,14 @@
 """
 Testes do Module CodeGen — Fase 3
 Testa geração de código, mapeamento de frameworks e classificação de testes.
+
+DT-085 (2026-05-03): testes que exercitam `generate_module_from_candidate`
+agora mockam `check_ocg_maturity_gate` para passar pelo gate (introduzido
+pelo MVP 31). Sem o mock, o gate levanta HTTPException 404 antes da lógica
+sob teste — resultando em retry × 3 e fail genérico.
 """
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from app.services.module_codegen_service import ModuleCodegenService, TEST_FRAMEWORK_MAP
@@ -59,21 +64,32 @@ class TestModuleCodegenService:
 
     @pytest.mark.asyncio
     async def test_generate_with_missing_candidate_returns_none(self, mock_db):
-        """Geração com candidato inexistente deve retornar None."""
+        """Geração com candidato inexistente deve retornar None.
+
+        DT-085: mocka gate de OCG (MVP 31) para que o teste exercite a
+        lógica de "candidato inexistente" e não falhe no gate antes.
+        """
         mock_result = MagicMock()
         mock_result.scalar_one_or_none.return_value = None
         mock_db.execute.return_value = mock_result
 
-        service = ModuleCodegenService(mock_db)
-        result = await service.generate_module_from_candidate(
-            project_id=uuid4(),
-            module_candidate_id=uuid4(),
-        )
+        with patch(
+            "app.services.module_codegen_service.check_ocg_maturity_gate",
+            new=AsyncMock(return_value=None),  # gate liberado
+        ):
+            service = ModuleCodegenService(mock_db)
+            result = await service.generate_module_from_candidate(
+                project_id=uuid4(),
+                module_candidate_id=uuid4(),
+            )
         assert result is None
 
     @pytest.mark.asyncio
     async def test_generate_with_unapproved_candidate_returns_none(self, mock_db):
-        """Geração com candidato não aprovado deve retornar None."""
+        """Geração com candidato não aprovado deve retornar None.
+
+        DT-085: mocka gate de OCG (MVP 31).
+        """
         candidate = MagicMock()
         candidate.status = "suggested"
         candidate.name = "TestModule"
@@ -81,11 +97,15 @@ class TestModuleCodegenService:
         mock_result.scalar_one_or_none.return_value = candidate
         mock_db.execute.return_value = mock_result
 
-        service = ModuleCodegenService(mock_db)
-        result = await service.generate_module_from_candidate(
-            project_id=uuid4(),
-            module_candidate_id=uuid4(),
-        )
+        with patch(
+            "app.services.module_codegen_service.check_ocg_maturity_gate",
+            new=AsyncMock(return_value=None),  # gate liberado
+        ):
+            service = ModuleCodegenService(mock_db)
+            result = await service.generate_module_from_candidate(
+                project_id=uuid4(),
+                module_candidate_id=uuid4(),
+            )
         assert result is None
 
     @pytest.mark.asyncio
