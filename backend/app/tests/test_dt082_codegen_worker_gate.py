@@ -250,8 +250,15 @@ def test_execute_run_imports_evaluate_ocg_maturity():
     )
 
 
-def test_execute_run_marks_blocked_status_when_gate_blocks():
-    """Guard: execute_run tem branch que marca run.status='blocked' quando gate bloqueia."""
+def test_execute_run_marks_failed_status_with_canonical_prefix_when_gate_blocks():
+    """Guard: execute_run tem branch que marca run.status='failed' + prefixo
+    `[ocg_gate:` no error quando gate bloqueia.
+
+    DT-083 (2026-05-03) corrigiu DT-082: status original 'blocked' violava
+    `scaffold_runs_status_check`. Agora usa 'failed' + prefixo canônico no
+    error, permitindo que a métrica `gca_codegen_blocked_total{block_level}`
+    parseie sem migration.
+    """
     from pathlib import Path
 
     src = (
@@ -260,8 +267,12 @@ def test_execute_run_marks_blocked_status_when_gate_blocks():
         / "scaffold_run_service.py"
     ).read_text(encoding="utf-8")
 
-    assert 'run.status = "blocked"' in src, (
-        "execute_run não marca run.status='blocked' — DT-082 incompleta"
+    assert 'run.status = "failed"' in src, (
+        "execute_run não marca run.status='failed' no branch do gate — "
+        "DT-082+DT-083 incompletas"
+    )
+    assert '[ocg_gate:' in src, (
+        "Prefixo canônico '[ocg_gate:' ausente no error — métrica DT-083 não popula"
     )
     assert 'scaffold_run.blocked_by_ocg_gate' in src, (
         "Log canônico 'scaffold_run.blocked_by_ocg_gate' ausente"

@@ -112,6 +112,14 @@ class AuditEvents:
     # timestamp}. Emitido por OCGService.consolidate_ocg.
     OCG_CONSOLIDATED = "ocg_consolidated"
 
+    # DT-083 (MVP cleanup 2026-05-03) — Evento canônico para deltas negativos
+    # bloqueados pelo `_filter_negative_score_deltas` no OCG Updater. Permite
+    # que a métrica `gca_ocg_negative_delta_blocked_total{project}` em
+    # MetricsService derive a contagem sem schema novo. Payload em details:
+    # {project_id, count, samples[{path, old, tried}]}.
+    OCG_NEGATIVE_DELTA_BLOCKED = "ocg_negative_delta_blocked"
+
+
 logger = structlog.get_logger(__name__)
 
 

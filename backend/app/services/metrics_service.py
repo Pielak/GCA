@@ -26,8 +26,10 @@ from app.models.base import (
     AIUsageLog,
     GlobalAuditLog,
     Project,
+    ScaffoldRun,
     User,
 )
+from app.models.base import OCGDeltaLog  # DT-083 — métrica de deltas aplicados
 
 logger = structlog.get_logger(__name__)
 
@@ -302,4 +304,106 @@ class MetricsService:
         lines.append("# TYPE gca_celery_dlq_entries gauge")
         lines.append(f"gca_celery_dlq_entries {len(dlq)}")
 
+        # DT-083 — métricas de OCG e CodeGen Gate (sem prometheus_client).
+        # Counters cumulativos derivados de tabelas existentes:
+        #   ocg_delta_log → gca_ocg_delta_applied_total{project,trigger_source}
+        #   audit_log_global (OCG_NEGATIVE_DELTA_BLOCKED) → gca_ocg_negative_delta_blocked_total{project}
+        #   scaffold_runs (status='blocked') → gca_codegen_blocked_total{block_level}
+        ocg_deltas = await self._ocg_delta_aggregations()
+        lines.append("# HELP gca_ocg_delta_applied_total OCG deltas aplicados por projeto e trigger")
+        lines.append("# TYPE gca_ocg_delta_applied_total counter")
+        for r in ocg_deltas:
+            lines.append(
+                f'gca_ocg_delta_applied_total{{project="{r["project_id"]}",trigger_source="{r["trigger_source"]}"}} {r["count"]}'
+            )
+
+        negative_blocks = await self._ocg_negative_delta_block_aggregations()
+        lines.append("# HELP gca_ocg_negative_delta_blocked_total Eventos de deltas negativos bloqueados pelo filtro")
+        lines.append("# TYPE gca_ocg_negative_delta_blocked_total counter")
+        for r in negative_blocks:
+            lines.append(
+                f'gca_ocg_negative_delta_blocked_total{{project="{r["project_id"]}"}} {r["count"]}'
+            )
+
+        codegen_blocks = await self._codegen_block_aggregations()
+        lines.append("# HELP gca_codegen_blocked_total Runs de CodeGen bloqueadas pelo gate de maturidade do OCG")
+        lines.append("# TYPE gca_codegen_blocked_total counter")
+        for r in codegen_blocks:
+            lines.append(
+                f'gca_codegen_blocked_total{{block_level="{r["block_level"]}"}} {r["count"]}'
+            )
+
         return "\n".join(lines) + "\n"
+
+    # ---------------------------------------------------------------------
+    # DT-083 — agregações para os 3 contadores Prometheus de OCG / CodeGen.
+    # ---------------------------------------------------------------------
+    async def _ocg_delta_aggregations(self) -> List[Dict[str, Any]]:
+        """Conta deltas aplicados em `ocg_delta_log` agrupado por
+        (project_id, trigger_source). Cumulativo desde o início (counter)."""
+        stmt = (
+            select(
+                OCGDeltaLog.project_id,
+                OCGDeltaLog.trigger_source,
+                func.count(OCGDeltaLog.id).label("count"),
+            )
+            .group_by(OCGDeltaLog.project_id, OCGDeltaLog.trigger_source)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return [
+            {
+                "project_id": str(r.project_id),
+                "trigger_source": r.trigger_source or "unknown",
+                "count": int(r.count),
+            }
+            for r in rows
+        ]
+
+    async def _ocg_negative_delta_block_aggregations(self) -> List[Dict[str, Any]]:
+        """Conta eventos `OCG_NEGATIVE_DELTA_BLOCKED` em audit_log_global por
+        resource_id (que carrega o project_id). Cumulativo desde o início."""
+        from app.services.audit_service import AuditEvents
+
+        stmt = (
+            select(
+                GlobalAuditLog.resource_id,
+                func.count(GlobalAuditLog.id).label("count"),
+            )
+            .where(GlobalAuditLog.event_type == AuditEvents.OCG_NEGATIVE_DELTA_BLOCKED)
+            .where(GlobalAuditLog.resource_id.isnot(None))
+            .group_by(GlobalAuditLog.resource_id)
+        )
+        rows = (await self.db.execute(stmt)).all()
+        return [
+            {"project_id": str(r.resource_id), "count": int(r.count)}
+            for r in rows
+        ]
+
+    async def _codegen_block_aggregations(self) -> List[Dict[str, Any]]:
+        """Conta runs bloqueadas pelo gate em scaffold_runs.
+
+        Origem: DT-082 (worker Celery do CodeGen). A CHECK constraint do schema
+        não permite `status='blocked'`, então o worker usa `status='failed'`
+        com prefixo canônico `[ocg_gate:<level>]` em `error`. Filtramos por
+        esse prefixo e parseamos o block_level. Cumulativo desde o início.
+        """
+        stmt = (
+            select(ScaffoldRun.error)
+            .where(ScaffoldRun.status == "failed")
+            .where(ScaffoldRun.error.like("[ocg_gate:%"))
+        )
+        rows = (await self.db.execute(stmt)).scalars().all()
+        # Parse block_level do error canônico
+        counts: Dict[str, int] = {}
+        for err in rows:
+            # Garantia: filtro WHERE LIKE já garante o prefixo, mas defendemos
+            # contra payload inesperado para não emitir métrica falsa.
+            if err and err.startswith("[ocg_gate:") and "]" in err:
+                level = err[len("[ocg_gate:") : err.index("]")]
+            else:
+                level = "other"
+            counts[level] = counts.get(level, 0) + 1
+        return [
+            {"block_level": level, "count": cnt}
+            for level, cnt in sorted(counts.items())
+        ]
