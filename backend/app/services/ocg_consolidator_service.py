@@ -21,15 +21,28 @@ from app.models.auditor_output import AuditorOutput
 
 logger = structlog.get_logger(__name__)
 
-# Persona → Pillar mapping (which persona validates which pillar)
+# Persona → Pillar mapping (which persona validates which pillar).
+# Cobertura canônica das 12 personas LLM (Conjunto B, glossário §0.5):
+#   - GP, NEG       → P1 (business)
+#   - CONF, LGPD    → P2 (rules — regulatório/legal)
+#   - UX, UI        → P3 (features)
+#   - QA            → P4 (nfr)
+#   - ARQ, DEV      → P5 (architecture)
+#   - DBA           → P6 (data)
+#   - SEG           → P7 (security)
+#   - AUD           → não mapeada (router/classificador, sem score próprio)
 PERSONA_TO_PILLAR = {
-    "gp": "p1_business_score",     # Gerente: Business value
-    "arq": "p5_architecture_score", # Arquiteto: Architecture
-    "dba": "p6_data_score",         # DBA: Data/Schema
-    "dev": "p5_architecture_score", # Dev: Implementation feasibility
-    "qa": "p4_nfr_score",           # QA: NFR, test coverage
-    "ux": "p3_features_score",      # UX: Feature completeness
-    "ui": "p3_features_score",      # UI: Design system alignment
+    "gp": "p1_business_score",      # Gerente: Business value
+    "neg": "p1_business_score",     # Negócio: valor estratégico, ROI
+    "conf": "p2_rules_score",       # Conformidade regulatória (bloqueante <60)
+    "lgpd": "p2_rules_score",       # LGPD: privacidade regulatória
+    "ux": "p3_features_score",      # UX: jornada e completude funcional
+    "ui": "p3_features_score",      # UI: design system alignment
+    "qa": "p4_nfr_score",           # QA: testes, cobertura, NFR
+    "arq": "p5_architecture_score", # Arquiteto: stack, padrões
+    "dev": "p5_architecture_score", # Dev: feasibility de implementação
+    "dba": "p6_data_score",         # DBA: modelo de dados, retenção
+    "seg": "p7_security_score",     # Segurança: OWASP, AuthN/Z
 }
 
 # Threshold for conflict: if variance in scores > this, flag as conflict
