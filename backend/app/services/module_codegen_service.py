@@ -157,7 +157,12 @@ class ModuleCodegenService:
             ocg = await self._fetch_ocg(project_id)
             ocg_context = json.loads(ocg.ocg_data) if ocg and ocg.ocg_data else {}
 
-            # 3. Criar registro GeneratedModule
+            # 3. Criar registro GeneratedModule.
+            # DT-079: provider/model resolvidos via AIKeyResolver
+            # (porta única §3.1). Sem hardcode de Anthropic.
+            from app.services.codegen_llm import resolve_codegen_provider_meta
+
+            provider_meta = await resolve_codegen_provider_meta(self.db, project_id)
             generated_module = GeneratedModule(
                 id=uuid4(),
                 project_id=project_id,
@@ -165,8 +170,8 @@ class ModuleCodegenService:
                 name=candidate.name,
                 module_type=candidate.module_type,
                 status="generating",
-                llm_provider=getattr(settings, "ANTHROPIC_API_KEY", None) and "anthropic",
-                llm_model=getattr(settings, "ANTHROPIC_MODEL", "claude-opus-4-0-20250514"),
+                llm_provider=(provider_meta or {}).get("provider"),
+                llm_model=(provider_meta or {}).get("model"),
             )
             self.db.add(generated_module)
             await self.db.commit()
@@ -247,8 +252,10 @@ class ModuleCodegenService:
         except (json.JSONDecodeError, TypeError):
             deps = []
 
-        # 4. Gerar código via LLM (placeholder — chamada real usa Anthropic SDK)
+        # 4. Gerar código via LLM. DT-079: provider resolvido por projeto via
+        # AIKeyResolver — sem hardcode de Anthropic.
         module_code = await self._generate_code_via_llm(
+            project_id=project_id,
             module_name=candidate.name,
             module_type=candidate.module_type,
             module_description=candidate.description,
@@ -304,6 +311,7 @@ class ModuleCodegenService:
 
     async def _generate_code_via_llm(
         self,
+        project_id: UUID,
         module_name: str,
         module_type: str,
         module_description: str,
@@ -311,31 +319,30 @@ class ModuleCodegenService:
         dependencies: list,
     ) -> str:
         """
-        Gera código-fonte via LLM (Anthropic Claude).
+        Gera código-fonte via LLM. DT-079: usa porta única `call_codegen_llm`
+        (AIKeyResolver) — sem hardcode de Anthropic. Provider/modelo vêm
+        de `project_settings.setting_type='llm'` configurado pelo GP.
         Retorna o código gerado como string.
         """
+        from app.services.codegen_llm import call_codegen_llm
+
+        prompt = MODULE_CODE_PROMPT.format(
+            module_name=module_name,
+            module_type=module_type,
+            module_description=module_description,
+            ocg_context=json.dumps(ocg_context, ensure_ascii=False, indent=2)[:3000],
+            dependencies=json.dumps(dependencies, ensure_ascii=False),
+        )
+
         try:
-            from anthropic import AsyncAnthropic
-
-            client = AsyncAnthropic(api_key=settings.ANTHROPIC_API_KEY)
-
-            prompt = MODULE_CODE_PROMPT.format(
-                module_name=module_name,
-                module_type=module_type,
-                module_description=module_description,
-                ocg_context=json.dumps(ocg_context, ensure_ascii=False, indent=2)[:3000],
-                dependencies=json.dumps(dependencies, ensure_ascii=False),
-            )
-
-            response = await client.messages.create(
-                model=getattr(settings, "ANTHROPIC_MODEL", "claude-opus-4-0-20250514"),
-                max_tokens=getattr(settings, "ANTHROPIC_MAX_TOKENS", 4096),
+            return await call_codegen_llm(
+                db=self.db,
+                project_id=project_id,
+                user_prompt=prompt,
+                max_tokens=4096,
                 temperature=0.3,
-                messages=[{"role": "user", "content": prompt}],
+                log_context="codegen.module_code",
             )
-
-            return response.content[0].text
-
         except Exception as e:
             logger.warning(
                 "codegen.llm_indisponivel",
