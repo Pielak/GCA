@@ -140,12 +140,28 @@ Estes pontos são lidos em toda sessão. Detalhe extenso em `GCA_CANONICAL_CONTR
 
 - ✅ OCG nasce do questionário aprovado.
 - ✅ OCG é evolutivo e auditável.
-- ✅ **OCG só expande quando recebe informação de valor**. Nunca contrai.
+- ✅ **OCG só expande quando recebe informação de valor**. Nunca contrai por análise.
 - ✅ Ingestão ruim ou conflitante: documento vai para **quarentena** e **não afeta o OCG**. Não há mais "contração de confiança" como behavior do motor.
 - ✅ Módulos não podem assumir defaults invisíveis quando o OCG estiver incompleto: bloquear ou exigir complementação.
 - ✅ Toda mudança gera versionamento e trilha de auditoria.
 
-Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine`.
+#### Reversão por deleção legítima da fonte (MVP 34, 2026-05-03)
+
+Complementa — **não viola** — a regra "OCG não contrai por ingestão". A regra acima protege contra LLM hallucination, ingestão maliciosa ou conflitante. **Quando o GP soft-deleta um `ingested_documents` row** (operação humana de gestão: smoke fixture, erro de upload, PII em LGPD, doc obsoleto), os efeitos derivados devem ser revertidos:
+
+- ✅ Endpoint `DELETE /api/v1/projects/{pid}/ingestion/{did}?reason=manual|lgpd|smoke_cleanup` é o caminho canônico — retorna **202 Accepted** + `revert_job_id`.
+- ✅ Soft-delete imediato (`deleted_at IS NOT NULL`) — doc some de queries de listagem/CodeGen/specs/livedocs/consistência (12 pontos canônicos filtrados).
+- ✅ Celery job em background recompute o OCG ignorando o doc (via JOIN `WHERE deleted_at IS NULL` em `_load_persona_scores`).
+- ✅ Versão do OCG incrementa com `change_type='REVERT_DOCUMENT_DELETE'` e `ocg_delta_log` ganha row com `trigger_source='document_revert'`.
+- ✅ Tabelas auxiliares limpas: `persona_follow_up_questions` → `expired`, `conflicts_pending_review`/`chunk_errors_pending_review` → `archived_doc_deleted`.
+- ✅ `module_candidates` órfãos (única fonte = doc deletado) viram `archived`. Múltiplas fontes: remove `doc_id` da lista, mantém candidato.
+- ✅ Audit event `DOCUMENT_REVERTED` em `audit_log_global` (hash chain íntegro).
+- ✅ `maturity_warning` populado em PT-BR quando `score_after < SCORE_MATURIDADE` (gate CodeGen).
+- ⚠ **LGPD parcial:** `pii_fields`, `ocg_individual.parecer` e `ocg_global.parecer_consolidated` permanecem (DT-086 — purge físico em MVP futuro).
+
+**Conceitualmente:** a regra "OCG não contrai" continua. O que muda é o caminho de **gestão da fonte**: deletar o doc é operação humana, e o sistema garante que efeitos derivados sigam a deleção da fonte. Não é contração arbitrária — é integridade.
+
+Detalhe da máquina de estado, schema e propagação: skill `gca-ocg-engine`. Detalhe operacional do MVP 34: [`docs/MVP_34_REVERT_DOCUMENT_DELETE.md`](docs/MVP_34_REVERT_DOCUMENT_DELETE.md).
 
 ### 2.5. Política de criticidade de IA (3 níveis)
 

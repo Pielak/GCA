@@ -371,10 +371,12 @@ async def _load_ocg_context(
         data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
     except (ValueError, TypeError):
         data = {}
+    # MVP 34: filtra docs soft-deleted — spec global não deve incluir docs deletados.
     docs_rows = await db.execute(
         select(IngestedDocument.id).where(
             IngestedDocument.project_id == project_id,
             IngestedDocument.arguider_status == "completed",
+            IngestedDocument.deleted_at.is_(None),
         )
     )
     doc_ids = [str(r[0]) for r in docs_rows.all()]

@@ -509,10 +509,14 @@ async def generate_scaffold(
     # 2. Buscar OCG mais recente do projeto
     ocg_data = await _load_ocg_context(db, project_id)
 
-    # 3. Buscar documentos ingeridos e análises do Arguidor
+    # 3. Buscar documentos ingeridos e análises do Arguidor.
+    # MVP 34: ignora docs soft-deleted — CRÍTICO PARA LGPD. CodeGen não pode
+    # gerar código a partir de doc cujo conteúdo deveria ter sido removido
+    # (Art. 6º III LGPD — princípio de minimização).
     docs_result = await db.execute(
         select(IngestedDocument)
         .where(IngestedDocument.project_id == project_id)
+        .where(IngestedDocument.deleted_at.is_(None))
         .order_by(IngestedDocument.created_at.desc())
     )
     ingested_docs = docs_result.scalars().all()

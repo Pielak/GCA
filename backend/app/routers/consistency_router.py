@@ -59,9 +59,11 @@ async def get_consistency_status(
       - error: arguider quebrou
       - pending: ainda enfileirado
     """
+    # MVP 34: ignora docs soft-deleted no painel de consistência.
     docs = (await db.execute(
         select(IngestedDocument)
         .where(IngestedDocument.project_id == project_id)
+        .where(IngestedDocument.deleted_at.is_(None))
         .order_by(IngestedDocument.created_at.desc())
     )).scalars().all()
 
