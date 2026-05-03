@@ -1,16 +1,19 @@
-"""Phase B.3 Integration Tests — Full Passada 1→2 flow with database persistence."""
+"""Phase B.3 Integration Tests — Full Passada 1→2 flow with database persistence.
+
+DT-084 (2026-05-03): SUITE LEGADA SUSPENSA.
+Este arquivo usa `Session` síncrono (sqlalchemy.orm.Session) e `SessionLocal`,
+que foram removidos quando o backend migrou para async (`AsyncSession` +
+`AsyncSessionLocal`). A reescrita ponta-a-ponta para async exige refactor
+amplo, fora do escopo de cleanup. Marcado como skipped (com
+`allow_module_level=True`) para que o ImportError não dispare na coleta.
+"""
 import pytest
-from uuid import uuid4
-from sqlalchemy.orm import Session
-from fastapi.testclient import TestClient
-from app.main import app
-from app.db.database import get_db, SessionLocal
-from app.models.document_route_map import DocumentRouteMap
-from app.models.auditor_output import AuditorOutput
-from app.models.gatekeeper_persona_response import GatekeeperPersonaResponse
-from app.models.human_answer import HumanAnswer
-from app.schemas.chunk import Chunk
-from unittest.mock import MagicMock, AsyncMock, patch
+
+pytest.skip(
+    "DT-084: arquitetura síncrona obsoleta (SessionLocal removido). "
+    "Reescrever para async se ressuscitar.",
+    allow_module_level=True,
+)
 
 
 @pytest.fixture

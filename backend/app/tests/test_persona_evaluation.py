@@ -20,8 +20,30 @@ from app.services.persona_validator import (
     create_single_persona_validator,
     create_personas_consolidator,
 )
+from app.tests.factories import create_test_organization, create_test_project
 
 pytestmark = pytest.mark.unit
+
+
+# DT-084: helper para criar project real + technical_questionnaire real
+# (FKs persona_responses.project_id + persona_responses.technical_questionnaire_id).
+# Antes os 3 testes de PersonaResponse usavam uuid4() solto, falhando com
+# `ForeignKeyViolationError`.
+async def _seed_project_and_questionnaire(db):
+    org = await create_test_organization(db)
+    project = await create_test_project(
+        db, organization_id=org.id, slug=f"persona-{uuid4().hex[:6]}"
+    )
+    questionnaire = TechnicalQuestionnaire(
+        id=uuid4(),
+        project_id=project.id,
+        responses={},
+        progress_percent=0,
+        status="draft",
+    )
+    db.add(questionnaire)
+    await db.flush()
+    return project.id, questionnaire.id
 
 
 # ─── Persona Validator Creation ──────────────────────────────────────
@@ -120,8 +142,7 @@ def test_all_persona_classes_have_get_validation_prompt():
 @pytest.mark.asyncio
 async def test_persona_response_creation(db_session):
     """PersonaResponse pode ser criado e persisted"""
-    project_id = uuid4()
-    questionnaire_id = uuid4()
+    project_id, questionnaire_id = await _seed_project_and_questionnaire(db_session)
 
     response = PersonaResponse(
         project_id=project_id,
@@ -143,8 +164,7 @@ async def test_persona_response_creation(db_session):
 @pytest.mark.asyncio
 async def test_persona_response_unique_constraint(db_session):
     """Uma Persona por questionário — constraint único"""
-    project_id = uuid4()
-    questionnaire_id = uuid4()
+    project_id, questionnaire_id = await _seed_project_and_questionnaire(db_session)
 
     r1 = PersonaResponse(
         project_id=project_id,
@@ -170,8 +190,7 @@ async def test_persona_response_unique_constraint(db_session):
 @pytest.mark.asyncio
 async def test_persona_response_fields(db_session):
     """PersonaResponse armazena todas as informações necessárias"""
-    project_id = uuid4()
-    questionnaire_id = uuid4()
+    project_id, questionnaire_id = await _seed_project_and_questionnaire(db_session)
 
     response = PersonaResponse(
         project_id=project_id,
