@@ -204,6 +204,33 @@ async def save_technical_questionnaire(
 
     # Handle submission
     if req.submit:
+        # MVP 35 (decisão GP #4): Submeter exige status='validated'.
+        # Frontend já bloqueia, backend é defesa em profundidade.
+        if questionnaire.status != "validated":
+            raise HTTPException(
+                status_code=status.HTTP_412_PRECONDITION_FAILED,
+                detail=(
+                    "Questionário precisa ser validado antes de submeter. "
+                    "Clique em 'Validar Escopo' primeiro."
+                ),
+            )
+
+        # MVP 35 Camada 2: LLM sanity check semântico (DBA-M2 — bloqueia se LLM falha)
+        from app.services.questionnaire_validation.llm_sanity_check import llm_sanity_check
+        from app.services.questionnaire_validation.rules_evaluator import evaluate_rules
+
+        # Roda RulesEvaluator de novo para passar conflicts ao LLM (não repetir)
+        rules_result = evaluate_rules(req.responses)
+        conflicts_detected = [c["message"] for c in rules_result["conflicts"]]
+
+        # Esta chamada LEVANTA HTTPException 503 se LLM indisponível — submit aborta.
+        await llm_sanity_check(
+            db=db,
+            project_id=project_id,
+            responses=req.responses,
+            conflicts_detected=conflicts_detected,
+        )
+
         questionnaire.status = "submitted"
         questionnaire.submitted_by = current_user
         questionnaire.submitted_at = datetime.utcnow()
@@ -228,6 +255,20 @@ async def save_technical_questionnaire(
                 submitted_at=datetime.utcnow(),
             )
             db.add(new_q)
+
+        # MVP 35 (decisão GP #2): cria IngestedDocument sintético — aparece na aba Ingestão.
+        # Idempotente (Arq-M2 + DBA-M1): re-submit com responses iguais reusa row.
+        from app.services.questionnaire_validation.synthetic_document import (
+            create_or_get_synthetic_document,
+        )
+        await create_or_get_synthetic_document(
+            db=db,
+            project_id=project_id,
+            project_name=project.name,
+            questionnaire_id=questionnaire.id,
+            responses=req.responses,
+            uploaded_by=current_user,
+        )
 
         logger.info(
             "technical_questionnaire_submitted",

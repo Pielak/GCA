@@ -306,7 +306,20 @@ class IngestionService:
         self.db = db
 
     async def _dispatch_to_n8n(self, doc_id, project_id, file_type, file_bytes):
-        """Dispara o pipeline de ingestão via webhook n8n (feature flag INGESTION_VIA_N8N)."""
+        """Dispara o pipeline de ingestão via webhook n8n (feature flag INGESTION_VIA_N8N).
+
+        MVP 35 (Arq-M1): file_type='questionnaire' é IngestedDocument sintético
+        criado direto no router de submit do questionário — NÃO passa pelo n8n.
+        Guard explícito aqui evita dispatch acidental se outra rota chamar
+        `upload_document` com esse tipo.
+        """
+        if file_type == "questionnaire":
+            logger.info(
+                "ingestion.dispatch_skipped_questionnaire_synthetic",
+                document_id=str(doc_id),
+                project_id=str(project_id),
+            )
+            return
         import base64
         import json as _json
         import hmac
@@ -736,7 +749,8 @@ class IngestionService:
 
         try:
             # Se nenhum em processamento, dispara pipeline (n8n ou Celery)
-            if processing_count == 0:
+            # MVP 35 (Arq-M1): questionnaire é sintético — NÃO entra no pipeline.
+            if processing_count == 0 and file_type != "questionnaire":
                 if use_n8n:
                     await self._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
                 else:

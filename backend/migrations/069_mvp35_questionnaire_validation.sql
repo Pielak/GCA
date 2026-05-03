@@ -65,4 +65,33 @@ ALTER TABLE technical_questionnaires
 COMMENT ON COLUMN technical_questionnaires.status IS
     'Estado canônico do questionário (MVP 35): draft (rascunho/auto-save) | validated (passou Validar Escopo, pré-submit) | submitted (terminal, dispara personas) | archived (deletado via Ingestão, força novo questionário). CHECK chk_tq_status.';
 
+-- =============================================================================
+-- 6. Índice único parcial em ingested_documents (resolução pós-DBA gate)
+--
+-- A constraint UNIQUE original `uq_ingested_doc_hash (project_id, file_hash)`
+-- não tem filtro de soft-delete. Quando GP soft-deleta IngestedDocument
+-- tipo 'questionnaire' e re-submete o mesmo questionário (responses idênticas
+-- → mesmo hash canônico Arq-M2), o INSERT do novo doc bate na constraint
+-- antes do dup-check com `WHERE deleted_at IS NULL` poder filtrar.
+--
+-- Solução canônica: substituir por índice único PARCIAL que só considera
+-- rows ativas (deleted_at IS NULL). Permite re-submit pós-delete sem
+-- UniqueViolationError, mantendo proteção contra duplicatas ativas.
+--
+-- DBA Gate 3 sugeriu como alternativa ("filtro código vs índice parcial");
+-- escopo MVP 35 + IngestedDocument sintético tornaram índice parcial
+-- a única solução robusta sem hack de UPSERT/UNDELETE.
+-- =============================================================================
+
+ALTER TABLE ingested_documents
+    DROP CONSTRAINT IF EXISTS uq_ingested_doc_hash;
+
+DROP INDEX IF EXISTS uq_ingested_doc_hash_active;
+CREATE UNIQUE INDEX uq_ingested_doc_hash_active
+    ON ingested_documents (project_id, file_hash)
+    WHERE deleted_at IS NULL;
+
+COMMENT ON INDEX uq_ingested_doc_hash_active IS
+    'MVP 35: substitui uq_ingested_doc_hash UNIQUE regular. Filtro parcial WHERE deleted_at IS NULL permite re-ingestão pós-soft-delete (mesmo hash canônico). Mantém proteção contra duplicatas ATIVAS.';
+
 COMMIT;
