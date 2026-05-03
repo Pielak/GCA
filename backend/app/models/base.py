@@ -4,7 +4,7 @@ Global schema tables: users, organizations, projects, etc
 """
 from datetime import datetime, timezone
 from uuid import uuid4
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, CheckConstraint, Integer, Float, Text, UniqueConstraint, LargeBinary, Numeric
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Index, CheckConstraint, Integer, Float, Text, UniqueConstraint, LargeBinary, Numeric, SmallInteger
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -1467,25 +1467,51 @@ class OCGGlobal(Base):
 class OCGIndividualRefined(Base):
     """Refinamento humano do parecer individual de uma persona (HITL).
 
-    DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
-    Por ora apenas espelha o schema da tabela para que o ORM não quebre.
+    DT-080 (2026-05-03): modelo completo. Cobre todas as colunas do schema
+    vivo. Iteração permite múltiplas rodadas de refinamento humano sobre o
+    mesmo parecer original — UNIQUE (ocg_individual_id, refinement_iteration)
+    impede sobrescrita acidental dentro da mesma rodada.
     """
     __tablename__ = "ocg_individual_refined"
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     ocg_individual_id = Column(
-        UUID(as_uuid=True), ForeignKey("ocg_individual.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("ocg_individual.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Iteração 1, 2, 3... — humano pode refinar várias vezes
+    refinement_iteration = Column(SmallInteger, nullable=False, default=1)
+    # Parecer refinado pelo humano (mesmo shape do parecer original)
+    parecer_refined = Column(JSONB, nullable=False)
+    # Lista dos campos alterados em relação à versão anterior
+    changed_fields = Column(JSONB, nullable=True)
+    # Resumo legível em PT-BR (≤500 chars)
+    change_summary = Column(String(500), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "ocg_individual_id",
+            "refinement_iteration",
+            name="ocg_individual_refined_ocg_individual_id_refinement_iterati_key",
+        ),
     )
 
     def __repr__(self) -> str:
-        return f"<OCGIndividualRefined ocg_individual={self.ocg_individual_id}>"
+        return (
+            f"<OCGIndividualRefined ocg_individual={self.ocg_individual_id} "
+            f"iter={self.refinement_iteration}>"
+        )
 
 
 class PersonaFollowUpQuestion(Base):
     """Pergunta de follow-up gerada por persona LLM para complementação humana (HITL).
 
-    DT-080 — stub: completar quando pipeline HITL ativar na Fase 31.3.
-    Por ora apenas espelha o schema mínimo para que o ORM não quebre.
+    DT-080 (2026-05-03): modelo completo. Persona detecta lacuna no insumo
+    (filosofia "Assistida": LLM tem permissão explícita de não saber) e gera
+    pergunta estruturada para humano. Pilar afetado fica pausado até resposta.
 
     Migration 067 corrigiu persona_id: era uuid FK → users.id (errado).
     Agora é VARCHAR(20) com tag canônica da persona LLM ("AUD", "GP", etc.).
@@ -1494,14 +1520,51 @@ class PersonaFollowUpQuestion(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     project_id = Column(
-        UUID(as_uuid=True), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
-    # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ") — não FK para users
+    document_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ingested_documents.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    ocg_individual_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ocg_individual.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ") — NÃO FK para users.
     # Migration 067 converteu uuid → VARCHAR(20). Corrige gap da migration 066.
-    persona_id = Column(String(20), nullable=False)  # tag canônica (AUD, GP, etc.) — não FK
+    persona_id = Column(String(20), nullable=False, index=True)
+    persona_name = Column(String(100), nullable=False)
+    # Texto da pergunta em PT-BR
+    question_text = Column(Text, nullable=False)
+    # Contexto curto (≤500 chars) explicando por que a pergunta foi gerada
+    context = Column(String(500), nullable=True)
+    # Ordem de exibição (UI HITL)
+    question_order = Column(SmallInteger, nullable=True, default=0)
+    # Resposta (preenchida quando humano responde)
+    answer_text = Column(Text, nullable=True)
+    answer_provided_at = Column(DateTime(timezone=True), nullable=True)
+    answered_by = Column(UUID(as_uuid=True), nullable=True)  # users.id (sem FK no schema vivo)
+    # Status: pending, answered, skipped, expired
+    status = Column(String(20), nullable=False, default="pending", index=True)
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     def __repr__(self) -> str:
-        return f"<PersonaFollowUpQuestion project={self.project_id}>"
+        return (
+            f"<PersonaFollowUpQuestion project={self.project_id} "
+            f"persona={self.persona_id} status={self.status}>"
+        )
 
 
 class AppPreviewSession(Base):
