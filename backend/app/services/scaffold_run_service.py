@@ -189,6 +189,7 @@ async def execute_run(run_id: UUID) -> None:
         clamp_max_tokens,
         get_provider_max_concurrency,
     )
+    from app.services.ocg_gate import evaluate_ocg_maturity
 
     # Carrega project_id pra resolver config — buscamos a run primeiro.
     async with AsyncSessionLocal() as db:
@@ -196,6 +197,32 @@ async def execute_run(run_id: UUID) -> None:
         if run_for_pid is None:
             return
         project_id_for_llm = run_for_pid.project_id
+
+    # DT-082: gate de maturidade do OCG na entrada do worker (defesa em
+    # profundidade). Se algum caller futuro enfileirar a run sem passar pelo
+    # endpoint HTTP que já chama check_ocg_maturity_gate, o worker recusa
+    # marcando run.status='blocked' (não levanta exceção — sem caller HTTP).
+    async with AsyncSessionLocal() as db:
+        gate_result = await evaluate_ocg_maturity(project_id_for_llm, db)
+    if gate_result["blocked"]:
+        async with AsyncSessionLocal() as db:
+            run = await db.get(ScaffoldRun, run_id)
+            if run:
+                run.status = "blocked"
+                run.error = (
+                    f"[ocg_gate:{gate_result['block_level']}] "
+                    f"{gate_result['blocking_reason']}"
+                )
+                run.finished_at = datetime.now(timezone.utc)
+                await db.commit()
+        logger.warning(
+            "scaffold_run.blocked_by_ocg_gate",
+            run_id=str(run_id),
+            project_id=str(project_id_for_llm),
+            block_level=gate_result["block_level"],
+            overall_score=gate_result["overall_score"],
+        )
+        return
 
     async with AsyncSessionLocal() as db:
         llm_cfg = await resolve_llm_config(db, project_id_for_llm, prefer_ollama=False)
