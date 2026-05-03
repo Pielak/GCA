@@ -2,6 +2,36 @@
 
 All notable changes to GCA will be documented in this file.
 
+## [MVP 32 — DT-081 OCG Updater funcional com payload n8n] - 2026-05-02
+
+### Entrega principal
+
+Fecha DT-081 descoberta no smoke E2E do MVP 31. OCG agora **acumula em produção** após pipeline n8n — `ocg.status='active'` (não mais `ocg_pending`), `ocg.version` incrementa, `ocg_delta_log` ganha row por doc ingerido.
+
+### Mudanças técnicas
+
+- `OCGUpdaterService._load_persona_scores` reescrito para ler de `ocg_individual` (cumulativo MVP 31), removendo dependência de `DocumentRouteMap` legacy quebrado (`AttributeError`)
+- Normalização `persona_tag.lower()` antes do lookup em `PERSONA_TO_PILLAR` (case mismatch entre uppercase n8n e lowercase legacy)
+- Novo módulo `arguider_compactor.py` — função `compact_arguider_for_prompt(arguider_analysis, max_findings=20)` reduz payload n8n de ~217KB para ~7.8KB (96.4%)
+- Critério de prioridade: `criticidade='critica'` e CONF `score<60` SEMPRE incluídos (não truncados)
+- `_build_user_prompt` chama compactor antes de serializar
+- Logs distintos: `no_ocg_individual_rows` (n8n não rodou) e `conf_blocking_score` (CONF<60)
+
+### Testes
+
+- 18 testes unit + 1 E2E opt-in (`MVP32_REAL_LLM=1`)
+- 53/53 com não-regressão MVP 31
+
+### Dívidas registradas (fora de escopo)
+
+- `PERSONA_TO_PILLAR` ainda tem só 7 entradas legacy — 5 personas novas (SEG/CONF/LGPD/NEG/AUD) sem mapeamento. Expansão para MVP 33.
+
+### Plano de rollback
+
+`git revert` dos commits MVP 32 (`506e1c0`, `80851d3`, este). Sem mudança de schema — rollback é só código. OCG volta para `ocg_pending` em ingestões n8n até MVP 32 ser reaplicado.
+
+---
+
 ## [MVP 31 — OCG Cumulativo + CodeGen Gate] - 2026-05-02
 
 ### Entrega principal

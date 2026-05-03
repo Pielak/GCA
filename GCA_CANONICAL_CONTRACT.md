@@ -313,6 +313,26 @@ Regras duras:
 
 **Próximo gate:** arquiteto-projetos (Gate 2) com mandato específico definido em §11 do plano.
 
+### 7.32 MVP 32 — DT-081 (OCG Updater funcional com payload n8n)
+
+**Estado:** Definido — não iniciado (Gate 1 aprovado com ressalvas em 2026-05-02 por gerente-projetos-ti).
+**Plano completo:** [`docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md`](docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md).
+
+**Em escopo (MUST):**
+- Reescrever `OCGUpdaterService._load_persona_scores` para ler de `ocg_individual` (cumulativo, populado pelo MVP 31). Remover dependência de `DocumentRouteMap` legacy (tem `AttributeError` por não ter `project_id`).
+- Tuning de `_build_user_prompt` para payload n8n: truncar `consolidated_findings` por criticidade (criticidade='critica' e CONF<60 nunca descartados); sumarizar `ocg_individual` (apenas score/approved/blocking/findings_count); manter `ocg_global_delta` integral. Prompt resultante < 8KB.
+- Testes E2E reais (opt-in via env `MVP32_REAL_LLM=1`) validando OCG cresce monotonicamente após pipeline n8n + handler + updater.
+- Log estruturado distinto `ocg_updater.no_ocg_individual_rows` (vs `no_persona_scores`) para distinguir "n8n não rodou" de "bug".
+
+**Fora de escopo:**
+- Refactor amplo do `OCGUpdaterService` (mantém estrutura, conserta os 2 pontos).
+- DT-079 (hardcode Anthropic), DT-080 (ORM stubs), DT-082 (defesa Celery), DT-083 (Prometheus).
+- Mudança de schema (não há).
+
+**Estimativa:** ~2-3 dias.
+
+**Próximo gate:** arquiteto-projetos (Gate 2).
+
 ## MVP Registry — histórico arquivado
 
 MVPs 1-15 fechados. Detalhes completos em `docs/mvp_archive/`.
