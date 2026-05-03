@@ -639,3 +639,116 @@ async def _run_propagate_questionnaire(project_id: str, report: dict) -> None:
         project_id=pid, ocg_version=None,
         trigger="questionnaire_applied",
     )
+
+
+# =============================================================================
+# MVP 34 — Reversão de propagação ao deletar documento (Fase 34.2)
+# =============================================================================
+
+
+@celery_app.task(
+    name="app.tasks.pipeline.revert_document_propagation_task",
+    bind=True,
+    max_retries=2,
+    default_retry_delay=30,
+    acks_late=True,
+)
+def revert_document_propagation_task(
+    self,
+    document_id: str,
+    project_id: str,
+    actor_id: str | None,
+    reason: str,
+) -> dict:
+    """Roda `DocumentRevertService.revert_document_propagation` como task.
+
+    Lock distribuído via `_try_claim_task_lease` (Redis SET NX EX) — chave
+    granular por doc + project para permitir reverts paralelos de docs
+    diferentes do mesmo projeto sem se bloquear, mas serializar o mesmo doc.
+
+    Idempotência dupla:
+      - Layer 1 (aqui): lease Redis impede execução simultânea
+      - Layer 2 (service): verifica `deleted_at IS NOT NULL` no início
+
+    Args:
+        document_id: UUID str do doc a reverter.
+        project_id: UUID str do projeto dono.
+        actor_id: UUID str do user (None = sistema).
+        reason: 'manual'|'lgpd'|'smoke_cleanup'.
+    """
+    import time
+
+    t0 = time.time()
+    lease_key = f"gca:task:revert_document:{project_id}:{document_id}"
+
+    if not _try_claim_task_lease(lease_key, ttl_seconds=120):
+        logger.info(
+            "revert_document.lease_already_claimed",
+            document_id=document_id,
+            project_id=project_id,
+        )
+        return {
+            "status": "lease_busy",
+            "document_id": document_id,
+            "task_id": self.request.id,
+        }
+
+    try:
+        result = _run_coro_isolated(
+            _run_revert_document_async(document_id, project_id, actor_id, reason)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "revert_document_task.failed",
+            document_id=document_id,
+            project_id=project_id,
+            retries_remaining=self.max_retries - self.request.retries,
+            error=str(exc),
+        )
+        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+
+    return {
+        **result,
+        "duration_ms": int((time.time() - t0) * 1000),
+        "task_id": self.request.id,
+    }
+
+
+async def _run_revert_document_async(
+    document_id: str,
+    project_id: str,
+    actor_id: str | None,
+    reason: str,
+) -> dict:
+    """Wrapper async — abre session dedicada e delega ao service.
+
+    Idempotência layer 2 dentro do service via `AlreadyRevertedError`.
+    """
+    from app.db.database import AsyncSessionLocal
+    from app.services.document_revert_service import (
+        AlreadyRevertedError,
+        DocumentNotFoundError,
+        revert_document_propagation,
+    )
+
+    async with AsyncSessionLocal() as db:
+        try:
+            return await revert_document_propagation(
+                db=db,
+                document_id=UUID(document_id),
+                project_id=UUID(project_id),
+                actor_id=UUID(actor_id) if actor_id else None,
+                reason=reason,
+            )
+        except AlreadyRevertedError as exc:
+            return {
+                "status": "already_reverted",
+                "document_id": document_id,
+                "message": str(exc),
+            }
+        except DocumentNotFoundError as exc:
+            return {
+                "status": "not_found",
+                "document_id": document_id,
+                "message": str(exc),
+            }

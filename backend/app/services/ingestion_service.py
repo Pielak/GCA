@@ -1947,15 +1947,48 @@ class IngestionService:
             "arguider_stage_updated_at": doc.arguider_stage_updated_at.isoformat() if doc.arguider_stage_updated_at else None,
         }
 
-    async def delete_document(self, project_id: UUID, document_id: UUID) -> dict:
-        """Remove documento se não tem módulos aprovados.
+    async def delete_document(
+        self,
+        project_id: UUID,
+        document_id: UUID,
+        actor_id: Optional[UUID] = None,
+        reason: str = "manual",
+    ) -> dict:
+        """Soft-delete + reversão de propagação assíncrona (MVP 34).
 
-        Se o documento deixou deltas no OCG (`ocg_delta_log`), faz contração
-        segura antes de deletar: reverte os campos que este doc alterou ao
-        valor anterior, exceto aqueles que foram posteriormente modificados
-        por outros deltas. Registra um delta com `trigger_source=
-        'document_removal'` para auditoria e rollback (contrato §5).
+        ## Breaking change vs. comportamento pré-MVP 34
+
+        Antes (até 2026-05-03): hard-delete síncrono + reversão via
+        `_contract_ocg_for_deleted_document` baseado em `ocg_delta_log`.
+        Retornava `{"success": True, "ocg_contraction": ...}` com 200 OK.
+
+        Depois (MVP 34): soft-delete imediato + Celery job assíncrono de
+        recompute. Retorna `{"success": True, "revert_job_id": ..., "status_code": 202}`.
+        Frontend deve fazer polling do status via GET endpoint dedicado.
+
+        ## Validações canônicas (preservadas)
+
+        - Doc deve existir e pertencer ao projeto
+        - Doc não pode estar em processamento
+        - Doc não pode ter módulos APROVADOS dependentes (bloqueia)
+
+        ## Args
+
+            project_id: UUID do projeto.
+            document_id: UUID do doc.
+            actor_id: UUID do user que disparou (None = sistema).
+            reason: 'manual'|'lgpd'|'smoke_cleanup' (CHECK constraint no DB).
+
+        ## Retorno
+
+            dict com campos canônicos:
+              - success (bool)
+              - status_code (int) — 202 sucesso, 4xx erro
+              - revert_job_id (str) quando 202
+              - error (str) quando falha
         """
+        from datetime import datetime, timezone
+
         result = await self.db.execute(
             select(IngestedDocument).where(
                 IngestedDocument.id == document_id,
@@ -1966,10 +1999,19 @@ class IngestionService:
         if not doc:
             return {"success": False, "error": "Documento não encontrado", "status_code": 404}
 
+        if doc.deleted_at is not None:
+            return {
+                "success": False,
+                "error": "Documento já foi deletado",
+                "status_code": 409,
+                "deleted_at": doc.deleted_at.isoformat(),
+            }
+
         if doc.arguider_status == "processing":
             return {"success": False, "error": "Documento em análise, aguarde conclusão", "status_code": 409}
 
-        # Verificar módulos aprovados
+        # Validação canônica preservada: módulos aprovados bloqueiam delete.
+        # Cleanup do candidato é responsabilidade do GP (rejeitar antes).
         mc_result = await self.db.execute(
             select(func.count(ModuleCandidate.id)).where(
                 ModuleCandidate.project_id == project_id,
@@ -1981,61 +2023,48 @@ class IngestionService:
         if approved_count > 0:
             return {"success": False, "error": "Módulos aprovados dependem deste documento", "status_code": 409}
 
-        # Contração de OCG antes do delete (contrato §5: OCG contrai com
-        # ingestão ruim ou conflitante; aqui, com remoção explícita).
-        contraction_info = await self._contract_ocg_for_deleted_document(project_id, document_id)
+        # Validação do reason (também tem CHECK no DB, mas valida cedo
+        # para devolver erro amigável em vez de IntegrityError).
+        if reason not in ("manual", "lgpd", "smoke_cleanup"):
+            return {
+                "success": False,
+                "error": f"reason inválido: {reason!r} — esperado manual|lgpd|smoke_cleanup",
+                "status_code": 400,
+            }
 
-        # Cascata manual: tabelas que referenciam este doc mas NÃO têm
-        # ON DELETE CASCADE/SET NULL na constraint. Ordem importa.
-        from sqlalchemy import delete as sa_delete, update as sa_update, text
-        # 1. module_candidates via arguider_analyses (analise → modules)
-        await self.db.execute(text(
-            "DELETE FROM module_candidates WHERE arguider_analysis_id IN "
-            "(SELECT id FROM arguider_analyses WHERE document_id = :doc_id)"
-        ), {"doc_id": document_id})
-        # 2. gatekeeper_items via arguider_analyses
-        await self.db.execute(text(
-            "DELETE FROM gatekeeper_items WHERE arguider_analysis_id IN "
-            "(SELECT id FROM arguider_analyses WHERE document_id = :doc_id)"
-        ), {"doc_id": document_id})
-        # 3. ocg_delta_log — preserva histórico, só zera document_id (auditoria
-        #    mantida; docs sumidos ficam como "trigger desconhecido" no delta).
-        await self.db.execute(text(
-            "UPDATE ocg_delta_log SET document_id = NULL WHERE document_id = :doc_id"
-        ), {"doc_id": document_id})
-        # 4. custom_questionnaire_iterations.answer_document_id — mesma lógica:
-        #    preserva a iteração, só desvincula o doc.
-        await self.db.execute(text(
-            "UPDATE custom_questionnaire_iterations SET answer_document_id = NULL "
-            "WHERE answer_document_id = :doc_id"
-        ), {"doc_id": document_id})
-        # 5. arguider_analyses — agora seguro pra apagar.
-        await self.db.execute(text(
-            "DELETE FROM arguider_analyses WHERE document_id = :doc_id"
-        ), {"doc_id": document_id})
-
-        await self.db.delete(doc)
+        # Marca soft-delete imediato (antes de enfileirar — Celery worker
+        # vê deleted_at IS NOT NULL e idempotência layer 2 detecta).
+        doc.deleted_at = datetime.now(timezone.utc)
+        doc.deleted_by = actor_id
+        doc.deleted_reason = reason
         await self.db.commit()
-        logger.info(
-            "ingestion.document_deleted",
+
+        # Enfileira Celery task. `revert_document_propagation_task` faz
+        # o recompute do OCG + cleanup auxiliar + audit + payload.
+        from app.tasks.pipeline import revert_document_propagation_task
+
+        async_result = revert_document_propagation_task.delay(
             document_id=str(document_id),
-            contracted_fields=contraction_info.get("fields_reverted", []),
-            skipped_fields=contraction_info.get("fields_skipped", []),
+            project_id=str(project_id),
+            actor_id=str(actor_id) if actor_id else None,
+            reason=reason,
         )
 
-        # Disparar hooks de consistência se a contração efetivamente mudou
-        # o OCG. Sem fields_reverted, não há delta a propagar (skipped-only).
-        fields_reverted = contraction_info.get("fields_reverted", [])
-        if fields_reverted:
-            changes = [{"field": f} for f in fields_reverted]
-            await _fire_ocg_change_hooks(
-                project_id=project_id,
-                ocg_version=contraction_info.get("version_to"),
-                trigger="document_removal",
-                changes=changes,
-            )
+        logger.info(
+            "ingestion.document_soft_deleted_revert_enqueued",
+            document_id=str(document_id),
+            project_id=str(project_id),
+            actor_id=str(actor_id) if actor_id else None,
+            reason=reason,
+            revert_job_id=async_result.id,
+        )
 
-        return {"success": True, "ocg_contraction": contraction_info}
+        return {
+            "success": True,
+            "status_code": 202,
+            "revert_job_id": async_result.id,
+            "message": "Documento marcado para reversão. Job em background recalcula OCG.",
+        }
 
     async def _contract_ocg_for_deleted_document(
         self, project_id: UUID, document_id: UUID

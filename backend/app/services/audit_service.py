@@ -119,6 +119,13 @@ class AuditEvents:
     # {project_id, count, samples[{path, old, tried}]}.
     OCG_NEGATIVE_DELTA_BLOCKED = "ocg_negative_delta_blocked"
 
+    # MVP 34 (2026-05-03) — Evento canônico de reversão de propagação ao
+    # deletar documento (soft-delete + recompute do OCG). Trigger: endpoint
+    # DELETE /ingestion/{doc_id}. Payload em details: {project_id, document_id,
+    # actor_id, deleted_reason ('manual'|'lgpd'|'smoke_cleanup'), score_before,
+    # score_after, version_from, version_to, modules_archived[], maturity_warning?}.
+    DOCUMENT_REVERTED = "DOCUMENT_REVERTED"
+
 
 logger = structlog.get_logger(__name__)
 
