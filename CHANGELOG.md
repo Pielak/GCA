@@ -2,6 +2,97 @@
 
 All notable changes to GCA will be documented in this file.
 
+## [MVP 31 — OCG Cumulativo + CodeGen Gate] - 2026-05-02
+
+### Entrega principal
+
+**Caminho n8n agora respeita as invariantes canônicas do OCG**: o handler `/ingestion-complete` não faz mais `UPDATE ocg SET ocg_data=...` cru. Agora delega ao `OCGUpdaterService.update_ocg_from_arguider` (mesmo fluxo do Celery legacy) que tem `_filter_negative_score_deltas` (OCG só cresce, nunca contrai) e versionamento via `ocg_delta_log` com `hash_chain` (anti-tamper).
+
+Histórico imutável passa a ser persistido por documento ingerido:
+- `ocg_individual` (1 row por persona/doc, unique `(document_id, persona_id)`)
+- `ocg_global` (1 row consolidada por doc)
+- `ocg_delta_log` (versionamento + trigger_source para auditoria)
+
+**CodeGen ganha gate de maturidade do OCG em 3 níveis**: nenhum endpoint de geração de código roda mais com OCG bloqueado/imaturo. Cobertura nos 6 entry points HTTP + 1 endpoint async (`start_scaffold_run`):
+- `hard_block` (HTTP 409): `ocg.is_blocking=true` (CONF marcou bloqueante)
+- `insufficient` (HTTP 409): `overall_score < 60` (mínimo absoluto)
+- `immature` (HTTP 409): `overall_score < 95` (limiar de maturidade — orientação para amadurecer ingerindo mais docs)
+
+**Política de "lixo descartado"**: PersonaOutputs falhos (G4 reprovou) ficam em `ocg_individual` com `status='failed'` para auditoria, mas **NÃO** entram no merge cumulativo. Quando ≥50% das personas falham, updater não é chamado (status do doc fica `partial`).
+
+### Mudanças técnicas
+
+**Backend**
+- `backend/app/routers/webhooks.py` — handler `ingestion_complete` reescrito (4 commits cumulativos)
+- `backend/app/services/ocg_updater_service.py` — constantes `TRIGGER_N8N` e `TRIGGER_CELERY` adicionadas
+- `backend/app/services/ocg_gate.py` — novo helper `check_ocg_maturity_gate(project_id, db)` com 3 níveis
+- `backend/app/services/module_codegen_service.py` + `backend/app/routers/code_generation.py` — gate adicionado em 7 entry points (antes do hardcode Anthropic — DT-079)
+- `backend/app/models/base.py` — 4 modelos novos: `OCGIndividual`, `OCGGlobal`, `OCGIndividualRefined` (stub — DT-080), `PersonaFollowUpQuestion` (stub — DT-080)
+
+**Banco**
+- `backend/migrations/066_mvp31_consolidate_ocg_tables.sql` — alteração de `ocg_individual.persona_id` (uuid FK → VARCHAR(20)), drop de 13 índices duplicados (3 em `ocg_individual` + 10 em `ocg`), `NOT NULL` + `CHECK > 0` em `ocg.version`, `ON DELETE SET NULL` em `persona_follow_up_questions.answered_by`, novo índice composto `idx_ocg_project_version`
+- `backend/migrations/067_mvp31_fix_persona_follow_up_questions.sql` — alteração de `persona_follow_up_questions.persona_id` (uuid FK → VARCHAR(20))
+
+**n8n**
+- 12 workflows (11 specialists + GP orchestrator) — `Parse PersonaOutput` agora produz `PersonaOutput-v2` válido (`schema_version`, `score`, `findings`, `recommendations`, `ocg_contributions`). Antes, todos os PersonaOutputs eram silenciosamente reprovados pelo Consolidador G4.
+
+**Testes**
+- 35 testes novos cobrindo as 5 fases (`test_mvp31_models_and_migration.py`, `test_mvp31_phase2_ocg_cumulative.py`, `test_mvp31_phase3_lixo_descartado.py`, `test_mvp31_phase4_codegen_gate.py`, `test_mvp31_phase5_e2e_cumulative.py`)
+
+**Documentação canônica**
+- `GCA_CANONICAL_CONTRACT.md §5.1` — cláusula formal do caminho n8n delegando ao `OCGUpdaterService`
+- `GCA_CANONICAL_CONTRACT.md §7.31` — escopo formalizado (em/fora de escopo)
+- `GCA_MVP_PROGRESS.md §1` — MVP 31 como ativo
+- `GCA_MVP_PROGRESS.md §3` — DT-079, DT-080, DT-081, DT-082, DT-083 (todas registradas como abertas, fora do escopo)
+- `docs/n8n-pipeline/PIPELINE_OPERACIONAL.md §6` — dívidas do MVP 31 marcadas como resolvidas
+- `docs/MVP_31_OCG_CUMULATIVO_PLAN.md` — plano completo com 5 fases, riscos, gates Gatekeeper
+
+### Plano de rollback (caso necessário em <15min)
+
+Tabelas `ocg_individual` e `ocg_global` em produção têm 0 rows pré-MVP 31 — rollback de tipo de coluna é trivial.
+
+```sql
+-- Rollback migration 067 (executar antes do 066)
+BEGIN;
+ALTER TABLE persona_follow_up_questions
+    ALTER COLUMN persona_id TYPE uuid USING persona_id::uuid,
+    ADD CONSTRAINT persona_follow_up_questions_persona_id_fkey
+        FOREIGN KEY (persona_id) REFERENCES users(id) ON DELETE CASCADE;
+DROP INDEX IF EXISTS idx_persona_follow_up_questions_persona;
+COMMIT;
+
+-- Rollback migration 066
+BEGIN;
+ALTER TABLE ocg_individual
+    ALTER COLUMN persona_id TYPE uuid USING persona_id::uuid,
+    ADD CONSTRAINT ocg_individual_persona_id_fkey
+        FOREIGN KEY (persona_id) REFERENCES users(id) ON DELETE CASCADE;
+DROP INDEX IF EXISTS idx_ocg_project_version;
+ALTER TABLE ocg DROP CONSTRAINT chk_ocg_version_positive;
+-- Indexes ix_* duplicados e ON DELETE de answered_by ficam como estão (não regridem)
+COMMIT;
+```
+
+Reverter código: `git revert` dos commits da branch `feat/mvp31-ocg-cumulativo` (12 commits) ou hard reset do master para o commit `b73fd38` (último antes do PR #2).
+
+### Dívidas remanescentes (registradas, fora do escopo deste MVP)
+
+- **DT-079** (Major): Hardcode `AsyncAnthropic` em `module_codegen_service.py:164,316` e `code_generation.py:592,1693,1838,2353,2367,2498` viola §3.1 (porta única é `AIKeyResolver`). MVP 31 inseriu o gate **antes** dos hardcodes — não agravou.
+- **DT-080** (Major): `OCGIndividualRefined` e `PersonaFollowUpQuestion` são stubs ORM mínimos (sem 13+ colunas reais). MVP 31 endereçou parcialmente para que `alembic autogenerate` futuro não tente dropar.
+- **DT-081** (Major): `OCGUpdaterService._load_persona_scores` quebrado (`AttributeError: type object 'DocumentRouteMap' has no attribute 'project_id'`) + prompt do `_build_user_prompt` não otimizado para payload n8n de ~23KB. Resultado: smoke E2E em dogfood termina com `ocg.status='ocg_pending'` (canônico — não corrompe OCG, mas updater não produz delta).
+- **DT-082** (Minor): Worker Celery `execute_run` em `scaffold_run_service.py` não tem gate de maturidade próprio. Defesa em profundidade pendente — endpoint atual é o único caller, sem bypass real.
+- **DT-083** (Minor): Métricas Prometheus (`gca_ocg_delta_applied_total`, `gca_ocg_negative_delta_blocked_total`, `gca_codegen_blocked_total`) parked porque projeto não tem `prometheus_client` instrumentado.
+
+### Migração de produção
+
+⚠️ Migrations 066 e 067 já foram aplicadas em ambos os bancos (`gca_test` e `gca`/dogfood) durante o desenvolvimento — sem perda de dados (tabelas vazias).
+
+### Suíte de testes
+
+35/35 verdes em 11.10s. Smoke n8n contracts: 2 passed, 7 skipped (esperado — depende de n8n ativo).
+
+---
+
 ## [Unreleased — MVP 2 em andamento] - 2026-04-17
 
 ### Dogfood dia inteiro — 20+ DTs quitadas
