@@ -9,7 +9,21 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ## 1. Fase atual
 
 ### MVP ativo
-**MVP 31 — OCG Cumulativo + CodeGen Gate** — DEFINIDO (não iniciado), 2026-05-02. Gate 1 (gerente-projetos-ti) **Aprovado com ressalvas**. Aguardando formalização atômica nos docs canônicos antes de prosseguir para Gate 2 (arquiteto-projetos). Plano completo em [`docs/MVP_31_OCG_CUMULATIVO_PLAN.md`](docs/MVP_31_OCG_CUMULATIVO_PLAN.md).
+**MVP 32 — DT-081 (OCG Updater funcional com payload n8n)** — DEFINIDO 2026-05-02. Gate 1 (gerente-projetos-ti) **Aprovado com ressalvas** (3 MUSTs incorporados ao plano). Plano completo em [`docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md`](docs/MVP_32_DT081_OCG_UPDATER_FUNCIONAL.md).
+
+**Escopo:** Fechar a DT-081 descoberta no smoke E2E do MVP 31 — `OCGUpdaterService._load_persona_scores` quebrado (AttributeError em DocumentRouteMap.project_id) + prompt sub-ótimo (~23KB do payload n8n com 9 personas faz DeepSeek retornar JSON sem updated_ocg/changes). Sem essas correções, OCG fica eternamente em `ocg_pending` em produção, CodeGen permanente bloqueado por `immature`. Reescrever fallback para usar `ocg_individual` (cumulativo, populado pelo MVP 31) + tuning de prompt com truncamento por criticidade.
+
+**3 fases (~2-3d):**
+- 32.1: Reescrever `_load_persona_scores` com `OCGIndividual` (~0.5d)
+- 32.2: Tuning `_build_user_prompt` com truncamento por criticidade (~1d)
+- 32.3: Testes E2E reais (sem mock LLM, opt-in) + doc (~1d)
+
+**Não-objetivos:** refactor amplo do updater, DT-079/080/082/083, mudança de schema.
+
+**Próxima ação:** Gate 2 (arquiteto-projetos) — validar reuso de `OCGIndividual` como fonte de fallback, confirmar suficiência do JSONB `parecer`, decidir tuning inline vs estratégia reutilizável.
+
+### MVP anterior fechado
+**MVP 31 — OCG Cumulativo + CodeGen Gate** — FECHADO 2026-05-02 (PR #3 mergeado, commit `41b6f3a`). 5 fases entregues, 35/35 testes verdes, 4 dívidas registradas (DT-079, DT-080, DT-081, DT-082, DT-083). Caminho n8n agora respeita invariantes canônicas do OCG (não-contrai, histórico imutável em `ocg_individual`+`ocg_global`, hash chain). CodeGen ganha gate de maturidade em 3 níveis (hard_block/insufficient/immature) em 7 entry points. Pipeline n8n permanece intocado.
 
 **Escopo:** Caminho n8n → backend deixa de fazer UPDATE cru no `ocg` e passa a delegar ao `OCGUpdaterService` (que já respeita as invariantes canônicas: não-contrai, filter_negative_score_deltas, hash_chain). Tabelas `ocg_individual` e `ocg_global` ganham modelo ORM e populam por doc. CodeGen ganha gate de maturidade do OCG em 3 níveis: hard_block (CONF/is_blocking), insufficient (overall_score<60), immature (<95).
 
