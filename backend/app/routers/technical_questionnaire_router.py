@@ -196,11 +196,27 @@ async def save_technical_questionnaire(
         )
         db.add(questionnaire)
 
-    # Update responses from request
-    questionnaire.responses = req.responses
+    # MVP 35 fix: limpa respostas órfãs ANTES de persistir.
+    # Quando GP muda resposta de pergunta-pai (ex: Q3), perguntas dependentes
+    # ficam invisíveis na UI mas seus valores antigos permanecem em responses,
+    # gerando "conflito não-corrigível" (campo invisível + validate detecta).
+    # Auto-prune mantém responses sempre consistente com visibilidade dinâmica.
+    from app.services.technical_questionnaire_service import prune_orphan_responses
+    pruned_responses, orphans_removed = prune_orphan_responses(
+        req.responses, TECHNICAL_QUESTIONS_SCHEMA
+    )
+    if orphans_removed:
+        logger.info(
+            "technical_questionnaire.orphans_pruned",
+            project_id=str(project_id),
+            removed_fields=orphans_removed,
+        )
+
+    # Update responses from request (já com órfãos removidos)
+    questionnaire.responses = pruned_responses
 
     # Recalculate progress
-    questionnaire.progress_percent = calculate_progress(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
+    questionnaire.progress_percent = calculate_progress(pruned_responses, TECHNICAL_QUESTIONS_SCHEMA)
 
     # Handle submission
     if req.submit:
@@ -410,16 +426,21 @@ async def validate_technical_questionnaire(
     if not project:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Projeto não encontrado")
 
+    # MVP 35 fix: prune órfãs ANTES de validar — evita falso conflito por
+    # respostas residuais de perguntas que ficaram invisíveis.
+    from app.services.technical_questionnaire_service import prune_orphan_responses
+    pruned_responses, _ = prune_orphan_responses(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
+
     # Camada 1 — schema visibility/legacy
-    legacy_result = validate_questionnaire(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
-    visible = calculate_visibility(req.responses, TECHNICAL_QUESTIONS_SCHEMA)
+    legacy_result = validate_questionnaire(pruned_responses, TECHNICAL_QUESTIONS_SCHEMA)
+    visible = calculate_visibility(pruned_responses, TECHNICAL_QUESTIONS_SCHEMA)
 
     # Camada 2 — RulesEvaluator (MVP 35 Fase 35.1)
     from app.services.questionnaire_validation.rules_evaluator import (
         evaluate_rules,
         is_blocking,
     )
-    rules_result = evaluate_rules(req.responses)
+    rules_result = evaluate_rules(pruned_responses)
 
     # Combina conflicts: legacy schema + rules engine (canônico)
     combined_conflicts = list(legacy_result["conflicts"]) + [
@@ -440,7 +461,7 @@ async def validate_technical_questionnaire(
             questionnaire = TechnicalQuestionnaire(
                 project_id=project_id,
                 status="validated",
-                responses=req.responses,
+                responses=pruned_responses,
                 progress_percent=legacy_result["progress"],
                 validated_at=datetime.now(timezone.utc),
                 validated_by=current_user,
@@ -449,7 +470,7 @@ async def validate_technical_questionnaire(
         elif questionnaire.status not in ("submitted", "archived"):
             # Só sobe pra validated se não está em estado terminal
             questionnaire.status = "validated"
-            questionnaire.responses = req.responses
+            questionnaire.responses = pruned_responses
             questionnaire.progress_percent = legacy_result["progress"]
             # CHECK chk_tq_validated_at exige NOT NULL — DBA-M3
             questionnaire.validated_at = datetime.now(timezone.utc)

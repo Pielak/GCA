@@ -63,6 +63,36 @@ def calculate_visibility(responses: Dict[str, Any], schema: List[Dict[str, Any]]
     return sorted(list(visible))
 
 
+def prune_orphan_responses(
+    responses: Dict[str, Any], schema: List[Dict[str, Any]]
+) -> tuple[Dict[str, Any], List[str]]:
+    """MVP 35 fix: remove respostas órfãs (campos não-visíveis com valor).
+
+    Quando GP muda Q3 de "Sim, agressivo" para "Sim, modesto", as perguntas
+    Q9/Q10 deixam de ser visíveis na UI — mas seus valores antigos
+    permanecem em responses. validate_questionnaire detecta como conflito
+    "Q9 deve estar vazio pois Q3=Sim, modesto", mas GP não consegue
+    corrigir porque o campo não é mais editável.
+
+    Solução canônica: ao salvar, qualquer resposta cuja pergunta NÃO esteja
+    visível é removida. Auto-correção transparente. Estado responses sempre
+    consistente com visibilidade dinâmica.
+
+    Retorna (responses limpas, lista de campos órfãos removidos).
+    """
+    visible = set(calculate_visibility(responses, schema))
+    pruned: Dict[str, Any] = {}
+    removed: List[str] = []
+    for key, value in responses.items():
+        # Permite chaves auxiliares (Qx_outros) que pertencem a Qx visível
+        base_key = key.split("_")[0] if "_" in key else key
+        if base_key in visible:
+            pruned[key] = value
+        else:
+            removed.append(key)
+    return pruned, removed
+
+
 def calculate_progress(responses: Dict[str, Any], schema: List[Dict[str, Any]]) -> int:
     """
     Calcula progresso baseado apenas em perguntas visíveis.
