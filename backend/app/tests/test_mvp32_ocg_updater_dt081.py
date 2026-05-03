@@ -470,6 +470,81 @@ def test_build_user_prompt_calls_compactor():
 
 
 # =============================================================================
+# Teste quantitativo Gate 2 — prompt resultante < 8KB
+# =============================================================================
+
+def test_compact_arguider_prompt_fits_8kb():
+    """MUST Gate 2: prompt compactado deve ficar < 8KB mesmo com payload n8n real ~23KB.
+
+    Fixture simula consolidador n8n com 9 personas + 50 findings mistos +
+    parecer JSONB volumoso. Resultado do compactor deve caber em < 8000 chars
+    serializado (margem de folga vs janela efetiva do DeepSeek).
+    """
+    import json
+
+    # Fixture: payload n8n com 9 personas e parecer volumoso (simula 23KB original)
+    big_parecer = {
+        "score": 75,
+        "approved": True,
+        "blocking": False,
+        "findings": [{"f": f"finding_{i}", "detalhe": "x" * 200} for i in range(50)],
+        "recommendations": [{"r": f"rec_{i}", "detalhe": "y" * 200} for i in range(30)],
+        "metadata": {"reasoning_tokens": 5000, "internal_log": "z" * 1000},
+    }
+
+    arguider_analysis = {
+        "overall_score": 65,
+        "blocked": False,
+        "blocking_reason": None,
+        "personas_executed": ["AUD", "GP", "ARQ", "DBA", "DEV", "QA", "UX", "UI", "SEG"],
+        "personas_failed": [],
+        "personas_excluded_count": 0,
+        "ocg_individual": {
+            tag: dict(big_parecer, persona_tag=tag)
+            for tag in ["AUD", "GP", "ARQ", "DBA", "DEV", "QA", "UX", "UI", "SEG"]
+        },
+        "ocg_global_delta": {
+            "deltas": [{"path": f"P{i}.score", "value": 70 + i} for i in range(7)]
+        },
+        "consolidated_findings": [
+            {
+                "id": f"f_{i}",
+                "criticidade": ["critica", "alta", "media", "baixa"][i % 4],
+                "source_persona": ["AUD", "GP", "ARQ", "DBA", "DEV", "QA", "UX", "UI", "SEG"][i % 9],
+                "score": 50 + (i * 3) % 50,
+                "titulo": f"Finding {i} title with some text",
+                "analise": "x" * 300,  # 300 chars por finding
+                "recomendacao": "y" * 200,
+            }
+            for i in range(50)
+        ],
+        "consolidated_recommendations": [
+            {"r": f"rec_{i}", "detalhe": "z" * 300} for i in range(30)
+        ],
+    }
+
+    # Sanity: payload bruto serializado é grande (simula os ~23KB reais do n8n)
+    raw_size = len(json.dumps(arguider_analysis))
+    assert raw_size > 15_000, f"fixture deveria ser grande (>15KB), mas tem {raw_size}"
+
+    # Compactar
+    compacted = compact_arguider_for_prompt(arguider_analysis, max_findings=20)
+
+    # Critério arquitetural Gate 2: < 8KB
+    compacted_size = len(json.dumps(compacted, ensure_ascii=False))
+    assert compacted_size < 8_000, (
+        f"Compactor falhou em reduzir payload: {raw_size} -> {compacted_size} bytes "
+        f"(esperado < 8000). Threshold de DT-081 violado."
+    )
+
+    # Ainda preserva estrutura essencial
+    assert "consolidated_findings" in compacted
+    assert "ocg_individual_summary" in compacted
+    assert "ocg_global_delta" in compacted
+    assert "_compactor_meta" in compacted
+
+
+# =============================================================================
 # Teste de regressão — guard AttributeError DocumentRouteMap
 # =============================================================================
 

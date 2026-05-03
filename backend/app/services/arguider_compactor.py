@@ -10,21 +10,91 @@ Estratégia:
 - Findings de CONF com score<60 SEMPRE incluídos (regra de bloqueio canônica)
 - Sumarizar ocg_individual: apenas score/approved/blocking/findings_count por persona
 - Manter ocg_global_delta integral (já agregado, tamanho gerenciável)
+- Truncar campos de texto longo (analise, recomendacao, descricao, detalhe) dentro
+  de cada finding para garantir que o prompt resultante caiba em < 8KB (Gate 2).
 """
 from typing import Any, Dict, List
 
 
 CRITICIDADE_ORDER = {"critica": 0, "alta": 1, "media": 2, "baixa": 3}
 
+# Campos de identificação/metadados preservados integralmente nos findings
+_FINDING_CANONICAL_FIELDS = {"id", "criticidade", "source_persona", "score", "titulo"}
+
+# Campos de texto longo que existem em findings — truncados para caber em 8KB
+_FINDING_TEXT_FIELDS = {"analise", "recomendacao", "descricao", "detalhe"}
+
+# Limite de chars para texto longo: imunes recebem um pouco mais de contexto
+_MAX_TEXT_IMMUNE = 60   # chars para findings críticos/CONF-blocking
+_MAX_TEXT_CANDIDATE = 40  # chars para findings normais
+
+# Limite de chars para campos de texto em recomendações
+_MAX_REC_TEXT = 80
+
+
+def _compact_finding(f: Dict[str, Any], is_immune: bool) -> Dict[str, Any]:
+    """Projeta finding para campos canônicos truncando texto longo.
+
+    Campos canônicos (_FINDING_CANONICAL_FIELDS) são preservados integralmente
+    (com títulos truncados a 60 chars). Campos de texto longo (_FINDING_TEXT_FIELDS)
+    são truncados conforme imunidade. Campos desconhecidos/verbosos são descartados.
+
+    Args:
+        f: Finding original (não será mutado).
+        is_immune: True para findings críticos ou CONF-blocking.
+
+    Returns:
+        Novo dict compactado.
+    """
+    max_text = _MAX_TEXT_IMMUNE if is_immune else _MAX_TEXT_CANDIDATE
+    result: Dict[str, Any] = {}
+    for key, val in f.items():
+        if key in _FINDING_CANONICAL_FIELDS:
+            # Título pode ser longo — truncar a 60 chars para consistência
+            if isinstance(val, str) and len(val) > 60:
+                result[key] = val[:60] + "..."
+            else:
+                result[key] = val
+        elif key in _FINDING_TEXT_FIELDS:
+            if isinstance(val, str) and len(val) > max_text:
+                result[key] = val[:max_text] + "..."
+            else:
+                result[key] = val
+        # Campos desconhecidos são descartados para manter o payload enxuto
+    return result
+
+
+def _compact_recommendation(rec: Any) -> Any:
+    """Trunca campos de texto longos em uma recomendação.
+
+    Args:
+        rec: Recomendação — pode ser dict ou string.
+
+    Returns:
+        Recomendação com campos de texto truncados a _MAX_REC_TEXT chars.
+    """
+    if isinstance(rec, dict):
+        result = {}
+        for key, val in rec.items():
+            if isinstance(val, str) and len(val) > _MAX_REC_TEXT:
+                result[key] = val[:_MAX_REC_TEXT] + "..."
+            else:
+                result[key] = val
+        return result
+    if isinstance(rec, str) and len(rec) > _MAX_REC_TEXT:
+        return rec[:_MAX_REC_TEXT] + "..."
+    return rec
+
 
 def compact_arguider_for_prompt(
     arguider_analysis: Dict[str, Any],
     max_findings: int = 20,
 ) -> Dict[str, Any]:
-    """Reduz arguider_analysis preservando informação crítica.
+    """Reduz arguider_analysis preservando informação crítica dentro de < 8KB.
 
     Retorna novo dict (não muta o input). Findings críticos (criticidade='critica'
-    ou de CONF com score<60) NUNCA são descartados.
+    ou de CONF com score<60) NUNCA são descartados. O payload resultante deve
+    caber em < 8000 chars serializado (critério arquitetural Gate 2 — DT-081).
 
     Args:
         arguider_analysis: Dict com resultado completo do Arguidor (payload n8n).
@@ -78,12 +148,20 @@ def compact_arguider_for_prompt(
         )
     )
 
-    # Combinar: imunes + top-K dos candidatos
+    # Combinar: imunes + top-K dos candidatos; compactar campos de texto em cada finding
     slots_remaining = max(0, max_findings - len(immune_findings))
-    truncated_findings = immune_findings + candidate_findings[:slots_remaining]
-    findings_dropped = len(all_findings) - len(truncated_findings)
+    selected_findings = immune_findings + candidate_findings[:slots_remaining]
+    compacted_findings = (
+        [_compact_finding(f, is_immune=True) for f in immune_findings]
+        + [_compact_finding(f, is_immune=False) for f in candidate_findings[:slots_remaining]]
+    )
+    findings_dropped = len(all_findings) - len(selected_findings)
 
-    # 3. Compor payload compactado
+    # 3. Truncar campos de texto nas recomendações
+    recs_raw: List[Any] = (arguider_analysis.get("consolidated_recommendations") or [])[:10]
+    compacted_recs = [_compact_recommendation(r) for r in recs_raw]
+
+    # 4. Compor payload compactado
     compacted: Dict[str, Any] = {
         "overall_score": arguider_analysis.get("overall_score"),
         "blocked": arguider_analysis.get("blocked"),
@@ -93,13 +171,11 @@ def compact_arguider_for_prompt(
         "personas_excluded_count": arguider_analysis.get("personas_excluded_count", 0),
         "ocg_individual_summary": ocg_individual_summary,  # sumarizado
         "ocg_global_delta": arguider_analysis.get("ocg_global_delta") or {},  # integral
-        "consolidated_findings": truncated_findings,  # truncado
-        "consolidated_recommendations": (
-            arguider_analysis.get("consolidated_recommendations") or []
-        )[:10],  # top 10
+        "consolidated_findings": compacted_findings,  # truncado por quantidade e tamanho
+        "consolidated_recommendations": compacted_recs,  # truncado a top-10 com texto enxuto
         "_compactor_meta": {
             "findings_total": len(all_findings),
-            "findings_kept": len(truncated_findings),
+            "findings_kept": len(selected_findings),
             "findings_dropped": findings_dropped,
             "immune_findings": len(immune_findings),
         },
