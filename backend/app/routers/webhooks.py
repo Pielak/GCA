@@ -678,6 +678,86 @@ async def ingestion_complete(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class IngestionErrorPayload(BaseModel):
+    workflow: Optional[str] = None
+    node: Optional[str] = None
+    error_message: Optional[str] = None
+    execution_id: Optional[str] = None
+
+
+@router.post("/internal/ingestion/{ingestion_id}/error")
+async def report_ingestion_error(
+    ingestion_id: str,
+    payload: IngestionErrorPayload,
+    db: AsyncSession = Depends(get_db),
+):
+    """Notificação de erro do pipeline n8n — chamado pelo Error Workflow (16).
+
+    Marca o doc como `arguider_status='error'` com mensagem clara,
+    limpa Redis daquele ingestion e dispara o próximo da fila. Sem isto,
+    qualquer crash no n8n trava o doc em `processing` para sempre.
+    """
+    from sqlalchemy import text as _text
+    from uuid import UUID as _UUID
+    import redis
+    from app.core.config import settings
+
+    # 1. Marca doc como error (idempotente — só atualiza se ainda processing)
+    msg = f"Pipeline n8n erro ({payload.workflow}/{payload.node}): {payload.error_message or 'desconhecido'}"[:1000]
+    project_id_row = await db.execute(
+        _text(
+            "UPDATE ingested_documents "
+            "SET arguider_status='error', arguider_stage='failed', "
+            "    arguider_error_message=:msg, updated_at=NOW() "
+            "WHERE id=:doc_id AND arguider_status='processing' "
+            "RETURNING project_id"
+        ),
+        {"doc_id": ingestion_id, "msg": msg},
+    )
+    project_id = project_id_row.scalar_one_or_none()
+    await db.commit()
+
+    if project_id is None:
+        # Doc não estava processing (já completed/error/inexistente).
+        # Continua para limpar Redis mesmo assim.
+        logger.info(
+            "webhook.ingestion_error_no_op",
+            ingestion_id=ingestion_id,
+            detail="Doc não estava em processing — nada a marcar",
+        )
+
+    # 2. Limpa todas as chaves Redis daquele ingestion
+    try:
+        r = redis.Redis(
+            host=getattr(settings, "REDIS_HOST", "redis"),
+            port=int(getattr(settings, "REDIS_PORT", 6379)),
+            db=int(getattr(settings, "N8N_REDIS_DB", 2)),
+        )
+        keys = r.keys(f"gca:ingestion:{ingestion_id}*")
+        if keys:
+            r.delete(*keys)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("webhook.ingestion_error_redis_cleanup_failed", error=str(exc))
+
+    logger.info(
+        "webhook.ingestion_error_processed",
+        ingestion_id=ingestion_id,
+        project_id=str(project_id) if project_id else None,
+        workflow=payload.workflow,
+        node=payload.node,
+    )
+
+    # 3. Dispara próximo da fila (canônico)
+    if project_id is not None:
+        try:
+            from app.services.ingestion_service import dispatch_first_pending_for_project
+            await dispatch_first_pending_for_project(db, project_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("webhook.ingestion_error_dispatch_next_failed", error=str(exc))
+
+    return {"status": "processed", "ingestion_id": ingestion_id, "marked_error": project_id is not None}
+
+
 class AccumulatePayload(BaseModel):
     persona_result: Dict[str, Any]
     persona_tag: str

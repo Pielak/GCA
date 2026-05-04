@@ -218,6 +218,11 @@ services:
     environment:
       N8N_API_DISABLED: "false"
       N8N_PUBLIC_API_DISABLED: "false"
+      # Code node JS task runner — default 60s estoura no Conferente Parse G2
+      # quando LLM retorna respostas longas + parse pesado. 5min cobre folga.
+      N8N_RUNNERS_TASK_TIMEOUT: "300"
+      N8N_RUNNERS_ENABLED: "true"
+      N8N_RUNNERS_MODE: "internal"
     volumes:
       - /home/luiz/.n8n:/home/node/.n8n
 

@@ -133,8 +133,8 @@ celery_app.conf.update(
     beat_schedule={
         "watchdog-ingestion-zombies": {
             "task": "app.tasks.pipeline.watchdog_ingestion_zombies",
-            "schedule": 300.0,  # 5 minutos
-            "args": (15,),  # threshold_minutes — MVP 29.3: 8→15 (alinhado com visibility_timeout)
+            "schedule": 120.0,  # 2 minutos — mais agressivo (sessão 2026-05-04)
+            "args": (8,),  # threshold_minutes 8min (cobre stack n8n com timeouts 5min)
         },
         "watchdog-scaffold-zombies": {
             "task": "app.tasks.scaffold.watchdog_scaffold_zombies",

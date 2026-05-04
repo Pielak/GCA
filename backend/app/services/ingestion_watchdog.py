@@ -98,6 +98,15 @@ async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
             IngestedDocument.arguider_stage == "failed",
             IngestedDocument.arguider_status.in_(("pending", "processing")),
         ),
+        # Pipeline n8n não seta `arguider_started_at` — usa `updated_at`
+        # como proxy. Cobre Conferente/Specialist/Consolidador caindo
+        # silenciosamente sem virar stage='failed' nem started_at preenchido.
+        and_(
+            IngestedDocument.arguider_status == "processing",
+            IngestedDocument.arguider_stage == "n8n_pipeline",
+            IngestedDocument.updated_at < cutoff,
+            IngestedDocument.deleted_at.is_(None),
+        ),
     )
 
     rows = await db.execute(
@@ -126,7 +135,9 @@ async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
     await db.commit()
     recovered = result.rowcount or 0
 
+    project_ids_recovered: set = set()
     for cid, pid, fname, prev_status in candidates:
+        project_ids_recovered.add(pid)
         logger.warning(
             "ingestion.zombie_recovered",
             document_id=str(cid),
@@ -136,10 +147,30 @@ async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
             threshold_minutes=threshold_minutes,
         )
 
+    # Dispara próximo pendente por projeto afetado — sem isso a fila trava
+    # mesmo após marcar zombie (lição da sessão 2026-05-04).
+    if project_ids_recovered:
+        try:
+            from app.services.ingestion_service import (
+                dispatch_first_pending_for_project,
+            )
+            for pid in project_ids_recovered:
+                try:
+                    await dispatch_first_pending_for_project(db, pid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "ingestion.watchdog_dispatch_next_failed",
+                        project_id=str(pid),
+                        error=str(exc),
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ingestion.watchdog_dispatch_import_failed", error=str(exc))
+
     logger.info(
         "ingestion.watchdog_summary",
         checked=checked,
         recovered=recovered,
+        projects_dispatched=len(project_ids_recovered),
     )
 
     return {

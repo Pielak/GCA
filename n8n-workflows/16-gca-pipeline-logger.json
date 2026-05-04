@@ -59,6 +59,41 @@
           ]
         }
       }
+    },
+    {
+      "id": "err-notificar-backend",
+      "name": "Notificar Backend Erro",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        900,
+        300
+      ],
+      "alwaysOutputData": true,
+      "continueOnFail": true,
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.ingestion_id ? 'http://gca-backend:8000/api/v1/webhooks/internal/ingestion/' + $json.ingestion_id + '/error' : 'http://gca-backend:8000/healthz' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workflow: $json.workflow, node: $json.node, error_message: $json.error, execution_id: $json.detail }) }}",
+        "options": {
+          "timeout": 15000,
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          }
+        }
+      }
     }
   ],
   "connections": {
@@ -78,6 +113,17 @@
         [
           {
             "node": "Log Erro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Erro": {
+      "main": [
+        [
+          {
+            "node": "Notificar Backend Erro",
             "type": "main",
             "index": 0
           }
