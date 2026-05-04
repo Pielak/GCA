@@ -59,6 +59,11 @@ python-docx = "^1.1.0"
 openpyxl = "^3.1.2"
 reportlab = "^4.0"
 pypdf = "^4.0"
+# OCR Camada 2 (PDFs scaneados/apresentações sem texto nativo).
+# Requer tesseract-ocr + poppler-utils no SO (Dockerfile).
+pdf2image = "^1.17.0"
+pytesseract = "^0.3.10"
+Pillow = "^10.0"
 
 # Code validation (DT-040 + DT-041)
 esprima = "^4.0.1"

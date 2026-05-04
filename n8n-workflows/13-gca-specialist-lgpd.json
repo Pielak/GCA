@@ -40,7 +40,13 @@
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Webhook Trigger').item.json.ingestion_id || '', workflow: 'gca-specialist-lgpd', node: 'Log - Inicio', event: 'started', persona_tag: 'LGPD', duration_ms: 0, detail: 'LGPD specialist iniciado', error: null }) }}",
-        "options": {},
+        "options": {
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          },
+          "timeout": 30000
+        },
         "sendBody": true,
         "sendHeaders": true,
         "headerParameters": {
@@ -68,7 +74,13 @@
         "method": "POST",
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/verify",
         "specifyBody": "json",
-        "options": {},
+        "options": {
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          },
+          "timeout": 30000
+        },
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -161,7 +173,13 @@
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/hmac/sign",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ body_raw: JSON.stringify($json.personaOutput), secret_name: 'SPECIALIST_SECRET' }) }}",
-        "options": {},
+        "options": {
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          },
+          "timeout": 30000
+        },
         "sendBody": true,
         "sendHeaders": true,
         "headerParameters": {
@@ -202,7 +220,13 @@
             }
           ]
         },
-        "options": {},
+        "options": {
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          },
+          "timeout": 30000
+        },
         "sendBody": true
       }
     },
@@ -221,7 +245,13 @@
         "url": "http://gca-backend:8000/api/v1/webhooks/internal/pipeline-log",
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ ts: new Date().toISOString(), ingestion_id: $('Parse PersonaOutput').item.json.ingestion_id || '', workflow: 'gca-specialist-lgpd', node: 'Log - Concluido', event: 'completed', persona_tag: 'LGPD', duration_ms: 0, detail: 'score=' + $('Parse PersonaOutput').item.json.personaOutput.avg_score + ' findings=' + ($('Parse PersonaOutput').item.json.personaOutput.issues || []).length, error: null }) }}",
-        "options": {},
+        "options": {
+          "retry": {
+            "maxRetries": 3,
+            "retryInterval": 2000
+          },
+          "timeout": 30000
+        },
         "sendBody": true,
         "sendHeaders": true,
         "headerParameters": {

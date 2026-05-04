@@ -438,9 +438,9 @@ class IngestionService:
         }
         mime_type = mime_map.get(file_type, "application/octet-stream")
 
-        # DOCX: Normalizer n8n não tem extrator (sem require()). Pré-extraímos
-        # texto aqui via python-docx e enviamos como text/plain para o pipeline
-        # ter conteúdo a analisar.
+        # DOCX/PDF: Normalizer n8n não tem extrator nativo (sem require()) e
+        # o caminho Vision LLM tem URL/provider frágeis. Pré-extraímos texto
+        # aqui via python-docx / pdfplumber e enviamos como text/plain.
         payload_bytes = file_bytes
         if file_type == "docx" and file_bytes:
             try:
@@ -458,6 +458,92 @@ class IngestionService:
             except Exception as exc:  # noqa: BLE001
                 logger.warning(
                     "ingestion.docx_extract_failed",
+                    doc_id=str(doc_id),
+                    error=str(exc),
+                )
+        elif file_type == "pdf" and file_bytes:
+            # Pipeline OCR canônico em 2 camadas (LLM-agnóstico):
+            #   1) pdfplumber: texto nativo (PDFs com camada texto, ~95%).
+            #   2) Tesseract: pdf2image renderiza página → pytesseract por
+            #      página onde a Camada 1 retornou pouco texto. Funciona
+            #      em scans, apresentações com texto raster, screenshots.
+            # Camada 3 (Vision LLM) fica para MVP futuro — depende de
+            # provider opcional configurado pelo cliente em Settings → IA.
+            MIN_CHARS_PER_PAGE = 50  # abaixo disso, considera "imagem/scan"
+            try:
+                import pdfplumber
+                pages_native: list[str] = []
+                pages_to_ocr: list[int] = []
+                with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+                    for idx, page in enumerate(pdf.pages):
+                        try:
+                            t = (page.extract_text() or "").strip()
+                        except Exception:  # noqa: BLE001
+                            t = ""
+                        if len(t) >= MIN_CHARS_PER_PAGE:
+                            pages_native.append(t)
+                        else:
+                            pages_native.append("")  # placeholder pra ordem
+                            pages_to_ocr.append(idx)
+
+                ocr_pages_done = 0
+                if pages_to_ocr:
+                    try:
+                        from pdf2image import convert_from_bytes
+                        import pytesseract
+                        # DPI 200 = bom equilíbrio qualidade/velocidade.
+                        # Renderiza só as páginas que precisam.
+                        for page_idx in pages_to_ocr:
+                            try:
+                                imgs = convert_from_bytes(
+                                    file_bytes,
+                                    dpi=200,
+                                    first_page=page_idx + 1,
+                                    last_page=page_idx + 1,
+                                )
+                                if not imgs:
+                                    continue
+                                ocr_text = pytesseract.image_to_string(
+                                    imgs[0], lang="por+eng"
+                                ).strip()
+                                if ocr_text:
+                                    pages_native[page_idx] = ocr_text
+                                    ocr_pages_done += 1
+                            except Exception as exc:  # noqa: BLE001
+                                logger.warning(
+                                    "ingestion.pdf_ocr_page_failed",
+                                    doc_id=str(doc_id),
+                                    page=page_idx,
+                                    error=str(exc),
+                                )
+                    except ImportError:
+                        logger.warning(
+                            "ingestion.pdf_tesseract_unavailable",
+                            doc_id=str(doc_id),
+                            detail="pdf2image/pytesseract não instalados (requer rebuild da imagem)",
+                        )
+
+                pdf_text = "\n\n".join(p for p in pages_native if p).strip()
+                if pdf_text:
+                    payload_bytes = pdf_text.encode("utf-8")
+                    mime_type = "text/plain"
+                    logger.info(
+                        "ingestion.pdf_extracted",
+                        doc_id=str(doc_id),
+                        chars=len(pdf_text),
+                        pages_native=sum(1 for p in pages_native if p) - ocr_pages_done,
+                        pages_ocr=ocr_pages_done,
+                        pages_total=len(pages_native),
+                    )
+                else:
+                    logger.warning(
+                        "ingestion.pdf_no_text",
+                        doc_id=str(doc_id),
+                        detail="Nem pdfplumber nem Tesseract extraíram texto. Documento provavelmente é só imagem sem texto reconhecível.",
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.pdf_extract_failed",
                     doc_id=str(doc_id),
                     error=str(exc),
                 )

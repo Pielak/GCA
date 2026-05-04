@@ -736,20 +736,25 @@ class OCGUpdaterService:
                 )
                 return {}
 
-            pillar_scores: dict[str, list[float]] = {}
+            # Invariante §2.4 (CLAUDE.md): "OCG só expande quando recebe
+            # informação de valor. Nunca contrai por análise." Por pilar,
+            # tomamos o MAX por persona ao longo de TODOS os docs (melhor
+            # evidência já vista), depois média dos MAX. Doc novo só pode
+            # subir o score (se trouxer evidência mais forte), nunca derrubar.
+            #
+            # Bug histórico (corrigido): média de todas as rows incluía rows
+            # de docs novos com persona pouco-informada, diluindo o pilar.
+            pillar_persona_max: dict[str, dict[str, float]] = {}
             conf_blocking_detected = False
 
             for row in rows:
-                persona_tag_lower = (row.persona_id or "").lower()  # normaliza case (MUST Gate 2)
+                persona_tag_lower = (row.persona_id or "").lower()
 
                 parecer = row.parecer or {}
                 score = parecer.get("score", parecer.get("avg_score", 50))
                 if not isinstance(score, (int, float)):
                     score = 50
 
-                # Log distinto para CONF bloqueante ANTES do skip (MUST Gate 2).
-                # CONF está em PERSONA_TO_PILLAR (P2 desde MVP 33) mas o alerta
-                # de bloqueio DEVE ser emitido independente do mapeamento.
                 if persona_tag_lower == "conf" and score < 60:
                     conf_blocking_detected = True
                     logger.warning(
@@ -760,18 +765,21 @@ class OCGUpdaterService:
                     )
 
                 if persona_tag_lower not in PERSONA_TO_PILLAR:
-                    # Apenas AUD (router/classificador) fica de fora — não é validador.
-                    continue
+                    continue  # AUD fica de fora — router, sem score próprio
 
                 pillar_key = PERSONA_TO_PILLAR[persona_tag_lower]
-                pillar_scores.setdefault(pillar_key, []).append(float(score))
+                bucket = pillar_persona_max.setdefault(pillar_key, {})
+                prev = bucket.get(persona_tag_lower)
+                if prev is None or float(score) > prev:
+                    bucket[persona_tag_lower] = float(score)
 
-            if not pillar_scores:
+            if not pillar_persona_max:
                 return {}
 
-            # Média por pillar
+            # Média dos MAX por persona dentro de cada pilar
             result_data = {}
-            for pillar_key, scores_list in pillar_scores.items():
+            for pillar_key, persona_scores in pillar_persona_max.items():
+                scores_list = list(persona_scores.values())
                 avg = sum(scores_list) / len(scores_list)
                 result_data[pillar_key] = {"score": round(avg, 1)}
 
@@ -783,7 +791,7 @@ class OCGUpdaterService:
             logger.info(
                 "ocg_updater.persona_scores_loaded",
                 project_id=str(project_id),
-                pillars=len(pillar_scores),
+                pillars=len(pillar_persona_max),
                 personas_used=len(rows),
                 conf_blocking=conf_blocking_detected,
             )
@@ -1182,12 +1190,101 @@ class OCGUpdaterService:
         if p1_owner_declared and isinstance(pillars.get("P1_business_case"), dict):
             pillars["P1_business_case"]["mode"] = "owner-declared"
 
+        # PISO determinístico — MAX-por-persona consolidado em ocg_individual
+        # vira o LIMITE INFERIOR de cada pilar. LLM updater pode subir com
+        # interpretação semântica, mas nunca derrubar abaixo da evidência
+        # cumulativa registrada. Ignorado em REVERT_DOCUMENT_DELETE.
+        # Atualiza TODAS as variantes de chave do pilar no JSON (P2_rules,
+        # P2_compliance, p2_rules_score etc) — histórico tem múltiplas grafias.
+        if change_type != "REVERT_DOCUMENT_DELETE":
+            try:
+                fallback_scores = await self._load_persona_scores(ocg.project_id)
+                _DB_KEY_BY_NUM = {
+                    1: "p1_business_score", 2: "p2_rules_score",
+                    3: "p3_features_score", 4: "p4_nfr_score",
+                    5: "p5_architecture_score", 6: "p6_data_score",
+                    7: "p7_security_score",
+                }
+                _CANONICAL_BY_NUM = {
+                    1: "P1_business_case", 2: "P2_rules", 3: "P3_features",
+                    4: "P4_nfr", 5: "P5_architecture", 6: "P6_data",
+                    7: "P7_security",
+                }
+                for n, db_key in _DB_KEY_BY_NUM.items():
+                    floor = (fallback_scores.get(db_key) or {}).get("score")
+                    if floor is None:
+                        continue
+                    floor = float(floor)
+                    current = _extract_pillar_score(pillars, n) or 0.0
+                    if floor <= current:
+                        continue
+                    # Atualiza TODAS as variantes Px* existentes para evitar
+                    # _extract_pillar_score selecionar variante não-atualizada.
+                    prefix = f"P{n}_".upper()
+                    short = f"P{n}".upper()
+                    matched_any = False
+                    for k in list(pillars.keys()):
+                        if not isinstance(k, str):
+                            continue
+                        ku = k.upper()
+                        if ku == short or ku.startswith(prefix):
+                            if isinstance(pillars[k], dict):
+                                pillars[k]["score"] = floor
+                            else:
+                                pillars[k] = {"score": floor}
+                            matched_any = True
+                    if not matched_any:
+                        pillars[_CANONICAL_BY_NUM[n]] = {"score": floor}
+                    logger.info(
+                        "ocg_updater.floor_applied",
+                        project_id=str(ocg.project_id),
+                        pillar=db_key,
+                        llm_score=current,
+                        floor_max_per_persona=floor,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ocg_updater.floor_failed",
+                    project_id=str(ocg.project_id),
+                    error=str(exc),
+                )
+
+        # Invariante §2.4 (CLAUDE.md): "OCG só expande, nunca contrai por
+        # análise". Único caminho legítimo de contração: revert de doc
+        # soft-deleted (change_type='REVERT_DOCUMENT_DELETE'). Em ingestão
+        # normal, se LLM/fallback retornar score menor que o atual, mantém
+        # o atual — defesa em camada contra dilução.
+        is_revert = change_type == "REVERT_DOCUMENT_DELETE"
         pillar_scores: Dict[int, float] = {}
+        _PILLAR_KEY_BY_NUM = {
+            1: "P1_business_case", 2: "P2_rules", 3: "P3_features",
+            4: "P4_nfr", 5: "P5_architecture", 6: "P6_data", 7: "P7_security",
+        }
         for n, col in _PILLAR_COLUMNS.items():
             score = _extract_pillar_score(pillars, n)
-            if score is not None:
-                setattr(ocg, col, score)
-                pillar_scores[n] = score
+            if score is None:
+                continue
+            current = getattr(ocg, col, None)
+            if (
+                not is_revert
+                and current is not None
+                and float(score) < float(current)
+            ):
+                # Contração indevida — preserva o atual (monotonicidade).
+                logger.info(
+                    "ocg_updater.contraction_blocked",
+                    project_id=str(ocg.project_id),
+                    pillar=col,
+                    incoming=score,
+                    kept=current,
+                    change_type=change_type,
+                )
+                score = float(current)
+                key = _PILLAR_KEY_BY_NUM.get(n)
+                if key and isinstance(pillars.get(key), dict):
+                    pillars[key]["score"] = score
+            setattr(ocg, col, score)
+            pillar_scores[n] = score
 
         # 2. Recalcular overall: média ponderada normalizada pelos pesos dos
         #    pilares EFETIVAMENTE presentes (defesa contra OCG parcial).

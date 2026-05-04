@@ -409,7 +409,7 @@ export function IngestionPage() {
                     </div>
                     {doc.content_status === 'lost' ? (
                       <span
-                        className="text-slate-500 text-[11px] font-medium truncate line-through cursor-not-allowed"
+                        className="text-slate-500 text-[11px] font-medium break-all line-through cursor-not-allowed"
                         title="Conteúdo perdido — bytes não disponíveis para visualização"
                       >
                         {doc.original_filename}
@@ -425,7 +425,7 @@ export function IngestionPage() {
                             alert(`Falha ao abrir documento: ${getErrorMessage(err)}`)
                           }
                         }}
-                        className="text-slate-200 text-[11px] font-medium truncate hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
+                        className="text-slate-200 text-[11px] font-medium break-all hover:text-violet-300 hover:underline text-left bg-transparent border-0 cursor-pointer p-0"
                         title="Abrir documento (read-only)"
                       >
                         {doc.original_filename}
