@@ -15,6 +15,7 @@ from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -405,4 +406,91 @@ async def submit_persona_followup(
         missing_question_ids=[],
         document_id=str(new_doc_id),
         message=msg,
+    )
+
+
+# ─── Download .md das perguntas em aberto por persona (HITL offline) ───
+
+
+@router.get(
+    "/projects/{project_id}/pipeline-questions/personas/{persona_id}/download",
+    response_class=PlainTextResponse,
+)
+async def download_persona_questions_md(
+    project_id: UUID,
+    persona_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """Markdown com todas as PFQs pendentes de UMA persona, com IDs marcados.
+
+    Formato canônico: marcador YAML no topo (parseado pelo pipeline de ingestão
+    para detectar respostas) + 1 bloco por pergunta com `<!-- pfq-id: UUID -->`.
+    GP responde offline e faz upload normal pela aba Ingestão. O backend
+    detecta o marcador, marca as PFQs como answered e cria IngestedDocument
+    sintético — sem rodar pipeline n8n.
+    """
+    persona_id_norm = persona_id.upper()
+    project = await db.get(Project, project_id)
+    project_name = (project.name if project else "Projeto") if project else "Projeto"
+
+    rows = (
+        await db.execute(
+            select(PersonaFollowUpQuestion).where(
+                PersonaFollowUpQuestion.project_id == project_id,
+                func.upper(PersonaFollowUpQuestion.persona_id) == persona_id_norm,
+                PersonaFollowUpQuestion.status == "pending",
+            ).order_by(
+                PersonaFollowUpQuestion.question_order.asc().nulls_last(),
+                PersonaFollowUpQuestion.created_at.asc(),
+            )
+        )
+    ).scalars().all()
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sem perguntas pendentes para persona {persona_id_norm}.",
+        )
+
+    persona_name = rows[0].persona_name or persona_id_norm
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    lines: list[str] = []
+    lines.append("---")
+    lines.append("gca-followup-marker: v1")
+    lines.append(f"project_id: {project_id}")
+    lines.append(f"persona_id: {persona_id_norm}")
+    lines.append(f"persona_name: {persona_name}")
+    lines.append(f"generated_at: {now_iso}")
+    lines.append(f"question_count: {len(rows)}")
+    lines.append("---")
+    lines.append("")
+    lines.append(f"# Perguntas em aberto — {persona_name} — {project_name}")
+    lines.append("")
+    lines.append(
+        "Preencha as respostas abaixo de cada pergunta (substitua "
+        "`<sua resposta aqui>`). Faça upload deste arquivo pela aba "
+        "**Ingestão de Documentos**. NÃO altere as linhas com `<!-- pfq-id: ... -->`."
+    )
+    lines.append("")
+    for idx, p in enumerate(rows, start=1):
+        lines.append(f"## Q{idx}")
+        lines.append(f"<!-- pfq-id: {p.id} -->")
+        lines.append("")
+        lines.append(f"**Pergunta**: {p.question_text}")
+        if p.context:
+            lines.append(f"_Contexto_: {p.context}")
+        lines.append("")
+        lines.append("**Resposta**:")
+        lines.append("")
+        lines.append("<sua resposta aqui>")
+        lines.append("")
+
+    content = "\n".join(lines)
+    filename = f"questoes-aberto-{persona_id_norm.lower()}.md"
+    return PlainTextResponse(
+        content=content,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

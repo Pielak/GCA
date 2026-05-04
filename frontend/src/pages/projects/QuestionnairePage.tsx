@@ -13,7 +13,6 @@ import { formatDateTimeBR } from '@/lib/datetime'
 import { TechnicalQuestionnaireForm } from '@/components/questionnaire/TechnicalQuestionnaireForm'
 import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
 import { DiscrepancyBoard } from '@/components/questionnaire/DiscrepancyBoard'
-import { PipelineQuestionsSection } from '@/components/questionnaire/PipelineQuestionsSection'
 
 /**
  * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
@@ -176,13 +175,8 @@ export function QuestionnairePage() {
           }}
         />
       )}
-
-      {/* MVP-XX: Seção de perguntas do pipeline para validação humana.
-          Exibe perguntas geradas pelo Auditor e personas durante a ingestão.
-          Respostas disparam re-análise (Passada 2). */}
-      {projectId && (
-        <PipelineQuestionsSection projectId={projectId} />
-      )}
+      {/* "Pendências do Pipeline" foi movida para a sub-aba "Perguntas das
+          Personas" (sub-aba mestre 2 de "Questões em Aberto"). */}
     </div>
   )
 }

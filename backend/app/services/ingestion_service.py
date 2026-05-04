@@ -391,6 +391,120 @@ class IngestionService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    async def _process_followup_upload(
+        self,
+        doc_id: UUID,
+        project_id: UUID,
+        text: str,
+    ) -> Optional[dict]:
+        """Processa upload com marcador `gca-followup-marker` (HITL offline).
+
+        Parse do .md gerado por GET /pipeline-questions/personas/{p}/download:
+          - Frontmatter YAML simples (gca-followup-marker, persona_id, etc).
+          - Blocos com `<!-- pfq-id: UUID -->` + parágrafo "Resposta:".
+          - Marca PFQs como `answered`, atualiza ingested_document para
+            `file_type='persona_followup'` + completed, sem rodar n8n.
+
+        Retorna dict com {answered, persona_id, total} ou None se parse falhar.
+        """
+        import re
+        from sqlalchemy import select as _sel, update as _upd
+        from app.models.base import IngestedDocument, PersonaFollowUpQuestion
+
+        # 1. Validar marcador + extrair persona_id (frontmatter YAML)
+        m_proj = re.search(r"project_id:\s*([0-9a-f-]{36})", text, re.IGNORECASE)
+        m_pers = re.search(r"persona_id:\s*([A-Z]{2,5})", text)
+        if not m_proj or not m_pers:
+            return None
+        if m_proj.group(1).lower() != str(project_id).lower():
+            logger.warning(
+                "ingestion.followup_marker_project_mismatch",
+                doc_id=str(doc_id),
+                marker_project=m_proj.group(1),
+                actual_project=str(project_id),
+            )
+            return None
+        persona_id_norm = m_pers.group(1).upper()
+
+        # 2. Parse blocos `<!-- pfq-id: UUID -->` ... "Resposta:" ... próximo bloco/EOF
+        # Pega o conteúdo a partir do comentário até o próximo "## Q" ou EOF.
+        block_re = re.compile(
+            r"<!--\s*pfq-id:\s*([0-9a-f-]{36})\s*-->(.*?)(?=<!--\s*pfq-id:|\Z)",
+            re.IGNORECASE | re.DOTALL,
+        )
+        answer_re = re.compile(
+            r"\*\*Resposta\*\*:\s*\n+(.+?)(?=\n##\s|$)",
+            re.IGNORECASE | re.DOTALL,
+        )
+        parsed: dict[str, str] = {}
+        for bm in block_re.finditer(text):
+            pfq_id = bm.group(1)
+            block = bm.group(2)
+            am = answer_re.search(block)
+            if not am:
+                continue
+            answer = am.group(1).strip()
+            # Ignora placeholder não preenchido
+            if not answer or answer.lower().startswith("<sua resposta") or answer == "<sua resposta aqui>":
+                continue
+            parsed[pfq_id] = answer
+
+        if not parsed:
+            return {"answered": 0, "persona_id": persona_id_norm, "total": 0}
+
+        # 3. UPDATE PFQs (filtrando por persona+projeto pra evitar abuse)
+        now = datetime.now(timezone.utc)
+        updated = 0
+        for pfq_id_str, answer in parsed.items():
+            try:
+                pfq_uuid = UUID(pfq_id_str)
+            except (ValueError, TypeError):
+                continue
+            res = await self.db.execute(
+                _upd(PersonaFollowUpQuestion)
+                .where(
+                    PersonaFollowUpQuestion.id == pfq_uuid,
+                    PersonaFollowUpQuestion.project_id == project_id,
+                    func.upper(PersonaFollowUpQuestion.persona_id) == persona_id_norm,
+                    PersonaFollowUpQuestion.status == "pending",
+                )
+                .values(
+                    answer_text=answer[:5000],
+                    answer_provided_at=now,
+                    status="answered",
+                    updated_at=now,
+                )
+            )
+            if (res.rowcount or 0) > 0:
+                updated += 1
+
+        # 4. Atualiza IngestedDocument: vira sintético persona_followup, completed
+        await self.db.execute(
+            _upd(IngestedDocument)
+            .where(IngestedDocument.id == doc_id)
+            .values(
+                file_type="persona_followup",
+                arguider_status="completed",
+                arguider_stage="followup_synthetic",
+                arguider_progress_percent=100,
+                arguider_error_message=None,
+                updated_at=now,
+            )
+        )
+        await self.db.commit()
+
+        # 5. Dispara próximo da fila (este doc não vai pro pipeline)
+        try:
+            await dispatch_first_pending_for_project(self.db, project_id)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ingestion.followup_dispatch_next_failed", error=str(exc))
+
+        return {
+            "answered": updated,
+            "persona_id": persona_id_norm,
+            "total": len(parsed),
+        }
+
     async def _dispatch_to_n8n(self, doc_id, project_id, file_type, file_bytes):
         """Dispara o pipeline de ingestão via webhook n8n (feature flag INGESTION_VIA_N8N).
 
@@ -547,6 +661,37 @@ class IngestionService:
                     doc_id=str(doc_id),
                     error=str(exc),
                 )
+
+        # HITL fast-path: se o texto extraído tem marcador "gca-followup-marker",
+        # GP fez upload de respostas a perguntas em aberto. Processa direto no
+        # backend (sem n8n personas): marca PFQs como answered + cria
+        # IngestedDocument file_type='persona_followup'. Atalho determinístico.
+        try:
+            text_for_marker = (payload_bytes or b"").decode("utf-8", errors="ignore") if payload_bytes else ""
+        except Exception:  # noqa: BLE001
+            text_for_marker = ""
+        if "gca-followup-marker" in text_for_marker:
+            try:
+                handled = await self._process_followup_upload(
+                    doc_id=doc_id,
+                    project_id=project_id,
+                    text=text_for_marker,
+                )
+                if handled:
+                    logger.info(
+                        "ingestion.followup_marker_processed",
+                        doc_id=str(doc_id),
+                        project_id=str(project_id),
+                        answered=handled.get("answered", 0),
+                    )
+                    return  # Não envia pra n8n
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.followup_marker_failed",
+                    doc_id=str(doc_id),
+                    error=str(exc),
+                )
+                # Fallthrough: trata como doc normal se parsing falhar
 
         # Seed do shared_context: respostas do Questionário Técnico aprovado.
         # Sem isto cada persona analisa o doc no vácuo (DBA não sabe que é SQL,

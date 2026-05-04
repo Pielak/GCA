@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect } from 'react'
-import { Loader2, CheckCircle2, Save, ShieldCheck, Send, FileText } from 'lucide-react'
+import { Loader2, CheckCircle2, Save, ShieldCheck, Send, FileText, Download } from 'lucide-react'
+import { apiClient } from '@/lib/api'
 import {
   usePipelineQuestions,
   usePersonaSubmit,
@@ -142,6 +143,28 @@ export function PersonaFollowUpTabs({ projectId }: Props) {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={async () => {
+              if (!activePersona) return
+              try {
+                const res = await apiClient.get(
+                  `/projects/${projectId}/pipeline-questions/personas/${activePersona}/download`,
+                  { responseType: 'blob' },
+                )
+                const url = window.URL.createObjectURL(res.data)
+                const a = document.createElement('a')
+                a.href = url
+                a.download = `questoes-aberto-${activePersona.toLowerCase()}.md`
+                a.click()
+                window.URL.revokeObjectURL(url)
+              } catch (err) { console.error(err) }
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-slate-800 hover:bg-slate-700 text-slate-200"
+            title="Baixar perguntas em .md, responder offline e reenviar pela aba Ingestão"
+          >
+            <Download className="w-3.5 h-3.5" />
+            Baixar (.md)
+          </button>
           <button
             onClick={() => handleAction('save')}
             disabled={isPending}

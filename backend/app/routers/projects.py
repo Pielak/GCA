@@ -2,6 +2,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field
@@ -820,13 +821,22 @@ async def reconsolidate_ocg(
 
 
 async def _reconsolidate_ocg_impl(project_id: UUID, db: AsyncSession):
-    """Implementação real — isolada pra ficar sob project_operation_lock."""
-    from sqlalchemy import select
-    from app.models.base import ArguiderAnalysis, OCG
-    from app.services.ocg_updater_service import OCGUpdaterService
-    import json as _json
+    """Re-roda consolidação OCG sobre `ocg_individual` cumulativo (pipeline n8n).
 
-    # Verifica se tem OCG
+    Substituiu (sessão 2026-05-04) o caminho legacy via ArguiderAnalysis
+    (tabela descartada). Agora usa _load_persona_scores que aplica
+    MAX-por-persona como piso (skill gca-ocg-monotonicity) e deixa o
+    LLM updater subir scores via interpretação semântica do delta.
+
+    Útil quando:
+      - prompts/regras do consolidador mudaram e quer aplicar sem rerodar personas
+      - perguntas HITL foram respondidas via ingestão e quer refletir na pontuação
+      - LLM updater diluiu scores e quer forçar re-aplicar piso
+    """
+    from sqlalchemy import select
+    from app.models.base import OCG, OCGIndividual
+    from app.services.ocg_updater_service import OCGUpdaterService
+
     ocg = (await db.execute(
         select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
     )).scalar_one_or_none()
@@ -836,50 +846,59 @@ async def _reconsolidate_ocg_impl(project_id: UUID, db: AsyncSession):
             detail="Projeto não tem OCG. Aprove o questionário primeiro para gerar o OCG inicial.",
         )
 
-    # Busca todas as análises Arguidor do projeto (ordem cronológica)
-    analyses = (await db.execute(
-        select(ArguiderAnalysis)
-        .where(ArguiderAnalysis.project_id == project_id)
-        .order_by(ArguiderAnalysis.created_at.asc())
-    )).scalars().all()
-
-    if not analyses:
+    rows_count = await db.scalar(
+        select(func.count(OCGIndividual.id)).where(
+            OCGIndividual.project_id == project_id,
+            OCGIndividual.status == "completed",
+        )
+    ) or 0
+    if rows_count == 0:
         raise HTTPException(
             status_code=400,
-            detail="Nenhuma análise do Arguidor encontrada — reingerir documentos antes.",
+            detail="Nenhuma análise de persona em ocg_individual — ingerir documentos antes.",
         )
 
     svc = OCGUpdaterService(db)
-    applied = 0
-    failures = []
-    for a in analyses:
-        try:
-            analysis_dict = {
-                "document_classification": _json.loads(a.document_classification) if a.document_classification else {},
-                "gaps": _json.loads(a.gaps) if a.gaps else [],
-                "show_stoppers": _json.loads(a.show_stoppers) if a.show_stoppers else [],
-                "poor_definitions": _json.loads(a.poor_definitions) if a.poor_definitions else [],
-                "improvement_suggestions": _json.loads(a.improvement_suggestions) if a.improvement_suggestions else [],
-                "module_candidates": _json.loads(a.module_candidates) if a.module_candidates else [],
-                "ocg_fields_to_update": _json.loads(a.ocg_fields_to_update) if a.ocg_fields_to_update else [],
-            }
-            await svc.update_ocg_from_arguider(
-                project_id=project_id,
-                arguider_analysis=analysis_dict,
-                document_id=a.document_id,
-                trigger_source="manual_reconsolidate",
-            )
-            applied += 1
-        except Exception as e:
-            failures.append({"analysis_id": str(a.id), "error": str(e)[:200]})
-            logger.warning("ocg.reconsolidate_analysis_failed", analysis_id=str(a.id), error=str(e))
+    persona_scores = await svc._load_persona_scores(project_id)
+    if not persona_scores:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível carregar scores das personas (todas zeradas?).",
+        )
+
+    pillar_scores_struct = {
+        "P1_business_case":  {"score": persona_scores.get("p1_business_score",   {}).get("score", 0)},
+        "P2_rules":          {"score": persona_scores.get("p2_rules_score",       {}).get("score", 0)},
+        "P3_features":       {"score": persona_scores.get("p3_features_score",    {}).get("score", 0)},
+        "P4_nfr":            {"score": persona_scores.get("p4_nfr_score",         {}).get("score", 0)},
+        "P5_architecture":   {"score": persona_scores.get("p5_architecture_score",{}).get("score", 0)},
+        "P6_data":           {"score": persona_scores.get("p6_data_score",        {}).get("score", 0)},
+        "P7_security":       {"score": persona_scores.get("p7_security_score",    {}).get("score", 0)},
+    }
+    arguider_analysis = {
+        "PILLAR_SCORES": pillar_scores_struct,
+        "overall_score": persona_scores.get("overall_score", 0),
+        "personas_executed": [],
+        "consolidated_findings": [],
+        "execution_summary": {"reconsolidate": "from_ocg_individual_max_per_persona"},
+    }
+    try:
+        result = await svc.update_ocg_from_arguider(
+            project_id=project_id,
+            arguider_analysis=arguider_analysis,
+            trigger_source="manual_reconsolidate",
+        )
+    except Exception as e:
+        logger.error("ocg.reconsolidate_failed", project_id=str(project_id), error=str(e), exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Falha ao reconsolidar: {str(e)[:200]}")
 
     return {
         "success": True,
-        "analyses_processed": applied,
-        "analyses_total": len(analyses),
-        "failures": failures,
-        "message": f"Reconsolidação aplicada a {applied}/{len(analyses)} análise(s).",
+        "ocg_individual_rows": rows_count,
+        "version_from": result.get("version_from") if result else None,
+        "version_to": result.get("version_to") if result else None,
+        "change_type": result.get("change_type") if result else None,
+        "message": f"Reconsolidação aplicada usando {rows_count} análises de persona.",
     }
 
 

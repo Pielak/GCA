@@ -876,10 +876,29 @@ export function ProjectSettingsPage() {
         </div>
       )}
 
-      {/* Tab: Questionário — reusa QuestionnairePage. */}
-      {activeTab === 'questionario' && (
-        <div className="-mx-6 -my-0">
-          <QuestionnairePage />
+      {/* Tab: Questionário — movido para "Questões em Aberto" (sub-aba 1). */}
+      {activeTab === 'questionario' && projectId && (
+        <div className="max-w-2xl mx-auto px-6 py-10">
+          <div className="rounded-lg border border-violet-700/40 bg-violet-950/20 p-5 flex items-start gap-3">
+            <ClipboardList className="w-5 h-5 text-violet-400 flex-shrink-0 mt-0.5" />
+            <div className="flex-1">
+              <h2 className="text-sm font-semibold text-slate-100 mb-1">
+                Questionário Técnico foi movido
+              </h2>
+              <p className="text-xs text-slate-400 mb-3">
+                Agora ele vive em <strong className="text-slate-200">Questões em Aberto</strong> →
+                primeira sub-aba <strong className="text-slate-200">"Questionário Inicial"</strong>.
+                Tudo que aguarda resposta do GP (questionário inicial, perguntas das personas,
+                iterações de pilares) está centralizado em um lugar só.
+              </p>
+              <a
+                href={`/projects/${projectId}/iterative-questionnaire`}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium"
+              >
+                Ir para Questões em Aberto →
+              </a>
+            </div>
+          </div>
         </div>
       )}
 
