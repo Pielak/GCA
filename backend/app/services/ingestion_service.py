@@ -173,11 +173,61 @@ async def dispatch_first_pending_for_project(
     doc_id = next_doc.id
     file_type = next_doc.file_type or ""
 
+    # HITL fast-path canônico (antes do fork n8n/Celery).
+    # Detecta marker `gca-followup-marker` em qualquer arquivo de texto e
+    # processa as respostas direto, sem rodar pipeline. Se o marker está
+    # presente mas o parse falha, doc vira erro com mensagem clara — NUNCA
+    # cai pro pipeline (que avaliaria o frontmatter como conteúdo bizarro).
+    from app.utils.ingested_storage import read_ingested
+    file_bytes = read_ingested(project_id, next_doc.filename) or b""
+    if file_bytes:
+        try:
+            text_preview = file_bytes.decode("utf-8", errors="ignore")
+        except Exception:  # noqa: BLE001
+            text_preview = ""
+        if "gca-followup-marker" in text_preview:
+            svc = IngestionService(db)
+            try:
+                handled = await svc._process_followup_upload(
+                    doc_id=doc_id, project_id=project_id, text=text_preview,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "ingestion.hitl_marker_parse_failed",
+                    document_id=str(doc_id),
+                    error=str(exc),
+                    exc_info=True,
+                )
+                handled = None
+
+            if handled and handled.get("answered", 0) > 0:
+                logger.info(
+                    "ingestion.hitl_dispatched_from_queue",
+                    document_id=str(doc_id),
+                    project_id=str(project_id),
+                    answered=handled["answered"],
+                    persona_id=handled.get("persona_id"),
+                )
+                return doc_id
+
+            # Falha ou 0 respostas: marcar erro com mensagem clara e NÃO
+            # cair pro pipeline (que daria score=0 para todas as personas).
+            err_msg = (
+                "Arquivo HITL detectado (gca-followup-marker presente) mas "
+                "o parse não extraiu respostas válidas. Verifique se o "
+                "frontmatter tem `project_id` e `persona_id` corretos e se "
+                "as respostas estão preenchidas no formato esperado "
+                "(blocos `<!-- pfq-id: UUID -->` seguidos de `**Resposta**:`)."
+            )
+            next_doc.arguider_status = "error"
+            next_doc.arguider_stage = "failed"
+            next_doc.arguider_error_message = err_msg
+            await db.commit()
+            return doc_id
+
     # Bytes do storage (n8n precisa do payload base64; Celery faz por id).
     use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
     if use_n8n:
-        from app.utils.ingested_storage import read_ingested
-        file_bytes = read_ingested(project_id, next_doc.filename) or b""
         await db.commit()
         svc = IngestionService(db)
         await svc._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
