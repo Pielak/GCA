@@ -1071,46 +1071,82 @@ async def get_ocg_history(
     current_user_id: UUID = Depends(get_current_user_from_token),
     db: AsyncSession = Depends(get_db),
 ):
-    """Histórico de versões do OCG com autor, trigger e flag de rollback disponível."""
+    """Histórico de versões do OCG — formato canônico (sessão 2026-05-04):
+    apenas documentos ingeridos com filename + delta de overall_score.
+
+    Filtra entries com `document_id IS NOT NULL`. Cada entry traz:
+    - document_id, document_filename (JOIN ingested_documents)
+    - version_from, version_to
+    - overall_before, overall_after, overall_delta (extraídos do snapshot)
+    - created_at
+    """
     from sqlalchemy import select
-    from app.models.base import OCGDeltaLog, User, OCG
+    from app.models.base import OCGDeltaLog, OCG, IngestedDocument
+    import json as _json
 
     result = await db.execute(
-        select(OCGDeltaLog, User)
-        .outerjoin(User, OCGDeltaLog.changed_by == User.id)
-        .where(OCGDeltaLog.project_id == project_id)
-        .order_by(OCGDeltaLog.created_at.desc())
-        .limit(50)
+        select(OCGDeltaLog, IngestedDocument.original_filename)
+        .outerjoin(IngestedDocument, OCGDeltaLog.document_id == IngestedDocument.id)
+        .where(
+            OCGDeltaLog.project_id == project_id,
+            OCGDeltaLog.document_id.isnot(None),
+        )
+        .order_by(OCGDeltaLog.ocg_version_to.desc())
+        .limit(100)
     )
     rows = result.all()
 
-    # Versão atual para marcar qual linha permite rollback (todas exceto a atual com snapshot)
-    current_ocg = await db.execute(
-        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
-    )
-    current = current_ocg.scalar_one_or_none()
-    current_version = current.version if current else 0
+    current_ocg = (await db.execute(
+        select(OCG).where(OCG.project_id == project_id)
+        .order_by(OCG.created_at.desc()).limit(1)
+    )).scalar_one_or_none()
+    current_version = current_ocg.version if current_ocg else 0
+
+    # Pré-carrega snapshots por version pra extrair overall_score por versão
+    # (evita N+1: 1 query traz tudo, monta dict version→overall).
+    snap_rows = (await db.execute(
+        select(OCGDeltaLog.ocg_version_to, OCGDeltaLog.ocg_snapshot)
+        .where(
+            OCGDeltaLog.project_id == project_id,
+            OCGDeltaLog.ocg_snapshot.isnot(None),
+        )
+    )).all()
+    overall_by_version: dict[int, float] = {}
+    for v, snap in snap_rows:
+        try:
+            data = _json.loads(snap)
+            ov = data.get("overall_score")
+            if isinstance(ov, (int, float)):
+                overall_by_version[v] = float(ov)
+            else:
+                composite = (data.get("COMPOSITE_SCORE") or {}).get("value")
+                if isinstance(composite, (int, float)):
+                    overall_by_version[v] = float(composite)
+        except Exception:  # noqa: BLE001
+            continue
+
+    history: list[dict] = []
+    for d, fname in rows:
+        before = overall_by_version.get(d.ocg_version_from)
+        after = overall_by_version.get(d.ocg_version_to)
+        delta = round(after - before, 2) if (before is not None and after is not None) else None
+        history.append({
+            "id": str(d.id),
+            "document_id": str(d.document_id) if d.document_id else None,
+            "document_filename": fname or "(documento removido)",
+            "version_from": d.ocg_version_from,
+            "version_to": d.ocg_version_to,
+            "overall_before": before,
+            "overall_after": after,
+            "overall_delta": delta,
+            "created_at": d.created_at.isoformat() if d.created_at else None,
+            "can_rollback": d.ocg_snapshot is not None and d.ocg_version_to != current_version,
+        })
 
     return {
         "current_version": current_version,
-        "history": [
-            {
-                "id": str(d.id),
-                "version_from": d.ocg_version_from,
-                "version_to": d.ocg_version_to,
-                "change_summary": d.change_summary,
-                "fields_changed": d.fields_changed,
-                "created_at": d.created_at.isoformat() if d.created_at else None,
-                "changed_by": {
-                    "id": str(u.id),
-                    "full_name": u.full_name or u.email.split("@")[0],
-                    "email": u.email,
-                } if u else None,
-                "trigger_source": d.trigger_source,
-                "can_rollback": d.ocg_snapshot is not None and d.ocg_version_to != current_version,
-            }
-            for d, u in rows
-        ],
+        "history": history,
+        "count": len(history),
     }
 
 

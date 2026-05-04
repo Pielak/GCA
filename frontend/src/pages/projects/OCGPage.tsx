@@ -407,63 +407,61 @@ export function OCGPage() {
         return (ocg.APPROVAL_STATUS) ? renderObject(ocg.APPROVAL_STATUS) : <p className="text-slate-500 text-sm italic">Aguardando Documentação</p>
       case 'history':
         return history.length > 0 ? (
-          <div className="space-y-3">
-            {history.map((h: any) => (
-              <div key={h.id} className="flex items-start gap-3 p-3 rounded-lg bg-slate-800/40">
-                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-violet-900/40 border border-violet-800/40 flex items-center justify-center">
-                  <span className="text-violet-400 text-xs font-bold">v{h.version_to}</span>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-slate-200 text-sm font-medium">
-                      Versão {h.version_from} → {h.version_to}
-                    </span>
-                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400 uppercase tracking-wide">
-                      {h.trigger_source || 'system'}
-                    </span>
-                    {h.changed_by && (
-                      <span className="text-slate-400 text-xs">
-                        por <span className="text-slate-300">{h.changed_by.full_name}</span>
-                      </span>
+          <div className="divide-y divide-slate-800 border border-slate-800 rounded-lg overflow-hidden">
+            <div className="grid grid-cols-[1fr_auto] gap-4 px-4 py-2 bg-slate-900/60 text-[10px] uppercase text-slate-500 font-medium tracking-wide">
+              <span>Documento ingerido</span>
+              <span className="text-right">Impacto no OCG</span>
+            </div>
+            {history.map((h: any) => {
+              const delta: number | null = h.overall_delta
+              const deltaColor = delta == null
+                ? 'text-slate-500'
+                : delta > 0
+                  ? 'text-emerald-400'
+                  : delta < 0
+                    ? 'text-red-400'
+                    : 'text-slate-400'
+              const deltaSign = delta == null ? '' : delta > 0 ? '+' : ''
+              return (
+                <div
+                  key={h.id}
+                  className="grid grid-cols-[1fr_auto] gap-4 items-center px-4 py-3 hover:bg-slate-800/30 transition-colors"
+                >
+                  <div className="min-w-0">
+                    {h.document_id ? (
+                      <a
+                        href={`/projects/${id}/ingestion?doc=${h.document_id}`}
+                        className="text-sm text-slate-200 hover:text-violet-300 hover:underline break-all"
+                      >
+                        {h.document_filename}
+                      </a>
+                    ) : (
+                      <span className="text-sm text-slate-500 italic">{h.document_filename}</span>
                     )}
-                    <span className="text-slate-500 text-xs">
-                      {h.created_at ? formatDateTimeBR(h.created_at) : ''}
-                    </span>
+                    <div className="text-[10px] text-slate-600 mt-0.5">
+                      v{h.version_from} → v{h.version_to}
+                      {h.created_at && <> · {formatDateTimeBR(h.created_at)}</>}
+                    </div>
                   </div>
-                  {h.change_summary && <p className="text-slate-400 text-xs mt-1">{h.change_summary}</p>}
-                  {h.fields_changed && (
-                    <details className="mt-1">
-                      <summary className="text-slate-500 text-xs cursor-pointer hover:text-slate-300">
-                        Ver campos alterados
-                      </summary>
-                      <pre className="text-slate-500 text-xs mt-1 bg-slate-900/50 rounded p-2 overflow-x-auto max-h-24">
-                        {typeof h.fields_changed === 'string' ? h.fields_changed : JSON.stringify(h.fields_changed, null, 2)}
-                      </pre>
-                    </details>
-                  )}
-                  {h.can_rollback && (
-                    <button
-                      onClick={async () => {
-                        if (!confirm(`Reverter o OCG para a versão ${h.version_to}? Isso cria uma nova versão e mantém o histórico.`)) return
-                        try {
-                          await apiClient.post(`/projects/${id}/ocg/rollback/${h.version_to}`)
-                          await loadData()
-                        } catch (e: unknown) {
-                          alert(getErrorMessage(e) || 'Erro ao reverter')
-                        }
-                      }}
-                      className="mt-2 text-xs px-2 py-1 rounded bg-amber-600/20 border border-amber-600/30 text-amber-300 hover:bg-amber-600/30 transition-colors"
-                    >
-                      ↶ Reverter para esta versão
-                    </button>
-                  )}
+                  <div className={`text-sm font-semibold tabular-nums ${deltaColor}`}>
+                    {delta == null ? (
+                      <span className="text-slate-500">—</span>
+                    ) : (
+                      <>
+                        {deltaSign}{delta.toFixed(2)}
+                        <span className="text-[10px] text-slate-500 ml-1">
+                          ({h.overall_before?.toFixed(1) ?? '?'} → {h.overall_after?.toFixed(1) ?? '?'})
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </div>
         ) : (
           <p className="text-slate-500 text-sm italic">
-            Nenhuma alteração registrada. O histórico se preenche automaticamente a cada mudança do OCG (ingestão, agente, edição ou propagação).
+            Nenhum documento ingerido alterou o OCG ainda. Faça upload de documentos pela aba <strong className="text-slate-300">Ingestão</strong>.
           </p>
         )
       default:

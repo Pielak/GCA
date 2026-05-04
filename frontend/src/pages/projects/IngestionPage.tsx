@@ -355,7 +355,13 @@ export function IngestionPage() {
       {/* Documents Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-slate-800">
-          <h3 className="text-slate-200 text-sm font-semibold">Documentos ({documents.length})</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-slate-200 text-sm font-semibold">Documentos ({documents.length})</h3>
+            <HelpTooltip
+              text="Status do processamento pelo Arguidor: ⚪ Aguardando = na fila de análise; ⏳ Processando = sendo analisado pelo LLM agora; ✅ Processado = extraído e adicionado ao OCG com sucesso; ❌ Erro = falha na análise. Erros são retentados automaticamente até 3 vezes (self-healing). Se persistir, verifique se o arquivo está corrompido."
+              maxWidth="max-w-96"
+            />
+          </div>
           <div className="flex gap-1">
             {(['all', 'pending', 'processing', 'completed', 'error', 'quarantined'] as FilterStatus[]).map(s => (
               <button
@@ -369,20 +375,15 @@ export function IngestionPage() {
           </div>
         </div>
 
-        {/* Table Header */}
-        <div className="grid grid-cols-[1fr_80px_80px_120px_1fr_80px] gap-4 px-5 py-2 border-b border-slate-800 text-xs text-slate-500 font-medium">
+        {/* Table Header — Status segue na coluna mas sem repetir o título
+            (já está ao lado de "Documentos (N)" como título da seção). */}
+        <div className="grid grid-cols-[1fr_80px_80px_120px_100px_1fr] gap-4 px-5 py-2 border-b border-slate-800 text-xs text-slate-500 font-medium">
           <span>Nome</span>
           <span className="text-center">Tipo</span>
           <span className="text-center">Tamanho</span>
           <span className="text-center">Upload</span>
-          <span className="flex items-center gap-1 pl-8">
-            Status Arguidor
-            <HelpTooltip
-              text="Status do processamento pelo Arguidor: ⚪ Aguardando = na fila de análise; ⏳ Processando = sendo analisado pelo LLM agora; ✅ Processado = extraído e adicionado ao OCG com sucesso; ❌ Erro = falha na análise. Erros são retentados automaticamente até 3 vezes (self-healing). Se persistir, verifique se o arquivo está corrompido."
-              maxWidth="max-w-96"
-            />
-          </span>
           <span className="text-center">Ações</span>
+          <span></span>
         </div>
 
         {isLoading ? (
@@ -402,7 +403,7 @@ export function IngestionPage() {
               const piiFields = doc.pii_fields || [];
               return (
               <div key={doc.id}>
-                <div className="grid grid-cols-[1fr_80px_80px_120px_1fr_80px] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
+                <div className="grid grid-cols-[1fr_80px_80px_120px_100px_1fr] gap-4 items-center px-5 py-3 hover:bg-slate-800/30 transition-colors">
                   <div className="flex items-center gap-3 min-w-0">
                     <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center flex-shrink-0">
                       <FileText className="w-4 h-4 text-slate-400" />
@@ -461,7 +462,10 @@ export function IngestionPage() {
                   ) : (
                     <span className="text-slate-700 text-[10px] opacity-0 text-center">— tk</span>
                   )}
-                  <div className="flex flex-col gap-1 text-[10px] pl-8">
+                  {/* STATUS — agora última coluna (1fr), pega todo espaço restante.
+                      Layout invertido em 2026-05-04: Ações vem antes pra que mensagens
+                      longas como "Pipeline n8n: failed. Failed: ['G0']" caibam sem cortar. */}
+                  <div className="flex flex-col gap-1 text-[10px] pl-2 order-2">
                     <div className="flex items-center gap-2">
                       {doc.arguider_status === 'processing' ? (
                         <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
@@ -500,10 +504,10 @@ export function IngestionPage() {
                       </div>
                     )}
                   </div>
-                  {/* Actions — wrapper único pra contar como 1 cell do grid
-                      (evita quebra de linha quando há 2+ botões; o bug do
-                      trash caindo em nova row). */}
-                  <div className="flex items-center gap-1 justify-end">
+                  {/* Actions — wrapper único pra contar como 1 cell do grid.
+                      Posicionada antes do Status (order-1) para liberar espaço
+                      restante (1fr) ao texto de status que pode ser longo. */}
+                  <div className="flex items-center gap-1 justify-center order-1">
                     {/* 2026-04-25 — STOP. Aparece quando doc está pending
                         ou processing. Permite owner forçar erro sem
                         precisar apagar (preserva o arquivo no storage). */}

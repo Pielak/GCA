@@ -388,56 +388,28 @@ async def reanalyze_document(
     use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
 
     if use_n8n:
-        import httpx
-        import base64
-        from app.services.ai_key_resolver import AIKeyResolver
-
-        provider_chain = await AIKeyResolver.resolve_project_provider_chain(db, project_id, include_api_key=True)
-        chain_data = []
-        for p in (provider_chain or []):
-            chain_data.append({
-                "provider": p.get("provider", ""),
-                "model": p.get("model", ""),
-                "api_key": p.get("api_key", ""),
-            })
-
-        n8n_payload = {
-            "ingestion_id": str(document_id),
-            "project_id": str(project_id),
-            "document_bytes_base64": base64.b64encode(file_bytes).decode() if file_bytes else "",
-            "document_metadata": {
-                "filename": doc.original_filename or doc.filename,
-                "mime_type": doc.file_type or "application/octet-stream",
-                "size_bytes": doc.file_size_bytes or 0,
-                "uploaded_by": str(doc.uploaded_by or ""),
-                "uploaded_by_role": "GP",
-                "declared_purpose": "reanalyze",
-            },
-            "provider_chain": chain_data,
-            "callback_url": f"{getattr(settings, 'GCA_CALLBACK_BASE_URL', 'http://localhost:8000')}/api/v1/webhooks/ingestion-complete",
-            "timestamp": __import__("datetime").datetime.utcnow().isoformat() + "Z",
-        }
-
-        n8n_url = getattr(settings, "N8N_BASE_URL", "http://localhost:5678")
-        webhook_secret = getattr(settings, "GCA_WEBHOOK_SECRET", "")
-        body_bytes = __import__("json").dumps(n8n_payload).encode()
-        sig = "sha256=" + __import__("hmac").new(
-            webhook_secret.encode(), body_bytes, __import__("hashlib").sha256
-        ).hexdigest()
-
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{n8n_url}/webhook/gca-normalizer",
-                content=body_bytes,
-                headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+        # Delega à porta canônica IngestionService._dispatch_to_n8n — cobre
+        # pré-extrator DOCX/PDF (Tesseract), seed_shared_context (questionário),
+        # persona_prompts com addendum de seções OCG estruturadas, detecção de
+        # marcador HITL, e mime_type canônico por file_type. Antes esse endpoint
+        # tinha cópia paralela com `mime_type=doc.file_type` (= 'docx' literal,
+        # rejeitado no G0 do Normalizer).
+        from app.services.ingestion_service import IngestionService
+        try:
+            await IngestionService(db)._dispatch_to_n8n(
+                doc_id=document_id,
+                project_id=project_id,
+                file_type=doc.file_type or "",
+                file_bytes=file_bytes,
             )
-            if resp.status_code not in (200, 202):
-                logger.error("ingestion.n8n_dispatch_failed", status=resp.status_code, body=resp.text[:200])
-                raise HTTPException(status_code=502, detail=f"n8n dispatch falhou: {resp.status_code}")
-
-        doc.arguider_status = "processing"
-        doc.arguider_stage = "n8n_pipeline"
-        await db.commit()
+        except Exception as exc:  # noqa: BLE001
+            logger.error(
+                "ingestion.reanalyze_dispatch_failed",
+                document_id=str(document_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            raise HTTPException(status_code=502, detail=f"Falha ao redespachar: {str(exc)[:200]}")
     else:
         from app.tasks.pipeline import pipeline_ingest_task
         pipeline_ingest_task.delay(
