@@ -495,7 +495,13 @@ export function OCGPage() {
               if (!confirm('Re-aplicar deltas de TODAS as análises Arguidor existentes? Não chama o Arguidor de novo (sem custo extra). Útil quando o prompt mudou ou o ocg_updater falhou.')) return
               setReconsolidating(true)
               try {
-                const res: any = await apiClient.post(`/projects/${id}/ocg/reconsolidate`, {})
+                // /reconsolidate chama LLM updater (DeepSeek) — pode levar 30-90s.
+                // Override timeout default do apiClient (30s) para 3min.
+                const res: any = await apiClient.post(
+                  `/projects/${id}/ocg/reconsolidate`,
+                  {},
+                  { timeout: 180000 },
+                )
                 alert(res?.data?.message || 'Reconsolidação disparada')
                 await loadData()
               } catch (err: unknown) {
@@ -517,7 +523,12 @@ export function OCGPage() {
               if (!confirm('REGENERAR o OCG do zero a partir do questionário aprovado? ATENÇÃO: chama os 8 agentes IA novamente (custo em tokens, leva 3-5min). O histórico de deltas é preservado. Continuar?')) return
               setRegenerating(true)
               try {
-                const res: any = await apiClient.post(`/projects/${id}/ocg/regenerate?confirm=true`, {})
+                // /regenerate chama 8 agentes IA (3-5min). Timeout 5min.
+                const res: any = await apiClient.post(
+                  `/projects/${id}/ocg/regenerate?confirm=true`,
+                  {},
+                  { timeout: 300000 },
+                )
                 alert(res?.data?.message || 'Regeneração disparada em background. Verifique em alguns minutos.')
                 await loadData()
               } catch (err: unknown) {

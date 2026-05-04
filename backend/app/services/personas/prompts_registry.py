@@ -26,19 +26,28 @@ from app.services.personas.lgpd import LGPD_SYSTEM_PROMPT
 from app.services.personas.negocios import NEG_SYSTEM_PROMPT
 
 
+from app.services.personas.ocg_sections_instructions import append_ocg_sections
+
+
+# Cada prompt é o canônico da persona + addendum de seções estruturadas do OCG
+# (ARQ/DBA/DEV/QA/SEG/CONF/LGPD têm chaves específicas; AUD/GP/UX/UI/NEG ficam
+# inalteradas). Resultado vai pro pipeline n8n via `_dispatch_to_n8n`.
 PERSONA_PROMPTS: dict[str, str] = {
-    "AUD": AUDITOR_SYSTEM_PROMPT,
-    "GP": GP_SYSTEM_PROMPT,
-    "ARQ": ARQ_SYSTEM_PROMPT,
-    "DBA": DBA_SYSTEM_PROMPT,
-    "DEV": DEV_SYSTEM_PROMPT,
-    "QA": QA_SYSTEM_PROMPT,
-    "UX": UX_SYSTEM_PROMPT,
-    "UI": UI_SYSTEM_PROMPT,
-    "SEG": SEG_SYSTEM_PROMPT,
-    "CONF": CONF_SYSTEM_PROMPT,
-    "LGPD": LGPD_SYSTEM_PROMPT,
-    "NEG": NEG_SYSTEM_PROMPT,
+    tag: append_ocg_sections(tag, prompt)
+    for tag, prompt in {
+        "AUD": AUDITOR_SYSTEM_PROMPT,
+        "GP": GP_SYSTEM_PROMPT,
+        "ARQ": ARQ_SYSTEM_PROMPT,
+        "DBA": DBA_SYSTEM_PROMPT,
+        "DEV": DEV_SYSTEM_PROMPT,
+        "QA": QA_SYSTEM_PROMPT,
+        "UX": UX_SYSTEM_PROMPT,
+        "UI": UI_SYSTEM_PROMPT,
+        "SEG": SEG_SYSTEM_PROMPT,
+        "CONF": CONF_SYSTEM_PROMPT,
+        "LGPD": LGPD_SYSTEM_PROMPT,
+        "NEG": NEG_SYSTEM_PROMPT,
+    }.items()
 }
 
 
@@ -46,11 +55,10 @@ CANONICAL_TAGS: frozenset[str] = frozenset(PERSONA_PROMPTS.keys())
 
 
 def get_persona_prompt(tag: str) -> str:
-    """Retorna o system prompt canônico para a tag informada.
+    """Retorna o system prompt canônico (com addendum de OCG sections) por tag.
 
     Levanta KeyError se a tag não pertencer ao Conjunto B canônico — é proibido
-    fallback genérico silencioso (CLAUDE.md §0). O caller deve tratar a tag
-    desconhecida explicitamente (rejeitar, logar erro, etc).
+    fallback genérico silencioso (CLAUDE.md §0).
     """
     if tag not in PERSONA_PROMPTS:
         raise KeyError(

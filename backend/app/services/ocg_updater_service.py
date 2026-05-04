@@ -470,6 +470,33 @@ class OCGUpdaterService:
             for d in applied
         ]
 
+        # Propaga seções estruturadas do ocg_global_delta (vindas das personas
+        # via consolidador n8n) pro updated_ocg top-level — alimenta UI do OCG
+        # (Stack, Architecture, Compliance, Testing, Security, Data). LLM updater
+        # pode escrever também nessas chaves; aqui garantimos PISO determinístico
+        # com merge raso (deep 1 nível) das contribuições das personas.
+        _CANONICAL_SECTIONS = {
+            "STACK_RECOMMENDATION", "ARCHITECTURE_OVERVIEW", "COMPLIANCE_CHECKLIST",
+            "TESTING_REQUIREMENTS", "SECURITY_PROFILE", "DATA_PROFILE",
+        }
+        incoming_delta = (arguider_analysis or {}).get("ocg_global_delta") or {}
+        for key, value in incoming_delta.items():
+            if key not in _CANONICAL_SECTIONS or not isinstance(value, dict):
+                continue
+            existing = updated_ocg.get(key)
+            if isinstance(existing, dict):
+                merged = dict(existing)
+                for sk, sv in value.items():
+                    if sk not in merged:
+                        merged[sk] = sv
+                    elif isinstance(sv, dict) and isinstance(merged[sk], dict):
+                        merged[sk] = {**merged[sk], **sv}
+                    elif isinstance(sv, list) and isinstance(merged[sk], list):
+                        merged[sk] = merged[sk] + [v for v in sv if v not in merged[sk]]
+                updated_ocg[key] = merged
+            else:
+                updated_ocg[key] = dict(value)
+
         # 5. Atualizar o registro OCG
         version_to = version_from + 1
         await self._update_ocg_record(
