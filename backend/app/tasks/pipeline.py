@@ -247,12 +247,16 @@ async def _enqueue_next_pending_document(project_id: UUID, db) -> None:
     from sqlalchemy import select, and_
     from app.models.base import IngestedDocument
 
-    # Buscar próximo doc pending (não processing) do mesmo projeto
+    # Buscar próximo doc pending (não processing) do mesmo projeto.
+    # Filtra deleted_at IS NULL — alinha com dispatch_first_pending_for_project
+    # canônico (MVP 34). Sem isso, doc soft-deleted via DELETE /ingestion/{did}
+    # ainda seria reenfileirado e o pipeline rodaria sobre material revogado.
     res = await db.execute(
         select(IngestedDocument).where(
             and_(
                 IngestedDocument.project_id == project_id,
                 IngestedDocument.arguider_status == "pending",
+                IngestedDocument.deleted_at.is_(None),
             )
         ).order_by(IngestedDocument.created_at.asc()).limit(1)
     )
