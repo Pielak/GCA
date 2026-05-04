@@ -7,19 +7,22 @@ Substituiu (2026-05-03) o caminho legado via DocumentRouteMap + AuditorOutput +
 GatekeeperPersonaResponse, que não é mais populado pelo pipeline n8n.
 """
 from __future__ import annotations
+import hashlib
+import json
 import logging
 from datetime import datetime, timezone
-from uuid import UUID
+from typing import Literal
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.exceptions import ValidationError
 from app.db.database import get_db
 from app.middleware.auth import get_current_user_from_token
-from app.models.base import IngestedDocument, PersonaFollowUpQuestion, User
+from app.models.base import IngestedDocument, PersonaFollowUpQuestion, Project, User
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["pipeline_questions"])
@@ -184,4 +187,222 @@ async def submit_pipeline_answers(
     return AnswersResponse(
         stored=stored,
         documents_reprocessed=list(docs_touched),
+    )
+
+
+# ─── Submit por persona (Save / Validate / Submit) ───
+
+
+class PersonaSubmitRequest(BaseModel):
+    answers: dict[str, str] = {}
+    mode: Literal["save", "validate", "submit"]
+
+
+class PersonaSubmitResponse(BaseModel):
+    ok: bool
+    saved: int
+    pending_count: int
+    answered_count: int
+    missing_question_ids: list[str]
+    document_id: str | None = None
+    message: str
+
+
+@router.post(
+    "/projects/{project_id}/pipeline-questions/personas/{persona_id}/submit",
+    response_model=PersonaSubmitResponse,
+)
+async def submit_persona_followup(
+    project_id: UUID,
+    persona_id: str,
+    req: PersonaSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user_from_token),
+):
+    """Salva, valida ou submete respostas HITL de UMA persona específica.
+
+    - mode='save'     → grava respostas, mantém perguntas; status=answered se
+                        texto não-vazio, pending caso contrário.
+    - mode='validate' → grava + retorna se está pronto pra submeter.
+    - mode='submit'   → grava + (se completo) cria IngestedDocument sintético
+                        com Q&A serializadas e DELETA as PFQs daquela persona.
+    """
+    persona_id_norm = persona_id.upper()
+    user_id = getattr(current_user, "id", None)
+    now = datetime.now(timezone.utc)
+
+    # 1. Salvar respostas (sempre)
+    saved = 0
+    for qid_str, answer_text in (req.answers or {}).items():
+        try:
+            qid = UUID(qid_str)
+        except (ValueError, TypeError):
+            continue
+        pfq = (
+            await db.execute(
+                select(PersonaFollowUpQuestion).where(
+                    PersonaFollowUpQuestion.id == qid,
+                    PersonaFollowUpQuestion.project_id == project_id,
+                    func.upper(PersonaFollowUpQuestion.persona_id) == persona_id_norm,
+                )
+            )
+        ).scalar_one_or_none()
+        if pfq is None:
+            continue
+        text_norm = (answer_text or "").strip()
+        await db.execute(
+            update(PersonaFollowUpQuestion)
+            .where(PersonaFollowUpQuestion.id == qid)
+            .values(
+                answer_text=text_norm or None,
+                answer_provided_at=now if text_norm else None,
+                answered_by=user_id if text_norm else None,
+                status="answered" if text_norm else "pending",
+                updated_at=now,
+            )
+        )
+        saved += 1
+
+    # 2. Recontar pendentes/respondidas
+    rows = (
+        await db.execute(
+            select(PersonaFollowUpQuestion).where(
+                PersonaFollowUpQuestion.project_id == project_id,
+                func.upper(PersonaFollowUpQuestion.persona_id) == persona_id_norm,
+            )
+        )
+    ).scalars().all()
+    missing = [str(p.id) for p in rows if (p.status or "pending") != "answered"]
+    answered_count = len(rows) - len(missing)
+
+    if req.mode == "save":
+        await db.commit()
+        return PersonaSubmitResponse(
+            ok=True,
+            saved=saved,
+            pending_count=len(missing),
+            answered_count=answered_count,
+            missing_question_ids=missing,
+            message=f"{saved} resposta(s) salva(s).",
+        )
+
+    if req.mode == "validate":
+        await db.commit()
+        if missing:
+            return PersonaSubmitResponse(
+                ok=False,
+                saved=saved,
+                pending_count=len(missing),
+                answered_count=answered_count,
+                missing_question_ids=missing,
+                message=f"{len(missing)} pergunta(s) sem resposta.",
+            )
+        return PersonaSubmitResponse(
+            ok=True,
+            saved=saved,
+            pending_count=0,
+            answered_count=answered_count,
+            missing_question_ids=[],
+            message="Todas respondidas — pronto pra submeter.",
+        )
+
+    # mode='submit' — comportamento canônico: submete APENAS as respondidas;
+    # as em branco permanecem na fila para próxima rodada. Aba só some quando
+    # todas forem respondidas/submetidas.
+    answered_rows = [r for r in rows if (r.status or "pending") == "answered"]
+    if not answered_rows:
+        await db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Nada a submeter: nenhuma resposta preenchida.",
+        )
+
+    persona_name = answered_rows[0].persona_name or persona_id_norm
+    qa_payload = [
+        {
+            "question": p.question_text,
+            "context": p.context,
+            "answer": p.answer_text,
+            "document_origin_id": str(p.document_id),
+        }
+        for p in sorted(answered_rows, key=lambda r: (r.question_order or 0, r.created_at))
+    ]
+    payload = {
+        "persona_id": persona_id_norm,
+        "persona_name": persona_name,
+        "submitted_by": str(user_id) if user_id else None,
+        "submitted_at": now.isoformat(),
+        "qa": qa_payload,
+        "qa_count": len(qa_payload),
+    }
+    payload_bytes = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    file_hash = hashlib.sha256(payload_bytes).hexdigest()
+
+    project = await db.get(Project, project_id)
+    project_name = (project.name if project else "") or "Projeto"
+    timestamp_compact = now.strftime("%Y%m%d-%H%M%S")
+    filename = f"followup-{persona_id_norm.lower()}-{timestamp_compact}.json"
+    doc = IngestedDocument(
+        id=uuid4(),
+        project_id=project_id,
+        uploaded_by=user_id,
+        original_filename=f"Respostas HITL — {persona_name} — {project_name}",
+        filename=filename,
+        file_type="persona_followup",
+        file_hash=file_hash,
+        file_size_bytes=len(payload_bytes),
+        arguider_status="completed",
+        arguider_stage="followup_synthetic",
+        arguider_progress_percent=100,
+        ocg_updated=False,
+        pii_detected=False,
+    )
+    db.add(doc)
+    await db.flush()
+    new_doc_id = doc.id
+
+    # Persistir payload no storage para extraction-report e auditoria.
+    from app.utils.ingested_storage import write_ingested
+    write_ingested(project_id, filename, payload_bytes)
+
+    # DELETE somente das respondidas — pendentes em branco continuam na fila.
+    await db.execute(
+        text(
+            "DELETE FROM persona_follow_up_questions "
+            "WHERE project_id = :pid AND upper(persona_id) = :persona "
+            "AND status = 'answered'"
+        ),
+        {"pid": str(project_id), "persona": persona_id_norm},
+    )
+
+    remaining_pending = (
+        await db.scalar(
+            select(func.count(PersonaFollowUpQuestion.id)).where(
+                PersonaFollowUpQuestion.project_id == project_id,
+                func.upper(PersonaFollowUpQuestion.persona_id) == persona_id_norm,
+            )
+        )
+    ) or 0
+
+    await db.commit()
+
+    logger.info(
+        "pipeline_questions.persona_submitted",
+        project_id=str(project_id),
+        persona_id=persona_id_norm,
+        questions_count=len(qa_payload),
+        document_id=str(new_doc_id),
+    )
+
+    msg = f"{len(qa_payload)} resposta(s) submetida(s) como evidência."
+    if remaining_pending > 0:
+        msg += f" Restam {remaining_pending} pergunta(s) em branco na aba."
+    return PersonaSubmitResponse(
+        ok=True,
+        saved=saved,
+        pending_count=remaining_pending,
+        answered_count=len(qa_payload),
+        missing_question_ids=[],
+        document_id=str(new_doc_id),
+        message=msg,
     )

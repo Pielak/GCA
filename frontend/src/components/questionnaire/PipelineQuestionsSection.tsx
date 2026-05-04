@@ -236,6 +236,7 @@ function groupByDoc(questions: PipelineQuestion[]): Record<string, PipelineQuest
 
 const SOURCE_LABELS: Record<string, string> = {
   auditor: 'Auditor',
+  aud: 'Auditor',
   gp: 'GP',
   arq: 'ARQ',
   dba: 'DBA',
@@ -243,6 +244,10 @@ const SOURCE_LABELS: Record<string, string> = {
   qa: 'QA',
   ux: 'UX',
   ui: 'UI',
+  seg: 'SEG',
+  conf: 'CONF',
+  lgpd: 'LGPD',
+  neg: 'NEG',
 }
 
 const SEVERITY_BADGE: Record<string, string> = {

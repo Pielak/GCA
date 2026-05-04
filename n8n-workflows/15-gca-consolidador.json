@@ -203,7 +203,7 @@
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($('Calcular scores e merge').first().json) }}",
         "options": {
-          "timeout": 60000,
+          "timeout": 300000,
           "retry": {
             "maxRetries": 3,
             "retryInterval": 2000

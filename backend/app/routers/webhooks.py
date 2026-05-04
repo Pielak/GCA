@@ -657,6 +657,20 @@ async def ingestion_complete(
             status=payload.status,
         )
 
+        # Puxa próximo doc da fila (sequencial 1-por-vez por projeto).
+        try:
+            from uuid import UUID as _UUID
+            from app.services.ingestion_service import (
+                dispatch_first_pending_for_project,
+            )
+            await dispatch_first_pending_for_project(db, _UUID(project_id))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "webhook.dispatch_next_failed",
+                project_id=project_id,
+                error=str(exc),
+            )
+
         return {"status": "processed", "ingestion_id": doc_id}
 
     except Exception as e:

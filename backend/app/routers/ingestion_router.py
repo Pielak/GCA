@@ -807,6 +807,46 @@ async def get_extraction_report(
             "text_sample": text_sample,
         }
 
+    # Documento sintético de respostas HITL (persona_followup): payload Q&A
+    # serializado no próprio doc, não há arquivo no storage.
+    if doc.file_type == "persona_followup":
+        import json as _json
+        from app.utils.ingested_storage import read_ingested as _read
+        raw = _read(project_id, doc.filename)
+        try:
+            payload = _json.loads(raw.decode("utf-8")) if raw else {}
+        except Exception:  # noqa: BLE001
+            payload = {}
+        qa = payload.get("qa") or []
+        sample_lines = []
+        for item in qa[:10]:
+            q = (item.get("question") or "")[:120]
+            a = (item.get("answer") or "")[:120]
+            sample_lines.append(f"Q: {q}\nA: {a}")
+        text_sample = "\n\n".join(sample_lines)
+        return {
+            "document_id": str(document_id),
+            "original_filename": doc.original_filename,
+            "file_type": "persona_followup",
+            "ok": len(qa) > 0,
+            "chars": len(text_sample),
+            "paragraphs": len(qa),
+            "tables_detected": 0,
+            "text_boxes": 0,
+            "headers_footers": 0,
+            "pdf_layers": [],
+            "pdf_pages_with_text": 0,
+            "acroform_fields": 0,
+            "requirements_functional": [],
+            "requirements_non_functional": [],
+            "module_hints": [payload.get("persona_name") or payload.get("persona_id") or ""],
+            "implicit_requirements": [],
+            "deliverables_hints": [],
+            "phases_hints": [],
+            "warnings": [],
+            "text_sample": text_sample,
+        }
+
     file_bytes = read_ingested(project_id, doc.filename)
     if file_bytes is None:
         raise HTTPException(

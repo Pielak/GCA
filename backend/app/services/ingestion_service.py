@@ -106,6 +106,92 @@ async def _propagate_async(
         )
 
 
+async def dispatch_first_pending_for_project(
+    db: AsyncSession,
+    project_id: UUID,
+) -> Optional[UUID]:
+    """Dispatcher canônico de fila por projeto (1-por-vez, n8n ou Celery).
+
+    Sob advisory lock Postgres por project_id (atômico contra uploads
+    paralelos):
+      1. Se já existe doc 'processing' (não-deleted), nada a fazer.
+      2. Senão, pega o doc 'pending' mais antigo, marca 'processing' e
+         dispara o pipeline (n8n se INGESTION_VIA_N8N, senão Celery).
+
+    Chamado em 2 lugares:
+      - upload_document → puxa o que acabou de chegar.
+      - webhook /ingestion-complete → puxa o próximo da fila quando o
+        anterior termina.
+
+    Retorna o UUID do doc despachado, ou None se nada a fazer.
+    """
+    from sqlalchemy import text as _text
+    from app.core.config import settings
+    from app.models.base import IngestedDocument as _IngDoc
+    from app.tasks.pipeline import pipeline_ingest_task
+
+    # Advisory lock por project_id — serializa concorrência sem locking de tabela.
+    await db.execute(
+        _text("SELECT pg_advisory_xact_lock(hashtextextended(:pid, 0))"),
+        {"pid": str(project_id)},
+    )
+
+    # Já há um processando?
+    in_flight = await db.scalar(
+        select(func.count(_IngDoc.id)).where(
+            and_(
+                _IngDoc.project_id == project_id,
+                _IngDoc.arguider_status == "processing",
+                _IngDoc.deleted_at.is_(None),
+            )
+        )
+    )
+    if in_flight and in_flight > 0:
+        return None
+
+    # Próximo pending mais antigo (exclui questionnaire — sintético, não pipeline).
+    res = await db.execute(
+        select(_IngDoc).where(
+            and_(
+                _IngDoc.project_id == project_id,
+                _IngDoc.arguider_status == "pending",
+                _IngDoc.deleted_at.is_(None),
+                _IngDoc.file_type != "questionnaire",
+            )
+        ).order_by(_IngDoc.created_at.asc()).limit(1)
+    )
+    next_doc = res.scalar_one_or_none()
+    if next_doc is None:
+        return None
+
+    # Marca processing antes de soltar o lock — outras requests verão in_flight=1.
+    next_doc.arguider_status = "processing"
+    next_doc.arguider_stage = "queued"
+    await db.flush()
+    doc_id = next_doc.id
+    file_type = next_doc.file_type or ""
+
+    # Bytes do storage (n8n precisa do payload base64; Celery faz por id).
+    use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
+    if use_n8n:
+        from app.utils.ingested_storage import read_ingested
+        file_bytes = read_ingested(project_id, next_doc.filename) or b""
+        await db.commit()
+        svc = IngestionService(db)
+        await svc._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
+    else:
+        await db.commit()
+        pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type)
+
+    logger.info(
+        "ingestion.dispatched_from_queue",
+        document_id=str(doc_id),
+        project_id=str(project_id),
+        pipeline="n8n" if use_n8n else "celery",
+    )
+    return doc_id
+
+
 async def _reevaluate_gatekeeper_for_audit(
     db: AsyncSession,
     project_id: UUID,
@@ -376,6 +462,30 @@ class IngestionService:
                     error=str(exc),
                 )
 
+        # Seed do shared_context: respostas do Questionário Técnico aprovado.
+        # Sem isto cada persona analisa o doc no vácuo (DBA não sabe que é SQL,
+        # SEG não sabe que é OAuth2 etc). Conferente funde com seu summary.
+        from app.models.base import TechnicalQuestionnaire as _TQ
+        tq_row = (
+            await self.db.execute(
+                select(_TQ)
+                .where(
+                    _TQ.project_id == project_id,
+                    _TQ.status == "submitted",
+                )
+                .order_by(_TQ.submitted_at.desc().nullslast())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        seed_shared_context: dict = {}
+        if tq_row is not None:
+            seed_shared_context = {
+                "questionnaire_responses": tq_row.responses or {},
+                "questionnaire_submitted_at": (
+                    tq_row.submitted_at.isoformat() if tq_row.submitted_at else None
+                ),
+            }
+
         n8n_payload = {
             "ingestion_id": str(doc_id),
             "project_id": str(project_id),
@@ -390,6 +500,7 @@ class IngestionService:
             },
             "provider_chain": chain_data,
             "persona_prompts": dict(PERSONA_PROMPTS),
+            "seed_shared_context": seed_shared_context,
             "callback_url": f"{getattr(settings, 'GCA_CALLBACK_BASE_URL', 'http://gca-backend:8000')}/api/v1/webhooks/ingestion-complete",
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -751,60 +862,22 @@ class IngestionService:
                 ),
             }
 
-        # MVP X Fase X.Y — Processamento sequencial de documentos por projeto.
-        # Enfileira APENAS se não há outro documento em processamento no projeto.
-        # Reduz tokens (análise paralela pesada) + risco de alucinação.
-        from app.tasks.pipeline import pipeline_ingest_task
-        from app.core.config import settings
-
-        # Checar se há outro doc em processamento neste projeto
-        # MVP 34: ignora docs soft-deleted no contador de fila.
-        processing_count = await self.db.scalar(
-            select(func.count(IngestedDocument.id)).where(
-                and_(
-                    IngestedDocument.project_id == project_id,
-                    IngestedDocument.arguider_status == "processing",
-                    IngestedDocument.deleted_at.is_(None),
-                )
-            )
-        )
-
-        use_n8n = getattr(settings, "INGESTION_VIA_N8N", False)
-
-        try:
-            # Se nenhum em processamento, dispara pipeline (n8n ou Celery)
-            # MVP 35 (Arq-M1): questionnaire é sintético — NÃO entra no pipeline.
-            if processing_count == 0 and file_type != "questionnaire":
-                if use_n8n:
-                    await self._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
-                else:
-                    pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type or "")
-                logger.info(
-                    "ingestion.document_enqueued",
+        # Processamento sequencial canônico: doc nasce 'pending', dispatcher
+        # com advisory lock garante 1-por-vez por projeto (sem race no upload
+        # paralelo). Próximo doc é puxado pelo callback /ingestion-complete.
+        # Questionnaire é sintético (Arq-M1) — não entra no pipeline.
+        if file_type != "questionnaire":
+            try:
+                await dispatch_first_pending_for_project(self.db, project_id)
+            except Exception as exc:  # noqa: BLE001
+                logger.error(
+                    "ingestion.dispatch_first_pending_failed",
                     document_id=str(doc_id),
                     project_id=str(project_id),
-                    position="first",
-                    pipeline="n8n" if use_n8n else "celery",
+                    error=str(exc),
+                    exc_info=True,
                 )
-            else:
-                # Há outro em processamento — este ficará na fila (pending) até callback do anterior
-                logger.info(
-                    "ingestion.document_queued_waiting",
-                    document_id=str(doc_id),
-                    project_id=str(project_id),
-                    position="waiting_sequential",
-                )
-        except Exception as exc:
-            # Se enfileiramento falhar (Celery/Redis indisponível),
-            # registra erro explícito + watchdog (DT-073) reconsiliaará.
-            logger.error(
-                "ingestion.celery_enqueue_failed",
-                document_id=str(doc_id),
-                project_id=str(project_id),
-                error=str(exc),
-                exc_info=True,
-            )
-            # Continua mesmo que falhe — watchdog vai reprocessar
+                # Continua — watchdog (DT-073) reconsilia se ficou órfão
 
         logger.info(
             "ingestion.document_uploaded",

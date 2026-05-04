@@ -65,3 +65,51 @@ export function usePipelineQuestions(projectId: string | undefined) {
     refetch: query.refetch,
   }
 }
+
+
+// ─── Submit por persona (save | validate | submit) ───
+
+export interface PersonaSubmitResponse {
+  ok: boolean
+  saved: number
+  pending_count: number
+  answered_count: number
+  missing_question_ids: string[]
+  document_id: string | null
+  message: string
+}
+
+export function usePersonaSubmit(projectId: string | undefined) {
+  const toast = useToast()
+  const qc = useQueryClient()
+
+  const mutation = useMutation({
+    mutationFn: async (args: {
+      personaId: string
+      mode: 'save' | 'validate' | 'submit'
+      answers: Record<string, string>
+    }) => {
+      const res = await apiClient.post<PersonaSubmitResponse>(
+        `/projects/${projectId}/pipeline-questions/personas/${args.personaId}/submit`,
+        { answers: args.answers, mode: args.mode }
+      )
+      return res.data
+    },
+    onSuccess: (data, vars) => {
+      if (vars.mode === 'submit') {
+        toast.success(data.message || 'Respostas submetidas como evidência.')
+        qc.invalidateQueries({ queryKey: ['pipeline-questions', projectId] })
+      } else if (vars.mode === 'save') {
+        toast.success(data.message || 'Respostas salvas.')
+      }
+    },
+    onError: (err: unknown) => {
+      toast.error(getErrorMessage(err) || 'Falha na operação.')
+    },
+  })
+
+  return {
+    runPersona: mutation.mutateAsync,
+    isPending: mutation.isPending,
+  }
+}

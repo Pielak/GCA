@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { Loader2, CheckCircle2, AlertCircle, Download, Upload, Sparkles } from 'lucide-react'
 import { apiClient } from '@/lib/api'
 import { useIterativeQuestionnaireStatus } from '@/hooks/useIterativeQuestionnaireStatus'
+import { PersonaFollowUpTabs } from '@/components/questionnaire/PersonaFollowUpTabs'
 
 const PILLAR_LABELS: Record<string, string> = {
   P1_business_case: 'Caso de Negócio',
@@ -65,9 +66,21 @@ export function IterativeQuestionnairePage() {
       <header className="mb-6">
         <h1 className="text-xl font-semibold text-slate-100 mb-1">Questões em Aberto</h1>
         <p className="text-xs text-slate-500">
-          Perguntas geradas a partir dos pilares deficitários do OCG. Meta: overall ≥ 90 e todos os pilares ≥ 75.
+          Perguntas das personas técnicas (geradas durante a ingestão) e das iterações
+          de pilares deficitários do OCG. Meta: overall ≥ 90 e todos os pilares ≥ 75.
         </p>
       </header>
+
+      {/* HITL — perguntas das personas: sub-abas por persona, com Salvar / Validar / Submeter.
+          Submit cria IngestedDocument 'persona_followup' e remove perguntas. */}
+      {projectId && (
+        <section className="mb-8">
+          <h2 className="text-sm font-semibold text-slate-200 mb-2 flex items-center gap-2">
+            Perguntas das personas (HITL)
+          </h2>
+          <PersonaFollowUpTabs projectId={projectId} />
+        </section>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
