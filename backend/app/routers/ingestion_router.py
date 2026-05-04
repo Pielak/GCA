@@ -262,7 +262,25 @@ async def cancel_document(
         project_id=str(project_id),
         canceled_by=str(current_user_id),
     )
-    return {"message": "Documento cancelado.", "document_id": str(document_id)}
+
+    # Destrava a fila do projeto: cancelar tira o doc de processing/pending,
+    # então o próximo doc 'pending' precisa ser puxado. Sem isso, a fila
+    # morre até alguém uploadar mais um arquivo (que dispara o despachante).
+    from app.services.ingestion_service import dispatch_first_pending_for_project
+    dispatched = await dispatch_first_pending_for_project(db, project_id)
+    if dispatched:
+        logger.info(
+            "ingestion.next_dispatched_after_cancel",
+            project_id=str(project_id),
+            canceled_doc=str(document_id),
+            next_doc=str(dispatched),
+        )
+
+    return {
+        "message": "Documento cancelado.",
+        "document_id": str(document_id),
+        "next_dispatched": str(dispatched) if dispatched else None,
+    }
 
 
 @router.post("/projects/{project_id}/ingestion/{document_id}/release")
