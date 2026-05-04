@@ -545,7 +545,85 @@ class IngestionService:
         )
         await self.db.commit()
 
-        # 5. Dispara próximo da fila (este doc não vai pro pipeline)
+        # 5. F2 — Recompute do OCG considerando as respostas HITL.
+        # Decisão arquitetural (gate DBA aprovado): chamada feita em
+        # transação SEPARADA (nova sessão), após commit das PFQs, pra
+        # respeitar a invariante de ordem de locks documentada em
+        # ocg_updater_service.py:273 (asyncio.Lock antes do advisory).
+        # Trade-off LLM vs heurística: optamos por LLM completo (~R$0,02
+        # por HITL) — é robusto, sem refactor do OCGUpdaterService, e o
+        # próprio LLM julga se as respostas justificam expansão (preserva
+        # o invariante "OCG só expande quando recebe informação de valor"
+        # do CLAUDE.md GCA §2.4).
+        if updated > 0:
+            try:
+                from app.db.database import AsyncSessionLocal
+                from app.services.ocg_updater_service import (
+                    OCGUpdaterService,
+                    TRIGGER_HITL_FOLLOWUP,
+                )
+
+                # arguider_analysis sintético: respostas HITL como contexto
+                # textual, persona_id pra rotear MAX-por-persona corretamente.
+                arguider_analysis_synthetic = {
+                    "persona_id": persona_id_norm,
+                    "trigger": "hitl_followup",
+                    "hitl_answers": [
+                        {"pfq_id": pfq_id, "answer": ans}
+                        for pfq_id, ans in parsed.items()
+                    ],
+                    "answered_count": updated,
+                }
+
+                async with AsyncSessionLocal() as ocg_db:
+                    ocg_svc = OCGUpdaterService(ocg_db)
+                    ocg_result = await ocg_svc.update_ocg_from_arguider(
+                        project_id=project_id,
+                        arguider_analysis=arguider_analysis_synthetic,
+                        document_id=doc_id,
+                        actor_id=None,
+                        trigger_source=TRIGGER_HITL_FOLLOWUP,
+                    )
+                    logger.info(
+                        "ingestion.hitl_ocg_updated",
+                        document_id=str(doc_id),
+                        project_id=str(project_id),
+                        persona_id=persona_id_norm,
+                        answered=updated,
+                        version_to=(ocg_result or {}).get("version_to"),
+                    )
+
+                # 5b. Audit dedicado HITL (DBA C4) — registra pfq_ids
+                # respondidos pra rastreabilidade. correlation_id aponta
+                # ao IngestedDocument HITL pra reconstituir a cadeia.
+                async with AsyncSessionLocal() as audit_db:
+                    from app.services.audit_service import AuditService
+                    aud = AuditService(audit_db)
+                    await aud.log_event(
+                        event_type="HITL_RESPONSES_RECEIVED",
+                        resource_type="ingested_document",
+                        resource_id=doc_id,
+                        details={
+                            "pfq_ids": list(parsed.keys()),
+                            "persona_id": persona_id_norm,
+                            "answered_count": updated,
+                            "total_in_upload": len(parsed),
+                        },
+                        correlation_id=doc_id,
+                    )
+                    await audit_db.commit()
+            except Exception as exc:  # noqa: BLE001
+                # Falha do recompute não derruba o registro HITL — as PFQs
+                # já estão persistidas como answered. Logar pra investigação.
+                logger.error(
+                    "ingestion.hitl_ocg_recompute_failed",
+                    document_id=str(doc_id),
+                    project_id=str(project_id),
+                    error=str(exc),
+                    exc_info=True,
+                )
+
+        # 6. Dispara próximo da fila (este doc não vai pro pipeline)
         try:
             await dispatch_first_pending_for_project(self.db, project_id)
         except Exception as exc:  # noqa: BLE001
@@ -594,6 +672,55 @@ class IngestionService:
         from app.models.base import IngestedDocument
         doc = await self.db.get(IngestedDocument, doc_id)
 
+        # F1-C2 (Arquiteto): Para imagens, filtra a chain por providers
+        # com capability Vision. DeepSeek/Ollama-text recebendo payload
+        # multimodal falha silenciosamente — pré-filtra no backend.
+        # Reutiliza PROVIDERS_WITH_VISION canônico de vision_service.
+        if file_type == "image":
+            from app.services.vision_service import PROVIDERS_WITH_VISION
+            chain_data = [c for c in chain_data if c["provider"] in PROVIDERS_WITH_VISION]
+            if not chain_data:
+                # Sem provider Vision → notifica GPs e curto-circuita
+                # (não enfileira no n8n — config gap, não erro de sistema).
+                try:
+                    from app.services.notification_inapp_service import InAppNotificationService
+                    from app.models.base import ProjectMember
+                    gps_q = await self.db.execute(
+                        select(ProjectMember).where(
+                            ProjectMember.project_id == project_id,
+                            ProjectMember.role == "gp",
+                            ProjectMember.is_active == True,
+                        )
+                    )
+                    notif = InAppNotificationService(self.db)
+                    for gp in gps_q.scalars().all():
+                        await notif.notify(
+                            user_id=gp.user_id,
+                            event_type="vision_provider_missing",
+                            title="Provider com Visão não configurado",
+                            message=(
+                                "A imagem enviada exige um provedor de IA com "
+                                "capacidade de Visão (Anthropic ou OpenAI). "
+                                "Configure em Configurações → IA antes de re-enviar."
+                            ),
+                            severity="warning",
+                            project_id=project_id,
+                            resource_type="ingested_document",
+                            resource_id=doc_id,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("ingestion.vision_notify_failed", error=str(exc))
+                # Marca doc como erro com mensagem clara
+                if doc:
+                    doc.arguider_status = "error"
+                    doc.arguider_stage = "failed"
+                    doc.arguider_error_message = (
+                        "Imagem requer provedor com Vision (Anthropic ou OpenAI). "
+                        "Configure em Configurações → IA."
+                    )
+                    await self.db.commit()
+                return
+
         # Mime type a partir do file_type
         mime_map = {
             "pdf": "application/pdf",
@@ -602,7 +729,47 @@ class IngestionService:
             "text": "text/plain",
             "code": "text/plain",
         }
-        mime_type = mime_map.get(file_type, "application/octet-stream")
+        # F1-C1 (Arquiteto): Para image, deriva mime da extensão real do
+        # arquivo. mime_map.get('image') retornaria octet-stream e a API
+        # Anthropic rejeitaria o payload (mime inválido para source.type='base64').
+        if file_type == "image" and doc:
+            ext_to_mime = {
+                "png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg",
+                "gif": "image/gif", "webp": "image/webp",
+            }
+            ext = (doc.original_filename or "").rsplit(".", 1)[-1].lower()
+            mime_type = ext_to_mime.get(ext, "image/png")  # fallback seguro
+            if ext == "gif":
+                logger.info("ingestion.gif_first_frame_only", doc_id=str(doc_id))
+
+            # F1-C5 (Arquiteto): registra evento de extração Vision com
+            # estimativa de tokens. Cliente AJA precisa de rastreabilidade
+            # de custo por documento (50 prints WhatsApp ≈ 80k tokens).
+            # Estimativa: ~1600 tokens input por imagem 1024px (Anthropic),
+            # ~200 tokens output (texto extraído). Refinamento real chega
+            # via callback /ingestion-complete e sobrescreve.
+            try:
+                from app.services.ai_billing_service import AIBillingService
+                if chain_data:  # já filtrado por PROVIDERS_WITH_VISION acima
+                    billing = AIBillingService(self.db)
+                    await billing.log_usage(
+                        project_id=project_id,
+                        provider=chain_data[0]["provider"],
+                        model=chain_data[0].get("model") or "vision-default",
+                        operation="vision_extraction_estimate",
+                        tokens_input=1600,
+                        tokens_output=200,
+                        metadata={
+                            "doc_id": str(doc_id),
+                            "filename": doc.original_filename,
+                            "mime_type": mime_type,
+                            "estimate": True,
+                        },
+                    )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("ingestion.vision_billing_log_failed", error=str(exc))
+        else:
+            mime_type = mime_map.get(file_type, "application/octet-stream")
 
         # DOCX/PDF: Normalizer n8n não tem extrator nativo (sem require()) e
         # o caminho Vision LLM tem URL/provider frágeis. Pré-extraímos texto
