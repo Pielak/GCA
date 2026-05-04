@@ -148,6 +148,16 @@ class AuditService:
     ) -> GlobalAuditLog:
         """Registra evento com hash chain encadeado"""
 
+        # Serializa _get_last_hash + INSERT cross-process. Sem isso, duas
+        # corrotinas/workers concorrentes leem o mesmo previous_hash e
+        # bifurcam a hash chain. Lock global (chave fixa) — volume de
+        # auditoria não justifica granularidade por projeto. Libera no
+        # COMMIT/ROLLBACK da transação atual.
+        from sqlalchemy import text as _text
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtext('gca_audit_chain'))")
+        )
+
         # Buscar hash do último registro para encadear
         previous_hash = await self._get_last_hash()
 

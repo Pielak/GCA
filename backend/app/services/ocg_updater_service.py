@@ -266,6 +266,19 @@ class OCGUpdaterService:
             actor_id=str(actor_id) if actor_id else None,
         )
 
+        # Defesa em profundidade — advisory lock cross-process.
+        # asyncio.Lock acima protege concorrência dentro do mesmo worker;
+        # pg_advisory_xact_lock protege concorrência entre workers Celery
+        # (ou múltiplas instâncias do backend) sobre o MESMO project_id.
+        # Invariante de ordem: asyncio.Lock SEMPRE antes do advisory.
+        # Inverter = risco de deadlock cross-process.
+        # Padrão alinhado com ingestion_service.dispatch_first_pending_for_project.
+        from sqlalchemy import text as _text
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtextextended(:pid, 0))"),
+            {"pid": str(project_id)},
+        )
+
         # 1. Carregar OCG atual
         ocg = await self._load_current_ocg(project_id)
         if not ocg:

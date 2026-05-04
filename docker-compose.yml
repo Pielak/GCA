@@ -71,6 +71,7 @@ services:
       POSTGRES_USER: gca
       POSTGRES_PASSWORD: gca_secret
       INGESTION_VIA_N8N: "true"
+      INGESTION_MAX_PARALLEL_PER_PROJECT: "${INGESTION_MAX_PARALLEL_PER_PROJECT:-1}"
       N8N_BASE_URL: ${N8N_BASE_URL:-http://n8n:5678}
       GCA_CALLBACK_BASE_URL: ${GCA_CALLBACK_BASE_URL:-http://gca-backend:8000}
       GCA_WEBHOOK_SECRET: "45b64e16b5653718023408419aade9a9a35ab244d1897bccebf51270f3b1cb6b"
@@ -120,6 +121,8 @@ services:
       POSTGRES_DB: gca
       POSTGRES_USER: gca
       POSTGRES_PASSWORD: gca_secret
+      INGESTION_VIA_N8N: "true"
+      INGESTION_MAX_PARALLEL_PER_PROJECT: "${INGESTION_MAX_PARALLEL_PER_PROJECT:-1}"
     depends_on:
       postgres:
         condition: service_healthy

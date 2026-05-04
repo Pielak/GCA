@@ -136,7 +136,9 @@ async def dispatch_first_pending_for_project(
         {"pid": str(project_id)},
     )
 
-    # Já há um processando?
+    # Quantos já estão processando? Habilita paralelismo configurável.
+    # Default=1 preserva FIFO sequencial; N>1 paraleliza até o teto.
+    max_parallel = getattr(settings, "INGESTION_MAX_PARALLEL_PER_PROJECT", 1)
     in_flight = await db.scalar(
         select(func.count(_IngDoc.id)).where(
             and_(
@@ -146,7 +148,7 @@ async def dispatch_first_pending_for_project(
             )
         )
     )
-    if in_flight and in_flight > 0:
+    if in_flight and in_flight >= max_parallel:
         return None
 
     # Próximo pending mais antigo (exclui questionnaire — sintético, não pipeline).

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
 
     # n8n Pipeline v2
     INGESTION_VIA_N8N: bool = False
+    # Paralelismo do dispatcher de ingestão por projeto.
+    # Default=1 preserva comportamento sequencial. Sweet spot=5 para
+    # tier pago DeepSeek (~600k tok/min) com folga.
+    # Regra operacional (engine usa NullPool, então DATABASE_POOL_SIZE
+    # é letra morta): N <= floor((max_connections - 20 headroom) /
+    # n_projetos_ativos / 3 sessoes_por_doc). Com max_connections=100
+    # padrão e 2 projetos ativos: N <= 13. Confortável até N=5.
+    INGESTION_MAX_PARALLEL_PER_PROJECT: int = 1
     N8N_BASE_URL: str = "http://localhost:5678"
     GCA_CALLBACK_BASE_URL: str = "http://localhost:8000"
     GCA_WEBHOOK_SECRET: str = ""

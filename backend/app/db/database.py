@@ -23,7 +23,11 @@ engine = create_async_engine(
     echo=settings.DATABASE_ECHO,
     connect_args={
         "timeout": 10,
-        "command_timeout": 10,
+        # command_timeout removido: pg_advisory_xact_lock pode aguardar
+        # minutos quando há paralelismo de ingestão (pipeline leva 5-7min
+        # por doc). Valor anterior de 10s cancelava o lock e quebrava a
+        # transação inteira. Timeout por query específica deve ser feito
+        # via `SET LOCAL statement_timeout` na rota que justificar.
     },
 )
 
