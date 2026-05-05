@@ -179,7 +179,7 @@ class ProjectBackup(Base):
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    trigger_source = Column(String(40), nullable=False)
+    trigger_source = Column(String(50), nullable=False)
     status = Column(String(20), nullable=False, default="running")
     file_path = Column(String(500), nullable=True)  # relativo ao volume gca-backups
     size_bytes = Column(Integer, nullable=False, default=0)
@@ -1575,6 +1575,13 @@ class PersonaFollowUpQuestion(Base):
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    # Índice composto criado pela migration 070 (DBA F2 R1) — UPDATE do
+    # _process_followup_upload filtra (project_id, persona_id, status='pending')
+    # em loop por pfq_id. Elimina seq-scan em projetos com muitas PFQs.
+    __table_args__ = (
+        Index("idx_pfq_project_persona_status", "project_id", "persona_id", "status"),
     )
 
     def __repr__(self) -> str:
