@@ -1,35 +1,25 @@
-"""MVP 13 Fase 13.3a — tasks Celery do pipeline de ingestão.
+"""Fase 2 — Tasks Dramatiq do pipeline de ingestão.
 
-Primeiro ponto de migração asyncio → Celery. Escopo mínimo: envelopa
-`IngestionService._analyze_async` numa task Celery chamada
-`pipeline_ingest_task`, mantendo a assinatura semântica original.
+Migração de Celery → Dramatiq para estabilidade do asyncio event loop.
+9 tasks convertidas com retry middleware canônico + ACK na conclusão.
 
-A task:
-- Recebe apenas IDs + metadados leves (bytes vão pelo storage, não
-  pelo broker — evita encher Redis com payload pesado).
-- Abre nova AsyncSession dedicada (worker roda em processo separado
-  do backend).
-- Lê bytes do storage path gravado no `IngestedDocument`.
-- Invoca `_analyze_async` via `asyncio.run` (Celery task é sync).
-- Retry bounded: max_retries=2, exponencial + jitter.
-
-Outros pontos de `asyncio.create_task` no pipeline seguem cobertos
-por 13.3b/c ou pelo watchdog DT-073 até lá.
+Actor setup:
+- queue_name: 'default' (lite) ou 'llm_heavy' (OCG consolidation)
+- max_retries: 2-3 com exponencial backoff
+- Sem result backend — jobs são fire-and-forget com telemetria em logs
 """
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Coroutine
+from typing import Any, Optional
 from uuid import UUID
 
+import dramatiq
 import structlog
 
-from app.celery_app import celery_app
+from app.dramatiq_app import broker  # noqa: F401
+from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated  # noqa: F401
 
 logger = structlog.get_logger(__name__)
-
-
-from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated  # noqa: E402,F401
 
 
 # MVP 29 Fase 29.3 — Lease helper canônico para idempotência de tasks
@@ -100,11 +90,13 @@ def _try_claim_task_lease(key: str, ttl_seconds: int = _LEASE_TTL_SECONDS) -> bo
     claimou nos últimos `ttl_seconds`. Nunca levanta — se o Redis estiver
     inacessível, devolve True (fail-open: melhor rodar duas vezes que
     travar o pipeline).
+
+    Usa Redis DB 2 (mesmo do Celery, compartilhado durante Fase 2).
     """
     try:
         import redis  # importado lazy pra manter a task leve em startup
-        from app.celery_app import _resolve_broker_url
-        client = redis.Redis.from_url(_resolve_broker_url(), decode_responses=True)
+        # DB 2 compartilhado (Celery/Dramatiq durante transição)
+        client = redis.Redis(host="redis", port=6379, db=2, decode_responses=True)
         acquired = client.set(key, "1", nx=True, ex=ttl_seconds)
         if not acquired:
             logger.info("task.lease_already_claimed", key=key)
@@ -122,43 +114,17 @@ def _lease_key(task_name: str, project_id: str, version: Any) -> str:
     return f"gca:task:{task_name}:{project_id}:{v}"
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.watchdog_ingestion_zombies",
-    bind=True,
-)
-def watchdog_ingestion_zombies(self, threshold_minutes: int = 8) -> dict:
-    """Task periódica do Celery beat: marca docs zombie como 'error'.
-
-    Sem essa task o watchdog só rodava no startup do backend (lifespan),
-    e docs presos em status='processing' ficavam zombie até o próximo
-    restart. Agora é checado a cada 5 min independentemente.
-
-    Returns: {checked, recovered, threshold_minutes}
-    """
-    from app.services.ingestion_watchdog import recover_zombie_documents
-    try:
-        result = _run_coro_isolated(recover_zombie_documents(threshold_minutes=threshold_minutes))
-        if result.get("recovered"):
-            logger.warning(
-                "watchdog.recovered",
-                recovered=result["recovered"],
-                checked=result["checked"],
-                threshold_minutes=threshold_minutes,
-            )
-        return result
-    except Exception as exc:  # noqa: BLE001
-        logger.error("watchdog.failed", error=str(exc), exc_info=True)
-        return {"status": "error", "error": str(exc)[:500]}
+# Watchdog de ingestão movido para APScheduler (Fase 1)
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.pipeline_ingest_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
-    acks_late=True,
+    min_backoff=30_000,
+    max_backoff=120_000,
+    time_limit=600_000,
 )
-def pipeline_ingest_task(self, document_id: str, project_id: str, file_type: str) -> dict:
+def pipeline_ingest_task(document_id: str, project_id: str, file_type: str) -> dict:
     """Roda `IngestionService._analyze_async` como task Celery.
 
     Args:
@@ -206,13 +172,10 @@ def pipeline_ingest_task(self, document_id: str, project_id: str, file_type: str
             "pipeline_ingest_task.failed",
             document_id=document_id,
             project_id=project_id,
-            retries_remaining=self.max_retries - self.request.retries,
             error=str(exc),
         )
-        # Retry apenas infra (task levanta); erros de domínio já foram
-        # gravados no doc como arguider_status='error' dentro do
-        # _analyze_async e NÃO levantam daqui.
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        # Dramatiq middleware trata retry com backoff automático
+        raise
 
     return {
         "status": "ok",
@@ -247,7 +210,7 @@ async def _enqueue_next_pending_document(project_id: UUID, db) -> None:
 
     if next_doc:
         try:
-            pipeline_ingest_task.delay(
+            pipeline_ingest_task.send(
                 str(next_doc.id), str(project_id), next_doc.file_type or ""
             )
             logger.info(
@@ -349,13 +312,13 @@ async def _run_analyze_async(document_id: str, project_id: str, file_type: str) 
 # ─── Fase 13.3b: propagate / regenerate_backlog / reevaluate_gatekeeper ──
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.propagate_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
-def propagate_task(self, project_id: str, changes: list, ocg_version) -> dict:
+def propagate_task(project_id: str, changes: list, ocg_version) -> dict:
     """Propaga mudanças do OCG (backlog/codegen/livedocs) via Celery.
 
     Substitui `asyncio.create_task(_propagate_async(...))` em
@@ -386,7 +349,7 @@ def propagate_task(self, project_id: str, changes: list, ocg_version) -> dict:
         _run_coro_isolated(_run_propagate(project_id, changes, ocg_version))
     except Exception as exc:  # noqa: BLE001
         logger.error("propagate_task.failed", project_id=project_id, error=str(exc))
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "project_id": project_id}
 
 
@@ -399,13 +362,13 @@ async def _run_propagate(project_id: str, changes: list, ocg_version) -> None:
     )
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.regenerate_backlog_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
-def regenerate_backlog_task(self, project_id: str, ocg_version, trigger: str) -> dict:
+def regenerate_backlog_task(project_id: str, ocg_version, trigger: str) -> dict:
     """Regenera backlog a partir do OCG atual. Substitui
     `asyncio.create_task(_regenerate_backlog_async(...))` em
     ingestion_service linha 255 pré-13.3b.
@@ -436,7 +399,7 @@ def regenerate_backlog_task(self, project_id: str, ocg_version, trigger: str) ->
         _run_coro_isolated(_run_regenerate_backlog(project_id, ocg_version, trigger))
     except Exception as exc:  # noqa: BLE001
         logger.error("regenerate_backlog_task.failed", project_id=project_id, error=str(exc))
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "project_id": project_id}
 
 
@@ -449,13 +412,13 @@ async def _run_regenerate_backlog(project_id: str, ocg_version, trigger: str) ->
     )
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.reevaluate_gatekeeper_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
-def reevaluate_gatekeeper_task(self, project_id: str, ocg_version, trigger: str) -> dict:
+def reevaluate_gatekeeper_task(project_id: str, ocg_version, trigger: str) -> dict:
     """Reavalia Gatekeeper pós-OCG. Substitui
     `asyncio.create_task(_reevaluate_gatekeeper_async(...))` em
     ingestion_service linhas 263 e 1338 pré-13.3b.
@@ -464,7 +427,7 @@ def reevaluate_gatekeeper_task(self, project_id: str, ocg_version, trigger: str)
         _run_coro_isolated(_run_reevaluate_gatekeeper(project_id, ocg_version, trigger))
     except Exception as exc:  # noqa: BLE001
         logger.error("reevaluate_gatekeeper_task.failed", project_id=project_id, error=str(exc))
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "project_id": project_id}
 
 
@@ -491,13 +454,14 @@ async def _run_reevaluate_gatekeeper(project_id: str, ocg_version, trigger: str)
 # - max_retries=3, countdown exponencial 30/120/480s. Após esgotar:
 #   arguider_status='ocg_pending' com mensagem clara.
 
-@celery_app.task(
-    name="app.tasks.pipeline.process_ingestion_complete_ocg",
-    bind=True,
+@dramatiq.actor(
+    queue_name="llm_heavy",
     max_retries=3,
-    acks_late=True,
+    min_backoff=30_000,
+    max_backoff=480_000,
+    time_limit=600_000,
 )
-def process_ingestion_complete_ocg(self, ingestion_id: str, project_id: str) -> dict:
+def process_ingestion_complete_ocg(ingestion_id: str, project_id: str) -> dict:
     """Processa OCG update do callback /ingestion-complete em background.
 
     Chamada apenas com IDs (Arq CR-1, decisão Opção B): re-lê os dados
@@ -513,27 +477,13 @@ def process_ingestion_complete_ocg(self, ingestion_id: str, project_id: str) -> 
         )
         return result
     except Exception as exc:  # noqa: BLE001
-        retries = self.request.retries
-        if retries < 3:
-            # Countdown exponencial — Arq RC-3 confirmou valores: 30s, 120s, 480s.
-            countdown = 30 if retries == 0 else (120 if retries == 1 else 480)
-            logger.warning(
-                "process_ingestion_complete_ocg.retry",
-                ingestion_id=ingestion_id,
-                retries=retries,
-                countdown=countdown,
-                error=str(exc),
-            )
-            raise self.retry(exc=exc, countdown=countdown)
-        # Esgotou retries: marca ocg_pending com mensagem clara.
         logger.error(
-            "process_ingestion_complete_ocg.exhausted",
+            "process_ingestion_complete_ocg.failed",
             ingestion_id=ingestion_id,
             error=str(exc),
-            exc_info=True,
         )
-        _run_coro_isolated(_mark_ocg_pending(ingestion_id, str(exc)))
-        return {"status": "exhausted", "ingestion_id": ingestion_id, "error": str(exc)[:300]}
+        # Dramatiq middleware trata retry automático com backoff
+        raise
 
 
 async def _mark_ocg_pending(ingestion_id: str, error_msg: str) -> None:
@@ -706,13 +656,13 @@ async def _run_process_ingestion_complete_ocg(ingestion_id: str, project_id: str
 # ─── Fase 13.3c: auto_generate (OCG updater) + external_repos fallback ──
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.auto_generate_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
-def auto_generate_task(self, project_id: str, updated_ocg: dict) -> dict:
+def auto_generate_task(project_id: str, updated_ocg: dict) -> dict:
     """Dispara generators de deliverables pós-OCG update.
 
     Substitui `asyncio.create_task(_auto_generate_in_background(...))`
@@ -747,7 +697,7 @@ def auto_generate_task(self, project_id: str, updated_ocg: dict) -> dict:
         _run_coro_isolated(_run_auto_generate(project_id, updated_ocg))
     except Exception as exc:  # noqa: BLE001
         logger.error("auto_generate_task.failed", project_id=project_id, error=str(exc))
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "project_id": project_id}
 
 
@@ -756,13 +706,13 @@ async def _run_auto_generate(project_id: str, updated_ocg: dict) -> None:
     await _auto_generate_in_background(UUID(project_id), updated_ocg)
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.external_repo_fallback_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=60,
+    min_backoff=60_000,
+    max_backoff=180_000,
 )
-def external_repo_fallback_task(self, project_id: str, repo_id: str) -> dict:
+def external_repo_fallback_task(project_id: str, repo_id: str) -> dict:
     """Análise direta de repo externo quando n8n falha.
 
     Substitui os 2 `asyncio.create_task(_run_analysis_fallback(...))`
@@ -785,14 +735,14 @@ async def _run_external_fallback(project_id: str, repo_id: str) -> None:
 # ─── MVP 24 Fase 24.4 — Cascateamento pós-questionário técnico ────────
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.propagate_questionnaire_impact_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
 def propagate_questionnaire_impact_task(
-    self, project_id: str, report: dict,
+    project_id: str, report: dict,
 ) -> dict:
     """Cascateamento ativo pós-aplicação de questionário técnico.
 
@@ -811,7 +761,7 @@ def propagate_questionnaire_impact_task(
             "propagate_questionnaire_impact.failed",
             project_id=project_id, error=str(exc),
         )
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "project_id": project_id, "report": report}
 
 
@@ -859,15 +809,13 @@ async def _run_propagate_questionnaire(project_id: str, report: dict) -> None:
 # =============================================================================
 
 
-@celery_app.task(
-    name="app.tasks.pipeline.revert_document_propagation_task",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=2,
-    default_retry_delay=30,
-    acks_late=True,
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
 def revert_document_propagation_task(
-    self,
     document_id: str,
     project_id: str,
     actor_id: str | None,
@@ -918,7 +866,7 @@ def revert_document_propagation_task(
             retries_remaining=self.max_retries - self.request.retries,
             error=str(exc),
         )
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
 
     return {
         **result,

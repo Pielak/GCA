@@ -144,9 +144,34 @@ services:
       retries: 3
       start_period: 40s
 
-  # 2026-04-25 — Celery beat scheduler. Roda tasks periódicas (watchdog
-  # de docs zombie a cada 5 min). Sem ele, doc preso em 'processing' só
-  # era limpo no restart do backend.
+  # Fase 2 — Dramatiq worker (queue manager para pipeline tasks)
+  # Processa tasks com Redis DB 3 (isolado de Celery DBs 1-2)
+  # Roda em paralelo com celery-worker durante transição
+  dramatiq-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gca-dramatiq-worker
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql+asyncpg://gca:gca_secret@postgres:5432/gca
+      REDIS_URL: redis://redis:6379/0
+      DRAMATIQ_BROKER_URL: redis://redis:6379/3
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: gca
+      POSTGRES_USER: gca
+      POSTGRES_PASSWORD: gca_secret
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend:/app
+      - gca-uploads-storage:/tmp/gca-storage
+    command: python -m dramatiq app.tasks.pipeline --processes 2 --threads 4
+
   # MVP 14 Fase 14.10 — Flower (UI de monitoramento do Celery).
   # Expõe dashboard em :5555 com filas, workers, DLQ visual e histórico.
   # Não requer restart: o worker envia eventos; Flower lê do broker.
