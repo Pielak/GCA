@@ -1,7 +1,6 @@
 """
 Celery tasks para Pilares Vivos — regeneração e notificações
 """
-import asyncio
 import time
 from uuid import UUID
 
@@ -15,6 +14,7 @@ from app.db.database import engine as async_engine
 from app.models.base import ProjectMember, PilaresVivosJob
 from app.services.notification_inapp_service import InAppNotificationService
 from app.services.pilares_vivos_service import PilaresVivosService
+from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated
 
 logger = structlog.get_logger(__name__)
 
@@ -47,7 +47,7 @@ def regenerar_pilares_apos_analise(
 
         start_time = time.time()
 
-        asyncio.run(
+        _run_coro_isolated(
             _regenerar_pilares_async(
                 project_uuid,
                 user_uuid,
@@ -69,7 +69,7 @@ def regenerar_pilares_apos_analise(
         )
 
         if job_uuid:
-            asyncio.run(_marcar_job_falhou(job_uuid, str(exc), async_engine))
+            _run_coro_isolated(_marcar_job_falhou(job_uuid, str(exc), async_engine))
 
         raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
 

@@ -70,7 +70,7 @@ def _check_document_already_analyzed(document_id: str, project_id: str) -> bool:
                 )
                 return await session.scalar(stmt)
 
-        doc = asyncio.get_event_loop().run_until_complete(_check())
+        doc = _run_coro_isolated(_check())
         if not doc:
             logger.warning(
                 "pipeline_ingest.document_not_found",
