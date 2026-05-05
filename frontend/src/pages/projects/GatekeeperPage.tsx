@@ -58,11 +58,13 @@ export function GatekeeperPage() {
         const ocgScores = raw.ocg?.pillar_scores || {}
         const ocgStatus = raw.ocg?.status || {}
 
-        const pillars: PillarResult[] = Object.entries(ocgScores as Record<string, unknown>).map(([name, score]) => ({
-          pillar: name,
-          score: typeof score === 'number' ? score : 0,
-          status: (typeof score === 'number' ? score : 0) >= 80 ? 'ok' : (typeof score === 'number' ? score : 0) >= 60 ? 'warning' : 'blocker',
-        }))
+        // Decisão GP 2 (2026-05-04): CodeGen exige ≥95% por pilar.
+        // Bandas: ≥95 ok (liberado), ≥60 warning, <60 blocker.
+        const pillars: PillarResult[] = Object.entries(ocgScores as Record<string, unknown>).map(([name, score]) => {
+          const s = typeof score === 'number' ? score : 0
+          const status = s >= 95 ? 'ok' : s >= 60 ? 'warning' : 'blocker'
+          return { pillar: name, score: s, status }
+        })
 
         setData({
           score: ocgStatus.overall_score || 0,

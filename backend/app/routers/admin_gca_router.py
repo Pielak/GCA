@@ -23,18 +23,21 @@ DEFAULT_PILLAR_WEIGHTS = {
 }
 DEFAULT_THRESHOLDS = {
     # Per-pilar: score abaixo deste valor marca o pilar como BLOQUEANTE.
-    # 0 = pilar não bloqueia individualmente (depende só de composite).
-    # Convenção histórica: P7 (Segurança) já bloqueava em 70.
-    "p1_blocking_threshold": 0,
-    "p2_blocking_threshold": 0,
-    "p3_blocking_threshold": 0,
-    "p4_blocking_threshold": 0,
-    "p5_blocking_threshold": 0,
-    "p6_blocking_threshold": 0,
-    "p7_blocking_threshold": 70,
+    # Decisão GP 2 (2026-05-04): CodeGen exige TODOS os pilares >= 95.
+    # Defaults alinham com SCORE_MATURIDADE em ocg_gate.py.
+    # Admin pode relaxar em settings se quiser ver BLOCKED em outro limiar.
+    "p1_blocking_threshold": 95,
+    "p2_blocking_threshold": 95,
+    "p3_blocking_threshold": 95,
+    "p4_blocking_threshold": 95,
+    "p5_blocking_threshold": 95,
+    "p6_blocking_threshold": 95,
+    "p7_blocking_threshold": 95,
     # Composite (overall): bandas de status do projeto inteiro.
-    "ready_threshold": 90,
-    "needs_review_threshold": 70,
+    # ready=95 alinha com SCORE_MATURIDADE (CodeGen liberado quando overall >=95
+    # E todos os pilares >=95 — Decisão GP 2).
+    "ready_threshold": 95,
+    "needs_review_threshold": 75,
     "at_risk_threshold": 50,
 }
 DEFAULT_AGENT_CONFIG = {
@@ -75,15 +78,15 @@ class ThresholdsRequest(BaseModel):
     ABAIXO desse valor, o pilar é marcado como BLOQUEANTE no Gatekeeper.
     Use 0 para "não bloqueia individualmente" (pilar entra só na média).
     """
-    p1_blocking_threshold: int = 0
-    p2_blocking_threshold: int = 0
-    p3_blocking_threshold: int = 0
-    p4_blocking_threshold: int = 0
-    p5_blocking_threshold: int = 0
-    p6_blocking_threshold: int = 0
-    p7_blocking_threshold: int = 70
-    ready_threshold: int = 90
-    needs_review_threshold: int = 70
+    p1_blocking_threshold: int = 95
+    p2_blocking_threshold: int = 95
+    p3_blocking_threshold: int = 95
+    p4_blocking_threshold: int = 95
+    p5_blocking_threshold: int = 95
+    p6_blocking_threshold: int = 95
+    p7_blocking_threshold: int = 95
+    ready_threshold: int = 95
+    needs_review_threshold: int = 75
     at_risk_threshold: int = 50
 
     @validator(

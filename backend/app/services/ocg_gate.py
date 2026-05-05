@@ -5,17 +5,23 @@ Conceito canônico (GP, 2026-05-02):
   "OCG fica estático e só cresce com informação útil. CodeGen é liberado
   para gerar código quando OCG estiver maduro, com >=95% de contexto."
 
-3 níveis de bloqueio (HTTP 409):
-  - hard_block:   is_blocking=true (CONF marcou bloqueante)
-  - insufficient: overall_score < 60 (mínimo absoluto)
-  - immature:     overall_score < 95 (abaixo do limiar de maturidade)
+Decisão GP 2 (2026-05-04): CodeGen exige ≥95% em **todos os pilares**
+P1-P7, não apenas no overall_score. Pilar individual abaixo do limiar
+bloqueia geração mesmo com overall alto.
+
+5 níveis de bloqueio (HTTP 409):
+  - hard_block:      is_blocking=true (CONF marcou bloqueante)
+  - insufficient:    overall_score < 60 (mínimo absoluto)
+  - immature:        overall_score < 95 (overall ainda baixo)
+  - pillar_immature: algum pilar P1-P7 < 95 (Decisão GP 2)
+  - no_ocg:          OCG inexistente (404)
 
 Duas portas de entrada:
   - `check_ocg_maturity_gate(...)`     — endpoints HTTP, levanta HTTPException 409.
   - `evaluate_ocg_maturity(...)`       — worker Celery, retorna dict estruturado
                                           sem levantar exceção (DT-082, MVP cleanup).
 """
-from typing import Optional, TypedDict
+from typing import List, Optional, TypedDict
 from uuid import UUID
 
 import structlog
@@ -27,9 +33,43 @@ from app.models.base import OCG
 
 logger = structlog.get_logger(__name__)
 
+
+def _extract_pillar_score(pillars: dict, pillar_num: int) -> Optional[float]:
+    """Lookup tolerante em PILLAR_SCORES (versão local — evita ciclo de
+    import com ocg_updater_service que carrega LLM client e billing).
+
+    Aceita chaves canônicas (P1_business_case) e curtas (P1), case-insensitive.
+    Retorna o score numérico ou None se ausente/malformado.
+    """
+    if not isinstance(pillars, dict):
+        return None
+    prefix = f"P{pillar_num}_".upper()
+    short = f"P{pillar_num}".upper()
+    for key, val in pillars.items():
+        if not isinstance(val, dict) or not isinstance(key, str):
+            continue
+        ku = key.upper()
+        if ku == short or ku.startswith(prefix):
+            score = val.get("score")
+            if score is None:
+                continue
+            try:
+                return float(score)
+            except (TypeError, ValueError):
+                return None
+    return None
+
 # Limiares canônicos (não literais nos endpoints — sempre usar a constante)
 SCORE_MINIMO_ABSOLUTO = 60   # abaixo disso: insufficient
 SCORE_MATURIDADE = 95        # abaixo disso: immature; >= disso: liberado
+PILARES_OBRIGATORIOS = (1, 2, 3, 4, 5, 6, 7)  # Decisão GP 2: todos ≥ MATURIDADE
+
+
+class PillarBelowThreshold(TypedDict):
+    pillar: str          # "P1" .. "P7"
+    score: float
+    threshold: int
+    deficit: float
 
 
 class OCGGateResult(TypedDict):
@@ -39,11 +79,12 @@ class OCGGateResult(TypedDict):
     `blocked=True`  ⇒ CodeGen recusa; ler `block_level` e `blocking_reason`.
     """
     blocked: bool
-    block_level: Optional[str]      # "hard_block" | "insufficient" | "immature" | "no_ocg" | None
+    block_level: Optional[str]      # "hard_block" | "insufficient" | "immature" | "pillar_immature" | "no_ocg" | None
     overall_score: float
     score_required: int
     blocking_reason: Optional[str]
     ocg_version: Optional[int]
+    pillars_below: List[PillarBelowThreshold]  # vazio quando todos >= MATURIDADE
 
 
 async def evaluate_ocg_maturity(
@@ -79,10 +120,41 @@ async def evaluate_ocg_maturity(
                 "questionário primeiro para gerar o OCG inicial."
             ),
             ocg_version=None,
+            pillars_below=[],
         )
 
     overall_score = float(ocg.overall_score or 0)
     is_blocking = bool(ocg.is_blocking)
+
+    # Decisão GP 2 (2026-05-04): coleta scores P1-P7 do ocg_data pra
+    # avaliação determinística por pilar. Tolerante a chaves canônicas
+    # (P1_business_case) e curtas (P1) — vide _extract_pillar_score.
+    import json as _json
+    raw = ocg.ocg_data
+    try:
+        ocg_full = _json.loads(raw) if isinstance(raw, str) else (raw or {})
+    except (ValueError, TypeError):
+        ocg_full = {}
+    pillar_scores_raw = ocg_full.get("PILLAR_SCORES") or {}
+    pillars_below: List[PillarBelowThreshold] = []
+    for n in PILARES_OBRIGATORIOS:
+        score = _extract_pillar_score(pillar_scores_raw, n)
+        if score is None:
+            # Pilar ausente conta como bloqueante (não decidir ambíguo —
+            # Decisão GP 8 / política erro determinístico).
+            pillars_below.append(PillarBelowThreshold(
+                pillar=f"P{n}", score=0.0,
+                threshold=SCORE_MATURIDADE,
+                deficit=float(SCORE_MATURIDADE),
+            ))
+            continue
+        if score < SCORE_MATURIDADE:
+            pillars_below.append(PillarBelowThreshold(
+                pillar=f"P{n}", score=score,
+                threshold=SCORE_MATURIDADE,
+                deficit=float(SCORE_MATURIDADE - score),
+            ))
+    pillars_below.sort(key=lambda p: p["deficit"], reverse=True)
 
     logger.info(
         "ocg_gate.verificando",
@@ -106,6 +178,7 @@ async def evaluate_ocg_maturity(
                 "que enderecem os findings de conformidade."
             ),
             ocg_version=ocg.version,
+            pillars_below=pillars_below,
         )
 
     if overall_score < SCORE_MINIMO_ABSOLUTO:
@@ -121,6 +194,7 @@ async def evaluate_ocg_maturity(
                 "ingerindo documentos para amadurecer o OCG."
             ),
             ocg_version=ocg.version,
+            pillars_below=pillars_below,
         )
 
     if overall_score < SCORE_MATURIDADE:
@@ -137,6 +211,34 @@ async def evaluate_ocg_maturity(
                 f"Aproximação atual: {overall_score}/{SCORE_MATURIDADE}."
             ),
             ocg_version=ocg.version,
+            pillars_below=pillars_below,
+        )
+
+    # Decisão GP 2: ainda que overall ≥ 95, CodeGen exige todos os
+    # pilares ≥ 95. Pilar abaixo do limiar = pillar_immature.
+    if pillars_below:
+        offenders = ", ".join(
+            f"{p['pillar']}={p['score']:.1f}" for p in pillars_below
+        )
+        logger.warning(
+            "ocg_gate.pillar_immature",
+            project_id=str(project_id),
+            overall_score=overall_score,
+            pillars_below=[p["pillar"] for p in pillars_below],
+        )
+        return OCGGateResult(
+            blocked=True,
+            block_level="pillar_immature",
+            overall_score=overall_score,
+            score_required=SCORE_MATURIDADE,
+            blocking_reason=(
+                f"OCG com pilar(es) abaixo de {SCORE_MATURIDADE}: {offenders}. "
+                f"Decisão GP 2 (2026-05-04): CodeGen exige TODOS os pilares "
+                f"P1-P7 com score >= {SCORE_MATURIDADE}, não apenas o overall. "
+                f"Continue ingerindo documentos que cubram os pilares listados."
+            ),
+            ocg_version=ocg.version,
+            pillars_below=pillars_below,
         )
 
     logger.info("ocg_gate.liberado", project_id=str(project_id), overall_score=overall_score)
@@ -147,6 +249,7 @@ async def evaluate_ocg_maturity(
         score_required=SCORE_MATURIDADE,
         blocking_reason=None,
         ocg_version=ocg.version,
+        pillars_below=[],
     )
 
 
@@ -199,5 +302,6 @@ async def check_ocg_maturity_gate(
             "overall_score": result["overall_score"],
             "score_required": result["score_required"],
             "blocking_reason": result["blocking_reason"],
+            "pillars_below": result.get("pillars_below") or [],
         },
     )
