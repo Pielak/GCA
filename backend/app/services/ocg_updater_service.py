@@ -1367,7 +1367,13 @@ class OCGUpdaterService:
                 )
                 overall_new = round(weighted_sum / total_weight, 2)
                 ocg.overall_score = overall_new
-                # Espelha no JSON em COMPOSITE_SCORE.value (UI/CodeGen lêem de lá)
+                # Espelha no JSON em 3 lugares pra coerência total:
+                # - coluna ocg.overall_score (já feito acima)
+                # - COMPOSITE_SCORE.value (UI/CodeGen lêem de lá)
+                # - overall_score top-level (campo legacy, UI antigo lê — bug
+                #   visto em dogfood 2026-05-04 mostrava 57.3 stale enquanto
+                #   coluna e COMPOSITE_SCORE estavam em 63.03).
+                updated_ocg["overall_score"] = overall_new
                 comp = updated_ocg.get("COMPOSITE_SCORE")
                 if isinstance(comp, dict):
                     comp["value"] = overall_new
