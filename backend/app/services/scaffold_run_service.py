@@ -882,7 +882,7 @@ async def execute_apply(run_id: UUID, user_id: UUID) -> dict:
     if committed > 0:
         try:
             from app.tasks.scaffold import code_audit_executor
-            code_audit_executor.delay(str(run_id))
+            code_audit_executor.send(str(run_id))
             logger.info(
                 "scaffold_run.audit_triggered",
                 run_id=str(run_id),

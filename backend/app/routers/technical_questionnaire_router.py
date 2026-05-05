@@ -318,14 +318,13 @@ async def save_technical_questionnaire(
     if req.submit:
         try:
             from app.tasks.questionnaire import evaluate_persona_task
-            from celery import group
 
             # Personas a avaliar
             personas = ["gp", "arquiteto", "dba", "dev_sr", "qa"]
 
-            # Preparar grupo de tasks paralelas
-            persona_tasks = group(
-                evaluate_persona_task.s(
+            # Disparar cada persona em paralelo (natural no Dramatiq)
+            for persona in personas:
+                evaluate_persona_task.send(
                     persona_name=persona,
                     technical_questionnaire_id=str(questionnaire.id),
                     project_id=str(project_id),
@@ -333,11 +332,6 @@ async def save_technical_questionnaire(
                     extracted_concepts=[],  # TODO: extrair do documento ingerido
                     document_domain="software",
                 )
-                for persona in personas
-            )
-
-            # Disparar em paralelo
-            persona_tasks.apply_async()
 
             logger.info(
                 "technical_questionnaire_personas_evaluation_queued",
@@ -352,7 +346,7 @@ async def save_technical_questionnaire(
             try:
                 from app.tasks.pilares_vivos_task import regenerar_pilares_apos_analise
 
-                regenerar_pilares_apos_analise.delay(
+                regenerar_pilares_apos_analise.send(
                     project_id=str(project_id),
                     user_id=str(current_user),
                     trigger="questionnaire",
@@ -378,7 +372,7 @@ async def save_technical_questionnaire(
                 error=str(exc),
                 exc_info=True,
             )
-            # Não bloqueia o retorno se o Celery falhar — questionário já foi salvo
+            # Não bloqueia o retorno se o Dramatiq falhar — questionário já foi salvo
 
     return TechnicalQuestionnaireResponse(
         id=str(questionnaire.id),

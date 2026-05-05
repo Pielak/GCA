@@ -903,9 +903,9 @@ async def start_scaffold_run(
 
     run = await create_run(db, project_id, triggered_by=user_id)
 
-    # Enfileira no Celery (idempotente: o execute_run guarda contra status != pending)
+    # Enfileira no Dramatiq (idempotente: o execute_run guarda contra status != pending)
     from app.tasks.scaffold import scaffold_run_executor
-    scaffold_run_executor.delay(str(run.id))
+    scaffold_run_executor.send(str(run.id))
 
     return ScaffoldStartResponse(run_id=run.id, status=run.status)
 
@@ -1082,7 +1082,7 @@ async def apply_scaffold_run(
     # pra não deixar a run presa em 'applying'.
     try:
         from app.tasks.scaffold import scaffold_apply_executor
-        scaffold_apply_executor.delay(str(run_id), str(user_id))
+        scaffold_apply_executor.send(str(run_id), str(user_id))
     except Exception as enq_err:  # noqa: BLE001
         run.status = "completed"
         await db.commit()
@@ -1323,7 +1323,7 @@ async def fix_build_errors(
     enqueued = False
     try:
         from app.tasks.scaffold import scaffold_run_executor
-        scaffold_run_executor.delay(str(run_id))
+        scaffold_run_executor.send(str(run_id))
         enqueued = True
     except Exception as exc:  # noqa: BLE001
         logger.error(
@@ -1456,7 +1456,7 @@ async def regenerate_invalid_scaffold_items(
     enqueued = False
     try:
         from app.tasks.scaffold import scaffold_run_executor
-        scaffold_run_executor.delay(str(run_id))
+        scaffold_run_executor.send(str(run_id))
         enqueued = True
     except Exception as enq_err:  # noqa: BLE001
         logger.error(
@@ -1590,7 +1590,7 @@ async def retry_failed_scaffold_items(
     # pode chamar de novo (run já está em generating, retry idempotente após
     # primeira chamada bem-sucedida).
     from app.tasks.scaffold import scaffold_run_executor
-    scaffold_run_executor.delay(str(run_id))
+    scaffold_run_executor.send(str(run_id))
     logger.info(
         "scaffold_run.retry_failed_enqueued",
         run_id=str(run_id),

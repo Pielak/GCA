@@ -65,7 +65,7 @@ async def trigger_code_audit(
         )
 
     from app.tasks.scaffold import code_audit_executor
-    code_audit_executor.delay(str(run_id))
+    code_audit_executor.send(str(run_id))
     logger.info(
         "code_audit.manual_trigger",
         run_id=str(run_id),

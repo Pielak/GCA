@@ -1,16 +1,17 @@
 """
-Celery tasks para Pilares Vivos — regeneração e notificações
+Fase 3 — Dramatiq task para Pilares Vivos — regeneração
 """
 import time
 from uuid import UUID
 
+import dramatiq
 import structlog
-from celery import shared_task
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import engine as async_engine
+from app.dramatiq_app import broker  # noqa: F401
 from app.models.base import ProjectMember, PilaresVivosJob
 from app.services.notification_inapp_service import InAppNotificationService
 from app.services.pilares_vivos_service import PilaresVivosService
@@ -19,9 +20,13 @@ from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated
 logger = structlog.get_logger(__name__)
 
 
-@shared_task(bind=True, max_retries=3)
+@dramatiq.actor(
+    queue_name="llm_heavy",
+    max_retries=3,
+    min_backoff=30_000,
+    max_backoff=480_000,
+)
 def regenerar_pilares_apos_analise(
-    self,
     project_id: str,
     user_id: str,
     trigger: str = "ingestao",
@@ -65,13 +70,12 @@ def regenerar_pilares_apos_analise(
             user_id=user_id,
             trigger=trigger,
             erro=str(exc),
-            retry_count=self.request.retries,
         )
 
         if job_uuid:
             _run_coro_isolated(_marcar_job_falhou(job_uuid, str(exc), async_engine))
 
-        raise self.retry(exc=exc, countdown=60 * (self.request.retries + 1))
+        raise
 
 
 async def _regenerar_pilares_async(

@@ -44,20 +44,20 @@ async def regenerar_pilares(
     db.add(job)
     await db.flush()
 
-    task = regenerar_pilares_apos_analise.delay(
+    message = regenerar_pilares_apos_analise.send(
         project_id=str(project_id),
         user_id=str(user_id),
         trigger="manual",
     )
 
-    job.celery_task_id = task.id
+    job.celery_task_id = message.message_id
     await db.commit()
 
     return {
         "sucesso": True,
         "job_id": str(job_id),
         "status": "queued",
-        "celery_task_id": task.id,
+        "celery_task_id": message.message_id,
     }
 
 

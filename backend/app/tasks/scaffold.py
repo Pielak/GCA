@@ -1,31 +1,29 @@
-"""Celery task pra scaffold server-side persistido (2026-04-25).
+"""Fase 3 — Dramatiq tasks para scaffold server-side.
 
-Substitui a iteração síncrona via HTTP `/scaffold/plan` + N×`/scaffold/item`
-do frontend. Aqui a run roda inteira no worker Celery, sobrevivendo a
-qualquer desconexão do navegador.
+Migração de 3 executors Celery → Dramatiq:
+- code_audit_executor
+- scaffold_apply_executor
+- scaffold_run_executor
 
-Frontend só chama `POST /scaffold/start` (retorna `run_id`) e depois
-`GET /scaffold/runs/{run_id}` em poll. Apply é manual via outro endpoint.
+watchdog_scaffold_zombies fica em Celery durante Fase 1 (APScheduler later).
 """
 from __future__ import annotations
 
-import asyncio
-from typing import Any, Coroutine
+from typing import Any
 from uuid import UUID
 
+import dramatiq
 import structlog
 
-from app.celery_app import celery_app
+from app.dramatiq_app import broker  # noqa: F401
+from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated  # noqa: F401
 
 logger = structlog.get_logger(__name__)
 
 
-from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated  # noqa: E402,F401
-
-
-@celery_app.task(
-    name="app.tasks.scaffold.watchdog_scaffold_zombies",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
+    max_retries=0,
 )
 def watchdog_scaffold_zombies(self, threshold_minutes: int = 10) -> dict:
     """Roda periodicamente (Celery beat) e re-enfileira ScaffoldRuns zombie.
@@ -74,9 +72,9 @@ def watchdog_scaffold_zombies(self, threshold_minutes: int = 10) -> dict:
                         run_id=run_id,
                     )
                     continue
-                scaffold_apply_executor.delay(run_id, triggered_by)
+                scaffold_apply_executor.send(run_id, triggered_by)
             else:
-                scaffold_run_executor.delay(run_id)
+                scaffold_run_executor.send(run_id)
             logger.info("watchdog_scaffold.requeued", run_id=run_id, status=run_status)
         if zombies:
             logger.warning(
@@ -90,9 +88,8 @@ def watchdog_scaffold_zombies(self, threshold_minutes: int = 10) -> dict:
         return {"status": "error", "error": str(exc)[:500]}
 
 
-@celery_app.task(
-    name="app.tasks.scaffold.code_audit_executor",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=0,
     acks_late=True,
 )
@@ -118,9 +115,8 @@ def code_audit_executor(self, run_id: str) -> dict:
         return {"status": "error", "run_id": run_id, "error": str(exc)[:500]}
 
 
-@celery_app.task(
-    name="app.tasks.scaffold.scaffold_apply_executor",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=0,
     acks_late=True,
 )
@@ -173,9 +169,8 @@ def scaffold_apply_executor(self, run_id: str, user_id: str) -> dict:
         return {"status": "error", "run_id": run_id, "error": str(exc)[:500]}
 
 
-@celery_app.task(
-    name="app.tasks.scaffold.scaffold_run_executor",
-    bind=True,
+@dramatiq.actor(
+    queue_name="default",
     max_retries=0,  # falhas dentro da run são gravadas no DB, não retry
     acks_late=True,
 )
