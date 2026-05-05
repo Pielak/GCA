@@ -1085,7 +1085,11 @@ async def get_ocg_history(
     import json as _json
 
     result = await db.execute(
-        select(OCGDeltaLog, IngestedDocument.original_filename)
+        select(
+            OCGDeltaLog,
+            IngestedDocument.original_filename,
+            IngestedDocument.file_type,
+        )
         .outerjoin(IngestedDocument, OCGDeltaLog.document_id == IngestedDocument.id)
         .where(
             OCGDeltaLog.project_id == project_id,
@@ -1125,11 +1129,91 @@ async def get_ocg_history(
         except Exception:  # noqa: BLE001
             continue
 
+    # Pré-carrega contagem de personas por document_id para derivar
+    # `delta_zero_reason` quando o doc não contribuiu ao OCG.
+    # Padrão observado: Auditor (router) classifica mal alguns docs e
+    # envia para personas que não entendem o conteúdo → todas dão score=0
+    # com justification vazia → delta=0. Outro caso: personas avaliam mas
+    # scores não superam o piso MAX-por-persona já consolidado.
+    from app.models.base import OCGIndividual
+    from sqlalchemy import case as _case, Float
+    doc_ids = [d.document_id for d, _, _ in rows if d.document_id]
+    persona_stats: dict = {}
+    if doc_ids:
+        stats_rows = (await db.execute(
+            select(
+                OCGIndividual.document_id,
+                func.count(OCGIndividual.id).label("total"),
+                func.sum(
+                    _case(
+                        ((OCGIndividual.parecer["score"].astext.cast(Float) > 0), 1),
+                        else_=0,
+                    )
+                ).label("with_score"),
+            )
+            .where(OCGIndividual.document_id.in_(doc_ids))
+            .group_by(OCGIndividual.document_id)
+        )).all()
+        for did, total, with_score in stats_rows:
+            persona_stats[did] = {
+                "total": int(total or 0),
+                "with_score": int(with_score or 0),
+            }
+
     history: list[dict] = []
-    for d, fname in rows:
+    for d, fname, ftype in rows:
         before = overall_by_version.get(d.ocg_version_from)
         after = overall_by_version.get(d.ocg_version_to)
         delta = round(after - before, 2) if (before is not None and after is not None) else None
+
+        # Motivo do delta=0 (ou null) — só relevante quando o doc não cresceu.
+        delta_zero_reason = None
+        personas_total = 0
+        personas_with_score = 0
+        if d.document_id and d.document_id in persona_stats:
+            stats = persona_stats[d.document_id]
+            personas_total = stats["total"]
+            personas_with_score = stats["with_score"]
+
+        is_hitl = (
+            d.trigger_source == "hitl_followup"
+            or ftype == "persona_followup"
+        )
+        is_no_delta = delta is None or delta == 0
+        if is_no_delta and d.document_id:
+            if is_hitl:
+                # HITL não passa por personas (file_type='persona_followup').
+                # Quando OCG não expandiu, é porque o LLM consolidador julgou
+                # que as respostas não trazem informação além do que já estava
+                # nos pilares (invariante §2.4 — só expande com valor novo).
+                delta_zero_reason = (
+                    "Respostas HITL registradas. OCG não expandiu — o LLM "
+                    "consolidador julgou que as respostas não trazem informação "
+                    "além do que já estava consolidado em ingestões anteriores "
+                    "(invariante de monotonicidade preservou os scores: OCG só "
+                    "cresce com valor novo, nunca contrai)."
+                )
+            elif personas_total == 0:
+                delta_zero_reason = (
+                    "Pipeline marcou o documento como concluído mas nenhuma persona "
+                    "avaliou — provável falha silenciosa no Normalizer ou Conferente "
+                    "n8n (formato não suportado, OCR vazio, ou rejeição no G0). "
+                    "Recomendado: reanalisar pelo botão Reanalisar."
+                )
+            elif personas_with_score == 0:
+                delta_zero_reason = (
+                    f"Roteamento incorreto: o Auditor enviou o documento para "
+                    f"{personas_total} personas que não entenderam seu conteúdo "
+                    f"(todas pontuaram 0 sem justificativa). Provável classificação "
+                    f"errada do tipo do documento."
+                )
+            else:
+                delta_zero_reason = (
+                    f"{personas_with_score} de {personas_total} personas avaliaram, "
+                    f"mas nenhum score superou os máximos já consolidados — piso de "
+                    f"monotonicidade do OCG impediu a expansão (OCG só cresce, nunca contrai)."
+                )
+
         history.append({
             "id": str(d.id),
             "document_id": str(d.document_id) if d.document_id else None,
@@ -1139,6 +1223,9 @@ async def get_ocg_history(
             "overall_before": before,
             "overall_after": after,
             "overall_delta": delta,
+            "personas_evaluated": personas_total,
+            "personas_with_score": personas_with_score,
+            "delta_zero_reason": delta_zero_reason,
             "created_at": d.created_at.isoformat() if d.created_at else None,
             "can_rollback": d.ocg_snapshot is not None and d.ocg_version_to != current_version,
         })
