@@ -190,20 +190,19 @@ async def test_ingestion_complete_inserts_ocg_individual(db_session):
     project, doc, _, _ = await _seed_environment(db_session)
     payload = _build_payload(str(doc.id), str(project.id))
 
+    # F5.1: handler agora enfileira Celery task; mock o .delay pra não
+    # depender de broker real. ocg_individual ainda é populado pelo
+    # handler antes do enqueue (não mudou).
     with patch(
-        "app.routers.webhooks.OCGUpdaterService",
-        autospec=True,
-    ) as MockUpdater:
-        mock_instance = MockUpdater.return_value
-        mock_instance.update_ocg_from_arguider = AsyncMock(
-            return_value={"status": "ok", "version_to": 2}
-        )
+        "app.tasks.pipeline.process_ingestion_complete_ocg.delay",
+    ) as mock_delay:
+        mock_delay.return_value = type("R", (), {"id": "fake-task-id"})()
 
         async with _async_client_with_db(db_session) as client:
             resp = await client.post(_ENDPOINT, json=payload)
 
-    assert resp.status_code == 200, (
-        f"Esperado 200, recebido {resp.status_code}: {resp.text}"
+    assert resp.status_code == 202, (
+        f"Esperado 202 (F5.1 async), recebido {resp.status_code}: {resp.text}"
     )
 
     result = await db_session.execute(
@@ -224,19 +223,16 @@ async def test_ingestion_complete_inserts_ocg_global(db_session):
     project, doc, _, _ = await _seed_environment(db_session)
     payload = _build_payload(str(doc.id), str(project.id))
 
+    # F5.1: enfileira Celery task; mock .delay
     with patch(
-        "app.routers.webhooks.OCGUpdaterService",
-        autospec=True,
-    ) as MockUpdater:
-        mock_instance = MockUpdater.return_value
-        mock_instance.update_ocg_from_arguider = AsyncMock(
-            return_value={"status": "ok", "version_to": 2}
-        )
+        "app.tasks.pipeline.process_ingestion_complete_ocg.delay",
+    ) as mock_delay:
+        mock_delay.return_value = type("R", (), {"id": "fake-task-id"})()
 
         async with _async_client_with_db(db_session) as client:
             resp = await client.post(_ENDPOINT, json=payload)
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
 
     result = await db_session.execute(
         text("SELECT COUNT(*) FROM ocg_global WHERE document_id = :doc_id"),
@@ -256,21 +252,18 @@ async def test_ingestion_complete_idempotent_on_retry(db_session):
     project, doc, _, _ = await _seed_environment(db_session)
     payload = _build_payload(str(doc.id), str(project.id))
 
+    # F5.1: enfileira Celery task; mock .delay
     with patch(
-        "app.routers.webhooks.OCGUpdaterService",
-        autospec=True,
-    ) as MockUpdater:
-        mock_instance = MockUpdater.return_value
-        mock_instance.update_ocg_from_arguider = AsyncMock(
-            return_value={"status": "ok", "version_to": 2}
-        )
+        "app.tasks.pipeline.process_ingestion_complete_ocg.delay",
+    ) as mock_delay:
+        mock_delay.return_value = type("R", (), {"id": "fake-task-id"})()
 
         async with _async_client_with_db(db_session) as client:
             resp1 = await client.post(_ENDPOINT, json=payload)
             resp2 = await client.post(_ENDPOINT, json=payload)
 
-    assert resp1.status_code == 200
-    assert resp2.status_code == 200
+    assert resp1.status_code == 202
+    assert resp2.status_code == 202
 
     ind_count = (await db_session.execute(
         text("SELECT COUNT(*) FROM ocg_individual WHERE document_id = :doc_id"),
@@ -290,53 +283,46 @@ async def test_ingestion_complete_idempotent_on_retry(db_session):
 # =============================================================================
 
 @pytest.mark.asyncio
-async def test_ingestion_complete_calls_ocg_updater(db_session):
-    """Handler deve chamar OCGUpdaterService com trigger_source=TRIGGER_N8N
-    e arguider_analysis contendo as chaves esperadas."""
-    from app.services.ocg_updater_service import TRIGGER_N8N
-
+async def test_ingestion_complete_enqueues_celery_task(db_session):
+    """F5.1: Handler enfileira process_ingestion_complete_ocg.delay com
+    (doc_id, project_id) — não chama OCGUpdaterService direto.
+    A chamada ao OCGUpdater foi movida pra dentro da Celery task
+    (verificação dessa lógica em test_f51_process_ingestion_ocg.py)."""
     project, doc, _, _ = await _seed_environment(db_session)
     payload = _build_payload(str(doc.id), str(project.id))
 
     with patch(
-        "app.routers.webhooks.OCGUpdaterService",
-        autospec=True,
-    ) as MockUpdater:
-        mock_instance = MockUpdater.return_value
-        mock_instance.update_ocg_from_arguider = AsyncMock(
-            return_value={"status": "ok", "version_to": 2}
-        )
+        "app.tasks.pipeline.process_ingestion_complete_ocg.delay",
+    ) as mock_delay:
+        mock_delay.return_value = type("R", (), {"id": "fake-task-id-123"})()
 
         async with _async_client_with_db(db_session) as client:
             resp = await client.post(_ENDPOINT, json=payload)
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
 
-    # Confirmar que o updater foi chamado
-    mock_instance.update_ocg_from_arguider.assert_awaited_once()
-    call_kwargs = mock_instance.update_ocg_from_arguider.call_args.kwargs
-
-    # Verificar trigger_source
-    assert call_kwargs.get("trigger_source") == TRIGGER_N8N, (
-        f"trigger_source esperado '{TRIGGER_N8N}', "
-        f"recebido '{call_kwargs.get('trigger_source')}'"
+    # F5.1: confirmar que .delay foi chamado com (doc_id, project_id)
+    mock_delay.assert_called_once()
+    call_args = mock_delay.call_args
+    args_passed = call_args.args
+    assert len(args_passed) == 2, f"Esperado 2 args (ids), recebido {args_passed}"
+    assert args_passed[0] == str(doc.id), (
+        f"Primeiro arg deve ser ingestion_id; recebido {args_passed[0]}"
+    )
+    assert args_passed[1] == str(project.id), (
+        f"Segundo arg deve ser project_id; recebido {args_passed[1]}"
     )
 
-    # Verificar chaves obrigatórias no arguider_analysis
-    analysis = call_kwargs.get("arguider_analysis", {})
-    chaves_obrigatorias = [
-        "overall_score", "blocked", "personas_executed", "personas_failed",
-        "ocg_individual", "ocg_global_delta", "gaps", "show_stoppers",
-        "recommendations",
-    ]
-    for chave in chaves_obrigatorias:
-        assert chave in analysis, (
-            f"Chave '{chave}' ausente em arguider_analysis"
-        )
-
-    # gaps e show_stoppers devem estar mapeados a partir de consolidated_findings
-    assert len(analysis["gaps"]) == 1, "Esperado 1 gap mapeado"
-    assert len(analysis["show_stoppers"]) == 1, "Esperado 1 blocker mapeado"
+    # Status persistido como ocg_updating (não completed direto)
+    status_row = (await db_session.execute(
+        text("SELECT arguider_status, celery_task_id FROM ingested_documents WHERE id = :doc_id"),
+        {"doc_id": str(doc.id)},
+    )).first()
+    assert status_row is not None
+    assert status_row[0] == "ocg_updating", (
+        f"Estado intermediário esperado 'ocg_updating'; recebido '{status_row[0]}'"
+    )
+    assert status_row[1] == "fake-task-id-123", "celery_task_id deve ser persistido"
 
 
 # =============================================================================
@@ -357,22 +343,19 @@ async def test_ingestion_complete_skips_updater_when_majority_failed(db_session)
         personas_failed=failed,
     )
 
+    # F5.1: majority_failed retorna antes do enqueue — Celery delay
+    # NÃO deve ser chamado, e doc fica 'partial'.
     with patch(
-        "app.routers.webhooks.OCGUpdaterService",
-        autospec=True,
-    ) as MockUpdater:
-        mock_instance = MockUpdater.return_value
-        mock_instance.update_ocg_from_arguider = AsyncMock(
-            return_value={"status": "ok", "version_to": 2}
-        )
-
+        "app.tasks.pipeline.process_ingestion_complete_ocg.delay",
+    ) as mock_delay:
         async with _async_client_with_db(db_session) as client:
             resp = await client.post(_ENDPOINT, json=payload)
 
-    assert resp.status_code == 200
+    # majority_failed retorna 200 (não enfileira, não 202)
+    assert resp.status_code == 200, f"Esperado 200, recebido {resp.status_code}"
 
-    # Updater NÃO deve ter sido chamado
-    mock_instance.update_ocg_from_arguider.assert_not_awaited()
+    # F5.1: Celery task NÃO deve ter sido enfileirada
+    mock_delay.assert_not_called()
 
     # ocg_individual deve ter sido populado (para auditoria)
     ind_count = (await db_session.execute(
@@ -409,19 +392,16 @@ async def test_ingestion_complete_persists_failed_personas_with_status(db_sessio
         personas_failed=failed,
     )
 
+    # F5.1: minoria falhou (1/9) → Celery task é enfileirada
     with patch(
-        "app.routers.webhooks.OCGUpdaterService",
-        autospec=True,
-    ) as MockUpdater:
-        mock_instance = MockUpdater.return_value
-        mock_instance.update_ocg_from_arguider = AsyncMock(
-            return_value={"status": "ok", "version_to": 2}
-        )
+        "app.tasks.pipeline.process_ingestion_complete_ocg.delay",
+    ) as mock_delay:
+        mock_delay.return_value = type("R", (), {"id": "fake-task-id"})()
 
         async with _async_client_with_db(db_session) as client:
             resp = await client.post(_ENDPOINT, json=payload)
 
-    assert resp.status_code == 200
+    assert resp.status_code == 202
 
     # Verificar que AUD ficou 'failed'
     result = await db_session.execute(

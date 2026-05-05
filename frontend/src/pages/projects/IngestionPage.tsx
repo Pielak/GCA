@@ -486,10 +486,17 @@ export function IngestionPage() {
                       />
                     )}
                     {/* F5.2 — Pipeline n8n concluiu, Celery task processando OCG via LLM.
-                        Estado intermediário antes de virar 'completed' / 'ocg_pending'. */}
+                        Estado intermediário antes de virar 'completed' / 'ocg_pending'.
+                        QA C-05: role/aria-live para screen readers anunciarem mudança. */}
                     {doc.arguider_status === 'ocg_updating' && (
-                      <div className="text-violet-400 text-[11px] leading-tight">
-                        <span className="inline-block animate-pulse">🧠 Consolidando OCG...</span>
+                      <div
+                        className="text-violet-400 text-[11px] leading-tight"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <span className="sr-only">Status: </span>
+                        <span className="inline-block animate-pulse" aria-hidden="true">🧠 </span>
+                        <span className="inline-block animate-pulse">Consolidando OCG...</span>
                         <div className="text-violet-500/70 text-[10px] mt-0.5">
                           LLM avaliando 12 personas + atualizando pilares. ~30-60s.
                         </div>
@@ -498,8 +505,13 @@ export function IngestionPage() {
                     {/* F5.2 — Task Celery falhou após 3 retries (30s/120s/480s).
                         Doc não corrompeu OCG — operação reentrante via Reanalisar. */}
                     {doc.arguider_status === 'ocg_pending' && (
-                      <div className="text-amber-400 text-[11px] leading-tight">
-                        <span className="inline-block">⚠ OCG não atualizado</span>
+                      <div
+                        className="text-amber-400 text-[11px] leading-tight"
+                        role="alert"
+                      >
+                        <span className="sr-only">Erro: </span>
+                        <span className="inline-block" aria-hidden="true">⚠ </span>
+                        <span className="inline-block">OCG não atualizado</span>
                         <div className="text-amber-500/70 text-[10px] mt-0.5">
                           {doc.arguider_error_message || 'Task de consolidação falhou após 3 retries. Use Reanalisar.'}
                         </div>
@@ -557,6 +569,7 @@ export function IngestionPage() {
                         onClick={() => handleReanalyze(doc.id)}
                         disabled={reanalyzing[doc.id]}
                         className="p-1 rounded text-slate-600 hover:text-violet-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        aria-label={`Reanalisar documento ${doc.original_filename}`}
                         title={
                           doc.arguider_stage === 'failed' || doc.arguider_status === 'error'
                             ? 'Tentar analisar novamente (dispara pipeline do zero)'

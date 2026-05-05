@@ -147,7 +147,10 @@ async def test_watchdog_recupera_pending_com_started_at(db_session):
         started_minutes_ago=ZOMBIE_THRESHOLD_MINUTES + 1,
     )
     summary = await recover_zombie_documents(db=db_session)
-    assert summary["recovered"] == 1
+    # QA C-03: assert >= 1 (não == 1) — gca_test pode ter docs poluídos de
+    # execuções anteriores (sem isolamento por savepoint). O ponto é que
+    # ESTE doc foi recuperado, não o número total.
+    assert summary["recovered"] >= 1
 
     await db_session.refresh(zombie)
     assert zombie.arguider_status == "error"
@@ -227,3 +230,91 @@ async def test_zombie_recovery_libera_delete(db_session):
     # Agora simulamos o guard de delete: status != 'processing' deve passar
     assert doc.arguider_status == "error"
     assert doc.arguider_status != "processing"
+
+
+# QA C-04 (F5.1): watchdog cobre estado novo `ocg_updating`. Threshold 15min
+# independente do global de 8min — Celery task pode rodar até 12min worst-case
+# (3 retries 30s/120s/480s + LLM 60s).
+
+@pytest.mark.asyncio
+async def test_watchdog_recupera_ocg_updating_velho(db_session):
+    """F5.1 — Doc travado em `ocg_updating` há > 15min é recuperado pra erro.
+    Cenário real: Celery worker morreu com task em voo, sem ACK.
+    """
+    user = await create_test_user(db_session, is_admin=True)
+    org = await create_test_organization(db_session)
+    p = await create_test_project(db_session, organization_id=org.id, slug=f"f51watch-{uuid4().hex[:6]}")
+
+    h = hashlib.sha256(f"{uuid4()}".encode()).hexdigest()
+    # Cria doc em ocg_updating com updated_at de 16min atrás (cutoff = 15min).
+    # _seed_doc não suporta esse status — fazer manual.
+    old_updated_at = datetime.now(timezone.utc) - timedelta(minutes=16)
+    doc = IngestedDocument(
+        id=uuid4(),
+        project_id=p.id,
+        uploaded_by=user.id,
+        original_filename="zombie_ocg_updating.pdf",
+        filename=f"{uuid4()}.pdf",
+        file_type="pdf",
+        file_hash=h,
+        file_size_bytes=1024,
+        arguider_status="ocg_updating",
+        arguider_stage="ocg_updating",
+        pii_detected=False,
+    )
+    db_session.add(doc)
+    await db_session.commit()
+    # updated_at é onupdate=NOW, então força via UPDATE direto:
+    from sqlalchemy import text as _text
+    await db_session.execute(
+        _text("UPDATE ingested_documents SET updated_at = :ts WHERE id = :id"),
+        {"ts": old_updated_at, "id": doc.id},
+    )
+    await db_session.commit()
+
+    summary = await recover_zombie_documents(db=db_session)
+    assert summary["recovered"] >= 1
+
+    await db_session.refresh(doc)
+    assert doc.arguider_status == "error", (
+        f"Doc em ocg_updating > 15min deveria virar 'error', recebido '{doc.arguider_status}'"
+    )
+
+
+@pytest.mark.asyncio
+async def test_watchdog_preserva_ocg_updating_recente(db_session):
+    """F5.1 — Doc em `ocg_updating` recente (< 15min) NÃO é recuperado."""
+    user = await create_test_user(db_session, is_admin=True)
+    org = await create_test_organization(db_session)
+    p = await create_test_project(db_session, organization_id=org.id, slug=f"f51watch-{uuid4().hex[:6]}")
+
+    h = hashlib.sha256(f"{uuid4()}".encode()).hexdigest()
+    # 5min atrás — dentro da janela de 15min, NÃO deve ser recuperado.
+    recent_updated_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+    doc = IngestedDocument(
+        id=uuid4(),
+        project_id=p.id,
+        uploaded_by=user.id,
+        original_filename="recent_ocg_updating.pdf",
+        filename=f"{uuid4()}.pdf",
+        file_type="pdf",
+        file_hash=h,
+        file_size_bytes=1024,
+        arguider_status="ocg_updating",
+        arguider_stage="ocg_updating",
+        pii_detected=False,
+    )
+    db_session.add(doc)
+    await db_session.commit()
+    from sqlalchemy import text as _text
+    await db_session.execute(
+        _text("UPDATE ingested_documents SET updated_at = :ts WHERE id = :id"),
+        {"ts": recent_updated_at, "id": doc.id},
+    )
+    await db_session.commit()
+
+    await recover_zombie_documents(db=db_session)
+    await db_session.refresh(doc)
+    assert doc.arguider_status == "ocg_updating", (
+        "Doc recente em ocg_updating NÃO deve ser tocado pelo watchdog"
+    )

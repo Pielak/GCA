@@ -705,6 +705,10 @@ async def ingestion_complete(
             media_type="application/json",
         )
 
+    except HTTPException:
+        # F5.1 (Arq CR-4): preserva 503 do enqueue offline (e outros).
+        # Sem este re-raise explícito, o outer catch convertia em 500.
+        raise
     except Exception as e:
         logger.error("webhook.ingestion_complete_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
