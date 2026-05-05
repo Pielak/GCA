@@ -858,23 +858,32 @@ class OCGUpdaterService:
         usa apenas OCG legacy (gerado pelo questionário). Se não existe,
         retorna None e o caller faz retry automático.
         """
-        stmt = (
-            select(OCG)
-            .where(OCG.project_id == project_id)
-            .order_by(OCG.version.desc())
-            .limit(1)
-            .execution_options(populate_existing=True)
-        )
-        result = await self.db.execute(stmt)
-        ocg = result.scalar_one_or_none()
-        if ocg:
-            return ocg
+        try:
+            stmt = (
+                select(OCG)
+                .where(OCG.project_id == project_id)
+                .order_by(OCG.version.desc())
+                .limit(1)
+                .execution_options(populate_existing=True)
+            )
+            result = await self.db.execute(stmt)
+            ocg = result.scalar_one_or_none()
+            if ocg:
+                return ocg
 
-        # Fase 2 Simplificação: OCGGlobal removido. Pipeline agora usa
-        # apenas OCG legacy (gerado pelo questionário). Se não existe,
-        # retorna None e o caller (update_ocg_from_arguider) recebe
-        # "awaiting_ocg" para retry automático.
-        return None
+            # Fase 2 Simplificação: OCGGlobal removido. Pipeline agora usa
+            # apenas OCG legacy (gerado pelo questionário). Se não existe,
+            # retorna None e o caller (update_ocg_from_arguider) recebe
+            # "awaiting_ocg" para retry automático.
+            return None
+        except Exception as exc:
+            logger.error(
+                "ocg_updater.load_current_ocg_failed",
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
 
     async def _load_persona_scores(self, project_id: UUID) -> dict:
         """Carrega scores das personas a partir de ocg_individual (cumulativo, MVP 31).
@@ -1376,177 +1385,187 @@ class OCGUpdaterService:
         fossilizado no valor da geração inicial. UI lê das colunas → dogfood
         via "nada muda" mesmo com Arguidor + apply_deltas funcionando.
         """
-        # MVP governance_mode (2026-04-24): em projeto solo_owner, P1
-        # (business case) é "owner-declared" — não-mensurável pelo Arguidor.
-        # Marcamos no JSON e EXCLUÍMOS do cálculo do composite, pra owner
-        # não ser punido por ausência de cronograma absoluto/orçamento formal.
-        gov_row = await self.db.execute(
-            select(Project.governance_mode).where(Project.id == ocg.project_id)
-        )
-        governance_mode = gov_row.scalar() or "solo_owner"
-        p1_owner_declared = governance_mode == "solo_owner"
+        try:
+            # MVP governance_mode (2026-04-24): em projeto solo_owner, P1
+            # (business case) é "owner-declared" — não-mensurável pelo Arguidor.
+            # Marcamos no JSON e EXCLUÍMOS do cálculo do composite, pra owner
+            # não ser punido por ausência de cronograma absoluto/orçamento formal.
+            gov_row = await self.db.execute(
+                select(Project.governance_mode).where(Project.id == ocg.project_id)
+            )
+            governance_mode = gov_row.scalar() or "solo_owner"
+            p1_owner_declared = governance_mode == "solo_owner"
 
-        # 1. Extrair score de cada pilar do JSON canônico, gravar nas colunas
-        pillars = updated_ocg.get("PILLAR_SCORES") or {}
-        if p1_owner_declared and isinstance(pillars.get("P1_business_case"), dict):
-            pillars["P1_business_case"]["mode"] = "owner-declared"
+            # 1. Extrair score de cada pilar do JSON canônico, gravar nas colunas
+            pillars = updated_ocg.get("PILLAR_SCORES") or {}
+            if p1_owner_declared and isinstance(pillars.get("P1_business_case"), dict):
+                pillars["P1_business_case"]["mode"] = "owner-declared"
 
-        # PISO determinístico — MAX-por-persona consolidado em ocg_individual
-        # vira o LIMITE INFERIOR de cada pilar. LLM updater pode subir com
-        # interpretação semântica, mas nunca derrubar abaixo da evidência
-        # cumulativa registrada. Ignorado em REVERT_DOCUMENT_DELETE.
-        # Atualiza TODAS as variantes de chave do pilar no JSON (P2_rules,
-        # P2_compliance, p2_rules_score etc) — histórico tem múltiplas grafias.
-        if change_type != "REVERT_DOCUMENT_DELETE":
-            try:
-                fallback_scores = await self._load_persona_scores(ocg.project_id)
-                _DB_KEY_BY_NUM = {
-                    1: "p1_business_score", 2: "p2_rules_score",
-                    3: "p3_features_score", 4: "p4_nfr_score",
-                    5: "p5_architecture_score", 6: "p6_data_score",
-                    7: "p7_security_score",
-                }
-                _CANONICAL_BY_NUM = {
-                    1: "P1_business_case", 2: "P2_rules", 3: "P3_features",
-                    4: "P4_nfr", 5: "P5_architecture", 6: "P6_data",
-                    7: "P7_security",
-                }
-                for n, db_key in _DB_KEY_BY_NUM.items():
-                    floor = (fallback_scores.get(db_key) or {}).get("score")
-                    if floor is None:
-                        continue
-                    floor = float(floor)
-                    current = _extract_pillar_score(pillars, n) or 0.0
-                    if floor <= current:
-                        continue
-                    # Atualiza TODAS as variantes Px* existentes para evitar
-                    # _extract_pillar_score selecionar variante não-atualizada.
-                    prefix = f"P{n}_".upper()
-                    short = f"P{n}".upper()
-                    matched_any = False
-                    for k in list(pillars.keys()):
-                        if not isinstance(k, str):
-                            continue
-                        ku = k.upper()
-                        if ku == short or ku.startswith(prefix):
-                            if isinstance(pillars[k], dict):
-                                pillars[k]["score"] = floor
-                            else:
-                                pillars[k] = {"score": floor}
-                            matched_any = True
-                    if not matched_any:
-                        pillars[_CANONICAL_BY_NUM[n]] = {"score": floor}
-                    logger.info(
-                        "ocg_updater.floor_applied",
-                        project_id=str(ocg.project_id),
-                        pillar=db_key,
-                        llm_score=current,
-                        floor_max_per_persona=floor,
-                    )
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "ocg_updater.floor_failed",
-                    project_id=str(ocg.project_id),
-                    error=str(exc),
-                )
-
-        # Invariante §2.4 (CLAUDE.md): "OCG só expande, nunca contrai por
-        # análise". Único caminho legítimo de contração: revert de doc
-        # soft-deleted (change_type='REVERT_DOCUMENT_DELETE'). Em ingestão
-        # normal, se LLM/fallback retornar score menor que o atual, mantém
-        # o atual — defesa em camada contra dilução.
-        is_revert = change_type == "REVERT_DOCUMENT_DELETE"
-        pillar_scores: Dict[int, float] = {}
-        _PILLAR_KEY_BY_NUM = {
-            1: "P1_business_case", 2: "P2_rules", 3: "P3_features",
-            4: "P4_nfr", 5: "P5_architecture", 6: "P6_data", 7: "P7_security",
-        }
-        for n, col in _PILLAR_COLUMNS.items():
-            score = _extract_pillar_score(pillars, n)
-            if score is None:
-                continue
-            current = getattr(ocg, col, None)
-            if (
-                not is_revert
-                and current is not None
-                and float(score) < float(current)
-            ):
-                # Contração indevida — preserva o atual (monotonicidade).
-                logger.info(
-                    "ocg_updater.contraction_blocked",
-                    project_id=str(ocg.project_id),
-                    pillar=col,
-                    incoming=score,
-                    kept=current,
-                    change_type=change_type,
-                )
-                score = float(current)
-                key = _PILLAR_KEY_BY_NUM.get(n)
-                if key and isinstance(pillars.get(key), dict):
-                    pillars[key]["score"] = score
-            setattr(ocg, col, score)
-            pillar_scores[n] = score
-
-        # 2. Recalcular overall: média ponderada normalizada pelos pesos dos
-        #    pilares EFETIVAMENTE presentes (defesa contra OCG parcial).
-        # Em solo_owner, P1 sai do denominador do composite.
-        overall_new: Optional[float] = None
-        composite_pillars = {
-            n: s for n, s in pillar_scores.items()
-            if not (p1_owner_declared and n == 1)
-        }
-        if composite_pillars:
-            total_weight = sum(_PILLAR_WEIGHTS[n] for n in composite_pillars)
-            if total_weight > 0:
-                weighted_sum = sum(
-                    composite_pillars[n] * _PILLAR_WEIGHTS[n] for n in composite_pillars
-                )
-                overall_new = round(weighted_sum / total_weight, 2)
-                ocg.overall_score = overall_new
-                # Espelha no JSON em 3 lugares pra coerência total:
-                # - coluna ocg.overall_score (já feito acima)
-                # - COMPOSITE_SCORE.value (UI/CodeGen lêem de lá)
-                # - overall_score top-level (campo legacy, UI antigo lê — bug
-                #   visto em dogfood 2026-05-04 mostrava 57.3 stale enquanto
-                #   coluna e COMPOSITE_SCORE estavam em 63.03).
-                updated_ocg["overall_score"] = overall_new
-                comp = updated_ocg.get("COMPOSITE_SCORE")
-                if isinstance(comp, dict):
-                    comp["value"] = overall_new
-                    if p1_owner_declared:
-                        comp["p1_excluded"] = True
-                        comp["p1_mode"] = "owner-declared"
-                else:
-                    updated_ocg["COMPOSITE_SCORE"] = {
-                        "value": overall_new,
-                        **({"p1_excluded": True, "p1_mode": "owner-declared"} if p1_owner_declared else {}),
-                    }
-
-        # 3. Fallback: se o LLM emitiu overall_score top-level (raro, formato
-        #    legado) e não conseguimos derivar dos pilares, respeita.
-        if overall_new is None:
-            legacy_overall = updated_ocg.get("overall_score")
-            if legacy_overall is not None:
+            # PISO determinístico — MAX-por-persona consolidado em ocg_individual
+            # vira o LIMITE INFERIOR de cada pilar. LLM updater pode subir com
+            # interpretação semântica, mas nunca derrubar abaixo da evidência
+            # cumulativa registrada. Ignorado em REVERT_DOCUMENT_DELETE.
+            # Atualiza TODAS as variantes de chave do pilar no JSON (P2_rules,
+            # P2_compliance, p2_rules_score etc) — histórico tem múltiplas grafias.
+            if change_type != "REVERT_DOCUMENT_DELETE":
                 try:
-                    ocg.overall_score = float(legacy_overall)
-                except (TypeError, ValueError):
-                    pass
+                    fallback_scores = await self._load_persona_scores(ocg.project_id)
+                    _DB_KEY_BY_NUM = {
+                        1: "p1_business_score", 2: "p2_rules_score",
+                        3: "p3_features_score", 4: "p4_nfr_score",
+                        5: "p5_architecture_score", 6: "p6_data_score",
+                        7: "p7_security_score",
+                    }
+                    _CANONICAL_BY_NUM = {
+                        1: "P1_business_case", 2: "P2_rules", 3: "P3_features",
+                        4: "P4_nfr", 5: "P5_architecture", 6: "P6_data",
+                        7: "P7_security",
+                    }
+                    for n, db_key in _DB_KEY_BY_NUM.items():
+                        floor = (fallback_scores.get(db_key) or {}).get("score")
+                        if floor is None:
+                            continue
+                        floor = float(floor)
+                        current = _extract_pillar_score(pillars, n) or 0.0
+                        if floor <= current:
+                            continue
+                        # Atualiza TODAS as variantes Px* existentes para evitar
+                        # _extract_pillar_score selecionar variante não-atualizada.
+                        prefix = f"P{n}_".upper()
+                        short = f"P{n}".upper()
+                        matched_any = False
+                        for k in list(pillars.keys()):
+                            if not isinstance(k, str):
+                                continue
+                            ku = k.upper()
+                            if ku == short or ku.startswith(prefix):
+                                if isinstance(pillars[k], dict):
+                                    pillars[k]["score"] = floor
+                                else:
+                                    pillars[k] = {"score": floor}
+                                matched_any = True
+                        if not matched_any:
+                            pillars[_CANONICAL_BY_NUM[n]] = {"score": floor}
+                        logger.info(
+                            "ocg_updater.floor_applied",
+                            project_id=str(ocg.project_id),
+                            pillar=db_key,
+                            llm_score=current,
+                            floor_max_per_persona=floor,
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "ocg_updater.floor_failed",
+                        project_id=str(ocg.project_id),
+                        error=str(exc),
+                    )
 
-        # 4. Status + is_blocking canônicos (P2<70 OR P7<70 → BLOCKED)
-        new_status, is_blocking = _compute_status(pillar_scores, ocg.overall_score)
-        ocg.status = new_status
-        ocg.is_blocking = is_blocking
-        updated_ocg["APPROVAL_STATUS"] = new_status
+            # Invariante §2.4 (CLAUDE.md): "OCG só expande, nunca contrai por
+            # análise". Único caminho legítimo de contração: revert de doc
+            # soft-deleted (change_type='REVERT_DOCUMENT_DELETE'). Em ingestão
+            # normal, se LLM/fallback retornar score menor que o atual, mantém
+            # o atual — defesa em camada contra dilução.
+            is_revert = change_type == "REVERT_DOCUMENT_DELETE"
+            pillar_scores: Dict[int, float] = {}
+            _PILLAR_KEY_BY_NUM = {
+                1: "P1_business_case", 2: "P2_rules", 3: "P3_features",
+                4: "P4_nfr", 5: "P5_architecture", 6: "P6_data", 7: "P7_security",
+            }
+            for n, col in _PILLAR_COLUMNS.items():
+                score = _extract_pillar_score(pillars, n)
+                if score is None:
+                    continue
+                current = getattr(ocg, col, None)
+                if (
+                    not is_revert
+                    and current is not None
+                    and float(score) < float(current)
+                ):
+                    # Contração indevida — preserva o atual (monotonicidade).
+                    logger.info(
+                        "ocg_updater.contraction_blocked",
+                        project_id=str(ocg.project_id),
+                        pillar=col,
+                        incoming=score,
+                        kept=current,
+                        change_type=change_type,
+                    )
+                    score = float(current)
+                    key = _PILLAR_KEY_BY_NUM.get(n)
+                    if key and isinstance(pillars.get(key), dict):
+                        pillars[key]["score"] = score
+                setattr(ocg, col, score)
+                pillar_scores[n] = score
 
-        # 5. Persistir JSON, change_type, context_health, version
-        ocg.ocg_data = json.dumps(updated_ocg, ensure_ascii=False)
-        ocg.change_type = change_type
-        ocg.context_health = json.dumps(context_health, ensure_ascii=False)
-        ocg.version = version_to
-        ocg.updated_at = datetime.now(timezone.utc)
+            # 2. Recalcular overall: média ponderada normalizada pelos pesos dos
+            #    pilares EFETIVAMENTE presentes (defesa contra OCG parcial).
+            # Em solo_owner, P1 sai do denominador do composite.
+            overall_new: Optional[float] = None
+            composite_pillars = {
+                n: s for n, s in pillar_scores.items()
+                if not (p1_owner_declared and n == 1)
+            }
+            if composite_pillars:
+                total_weight = sum(_PILLAR_WEIGHTS[n] for n in composite_pillars)
+                if total_weight > 0:
+                    weighted_sum = sum(
+                        composite_pillars[n] * _PILLAR_WEIGHTS[n] for n in composite_pillars
+                    )
+                    overall_new = round(weighted_sum / total_weight, 2)
+                    ocg.overall_score = overall_new
+                    # Espelha no JSON em 3 lugares pra coerência total:
+                    # - coluna ocg.overall_score (já feito acima)
+                    # - COMPOSITE_SCORE.value (UI/CodeGen lêem de lá)
+                    # - overall_score top-level (campo legacy, UI antigo lê — bug
+                    #   visto em dogfood 2026-05-04 mostrava 57.3 stale enquanto
+                    #   coluna e COMPOSITE_SCORE estavam em 63.03).
+                    updated_ocg["overall_score"] = overall_new
+                    comp = updated_ocg.get("COMPOSITE_SCORE")
+                    if isinstance(comp, dict):
+                        comp["value"] = overall_new
+                        if p1_owner_declared:
+                            comp["p1_excluded"] = True
+                            comp["p1_mode"] = "owner-declared"
+                    else:
+                        updated_ocg["COMPOSITE_SCORE"] = {
+                            "value": overall_new,
+                            **({"p1_excluded": True, "p1_mode": "owner-declared"} if p1_owner_declared else {}),
+                        }
 
-        self.db.add(ocg)
-        await self.db.flush()
+            # 3. Fallback: se o LLM emitiu overall_score top-level (raro, formato
+            #    legado) e não conseguimos derivar dos pilares, respeita.
+            if overall_new is None:
+                legacy_overall = updated_ocg.get("overall_score")
+                if legacy_overall is not None:
+                    try:
+                        ocg.overall_score = float(legacy_overall)
+                    except (TypeError, ValueError):
+                        pass
+
+            # 4. Status + is_blocking canônicos (P2<70 OR P7<70 → BLOCKED)
+            new_status, is_blocking = _compute_status(pillar_scores, ocg.overall_score)
+            ocg.status = new_status
+            ocg.is_blocking = is_blocking
+            updated_ocg["APPROVAL_STATUS"] = new_status
+
+            # 5. Persistir JSON, change_type, context_health, version
+            ocg.ocg_data = json.dumps(updated_ocg, ensure_ascii=False)
+            ocg.change_type = change_type
+            ocg.context_health = json.dumps(context_health, ensure_ascii=False)
+            ocg.version = version_to
+            ocg.updated_at = datetime.now(timezone.utc)
+
+            self.db.add(ocg)
+            await self.db.flush()
+        except Exception as exc:
+            logger.error(
+                "ocg_updater.update_ocg_record_failed",
+                project_id=str(ocg.project_id),
+                ocg_version=ocg.version,
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
 
     async def _log_delta(
         self,
@@ -1560,46 +1579,66 @@ class OCGUpdaterService:
         ocg_snapshot: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Registra delta sempre — document_id opcional (updates não-ingestão também contam)."""
-        fields_changed: Dict[str, Any] = {}
-        for change in changes:
-            field = change.get("field", "unknown")
-            fields_changed[field] = {
-                "old": change.get("old_value"),
-                "new": change.get("new_value"),
-                "reasoning": change.get("reasoning", ""),
-            }
+        try:
+            fields_changed: Dict[str, Any] = {}
+            for change in changes:
+                field = change.get("field", "unknown")
+                fields_changed[field] = {
+                    "old": change.get("old_value"),
+                    "new": change.get("new_value"),
+                    "reasoning": change.get("reasoning", ""),
+                }
 
-        summary_parts = [
-            f"{c.get('field', '?')}: {c.get('reasoning', '')}"
-            for c in changes[:5]
-        ]
-        change_summary = "; ".join(summary_parts) if summary_parts else f"Mudança via {trigger_source}"
+            summary_parts = [
+                f"{c.get('field', '?')}: {c.get('reasoning', '')}"
+                for c in changes[:5]
+            ]
+            change_summary = "; ".join(summary_parts) if summary_parts else f"Mudança via {trigger_source}"
 
-        delta_entry = OCGDeltaLog(
-            project_id=project_id,
-            document_id=document_id,
-            ocg_version_from=ocg_version_from,
-            ocg_version_to=ocg_version_to,
-            fields_changed=json.dumps(fields_changed, ensure_ascii=False),
-            change_summary=change_summary,
-            changed_by=changed_by,
-            trigger_source=trigger_source,
-            ocg_snapshot=json.dumps(ocg_snapshot, ensure_ascii=False) if ocg_snapshot else None,
-        )
-        self.db.add(delta_entry)
-        await self.db.flush()
+            delta_entry = OCGDeltaLog(
+                project_id=project_id,
+                document_id=document_id,
+                ocg_version_from=ocg_version_from,
+                ocg_version_to=ocg_version_to,
+                fields_changed=json.dumps(fields_changed, ensure_ascii=False),
+                change_summary=change_summary,
+                changed_by=changed_by,
+                trigger_source=trigger_source,
+                ocg_snapshot=json.dumps(ocg_snapshot, ensure_ascii=False) if ocg_snapshot else None,
+            )
+            self.db.add(delta_entry)
+            await self.db.flush()
+        except Exception as exc:
+            logger.error(
+                "ocg_updater.log_delta_failed",
+                project_id=str(project_id),
+                ocg_version_from=ocg_version_from,
+                ocg_version_to=ocg_version_to,
+                error=str(exc),
+                exc_info=True,
+            )
 
     async def _mark_ocg_pending(self, ocg: OCG) -> None:
         """
         Marca o OCG como ocg_pending quando o LLM falha.
         Preserva todos os dados atuais — nunca corrompe o OCG.
         """
-        ocg.status = "ocg_pending"
-        ocg.updated_at = datetime.now(timezone.utc)
-        self.db.add(ocg)
-        await self.db.flush()
-        logger.warning(
-            "ocg_updater.marked_pending",
-            ocg_id=str(ocg.id),
-            version=ocg.version,
-        )
+        try:
+            ocg.status = "ocg_pending"
+            ocg.updated_at = datetime.now(timezone.utc)
+            self.db.add(ocg)
+            await self.db.flush()
+            logger.warning(
+                "ocg_updater.marked_pending",
+                ocg_id=str(ocg.id),
+                version=ocg.version,
+            )
+        except Exception as exc:
+            logger.error(
+                "ocg_updater.mark_pending_failed",
+                ocg_id=str(ocg.id),
+                ocg_version=ocg.version,
+                error=str(exc),
+                exc_info=True,
+            )
+            raise

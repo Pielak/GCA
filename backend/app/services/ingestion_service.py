@@ -347,38 +347,49 @@ async def _reevaluate_gatekeeper_for_audit(
     from app.services.gatekeeper_service import GatekeeperService
     from app.services.audit_service import AuditService
 
-    ocg_check = await db.execute(
-        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
-    )
-    if ocg_check.scalar_one_or_none() is None:
-        logger.info(
-            "ingestion.gatekeeper_reeval_noop_no_ocg",
-            project_id=str(project_id),
-            trigger=trigger,
+    try:
+        ocg_check = await db.execute(
+            select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
         )
-        return
+        if ocg_check.scalar_one_or_none() is None:
+            logger.info(
+                "ingestion.gatekeeper_reeval_noop_no_ocg",
+                project_id=str(project_id),
+                trigger=trigger,
+            )
+            return
 
-    gatekeeper = GatekeeperService(db)
-    state = await gatekeeper.get_project_gatekeeper(project_id)
-    ocg_section = state.get("ocg", {}) or {}
-    summary = state.get("summary", {}) or {}
+        gatekeeper = GatekeeperService(db)
+        state = await gatekeeper.get_project_gatekeeper(project_id)
+        ocg_section = state.get("ocg", {}) or {}
+        summary = state.get("summary", {}) or {}
 
-    audit = AuditService(db)
-    await audit.log_event(
-        event_type="GATEKEEPER_REEVALUATED",
-        resource_type="project",
-        resource_id=project_id,
-        details={
-            "trigger": trigger,
-            "ocg_version": ocg_version,
-            "blocking_pillars": ocg_section.get("blocking_pillars", []),
-            "derived_status": ocg_section.get("derived_status"),
-            "overall_score": (ocg_section.get("status") or {}).get("overall_score"),
-            "has_blockers": summary.get("has_blockers"),
-            "open_gaps": summary.get("open_gaps"),
-            "open_show_stoppers": summary.get("open_show_stoppers"),
-        },
-    )
+        audit = AuditService(db)
+        await audit.log_event(
+            event_type="GATEKEEPER_REEVALUATED",
+            resource_type="project",
+            resource_id=project_id,
+            details={
+                "trigger": trigger,
+                "ocg_version": ocg_version,
+                "blocking_pillars": ocg_section.get("blocking_pillars", []),
+                "derived_status": ocg_section.get("derived_status"),
+                "overall_score": (ocg_section.get("status") or {}).get("overall_score"),
+                "has_blockers": summary.get("has_blockers"),
+                "open_gaps": summary.get("open_gaps"),
+                "open_show_stoppers": summary.get("open_show_stoppers"),
+            },
+        )
+    except Exception as exc:
+        logger.error(
+            "ingestion.gatekeeper_reeval_failed",
+            project_id=str(project_id),
+            ocg_version=ocg_version,
+            trigger=trigger,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 async def _reevaluate_gatekeeper_async(
@@ -430,31 +441,42 @@ async def _regenerate_backlog_for_audit(
     from app.services.backlog_service import BacklogService
     from app.services.audit_service import AuditService
 
-    ocg_check = await db.execute(
-        select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
-    )
-    if ocg_check.scalar_one_or_none() is None:
-        logger.info(
-            "ingestion.backlog_regen_noop_no_ocg",
-            project_id=str(project_id),
-            trigger=trigger,
+    try:
+        ocg_check = await db.execute(
+            select(OCG).where(OCG.project_id == project_id).order_by(OCG.created_at.desc()).limit(1)
         )
-        return
+        if ocg_check.scalar_one_or_none() is None:
+            logger.info(
+                "ingestion.backlog_regen_noop_no_ocg",
+                project_id=str(project_id),
+                trigger=trigger,
+            )
+            return
 
-    backlog_svc = BacklogService(db)
-    result = await backlog_svc.regenerate_from_ocg(project_id, ocg_version)
+        backlog_svc = BacklogService(db)
+        result = await backlog_svc.regenerate_from_ocg(project_id, ocg_version)
 
-    audit = AuditService(db)
-    await audit.log_event(
-        event_type="BACKLOG_REGENERATED",
-        resource_type="backlog",
-        resource_id=project_id,
-        details={
-            "trigger": trigger,
-            "ocg_version": ocg_version,
-            "regenerated": result.get("regenerated", 0),
-        },
-    )
+        audit = AuditService(db)
+        await audit.log_event(
+            event_type="BACKLOG_REGENERATED",
+            resource_type="backlog",
+            resource_id=project_id,
+            details={
+                "trigger": trigger,
+                "ocg_version": ocg_version,
+                "regenerated": result.get("regenerated", 0),
+            },
+        )
+    except Exception as exc:
+        logger.error(
+            "ingestion.backlog_regen_failed",
+            project_id=str(project_id),
+            ocg_version=ocg_version,
+            trigger=trigger,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 async def _regenerate_backlog_async(
@@ -510,12 +532,23 @@ async def _fire_ocg_change_hooks(
         regenerate_backlog_task,
         reevaluate_gatekeeper_task,
     )
-    if changes:
-        propagate_task.send(str(project_id), list(changes), ocg_version)
-    else:
-        regenerate_backlog_task.send(str(project_id), ocg_version, trigger)
+    try:
+        if changes:
+            propagate_task.send(str(project_id), list(changes), ocg_version)
+        else:
+            regenerate_backlog_task.send(str(project_id), ocg_version, trigger)
 
-    reevaluate_gatekeeper_task.send(str(project_id), ocg_version, trigger)
+        reevaluate_gatekeeper_task.send(str(project_id), ocg_version, trigger)
+    except Exception as exc:
+        logger.error(
+            "ingestion.ocg_change_hooks_failed",
+            project_id=str(project_id),
+            ocg_version=ocg_version,
+            trigger=trigger,
+            error=str(exc),
+            exc_info=True,
+        )
+        raise
 
 
 class IngestionService:
@@ -2034,11 +2067,21 @@ class IngestionService:
         `_link_target_module_in_session` pra ser testável.
         """
         from app.db.database import AsyncSessionLocal as _ASL
-        async with _ASL() as _db:
-            target_module_id = await cls._link_target_module_in_session(
-                _db, document_id, project_id,
+        try:
+            async with _ASL() as _db:
+                target_module_id = await cls._link_target_module_in_session(
+                    _db, document_id, project_id,
+                )
+                await _db.commit()
+        except Exception as exc:
+            logger.error(
+                "ingestion.link_target_module_failed",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
             )
-            await _db.commit()
+            raise
 
         # MVP 9 Fase 9.3 — avalia readiness em sessão própria pra
         # evitar dependência da session que acabou de commitar.
@@ -2846,78 +2889,98 @@ class IngestionService:
         Endpoint pode chamar `get_document_detail_including_deleted` se
         precisar inspecionar deletados (audit/admin).
         """
-        result = await self.db.execute(
-            select(IngestedDocument).where(
-                IngestedDocument.id == document_id,
-                IngestedDocument.project_id == project_id,
-                IngestedDocument.deleted_at.is_(None),
+        try:
+            result = await self.db.execute(
+                select(IngestedDocument).where(
+                    IngestedDocument.id == document_id,
+                    IngestedDocument.project_id == project_id,
+                    IngestedDocument.deleted_at.is_(None),
+                )
             )
-        )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            return None
+            doc = result.scalar_one_or_none()
+            if not doc:
+                return None
 
-        detail = {
-            "id": str(doc.id),
-            "original_filename": doc.original_filename,
-            "file_type": doc.file_type,
-            "document_category": doc.document_category,
-            "arguider_status": doc.arguider_status,
-            "arguider_error_message": doc.arguider_error_message,
-            "ocg_updated": doc.ocg_updated,
-            "file_size_bytes": doc.file_size_bytes,
-            "created_at": doc.created_at.isoformat() if doc.created_at else None,
-        }
-
-        # Buscar análise
-        analysis_result = await self.db.execute(
-            select(ArguiderAnalysis).where(
-                (ArguiderAnalysis.document_id == document_id) &
-                (ArguiderAnalysis.project_id == project_id)
-            )
-        )
-        analysis = analysis_result.scalar_one_or_none()
-        if analysis:
-            detail["analysis"] = {
-                "classification": json.loads(analysis.document_classification) if analysis.document_classification else {},
-                "gaps": json.loads(analysis.gaps) if analysis.gaps else [],
-                "show_stoppers": json.loads(analysis.show_stoppers) if analysis.show_stoppers else [],
-                "poor_definitions": json.loads(analysis.poor_definitions) if analysis.poor_definitions else [],
-                "improvement_suggestions": json.loads(analysis.improvement_suggestions) if analysis.improvement_suggestions else [],
-                "module_candidates": json.loads(analysis.module_candidates) if analysis.module_candidates else [],
-                "ocg_fields_to_update": json.loads(analysis.ocg_fields_to_update) if analysis.ocg_fields_to_update else [],
-                "tokens_used": analysis.tokens_used,
-                "latency_ms": analysis.latency_ms,
+            detail = {
+                "id": str(doc.id),
+                "original_filename": doc.original_filename,
+                "file_type": doc.file_type,
+                "document_category": doc.document_category,
+                "arguider_status": doc.arguider_status,
+                "arguider_error_message": doc.arguider_error_message,
+                "ocg_updated": doc.ocg_updated,
+                "file_size_bytes": doc.file_size_bytes,
+                "created_at": doc.created_at.isoformat() if doc.created_at else None,
             }
 
-        return detail
+            # Buscar análise
+            analysis_result = await self.db.execute(
+                select(ArguiderAnalysis).where(
+                    (ArguiderAnalysis.document_id == document_id) &
+                    (ArguiderAnalysis.project_id == project_id)
+                )
+            )
+            analysis = analysis_result.scalar_one_or_none()
+            if analysis:
+                detail["analysis"] = {
+                    "classification": json.loads(analysis.document_classification) if analysis.document_classification else {},
+                    "gaps": json.loads(analysis.gaps) if analysis.gaps else [],
+                    "show_stoppers": json.loads(analysis.show_stoppers) if analysis.show_stoppers else [],
+                    "poor_definitions": json.loads(analysis.poor_definitions) if analysis.poor_definitions else [],
+                    "improvement_suggestions": json.loads(analysis.improvement_suggestions) if analysis.improvement_suggestions else [],
+                    "module_candidates": json.loads(analysis.module_candidates) if analysis.module_candidates else [],
+                    "ocg_fields_to_update": json.loads(analysis.ocg_fields_to_update) if analysis.ocg_fields_to_update else [],
+                    "tokens_used": analysis.tokens_used,
+                    "latency_ms": analysis.latency_ms,
+                }
+
+            return detail
+        except Exception as exc:
+            logger.error(
+                "ingestion.get_document_detail_failed",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
 
     async def get_document_status(self, project_id: UUID, document_id: UUID) -> dict | None:
         """Status para polling.
 
         MVP 34: docs soft-deleted retornam None (frontend para de poll quando recebe 404).
         """
-        result = await self.db.execute(
-            select(IngestedDocument).where(
-                IngestedDocument.id == document_id,
-                IngestedDocument.project_id == project_id,
-                IngestedDocument.deleted_at.is_(None),
+        try:
+            result = await self.db.execute(
+                select(IngestedDocument).where(
+                    IngestedDocument.id == document_id,
+                    IngestedDocument.project_id == project_id,
+                    IngestedDocument.deleted_at.is_(None),
+                )
             )
-        )
-        doc = result.scalar_one_or_none()
-        if not doc:
-            return None
-        return {
-            "document_id": str(doc.id),
-            "arguider_status": doc.arguider_status,
-            "arguider_started_at": doc.arguider_started_at.isoformat() if doc.arguider_started_at else None,
-            "arguider_completed_at": doc.arguider_completed_at.isoformat() if doc.arguider_completed_at else None,
-            "ocg_updated": doc.ocg_updated,
-            # MVP 8 Fase 1 — feedback de progresso
-            "arguider_stage": doc.arguider_stage,
-            "arguider_progress_percent": doc.arguider_progress_percent,
-            "arguider_stage_updated_at": doc.arguider_stage_updated_at.isoformat() if doc.arguider_stage_updated_at else None,
-        }
+            doc = result.scalar_one_or_none()
+            if not doc:
+                return None
+            return {
+                "document_id": str(doc.id),
+                "arguider_status": doc.arguider_status,
+                "arguider_started_at": doc.arguider_started_at.isoformat() if doc.arguider_started_at else None,
+                "arguider_completed_at": doc.arguider_completed_at.isoformat() if doc.arguider_completed_at else None,
+                "ocg_updated": doc.ocg_updated,
+                # MVP 8 Fase 1 — feedback de progresso
+                "arguider_stage": doc.arguider_stage,
+                "arguider_progress_percent": doc.arguider_progress_percent,
+                "arguider_stage_updated_at": doc.arguider_stage_updated_at.isoformat() if doc.arguider_stage_updated_at else None,
+            }
+        except Exception as exc:
+            logger.error(
+                "ingestion.get_document_status_failed",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
 
     async def delete_document(
         self,
@@ -3009,18 +3072,42 @@ class IngestionService:
         doc.deleted_at = datetime.now(timezone.utc)
         doc.deleted_by = actor_id
         doc.deleted_reason = reason
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except Exception as exc:
+            logger.error(
+                "ingestion.delete_document_commit_failed",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            raise
 
         # Enfileira Celery task. `revert_document_propagation_task` faz
         # o recompute do OCG + cleanup auxiliar + audit + payload.
         from app.tasks.pipeline import revert_document_propagation_task
 
-        async_result = revert_document_propagation_task.send(
-            document_id=str(document_id),
-            project_id=str(project_id),
-            actor_id=str(actor_id) if actor_id else None,
-            reason=reason,
-        )
+        try:
+            async_result = revert_document_propagation_task.send(
+                document_id=str(document_id),
+                project_id=str(project_id),
+                actor_id=str(actor_id) if actor_id else None,
+                reason=reason,
+            )
+        except Exception as exc:
+            logger.error(
+                "ingestion.delete_document_task_enqueue_failed",
+                document_id=str(document_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
+            )
+            return {
+                "success": False,
+                "error": "Documento marcado para deletion, mas job não foi enfileirado. Contate suporte.",
+                "status_code": 500,
+            }
 
         logger.info(
             "ingestion.document_soft_deleted_revert_enqueued",
