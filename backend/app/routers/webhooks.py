@@ -427,6 +427,14 @@ async def ingestion_complete(
                 # HITL — extrair questions[] do PersonaOutput-v2 e persistir.
                 # Filosofia "Assistida": persona detectou lacuna no insumo e perguntou.
                 # DELETE só de pending: respostas já dadas (status='answered') preservadas.
+                #
+                # B4 (Decisão GP 2026-05-05): filtra questions cujo conteúdo já
+                # está no OCG atual ANTES de INSERT. Evita retrabalho do GP
+                # respondendo algo que documentação já cobriu.
+                # Heurística determinística: extrai keywords técnicos da
+                # pergunta, procura match no JSON do OCG (insensível a caso).
+                # Se ≥ MIN_KEYWORDS_MATCH keywords baterem → pergunta já
+                # respondida → SKIP com log estruturado.
                 questions = persona_output.get("questions") or []
                 if questions and not failed:
                     await db.execute(text("""
@@ -435,6 +443,40 @@ async def ingestion_complete(
                           AND persona_id = :persona_id
                           AND status = 'pending'
                     """), {"doc_id": doc_id, "persona_id": persona_tag})
+
+                    # Carrega OCG atual pra checar respostas existentes
+                    ocg_data_text = ""
+                    try:
+                        ocg_row = (await db.execute(
+                            text("SELECT ocg_data FROM ocg WHERE project_id=:pid ORDER BY created_at DESC LIMIT 1"),
+                            {"pid": project_id},
+                        )).first()
+                        if ocg_row and ocg_row[0]:
+                            ocg_data_text = ocg_row[0]
+                            # Lower pra match insensível
+                            ocg_data_text = ocg_data_text.lower()
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "webhook.hitl_filter_ocg_load_failed",
+                            ingestion_id=str(doc_id), error=str(exc),
+                        )
+
+                    # Stopwords PT-BR pra extrair keywords técnicos
+                    _STOPWORDS = {
+                        "a","o","as","os","de","da","do","das","dos","e","ou","que","qual","quais",
+                        "para","por","com","sem","em","na","no","nas","nos","ao","aos","à","às",
+                        "um","uma","uns","umas","é","são","está","estão","ser","ter","há","foi",
+                        "como","onde","quando","quem","porque","se","sua","seu","suas","seus",
+                        "este","esta","esse","essa","isso","isto","aquele","aquela",
+                        "qualquer","todos","todas","cada","entre","sobre","após","antes",
+                        "será","serão","deve","devem","pode","podem","tem","têm","já","ainda",
+                    }
+                    MIN_KEYWORDS_MATCH = 3
+
+                    skipped_count = 0
+                    inserted_count = 0
+                    import re as _re
+
                     for idx, q in enumerate(questions):
                         if isinstance(q, dict):
                             qtext = q.get("question") or q.get("text") or q.get("pergunta") or ""
@@ -445,6 +487,33 @@ async def ingestion_complete(
                         qtext = (qtext or "").strip()
                         if not qtext:
                             continue
+
+                        # Filtro B4: pergunta já no OCG?
+                        already_in_ocg = False
+                        if ocg_data_text:
+                            # Tokens ≥3 chars, alfabéticos+dígitos, lowercase, sem stopwords
+                            tokens = [
+                                t for t in _re.findall(r"[A-Za-zÀ-ÿ0-9_]{3,}", qtext.lower())
+                                if t not in _STOPWORDS
+                            ]
+                            # Dedup preservando ordem
+                            seen = set()
+                            tokens = [t for t in tokens if not (t in seen or seen.add(t))]
+                            if len(tokens) >= MIN_KEYWORDS_MATCH:
+                                matches = sum(1 for t in tokens if t in ocg_data_text)
+                                if matches >= MIN_KEYWORDS_MATCH:
+                                    already_in_ocg = True
+
+                        if already_in_ocg:
+                            skipped_count += 1
+                            logger.info(
+                                "webhook.hitl_question_skipped_already_in_ocg",
+                                ingestion_id=str(doc_id),
+                                persona_id=persona_tag,
+                                question_preview=qtext[:80],
+                            )
+                            continue
+
                         await db.execute(text("""
                             INSERT INTO persona_follow_up_questions
                                 (id, project_id, document_id, ocg_individual_id,
@@ -464,6 +533,17 @@ async def ingestion_complete(
                             "qctx": (qctx or "")[:500] or None,
                             "qorder": idx,
                         })
+                        inserted_count += 1
+
+                    if skipped_count or inserted_count:
+                        logger.info(
+                            "webhook.hitl_questions_persisted",
+                            ingestion_id=str(doc_id),
+                            persona_id=persona_tag,
+                            inserted=inserted_count,
+                            skipped_already_in_ocg=skipped_count,
+                            total=len(questions),
+                        )
 
             # --- Fase 31.3: conjunto de personas falhas (reutilizado abaixo) ---
             # Construído uma única vez para evitar duplicidade entre Tarefa 1 e 2.
