@@ -17,19 +17,31 @@ logger = structlog.get_logger(__name__)
 # ============================================================================
 # DATABASE ENGINE
 # ============================================================================
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    poolclass=NullPool,
-    echo=settings.DATABASE_ECHO,
-    connect_args={
-        "timeout": 10,
-        # command_timeout removido: pg_advisory_xact_lock pode aguardar
-        # minutos quando há paralelismo de ingestão (pipeline leva 5-7min
-        # por doc). Valor anterior de 10s cancelava o lock e quebrava a
-        # transação inteira. Timeout por query específica deve ser feito
-        # via `SET LOCAL statement_timeout` na rota que justificar.
-    },
-)
+# AsyncAdaptedQueuePool é o pool default do create_async_engine (SA 2.x) —
+# não precisa passar poolclass. Settings DATABASE_POOL_SIZE/MAX_OVERFLOW/
+# PRE_PING controlam o pool real. Feature flag DATABASE_USE_QUEUE_POOL
+# permite reverter para NullPool sem code change (DBA SHOULD 5.2).
+#
+# command_timeout removido: pg_advisory_xact_lock pode aguardar
+# minutos quando há paralelismo de ingestão (pipeline leva 5-7min
+# por doc). Timeout por query específica deve ser feito via
+# `SET LOCAL statement_timeout` na rota que justificar.
+_engine_kwargs: dict = {
+    "echo": settings.DATABASE_ECHO,
+    "connect_args": {"timeout": 10},
+}
+if getattr(settings, "DATABASE_USE_QUEUE_POOL", True):
+    _engine_kwargs.update(
+        pool_size=settings.DATABASE_POOL_SIZE,
+        max_overflow=settings.DATABASE_MAX_OVERFLOW,
+        pool_pre_ping=settings.DATABASE_POOL_PRE_PING,
+        pool_recycle=3600,  # recicla após 1h — protege contra idle-in-transaction
+        pool_timeout=10,    # falha rápido em saturação (DBA SHOULD 5.3)
+    )
+else:
+    _engine_kwargs["poolclass"] = NullPool
+
+engine = create_async_engine(settings.DATABASE_URL, **_engine_kwargs)
 
 # ============================================================================
 # SESSION FACTORY

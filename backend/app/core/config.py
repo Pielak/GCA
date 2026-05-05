@@ -38,9 +38,22 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://gca:gca_secret@localhost:5432/gca"
     DATABASE_BACKUP_URL: Optional[str] = None
     DATABASE_ECHO: bool = False
-    DATABASE_POOL_SIZE: int = 20
-    DATABASE_MAX_OVERFLOW: int = 10
+    # Pool de conexões SQLAlchemy (AsyncAdaptedQueuePool — engine assíncrono).
+    # Sizing canônico para 1 backend + 1 celery worker contra Postgres com
+    # max_connections=100 (padrão Alpine):
+    #   2 processos × (pool_size 5 + max_overflow 5) = 20 conns máx
+    #   80 conns disponíveis após reservar 20 para superuser/admin/migrations.
+    # Anti-padrão de sessão longa em _analyze_async pode segurar 1 conn por
+    # 2-5 min durante chamadas LLM — pool_size=5 cobre 3 docs paralelos
+    # (INGESTION_MAX_PARALLEL_PER_PROJECT=3) com folga.
+    DATABASE_POOL_SIZE: int = 5
+    DATABASE_MAX_OVERFLOW: int = 5
     DATABASE_POOL_PRE_PING: bool = True
+    # Feature flag (DBA SHOULD 5.2) — permite reverter para NullPool em
+    # 1 restart se aparecer comportamento inesperado em produção.
+    # Default=true habilita o pool real; false volta ao comportamento
+    # antigo (conexão por request, sem pool).
+    DATABASE_USE_QUEUE_POOL: bool = True
 
     # Redis
     REDIS_HOST: str = "localhost"
@@ -54,10 +67,12 @@ class Settings(BaseSettings):
     # Paralelismo do dispatcher de ingestão por projeto.
     # Default=1 preserva comportamento sequencial. Sweet spot=5 para
     # tier pago DeepSeek (~600k tok/min) com folga.
-    # Regra operacional (engine usa NullPool, então DATABASE_POOL_SIZE
-    # é letra morta): N <= floor((max_connections - 20 headroom) /
-    # n_projetos_ativos / 3 sessoes_por_doc). Com max_connections=100
-    # padrão e 2 projetos ativos: N <= 13. Confortável até N=5.
+    # Regra operacional após migração para QueuePool (pool_size=5 +
+    # max_overflow=5 = 10 conns máx por processo): N <= 3 documentos
+    # paralelos por projeto cobre o caso de uso comum sem saturar pool
+    # mesmo com sessão longa (anti-padrão LLM dentro de sessão segurando
+    # 1 conn por 2-5 min). Para subir N: aumentar pool_size proporcional
+    # OU resolver anti-padrão de sessão longa em _analyze_async (DBA 5.1).
     INGESTION_MAX_PARALLEL_PER_PROJECT: int = 1
     N8N_BASE_URL: str = "http://localhost:5678"
     GCA_CALLBACK_BASE_URL: str = "http://localhost:8000"
