@@ -815,17 +815,51 @@ async def get_extraction_report(
             "text_sample": text_sample,
         }
 
-    # Documento sintético de respostas HITL (persona_followup): payload Q&A
-    # serializado no próprio doc, não há arquivo no storage.
+    # Documento sintético de respostas HITL (persona_followup).
+    # Dois caminhos de origem:
+    #   1) UI direta (submit_persona_followup) → storage tem JSON {qa: [...]}.
+    #   2) Upload offline .md (fast-path em dispatch_first_pending) →
+    #      storage tem o .md raw com gca-followup-marker + blocos pfq-id.
+    # Tenta JSON primeiro; se falhar/vazio, parseia .md.
     if doc.file_type == "persona_followup":
         import json as _json
+        import re as _re
         from app.utils.ingested_storage import read_ingested as _read
         raw = _read(project_id, doc.filename)
-        try:
-            payload = _json.loads(raw.decode("utf-8")) if raw else {}
-        except Exception:  # noqa: BLE001
-            payload = {}
-        qa = payload.get("qa") or []
+        text_raw = (raw or b"").decode("utf-8", errors="replace") if raw else ""
+        payload: dict = {}
+        qa: list = []
+        # Caminho 1 — JSON
+        if text_raw.lstrip().startswith("{"):
+            try:
+                payload = _json.loads(text_raw)
+                qa = payload.get("qa") or []
+            except Exception:  # noqa: BLE001
+                payload = {}
+        # Caminho 2 — fallback .md HITL
+        if not qa and "gca-followup-marker" in text_raw:
+            BLOCK = _re.compile(
+                r"<!--\s*pfq-id:\s*([0-9a-f-]{36})\s*-->(.*?)(?=<!--\s*pfq-id:|\Z)",
+                _re.IGNORECASE | _re.DOTALL,
+            )
+            QUESTION = _re.compile(r"\*\*Pergunta\*\*:\s*(.+?)(?=\n\*\*Resposta|\Z)", _re.IGNORECASE | _re.DOTALL)
+            ANSWER = _re.compile(r"\*\*Resposta\*\*:\s*\n+(.+?)(?=\n##\s|\Z)", _re.IGNORECASE | _re.DOTALL)
+            m_pers = _re.search(r"persona_id:\s*([A-Z]{2,5})", text_raw)
+            if m_pers:
+                payload["persona_id"] = m_pers.group(1).upper()
+            for bm in BLOCK.finditer(text_raw):
+                block = bm.group(2)
+                am = ANSWER.search(block)
+                if not am:
+                    continue
+                ans = am.group(1).strip()
+                if not ans or ans.lower().startswith("<sua resposta") or "<sua resposta aqui>" in ans:
+                    continue
+                qm = QUESTION.search(block)
+                qa.append({
+                    "question": (qm.group(1).strip() if qm else "")[:1000],
+                    "answer": ans[:2000],
+                })
         sample_lines = []
         for item in qa[:10]:
             q = (item.get("question") or "")[:120]
