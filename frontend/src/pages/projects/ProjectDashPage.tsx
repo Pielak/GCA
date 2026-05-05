@@ -294,7 +294,9 @@ export function ProjectDashPage() {
               </ResponsiveContainer>
               <div className="flex items-center justify-center gap-2 mt-2">
                 <span className="text-slate-500 text-xs">Score composto:</span>
-                <span className={`text-sm font-bold ${overallScore >= 80 ? 'text-emerald-400' : overallScore >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
+                {/* B9: Decisão GP 2 — CodeGen exige >=95 por pilar e overall.
+                    Bandas: >=95 emerald (liberado), >=60 amber, <60 red. */}
+                <span className={`text-sm font-bold ${overallScore >= 95 ? 'text-emerald-400' : overallScore >= 60 ? 'text-amber-400' : 'text-red-400'}`}>
                   {overallScore.toFixed(1)}/100
                 </span>
               </div>
@@ -375,7 +377,8 @@ export function ProjectDashPage() {
             {Object.entries(pillarScores as Record<string, { score?: number; adherence_level?: string } | number>).map(([key, val]) => {
               const shortKey = key.replace(/_.*/, '')
               const score = typeof val === 'object' ? (val.score ?? 0) : (val ?? 0)
-              const color = score >= 80 ? 'emerald' : score >= 60 ? 'amber' : 'red'
+              // B9: Decisão GP 2 — pilar liberado só com >=95.
+              const color = score >= 95 ? 'emerald' : score >= 60 ? 'amber' : 'red'
               return (
                 <div key={key} className="p-3 rounded-lg bg-slate-800/50 border border-slate-700/50">
                   <div className="flex items-center justify-between mb-2">
