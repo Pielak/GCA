@@ -42,6 +42,21 @@ _TRIM_TARGETS: list[tuple[str, ...]] = [
     ("APPROVAL_STATUS", "reason"),
 ]
 
+# Listas que crescem cumulativamente (cada ingestão acrescenta itens) e
+# acabam dominando o payload do prompt. Trunca pra top-K mantendo ordem
+# original — itens descartados ficam no OCG persistido (não corta de fato),
+# só não vão pro prompt. Acréscimo 2026-05-05 após observar AJA com
+# ARCHITECTURE_OVERVIEW.integracoes=180 itens / 6.5KB.
+_LIST_TRUNCATE_TARGETS: list[tuple[tuple[str, ...], int]] = [
+    (("ARCHITECTURE_OVERVIEW", "integracoes"), 30),
+    (("SECURITY_PROFILE", "ameacas"), 25),
+    (("SECURITY_PROFILE", "mitigacoes"), 25),
+    (("COMPLIANCE_CHECKLIST", "bloqueante"), 30),
+    # Cobertura preventiva pra outras listas que tendem a crescer
+    (("DELIVERABLES", "checklist"), 50),
+    (("CRITICAL_FINDINGS",), 40),
+]
+
 
 def _trim_string(s: str, max_chars: int = 80) -> str:
     """Reduz string para `max_chars` adicionando indicador de trimming."""
@@ -129,6 +144,31 @@ def _enumerate_parents(node: Any, path: tuple[str, ...]) -> list[Any]:
     return []
 
 
+def _truncate_list_via_targets(ocg: Dict[str, Any]) -> None:
+    """Trunca listas registradas em `_LIST_TRUNCATE_TARGETS` a top-K itens.
+
+    Não muta o OCG persistido — opera no deepcopy retornado por
+    `compact_ocg_for_prompt`. Marcador `<truncated:N items>` no fim
+    sinaliza ao LLM que há mais itens não exibidos.
+    """
+    for path, max_items in _LIST_TRUNCATE_TARGETS:
+        # Navegar até o pai
+        if not path:
+            continue
+        parent_path, leaf = path[:-1], path[-1]
+        parents = _enumerate_parents(ocg, parent_path)
+        for parent in parents:
+            if not isinstance(parent, dict):
+                continue
+            value = parent.get(leaf)
+            if not isinstance(value, list) or len(value) <= max_items:
+                continue
+            n_total = len(value)
+            truncated = list(value[:max_items])
+            truncated.append(f"<truncated:{n_total - max_items} more items not shown>")
+            parent[leaf] = truncated
+
+
 def compact_ocg_for_prompt(
     ocg: Dict[str, Any],
     min_size_chars: int = DEFAULT_MIN_SIZE_CHARS,
@@ -162,4 +202,5 @@ def compact_ocg_for_prompt(
 
     compact = deepcopy(ocg)
     _trim_via_targets(compact)
+    _truncate_list_via_targets(compact)
     return compact
