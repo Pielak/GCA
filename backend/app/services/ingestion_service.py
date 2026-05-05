@@ -20,9 +20,14 @@ from app.services.arguider_service import ArguiderService, DocumentExtractor
 logger = structlog.get_logger(__name__)
 
 # Tipos de arquivo aceitos → file_type
+# B2 (auditoria 2026-05-04): adicionados html/htm, rtf, eml — extratores
+# em _dispatch_to_n8n via libs html2text/striprtf/email (built-in).
 EXTENSION_MAP = {
     "pdf": "pdf", "docx": "docx", "doc": "docx",
     "md": "markdown", "txt": "markdown",
+    "html": "html", "htm": "html",
+    "rtf": "rtf",
+    "eml": "eml",
     "png": "image", "jpg": "image", "jpeg": "image", "gif": "image", "webp": "image",
     "xlsx": "spreadsheet", "xls": "spreadsheet", "csv": "spreadsheet",
     "py": "code", "ts": "code", "js": "code", "java": "code",
@@ -806,6 +811,13 @@ class IngestionService:
             "markdown": "text/markdown",
             "text": "text/plain",
             "code": "text/plain",
+            # B2 (2026-05-04): novos formatos. Pré-extração converte para
+            # text/plain antes do dispatch — mas se a extração falhar e
+            # cair pro fallback bytes-as-is, mime_type indica o original.
+            "html": "text/html",
+            "rtf": "application/rtf",
+            "eml": "message/rfc822",
+            "spreadsheet": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         }
         # F1-C1 (Arquiteto): Para image, deriva mime da extensão real do
         # arquivo. mime_map.get('image') retornaria octet-stream e a API
@@ -849,11 +861,102 @@ class IngestionService:
         else:
             mime_type = mime_map.get(file_type, "application/octet-stream")
 
-        # DOCX/PDF: Normalizer n8n não tem extrator nativo (sem require()) e
-        # o caminho Vision LLM tem URL/provider frágeis. Pré-extraímos texto
-        # aqui via python-docx / pdfplumber e enviamos como text/plain.
+        # DOCX/PDF/HTML/RTF/EML/SPREADSHEET: Normalizer n8n não tem extrator
+        # nativo (sem require()). Pré-extraímos texto aqui e enviamos como
+        # text/plain. B2 (auditoria 2026-05-04) adicionou html/rtf/eml/xlsx.
+        # Política de erro: try/except com log estruturado (Decisão 8).
         payload_bytes = file_bytes
-        if file_type == "docx" and file_bytes:
+        if file_type == "html" and file_bytes:
+            try:
+                import html2text
+                h = html2text.HTML2Text()
+                h.ignore_images = True
+                h.body_width = 0  # sem wrap
+                html_text = h.handle(file_bytes.decode("utf-8", errors="replace"))
+                if html_text.strip():
+                    payload_bytes = html_text.encode("utf-8")
+                    mime_type = "text/plain"
+                else:
+                    logger.warning("ingestion.html_extract_empty", doc_id=str(doc_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.html_extract_failed",
+                    doc_id=str(doc_id), error=str(exc),
+                )
+        elif file_type == "rtf" and file_bytes:
+            try:
+                from striprtf.striprtf import rtf_to_text
+                rtf_text = rtf_to_text(file_bytes.decode("utf-8", errors="replace"))
+                if rtf_text.strip():
+                    payload_bytes = rtf_text.encode("utf-8")
+                    mime_type = "text/plain"
+                else:
+                    logger.warning("ingestion.rtf_extract_empty", doc_id=str(doc_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.rtf_extract_failed",
+                    doc_id=str(doc_id), error=str(exc),
+                )
+        elif file_type == "eml" and file_bytes:
+            try:
+                from email import policy
+                from email.parser import BytesParser
+                msg = BytesParser(policy=policy.default).parsebytes(file_bytes)
+                # Header + body texto. Anexos ignorados (vão como upload separado).
+                lines = [
+                    f"De: {msg.get('From','')}",
+                    f"Para: {msg.get('To','')}",
+                    f"Assunto: {msg.get('Subject','')}",
+                    f"Data: {msg.get('Date','')}",
+                    "",
+                ]
+                body = msg.get_body(preferencelist=("plain", "html"))
+                if body is not None:
+                    body_text = body.get_content() or ""
+                    if body.get_content_type() == "text/html":
+                        try:
+                            import html2text as _h2t
+                            h = _h2t.HTML2Text(); h.ignore_images = True; h.body_width = 0
+                            body_text = h.handle(body_text)
+                        except Exception:  # noqa: BLE001
+                            pass
+                    lines.append(body_text)
+                eml_text = "\n".join(lines)
+                if eml_text.strip():
+                    payload_bytes = eml_text.encode("utf-8")
+                    mime_type = "text/plain"
+                else:
+                    logger.warning("ingestion.eml_extract_empty", doc_id=str(doc_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.eml_extract_failed",
+                    doc_id=str(doc_id), error=str(exc),
+                )
+        elif file_type == "spreadsheet" and file_bytes:
+            try:
+                import openpyxl
+                from io import BytesIO
+                wb = openpyxl.load_workbook(BytesIO(file_bytes), data_only=True, read_only=True)
+                lines = []
+                for sheet_name in wb.sheetnames:
+                    sh = wb[sheet_name]
+                    lines.append(f"\n=== Planilha: {sheet_name} ===\n")
+                    for row in sh.iter_rows(values_only=True):
+                        # Pula linhas totalmente vazias
+                        if any(c is not None and str(c).strip() for c in row):
+                            lines.append(" | ".join(str(c) if c is not None else "" for c in row))
+                xlsx_text = "\n".join(lines)
+                if xlsx_text.strip():
+                    payload_bytes = xlsx_text.encode("utf-8")
+                    mime_type = "text/plain"
+                else:
+                    logger.warning("ingestion.xlsx_extract_empty", doc_id=str(doc_id))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.xlsx_extract_failed",
+                    doc_id=str(doc_id), error=str(exc),
+                )
+        elif file_type == "docx" and file_bytes:
             try:
                 from app.services.rich_docx_extractor import extract_rich_text
                 docx_text = extract_rich_text(file_bytes) or ""

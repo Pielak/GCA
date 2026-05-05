@@ -82,7 +82,7 @@ function fileTypeLabel(ft: string): string {
 // DT-022: converte mensagem crua do provider/SDK para uma linha que o GP
 // consiga agir. Mantém a crua disponível no `title` como fallback técnico.
 function humanizeArguiderError(raw: string | null | undefined): string {
-  if (!raw) return 'Erro na análise pelo Arguidor.';
+  if (!raw) return 'Erro na análise pelo pipeline de personas LLM.';
   const s = raw.toLowerCase();
   if (s.includes('401') || s.includes('authentication') || s.includes('invalid x-api-key') || s.includes('invalid api key')) {
     return 'Provedor de IA rejeitou a chave (401). Verifique em Configurações → Provedor de IA e use "Testar conexão".';
@@ -151,7 +151,7 @@ export function IngestionPage() {
   const handleRelease = useCallback(async (docId: string, piiFields: string[]) => {
     if (!projectId) return;
     const fieldsStr = piiFields.length ? piiFields.join(', ') : 'dados pessoais';
-    if (!confirm(`Liberar este documento da quarentena?\n\nO detector sinalizou: ${fieldsStr}.\n\nSe for falso-positivo (PDF técnico, coordenadas, IDs, timestamps que lembram telefone/CPF mas não são), confirmar libera o Arguidor a analisar normalmente. Se for dado pessoal real, clique Cancelar — o documento permanece seguro na quarentena.`)) return;
+    if (!confirm(`Liberar este documento da quarentena?\n\nO detector sinalizou: ${fieldsStr}.\n\nSe for falso-positivo (PDF técnico, coordenadas, IDs, timestamps que lembram telefone/CPF mas não são), confirmar libera o pipeline de análise (12 personas LLM). Se for dado pessoal real, clique Cancelar — o documento permanece seguro na quarentena.`)) return;
     setReleasing(prev => ({ ...prev, [docId]: true }));
     try {
       await apiClient.post(`/projects/${projectId}/ingestion/${docId}/release`, {});
@@ -250,21 +250,21 @@ export function IngestionPage() {
         />
       )}
 
-      {/* Header + Iniciar Arguidor */}
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-slate-100 flex items-center gap-2">
             Ingestão de Documentos
             <HelpTooltip
-              text="Ingestão é o processo de carregar documentos do projeto (requisitos, arquitetura, regras de negócio, mockups) para que o Arguidor — o agente de IA analítico do GCA — extraia informações estruturadas e popule o OCG. Documentos de baixa qualidade ou incompletos resultam em um OCG impreciso, o que reduz diretamente a qualidade do código gerado nas fases posteriores."
+              text="Ingestão é o processo de carregar documentos do projeto (requisitos, arquitetura, regras de negócio, mockups) para que o pipeline de análise — Normalizer + Conferente + 12 personas LLM (AUD, GP, ARQ, DBA, DEV, QA, UX, UI, SEG, CONF, LGPD, NEG) + Consolidador — extraia informações estruturadas e popule o OCG. Documentos de baixa qualidade ou incompletos resultam em um OCG impreciso, reduzindo diretamente a qualidade do código gerado nas fases posteriores."
               maxWidth="max-w-96"
             />
           </h2>
-          <p className="text-slate-500 text-sm mt-0.5">Upload de documentos para análise pelo Arguidor e população do OCG</p>
+          <p className="text-slate-500 text-sm mt-0.5">Upload de documentos para análise pelo pipeline de 12 personas LLM e população do OCG</p>
         </div>
         <div className="flex items-center gap-2">
           <HelpTooltip
-            text="Dispara a análise de todos os documentos com status 'Aguardando'. O Arguidor processa um documento por vez para evitar conflitos de escrita no OCG. Durante o processamento, o OCG fica em modo somente-leitura. Tempo estimado: 30 segundos a 5 minutos por documento, dependendo do tamanho e do provedor LLM configurado. Só o GP pode iniciar o Arguidor."
+            text="Pipeline assíncrono com paralelismo configurável (INGESTION_MAX_PARALLEL_PER_PROJECT, default 3). Cada doc atravessa: Normalizer (validação + OCR) → Conferente (classificação + roteamento) → personas em paralelo via n8n → Consolidador → OCG update via Celery task. Concorrência protegida por advisory lock cross-process. Tempo: 30s a 7min por doc; peças longas com retry exponencial podem chegar a 12min. Falha automática de retry: 3× (30s/120s/480s)."
             position="left"
             maxWidth="max-w-96"
           />
@@ -324,11 +324,11 @@ export function IngestionPage() {
         <p className="text-slate-300 text-sm font-medium flex items-center justify-center gap-2">
           Arraste documentos ou clique para selecionar
           <HelpTooltip
-            text="Formatos suportados: PDF e DOCX (extração de texto completa), PNG/JPG (análise visual via visão computacional para wireframes), XLSX (extração de tabelas e regras de negócio), MD (documentação técnica). Tamanho máximo: 50MB por arquivo. Arquivos maiores são processados em chunks de 8.000 tokens pelo Arguidor."
+            text="Formatos suportados: PDF e DOCX (extração de texto completa via pdfplumber + Tesseract OCR Camada 2 + Vision LLM Camada 3); PNG/JPG/JPEG/GIF/WEBP (Vision LLM); XLSX (planilhas via openpyxl); HTML (html2text); RTF (striprtf); EML (e-mail headers + corpo); MD/TXT (texto direto). Tamanho máximo: 50MB por arquivo, limite G1 do Normalizer 800k caracteres. Acima do limite, o pipeline divide automaticamente (MVP F4.2 — em planejamento)."
             maxWidth="max-w-96"
           />
         </p>
-        <p className="text-slate-500 text-xs mt-1">PDF &bull; DOCX &bull; XLSX &bull; PNG &bull; JPG &bull; MD &mdash; max. 50MB por arquivo</p>
+        <p className="text-slate-500 text-xs mt-1">PDF &bull; DOCX &bull; XLSX &bull; HTML &bull; RTF &bull; EML &bull; PNG &bull; JPG &bull; MD &mdash; max. 50MB por arquivo</p>
         <input
           ref={fileInputRef}
           type="file"
@@ -358,7 +358,7 @@ export function IngestionPage() {
           <div className="flex items-center gap-2">
             <h3 className="text-slate-200 text-sm font-semibold">Documentos ({documents.length})</h3>
             <HelpTooltip
-              text="Status do processamento pelo Arguidor: ⚪ Aguardando = na fila de análise; ⏳ Processando = sendo analisado pelo LLM agora; ✅ Processado = extraído e adicionado ao OCG com sucesso; ❌ Erro = falha na análise. Erros são retentados automaticamente até 3 vezes (self-healing). Se persistir, verifique se o arquivo está corrompido."
+              text="Status do processamento: ⚪ Aguardando = na fila de análise; ⏳ Processando = pipeline n8n com 12 personas LLM analisando; 🧠 Consolidando OCG = personas concluíram, Celery task atualizando OCG; ✅ Processado = OCG atualizado com sucesso; ⚠ OCG não atualizado = consolidação falhou após retries (use Reanalisar); ❌ Erro = falha no pipeline. Retry automático: 3× exponencial (30s/120s/480s). Se persistir, verifique formato e qualidade do arquivo."
               maxWidth="max-w-96"
             />
           </div>
@@ -456,7 +456,7 @@ export function IngestionPage() {
                   <span className="text-slate-400 text-[10px] text-center">{formatFileSize(doc.file_size_bytes)}</span>
                   <span className="text-slate-500 text-[10px] text-center">{formatDateBR(doc.created_at)}</span>
                   {doc.tokens_used ? (
-                    <span className="text-slate-600 text-[10px] text-center" title="Tokens usados na análise Arguidor">
+                    <span className="text-slate-600 text-[10px] text-center" title="Tokens usados pelo pipeline de personas LLM">
                       {doc.tokens_used.toLocaleString()} tk
                     </span>
                   ) : (
@@ -631,7 +631,7 @@ export function IngestionPage() {
                       <span className="font-semibold">Em quarentena por:</span>{' '}
                       {describePiiFields(piiFields)}.
                       <div className="text-[11px] text-orange-300/70 mt-0.5">
-                        Se for falso-positivo (PDF técnico com números que lembram telefone/CPF mas não são dados pessoais reais), clique em "Liberar" para o Arguidor analisar.
+                        Se for falso-positivo (PDF técnico com números que lembram telefone/CPF mas não são dados pessoais reais), clique em "Liberar" para o pipeline de análise prosseguir.
                       </div>
                     </div>
                     <button
