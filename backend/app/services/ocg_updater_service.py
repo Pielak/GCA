@@ -280,33 +280,24 @@ class OCGUpdaterService:
             actor_id=str(actor_id) if actor_id else None,
         )
 
-        # Defesa em profundidade — advisory lock cross-process.
-        # asyncio.Lock acima protege concorrência dentro do mesmo worker;
-        # pg_advisory_xact_lock protege concorrência entre workers Celery
-        # (ou múltiplas instâncias do backend) sobre o MESMO project_id.
-        # Invariante de ordem: asyncio.Lock SEMPRE antes do advisory.
-        # Inverter = risco de deadlock cross-process.
-        # Padrão alinhado com ingestion_service.dispatch_first_pending_for_project.
-        # Métricas de contenção (DBA F1 R3): warn quando aquisição > 100ms.
-        import time as _time2
-        from sqlalchemy import text as _text
-        _t0_adv = _time2.monotonic()
-        await self.db.execute(
-            _text("SELECT pg_advisory_xact_lock(hashtextextended(:pid, 0))"),
-            {"pid": str(project_id)},
-        )
-        _wait_ms_adv = (_time2.monotonic() - _t0_adv) * 1000
-        if _wait_ms_adv > 100:
-            logger.warning(
-                "ocg_updater.advisory_lock_contention",
-                wait_ms=round(_wait_ms_adv, 1),
-                project_id=str(project_id),
-                trigger_source=trigger_source,
-            )
+        # === FASE A: leitura + LLM SEM advisory lock cross-process ===
+        # Mudança 2026-05-05: chamada LLM movida pra FORA do advisory lock.
+        # Antes: pg_advisory_xact_lock era pego ANTES do _call_llm; LLM lento
+        # (DeepSeek com prompt 27k+ chars leva 30s-3min) segurava o lock e
+        # bloqueava o dispatcher de ingestão (que usa A MESMA chave de lock
+        # `hashtextextended(project_id, 0)`). Resultado: fila de reanalyze
+        # travava com wait_ms_dispatch crescendo (128s → 227s observados).
+        #
+        # Padrão correto: ler snapshot, chamar LLM (slow, sem lock), depois
+        # acquirir lock pra re-load + apply_deltas + commit. Como OCG é
+        # monotônico (§2.4) e deltas são path-replace, o re-load tolera
+        # avanço concorrente — apply_deltas aplica nas chaves que existirem
+        # no OCG fresh, e os filter_negative_score_deltas comparam contra o
+        # OCG atual (mais seguro).
 
-        # 1. Carregar OCG atual
-        ocg = await self._load_current_ocg(project_id)
-        if not ocg:
+        # 1. Carregar snapshot do OCG (sem lock cross-process)
+        ocg_snapshot = await self._load_current_ocg(project_id)
+        if not ocg_snapshot:
             logger.warning("ocg_updater.ocg_not_found", project_id=str(project_id))
             # DT-AUDITORIA-002: Em vez de falhar, retornar status especial
             # indicando que OCG não está pronto (personas ainda analisando).
@@ -318,8 +309,8 @@ class OCGUpdaterService:
                 "retry_at": (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat(),
             }
 
-        version_from = ocg.version
-        current_ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+        snapshot_version = ocg_snapshot.version
+        current_ocg_data = json.loads(ocg_snapshot.ocg_data) if ocg_snapshot.ocg_data else {}
 
         # 2. Tentar chamar LLM para atualizar OCG.
         # Se falhar, usar scores das personas como fallback (provider-agnóstico).
@@ -382,15 +373,86 @@ class OCGUpdaterService:
                     "ocg_updater.no_persona_scores",
                     project_id=str(project_id),
                 )
-                await self._mark_ocg_pending(ocg)
+                # Sem deltas pra aplicar — marca pending no snapshot e retorna.
+                # Não precisa do advisory lock: única escrita é status=pending,
+                # e o ocg_snapshot já não vai virar nova versão.
+                await self._mark_ocg_pending(ocg_snapshot)
                 await self.db.commit()
                 return {
-                    "ocg_id": str(ocg.id),
-                    "version_from": version_from,
-                    "version_to": version_from,
+                    "ocg_id": str(ocg_snapshot.id),
+                    "version_from": snapshot_version,
+                    "version_to": snapshot_version,
                     "status": "ocg_pending",
                     "error": "LLM call returned no data and no persona scores available",
                 }
+
+        # === FASE B: re-load + apply_deltas + commit COM advisory lock ===
+        # LLM já respondeu (slow path concluído). Agora pega o lock pra
+        # serializar a escrita do incremento de versão entre workers/processos.
+        # Re-carrega o OCG porque outro worker pode ter avançado entre o
+        # snapshot inicial (Fase A) e agora — comum quando 5 docs do mesmo
+        # projeto rodam em paralelo (INGESTION_MAX_PARALLEL_PER_PROJECT=3+).
+        # Métricas de contenção (DBA F1 R3): warn quando aquisição > 100ms.
+        import time as _time2
+        from sqlalchemy import text as _text
+        _t0_adv = _time2.monotonic()
+        await self.db.execute(
+            _text("SELECT pg_advisory_xact_lock(hashtextextended(:pid, 0))"),
+            {"pid": str(project_id)},
+        )
+        _wait_ms_adv = (_time2.monotonic() - _t0_adv) * 1000
+        if _wait_ms_adv > 100:
+            logger.warning(
+                "ocg_updater.advisory_lock_contention",
+                wait_ms=round(_wait_ms_adv, 1),
+                project_id=str(project_id),
+                trigger_source=trigger_source,
+            )
+
+        # Re-load OCG dentro do lock — pode ter avançado durante o LLM call.
+        # apply_deltas é tolerante a path-replace em chaves que existirem;
+        # OCG monotônico (§2.4) garante que score só sobe, então deltas do
+        # snapshot ainda fazem sentido contra o fresh.
+        ocg = await self._load_current_ocg(project_id)
+        if ocg is None:
+            # OCG sumiu entre Fase A e B (deletado?) — defensivo.
+            logger.error(
+                "ocg_updater.ocg_disappeared_during_llm",
+                project_id=str(project_id),
+                snapshot_version=snapshot_version,
+            )
+            return {
+                "status": "ocg_disappeared",
+                "project_id": str(project_id),
+                "snapshot_version": snapshot_version,
+            }
+        version_from = ocg.version
+        if version_from != snapshot_version:
+            # Outro worker rodou entre snapshot e re-load. Não é erro —
+            # OCG monotônico tolera; só registramos pra observabilidade.
+            logger.info(
+                "ocg_updater.ocg_advanced_during_llm",
+                project_id=str(project_id),
+                snapshot_version=snapshot_version,
+                fresh_version=version_from,
+            )
+        # current_ocg_data passa a refletir o OCG fresh (não o snapshot).
+        current_ocg_data = json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+        # Re-aplicar skeleton de PILLAR_SCORES no fresh data se vier do
+        # fallback path (pode ter pilar novo no fresh que o snapshot não tinha).
+        if llm_result.get("_from_fallback"):
+            if "PILLAR_SCORES" not in current_ocg_data or not isinstance(
+                current_ocg_data.get("PILLAR_SCORES"), dict
+            ):
+                current_ocg_data["PILLAR_SCORES"] = {}
+            for delta in (llm_result.get("deltas") or []):
+                path = delta.get("path") or ""
+                # path = "PILLAR_SCORES.<KEY>.score"
+                parts = path.split(".")
+                if len(parts) == 3 and parts[0] == "PILLAR_SCORES":
+                    pillar_key = parts[1]
+                    if pillar_key not in current_ocg_data["PILLAR_SCORES"]:
+                        current_ocg_data["PILLAR_SCORES"][pillar_key] = {"score": 50}
 
         # 3. Parse da resposta (formato delta)
         deltas, change_type, context_health = self._parse_llm_response(llm_result)
