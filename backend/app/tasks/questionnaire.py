@@ -1,17 +1,11 @@
-"""MVP 14 Fase 14.1 — Celery tasks pro pipeline de questionário.
+"""Fase 3 — Dramatiq tasks para pipeline de questionário.
 
-Substitui os 4 `asyncio.create_task` em `QuestionnaireService.submit_questionnaire`
-(linhas 135, 231, 242, 254 pré-14.1) por tasks Celery com retry bounded +
-ACK late, seguindo o padrão já estabelecido em `app/tasks/pipeline.py`
-(MVP 13 Fase 13.3).
-
-Escopo:
-- `notify_admins_submitted_task`: email para admins após submit.
-- `send_analysis_email_task`: email pro GP com resultado da análise.
-- `trigger_n8n_analysis_task`: webhook externo n8n (retry mais
-  conservador — falha de rede é comum).
-- `generate_ocg_task`: pipeline de 8 agentes IA (retry 60s — LLM
-  pesado; idempotente via flag no DB).
+Migração de 5 tasks Celery → Dramatiq:
+- notify_admins_submitted_task
+- send_analysis_email_task
+- trigger_n8n_analysis_task
+- generate_ocg_task
+- evaluate_persona_task
 """
 from __future__ import annotations
 
@@ -19,10 +13,11 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+import dramatiq
 import structlog
 from sqlalchemy import select, update
 
-from app.celery_app import celery_app
+from app.dramatiq_app import broker  # noqa: F401
 from app.tasks.pipeline import _run_coro_isolated
 
 logger = structlog.get_logger(__name__)
@@ -64,14 +59,13 @@ async def _try_claim_questionnaire_flag(db, questionnaire_id: UUID, flag: str) -
     return claimed
 
 
-@celery_app.task(
-    name="app.tasks.questionnaire.notify_admins_submitted_task",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=30,
+@dramatiq.actor(
+    queue_name="default",
+    
+    min_backoff=30_000,
+    max_backoff=120_000,
 )
 def notify_admins_submitted_task(
-    self,
     gp_email: str,
     project_name: str,
     questionnaire_id: str,
@@ -82,7 +76,7 @@ def notify_admins_submitted_task(
         _run_coro_isolated(_run_notify_admins(gp_email, project_name, questionnaire_id, project_id))
     except Exception as exc:  # noqa: BLE001
         logger.error("notify_admins_submitted_task.failed", error=str(exc))
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "questionnaire_id": questionnaire_id}
 
 
@@ -115,14 +109,15 @@ async def _run_notify_admins(gp_email, project_name, questionnaire_id, project_i
         raise
 
 
-@celery_app.task(
-    name="app.tasks.questionnaire.send_analysis_email_task",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=30,
+@dramatiq.actor(
+    queue_name="default",
+    
+    min_backoff=30_000,
+    max_backoff=120_000,
+    
+    
 )
 def send_analysis_email_task(
-    self,
     gp_email: str,
     project_id: str,
     questionnaire_id: str,
@@ -138,7 +133,7 @@ def send_analysis_email_task(
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("send_analysis_email_task.failed", error=str(exc))
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
     return {"status": "ok", "questionnaire_id": questionnaire_id}
 
 
@@ -172,14 +167,15 @@ async def _run_send_analysis_email(gp_email, project_id, questionnaire_id, notif
         raise
 
 
-@celery_app.task(
-    name="app.tasks.questionnaire.trigger_n8n_analysis_task",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=60,
+@dramatiq.actor(
+    queue_name="default",
+    
+    min_backoff=30_000,
+    max_backoff=120_000,
+    
+    
 )
 def trigger_n8n_analysis_task(
-    self,
     questionnaire_id: str,
     project_id: str,
     gp_email: str,
@@ -192,7 +188,7 @@ def trigger_n8n_analysis_task(
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("trigger_n8n_analysis_task.failed", error=str(exc))
-        raise self.retry(exc=exc, countdown=60 + 60 * self.request.retries)
+        raise
     return {"status": "ok", "questionnaire_id": questionnaire_id}
 
 
@@ -217,14 +213,15 @@ async def _run_trigger_n8n(questionnaire_id, project_id, gp_email, responses):
         raise
 
 
-@celery_app.task(
-    name="app.tasks.questionnaire.generate_ocg_task",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=60,
+@dramatiq.actor(
+    queue_name="default",
+    
+    min_backoff=30_000,
+    max_backoff=120_000,
+    
+    
 )
 def generate_ocg_task(
-    self,
     questionnaire_id: str,
     project_id: str,
     gp_email: str,
@@ -239,7 +236,7 @@ def generate_ocg_task(
         _run_coro_isolated(_run_generate_ocg(questionnaire_id, project_id, gp_email))
     except Exception as exc:  # noqa: BLE001
         logger.error("generate_ocg_task.failed", error=str(exc))
-        raise self.retry(exc=exc, countdown=60 + 60 * self.request.retries)
+        raise
     return {"status": "ok", "questionnaire_id": questionnaire_id}
 
 
@@ -285,14 +282,15 @@ async def _run_generate_ocg(questionnaire_id, project_id, gp_email):
 # MVP B — Personas Paralelas com IA do Projeto
 # ============================================================================
 
-@celery_app.task(
-    name="app.tasks.questionnaire.evaluate_persona_task",
-    bind=True,
-    max_retries=2,
-    default_retry_delay=30,
+@dramatiq.actor(
+    queue_name="default",
+    
+    min_backoff=30_000,
+    max_backoff=120_000,
+    
+    
 )
 def evaluate_persona_task(
-    self,
     persona_name: str,
     technical_questionnaire_id: str,
     project_id: str,
@@ -334,7 +332,7 @@ def evaluate_persona_task(
             error=str(exc),
             exc_info=True,
         )
-        raise self.retry(exc=exc, countdown=30 + 30 * self.request.retries)
+        raise
 
     return {
         "status": "ok",

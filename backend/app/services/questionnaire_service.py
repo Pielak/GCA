@@ -134,7 +134,7 @@ class QuestionnaireService:
             # relação admin-projeto antes da aprovação.
             # MVP 14 Fase 14.1 — via Celery.
             from app.tasks.questionnaire import notify_admins_submitted_task
-            notify_admins_submitted_task.delay(
+            notify_admins_submitted_task.send(
                 gp_email,
                 project_name,
                 questionnaire_id,
@@ -235,7 +235,7 @@ class QuestionnaireService:
                 )
 
                 # Trigger email async (non-blocking)
-                send_analysis_email_task.delay(
+                send_analysis_email_task.send(
                     gp_email,
                     str(project_id),
                     str(questionnaire.id),
@@ -244,7 +244,7 @@ class QuestionnaireService:
                 )
 
                 # OPTION C: Trigger n8n for enhanced analysis
-                trigger_n8n_analysis_task.delay(
+                trigger_n8n_analysis_task.send(
                     str(questionnaire.id),
                     str(project_id),
                     gp_email,
@@ -254,7 +254,7 @@ class QuestionnaireService:
                 # Se aprovado na verificação tecnológica, disparar geração do OCG
                 # via pipeline de 8 agentes IA (assíncrono, não bloqueia a resposta)
                 if result["approved"]:
-                    generate_ocg_task.delay(
+                    generate_ocg_task.send(
                         str(questionnaire.id),
                         str(project_id),
                         gp_email,
