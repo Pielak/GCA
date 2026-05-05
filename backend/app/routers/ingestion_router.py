@@ -308,7 +308,25 @@ async def release_from_quarantine(
     doc.arguider_error_message = None
     await db.commit()
 
-    return {"message": "Documento liberado da quarentena. Análise será iniciada.", "document_id": str(document_id)}
+    # Destrava a fila do projeto: release deixou o doc pending, mas o
+    # despachante canônico só roda em upload novo ou callback de pipeline
+    # complete. Sem este dispatch, doc fica órfão até alguém uploadar
+    # outro arquivo. Mesmo padrão do fix em cancel_document (commit ca58bc4).
+    from app.services.ingestion_service import dispatch_first_pending_for_project
+    dispatched = await dispatch_first_pending_for_project(db, project_id)
+    if dispatched:
+        logger.info(
+            "ingestion.next_dispatched_after_release",
+            project_id=str(project_id),
+            released_doc=str(document_id),
+            next_doc=str(dispatched),
+        )
+
+    return {
+        "message": "Documento liberado da quarentena. Análise será iniciada.",
+        "document_id": str(document_id),
+        "next_dispatched": str(dispatched) if dispatched else None,
+    }
 
 
 @router.post("/projects/{project_id}/ingestion/{document_id}/reanalyze")
