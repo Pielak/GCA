@@ -584,16 +584,73 @@ class IngestionService:
                     TRIGGER_HITL_FOLLOWUP,
                 )
 
-                # arguider_analysis sintético: respostas HITL como contexto
-                # textual, persona_id pra rotear MAX-por-persona corretamente.
+                # F2 FIX: shape sintético DENTRO do contrato esperado pelo
+                # OCGUpdaterService — chaves ocg_individual/ocg_global_delta/
+                # recommendations. Sem isso o LLM consolidador não sabia
+                # interpretar `hitl_answers` e retornava delta vazio.
+                # Buscar texto das perguntas (não só pfq_id UUID) pra prompt.
+                from sqlalchemy import select as _select
+                from app.models.base import PersonaFollowUpQuestion as _PFQ
+                pfq_rows = (await self.db.execute(
+                    _select(_PFQ.id, _PFQ.question_text, _PFQ.persona_name)
+                    .where(_PFQ.id.in_([UUID(pid) for pid in parsed.keys()]))
+                )).all()
+                pfq_text_map = {str(r[0]): (r[1], r[2]) for r in pfq_rows}
+
+                # Monta lista pergunta-resposta como `recommendations` —
+                # campo que o updater consolidador interpreta como input rico.
+                hitl_qa = []
+                for pfq_id, ans in parsed.items():
+                    qtext, pname = pfq_text_map.get(
+                        pfq_id, ("(pergunta perdida)", persona_id_norm)
+                    )
+                    hitl_qa.append({
+                        "pfq_id": pfq_id,
+                        "persona": persona_id_norm,
+                        "persona_name": pname or persona_id_norm,
+                        "pergunta": qtext or "(texto não encontrado)",
+                        "resposta": ans,
+                        "tipo": "hitl_followup_answer",
+                    })
+
+                # Sintético no shape canônico — HITL é "fonte de verdade
+                # adicional" pra persona específica. Inclui o parecer da
+                # persona se já existe (preserva MAX-por-persona).
+                from app.models.base import OCGIndividual as _OI
+                last_persona = (await self.db.execute(
+                    _select(_OI.parecer)
+                    .where(
+                        _OI.project_id == project_id,
+                        _OI.persona_id == persona_id_norm,
+                        _OI.status == "completed",
+                    )
+                    .order_by(_OI.completed_at.desc())
+                    .limit(1)
+                )).scalar_one_or_none()
+                persona_parecer = last_persona or {}
+
                 arguider_analysis_synthetic = {
+                    "trigger_source": "hitl_followup",
                     "persona_id": persona_id_norm,
-                    "trigger": "hitl_followup",
-                    "hitl_answers": [
-                        {"pfq_id": pfq_id, "answer": ans}
-                        for pfq_id, ans in parsed.items()
-                    ],
                     "answered_count": updated,
+                    # Chaves canônicas que o OCGUpdater espera:
+                    "ocg_individual": {persona_id_norm: persona_parecer},
+                    "ocg_global_delta": {},
+                    "gaps": [],
+                    "show_stoppers": [],
+                    "recommendations": hitl_qa,
+                    # Hint extra pra LLM consolidador: aqui temos respostas
+                    # diretas do GP a perguntas que A PRÓPRIA persona havia
+                    # gerado (filosofia Assistida). É informação de alta
+                    # confiança — deve elevar o pilar correspondente.
+                    "_hitl_hint": (
+                        f"GP respondeu {updated} pergunta(s) em aberto da "
+                        f"persona {persona_id_norm}. Cada par "
+                        f"pergunta/resposta em 'recommendations' é resposta "
+                        f"direta do owner — preencheu lacunas que a persona "
+                        f"havia identificado. Usar pra elevar score do "
+                        f"pilar correspondente, não descartar."
+                    ),
                 }
 
                 async with AsyncSessionLocal() as ocg_db:
