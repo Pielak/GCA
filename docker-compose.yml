@@ -101,10 +101,10 @@ services:
       - gca-backups:/var/gca-backups
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # Fase 4 (2026-05-05) — Celery removido, Dramatiq canonical.
+  # Fase 4 (2026-05-05) — Celery removido completamente, Dramatiq canonical.
   # Dramatiq worker (queue manager para pipeline tasks)
   # Processa tasks com Redis DB 3 (isolado de Celery DBs 1-2)
-  # Roda em paralelo com celery-worker durante transição
+  # Nota: celery-worker e celery-flower foram removidos em 2026-05-05 (containers órfãos)
   dramatiq-worker:
     build:
       context: ./backend
