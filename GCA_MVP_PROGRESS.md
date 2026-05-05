@@ -11,6 +11,18 @@ Status: **controle de avanço por fase** — MVPs 1-25 fechados. **MVP 29 ABERTO
 ### MVP ativo
 **Nenhum MVP em execução.** Gate §6 aberto.
 
+### Fix urgente em produção (2026-05-04 BRT)
+**F4.1 — Eleva limite G1 do Normalizer n8n (200k → 800k chars).** Aplicado como `fix:` (não MVP — caso real do AJA bloqueado). Permite ingestão de peças processuais até 800k chars (~250-300 páginas) em providers com context window grande (Claude Sonnet 4.x = 200k tok; Opus 1M = 1M tok). DeepSeek-V3 (64k tok) pode truncar próximo do teto — mitigação completa via F4.2+F4.3.
+
+### Próximos candidatos (registrados, não autorizados)
+- **F4.2 — Chunker estrutural + sub-ingestões** (backend-only): coluna `parent_document_id` em `ingested_documents`, `ChunkerService` aplicando `DocxChunker`/`MarkdownChunker`/`PdfChunker` existentes (sessão 35) ao path n8n, dispatch de N sub-ingestões respeitando `INGESTION_MAX_PARALLEL_PER_PROJECT`. Gate DBA bloqueante (migration `parent_document_id` FK self ON DELETE CASCADE). Watchdog precisa diferenciar sub-ingestões.
+- **F4.3 — Accumulator + OCG único + UX**: agregação de N callbacks em 1 update OCG, dedup HITL semântico, score composto por média ponderada, `IngestionProgressBar` "parte X/N". Custo estimado 3× por doc grande — exige endosso do cliente AJA antes de codar.
+
+**Pré-requisitos antes de autorizar F4.2/F4.3:**
+- Endosso documentado do cliente AJA sobre custo 3× e latência (sem isso, R5 do GP é blocker contratual).
+- Decisão canônica sobre comportamento de CONF bloqueante em chunking: reprovação de 1 part bloqueia doc inteiro OU quarentena parcial.
+- Cap de parts por documento (sugerido pelo GP: máx 10) para evitar consumo desproporcional de budget.
+
 ### MVP recém-fechado
 **MVP 35 — Validação canônica do Questionário Técnico** — FECHADO 2026-05-03. **3 gates aprovados** + 6 fases entregues + 90/90 testes Fase + 110/110 suite ampla (zero regressão) + smoke E2E real validado. Detalhe em [`docs/MVP_35_QUESTIONNAIRE_VALIDATION.md`](docs/MVP_35_QUESTIONNAIRE_VALIDATION.md). CLAUDE.md §2.4 atualizado com cascata especial `file_type='questionnaire'` + ordem hierárquica do pipeline.
 
