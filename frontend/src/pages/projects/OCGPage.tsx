@@ -9,7 +9,7 @@ import { apiClient } from '@/lib/api'
 import { pillarMeta, pillarKey, PILLAR_ORDER } from '@/data/pillarMeta'
 import { getErrorMessage, getErrorStatus, type ApiError } from '@/lib/errors'
 import RnfContractsEditor from '@/components/projects/RnfContractsEditor'
-import DesignTokensEditor from '@/components/projects/DesignTokensEditor'
+import UIUXAssetsPanel from '@/components/projects/UIUXAssetsPanel'
 import { FigmaImportPanel } from '@/components/projects/FigmaImportPanel'
 import { PreviewSessionsPanel } from '@/components/projects/PreviewSessionsPanel'
 import { formatDateTimeBR } from '@/lib/datetime'
@@ -67,7 +67,7 @@ const DIMENSIONS = [
   { key: 'architecture', label: 'Visão Arquitetural', icon: GitBranch, color: 'cyan' },
   { key: 'compliance', label: 'Conformidade e Regulatório', icon: Shield, color: 'amber' },
   { key: 'rnf', label: 'Contratos RNF (editável)', icon: Edit2, color: 'violet' },
-  { key: 'design_tokens', label: 'Design Tokens (editável)', icon: Edit2, color: 'violet' },
+  { key: 'design_tokens', label: 'Identidade Visual (logo, CSS, template)', icon: Edit2, color: 'violet' },
   { key: 'figma', label: 'Figma (import)', icon: ExternalLink, color: 'violet' },
   { key: 'preview', label: 'Preview Local (G4)', icon: Activity, color: 'emerald' },
   { key: 'testing', label: 'Estratégia de Testes', icon: TestTube2, color: 'emerald' },
@@ -236,16 +236,16 @@ export function OCGPage() {
       } else {
         setError('Erro ao carregar OCG')
       }
-    // Buscar histórico de versões
+    }
+
+    // Buscar histórico de versões — SEMPRE roda, independente do OCG.
     try {
       const histRes = await apiClient.get(`/projects/${id}/ocg/history`)
       setHistory(histRes.data?.history || [])
       setCurrentVersion(histRes.data?.current_version || 0)
     } catch { setHistory([]) }
 
-    } finally {
-      setLoading(false)
-    }
+    setLoading(false)
   }
 
   if (loading) {
@@ -272,7 +272,8 @@ export function OCGPage() {
           <h3 className="text-lg font-semibold text-slate-300 mb-2">OCG ainda não gerado</h3>
           <p className="text-slate-500 text-sm mb-4 max-w-md mx-auto">
             O Objeto de Contexto Global será gerado automaticamente após a aprovação do questionário
-            técnico e a análise pelos 8 agentes de IA (Analyzer + 7 Pillar Specialists + Consolidator).
+            técnico e a análise pelo pipeline de 12 personas LLM (Auditor + GP + 10 Specialists: ARQ,
+            DBA, DEV, QA, UX, UI, SEG, CONF, LGPD, NEG) orquestradas pelo Conferente e Consolidador via n8n.
           </p>
           {error && (
             <p className="text-red-400 text-sm mb-4">{error}</p>
@@ -392,7 +393,7 @@ export function OCGPage() {
       case 'rnf':
         return id ? <RnfContractsEditor projectId={id} /> : null
       case 'design_tokens':
-        return id ? <DesignTokensEditor projectId={id} /> : null
+        return id ? <UIUXAssetsPanel projectId={id} /> : null
       case 'figma':
         return id ? <FigmaImportPanel projectId={id} /> : null
       case 'preview':
@@ -442,9 +443,14 @@ export function OCGPage() {
                       v{h.version_from} → v{h.version_to}
                       {h.created_at && <> · {formatDateTimeBR(h.created_at)}</>}
                     </div>
+                    {h.delta_zero_reason && (
+                      <div className="text-[11px] text-amber-400/80 mt-1 italic leading-snug">
+                        {h.delta_zero_reason}
+                      </div>
+                    )}
                   </div>
                   <div className={`text-sm font-semibold tabular-nums ${deltaColor}`}>
-                    {delta == null ? (
+                    {delta == null || delta === 0 ? (
                       <span className="text-slate-500">—</span>
                     ) : (
                       <>
@@ -490,7 +496,7 @@ export function OCGPage() {
           <button
             onClick={async () => {
               if (!id || reconsolidating) return
-              if (!confirm('Re-aplicar deltas de TODAS as análises Arguidor existentes? Não chama o Arguidor de novo (sem custo extra). Útil quando o prompt mudou ou o ocg_updater falhou.')) return
+              if (!confirm('Re-aplicar deltas de TODAS as análises de personas (ocg_individual) existentes? Não chama o pipeline novamente (sem custo extra). Útil quando o prompt mudou ou o OCG updater falhou.')) return
               setReconsolidating(true)
               try {
                 // /reconsolidate chama LLM updater (DeepSeek) — pode levar 30-90s.
@@ -509,7 +515,7 @@ export function OCGPage() {
               }
             }}
             disabled={reconsolidating || regenerating}
-            title="Re-aplica deltas das análises Arguidor existentes (sem chamar Arguidor de novo). Aguarda terminar se já houver outra operação OCG rodando."
+            title="Re-aplica deltas das análises de personas existentes (sem chamar o pipeline LLM de novo). Aguarda terminar se já houver outra operação OCG rodando."
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600/20 border border-indigo-600/30 text-indigo-300 text-sm hover:bg-indigo-600/30 disabled:opacity-40 transition-colors"
           >
             {reconsolidating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5" />}
@@ -518,10 +524,10 @@ export function OCGPage() {
           <button
             onClick={async () => {
               if (!id || regenerating) return
-              if (!confirm('REGENERAR o OCG do zero a partir do questionário aprovado? ATENÇÃO: chama os 8 agentes IA novamente (custo em tokens, leva 3-5min). O histórico de deltas é preservado. Continuar?')) return
+              if (!confirm('REGENERAR o OCG do zero a partir do questionário aprovado? ATENÇÃO: dispara o pipeline n8n com 12 personas LLM novamente (custo em tokens, leva 5-7min). O histórico de deltas é preservado. Continuar?')) return
               setRegenerating(true)
               try {
-                // /regenerate chama 8 agentes IA (3-5min). Timeout 5min.
+                // /regenerate dispara pipeline n8n com 12 personas LLM (5-7min). Timeout 10min.
                 const res: any = await apiClient.post(
                   `/projects/${id}/ocg/regenerate?confirm=true`,
                   {},
