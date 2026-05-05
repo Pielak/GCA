@@ -49,9 +49,9 @@ const STEPS: Step[] = [
   {
     n: 3,
     key: 'questionnaire_submitted',
-    label: 'Questionário Técnico (PDF)',
-    description: 'Baixe o PDF editável, preencha offline e envie. 49 perguntas que alimentam o OCG.',
-    rationale: 'Dispara a geração do OCG (pipeline de 8 agentes IA). Precisa dos passos 1 e 2 completos para ser útil.',
+    label: 'Questionário Técnico',
+    description: '49 perguntas em formulário HTML (opções + texto livre). Salva rascunho automático, valida escopo (regras DSL + LLM sanity), submit ativo só após validação OK.',
+    rationale: 'Dispara a geração do OCG via pipeline de 12 personas LLM. Precisa dos passos 1 e 2 completos para ser útil.',
     icon: ClipboardList,
     to: (id) => `/projects/${id}/settings?tab=questionario`,
   },

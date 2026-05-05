@@ -15,13 +15,18 @@ import { PersonaBoard } from '@/components/questionnaire/PersonaBoard'
 import { DiscrepancyBoard } from '@/components/questionnaire/DiscrepancyBoard'
 
 /**
- * QuestionnairePage — fluxo único PDF-only (estratégia B, DT-015 fechada).
+ * QuestionnairePage — formulário HTML do Questionário Técnico (49 perguntas).
  *
- * O GP baixa o PDF editável (AcroForm com 49 perguntas), preenche offline
- * no seu tempo, e faz upload. O backend roda o pipeline de validação
- * tecnológica (8 fases) e, se aprovado, dispara a geração do OCG via 8
- * agentes IA. O PDF NÃO é ingerido como documento — é apenas transporte
- * de respostas (evita falso-positivo de PII no detector de ingestão).
+ * O GP responde inline na UI: opções (radio/checkbox) + texto livre por
+ * pergunta. Auto-save de rascunho via PATCH /technical-questionnaire.
+ * Validação 2 camadas no /validate (Camada 1 DSL determinística com 30
+ * regras + Camada 2 LLM sanity check). Botão Submeter ativa SÓ após
+ * validação retornar OK. No submit dispara o pipeline n8n com 12 personas
+ * LLM que alimenta o OCG.
+ *
+ * Histórico: o fluxo PDF AcroForm foi descontinuado — referências antigas
+ * (lib/arguiderQuestionnaire.ts, QuestionnaireDownloadPanel.tsx) saem
+ * junto da remoção da página Arguidor (Decisão 2026-05-04).
  */
 
 // ─── Types ─────────────────────────────────────────────────────────
