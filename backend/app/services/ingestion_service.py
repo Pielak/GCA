@@ -131,10 +131,21 @@ async def dispatch_first_pending_for_project(
     from app.tasks.pipeline import pipeline_ingest_task
 
     # Advisory lock por project_id — serializa concorrência sem locking de tabela.
+    # Métricas de contenção (DBA F1 R3): warn quando aquisição > 100ms.
+    import time as _time
+    _t0 = _time.monotonic()
     await db.execute(
         _text("SELECT pg_advisory_xact_lock(hashtextextended(:pid, 0))"),
         {"pid": str(project_id)},
     )
+    _wait_ms = (_time.monotonic() - _t0) * 1000
+    if _wait_ms > 100:
+        logger.warning(
+            "ingestion.advisory_lock_contention",
+            wait_ms=round(_wait_ms, 1),
+            project_id=str(project_id),
+            lock_scope="dispatch_queue",
+        )
 
     # Quantos já estão processando? Habilita paralelismo configurável.
     # Default=1 preserva FIFO sequencial; N>1 paraleliza até o teto.

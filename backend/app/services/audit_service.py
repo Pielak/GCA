@@ -153,10 +153,21 @@ class AuditService:
         # bifurcam a hash chain. Lock global (chave fixa) — volume de
         # auditoria não justifica granularidade por projeto. Libera no
         # COMMIT/ROLLBACK da transação atual.
+        # Métricas de contenção (DBA F1 R3): warn quando aquisição > 100ms.
+        import time as _time
         from sqlalchemy import text as _text
+        _t0 = _time.monotonic()
         await self.db.execute(
             _text("SELECT pg_advisory_xact_lock(hashtext('gca_audit_chain'))")
         )
+        _wait_ms = (_time.monotonic() - _t0) * 1000
+        if _wait_ms > 100:
+            logger.warning(
+                "audit.advisory_lock_contention",
+                wait_ms=round(_wait_ms, 1),
+                lock_key="gca_audit_chain",
+                event_type=event_type,
+            )
 
         # Buscar hash do último registro para encadear
         previous_hash = await self._get_last_hash()

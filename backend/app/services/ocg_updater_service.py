@@ -243,7 +243,20 @@ class OCGUpdaterService:
         Returns:
             Dict com: ocg_id, version_from, version_to, change_type, context_health, changes
         """
+        # Métricas de contenção asyncio.Lock (DBA F1 R3): warn quando
+        # aquisição > 100ms — sinal de concorrência alta entre corrotinas
+        # do mesmo worker para o mesmo project_id.
+        import time as _time
+        _t0 = _time.monotonic()
         async with _get_project_lock(project_id):
+            _wait_ms = (_time.monotonic() - _t0) * 1000
+            if _wait_ms > 100:
+                logger.warning(
+                    "ocg_updater.asyncio_lock_contention",
+                    wait_ms=round(_wait_ms, 1),
+                    project_id=str(project_id),
+                    trigger_source=trigger_source,
+                )
             return await self._update_ocg_from_arguider_locked(
                 project_id=project_id,
                 arguider_analysis=arguider_analysis,
@@ -274,11 +287,22 @@ class OCGUpdaterService:
         # Invariante de ordem: asyncio.Lock SEMPRE antes do advisory.
         # Inverter = risco de deadlock cross-process.
         # Padrão alinhado com ingestion_service.dispatch_first_pending_for_project.
+        # Métricas de contenção (DBA F1 R3): warn quando aquisição > 100ms.
+        import time as _time2
         from sqlalchemy import text as _text
+        _t0_adv = _time2.monotonic()
         await self.db.execute(
             _text("SELECT pg_advisory_xact_lock(hashtextextended(:pid, 0))"),
             {"pid": str(project_id)},
         )
+        _wait_ms_adv = (_time2.monotonic() - _t0_adv) * 1000
+        if _wait_ms_adv > 100:
+            logger.warning(
+                "ocg_updater.advisory_lock_contention",
+                wait_ms=round(_wait_ms_adv, 1),
+                project_id=str(project_id),
+                trigger_source=trigger_source,
+            )
 
         # 1. Carregar OCG atual
         ocg = await self._load_current_ocg(project_id)
