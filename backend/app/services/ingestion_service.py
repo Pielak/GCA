@@ -1093,10 +1093,17 @@ class IngestionService:
                 )
                 # Fallthrough: trata como doc normal se parsing falhar
 
-        # Seed do shared_context: respostas do Questionário Técnico aprovado.
-        # Sem isto cada persona analisa o doc no vácuo (DBA não sabe que é SQL,
-        # SEG não sabe que é OAuth2 etc). Conferente funde com seu summary.
+        # Seed do shared_context: respostas do Questionário Técnico aprovado +
+        # snapshot do OCG atual. Sem isto cada persona analisa o doc no vácuo
+        # (DBA não sabe que é SQL, SEG não sabe que é OAuth2 etc). Conferente
+        # funde com seu summary e propaga aos specialists no dispatch.
+        #
+        # B4 (Decisão GP 2026-05-05): `ocg_summary` injetado é o respaldo do
+        # princípio anti-retrabalho. O prompt das 12 personas instrui a
+        # verificar shared_context.ocg_summary ANTES de gerar question[].
+        # Sem este campo, instrução cai no vazio.
         from app.models.base import TechnicalQuestionnaire as _TQ
+        from app.models.base import OCG as _OCG
         tq_row = (
             await self.db.execute(
                 select(_TQ)
@@ -1108,14 +1115,51 @@ class IngestionService:
                 .limit(1)
             )
         ).scalar_one_or_none()
+
+        # OCG atual — campo top-level + campos canônicos que personas consultam
+        ocg_row = (
+            await self.db.execute(
+                select(_OCG)
+                .where(_OCG.project_id == project_id)
+                .order_by(_OCG.created_at.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        ocg_summary: dict = {}
+        if ocg_row is not None and ocg_row.ocg_data:
+            try:
+                import json as _json
+                ocg_full = _json.loads(ocg_row.ocg_data) if isinstance(ocg_row.ocg_data, str) else ocg_row.ocg_data
+                ocg_summary = {
+                    "version": ocg_row.version,
+                    "overall_score": ocg_row.overall_score,
+                    "status": ocg_row.status,
+                    # Campos canônicos que personas verificam antes de perguntar:
+                    "PROJECT_PROFILE": ocg_full.get("PROJECT_PROFILE") or {},
+                    "PILLAR_SCORES": ocg_full.get("PILLAR_SCORES") or {},
+                    "STACK_RECOMMENDATION": ocg_full.get("STACK_RECOMMENDATION") or {},
+                    "ARCHITECTURE_OVERVIEW": ocg_full.get("ARCHITECTURE_OVERVIEW") or {},
+                    "COMPLIANCE_CHECKLIST": ocg_full.get("COMPLIANCE_CHECKLIST") or {},
+                    "TESTING_REQUIREMENTS": ocg_full.get("TESTING_REQUIREMENTS") or {},
+                    "DELIVERABLES": ocg_full.get("DELIVERABLES") or {},
+                    "RISK_ANALYSIS": ocg_full.get("RISK_ANALYSIS") or {},
+                    "LGPD_COMPLIANCE": ocg_full.get("LGPD_COMPLIANCE") or {},
+                    "APPROVAL_STATUS": ocg_full.get("APPROVAL_STATUS"),
+                }
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "ingestion.ocg_summary_parse_failed",
+                    project_id=str(project_id), error=str(exc),
+                )
+
         seed_shared_context: dict = {}
         if tq_row is not None:
-            seed_shared_context = {
-                "questionnaire_responses": tq_row.responses or {},
-                "questionnaire_submitted_at": (
-                    tq_row.submitted_at.isoformat() if tq_row.submitted_at else None
-                ),
-            }
+            seed_shared_context["questionnaire_responses"] = tq_row.responses or {}
+            seed_shared_context["questionnaire_submitted_at"] = (
+                tq_row.submitted_at.isoformat() if tq_row.submitted_at else None
+            )
+        if ocg_summary:
+            seed_shared_context["ocg_summary"] = ocg_summary
 
         n8n_payload = {
             "ingestion_id": str(doc_id),
