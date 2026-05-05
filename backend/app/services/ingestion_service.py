@@ -1448,6 +1448,20 @@ class IngestionService:
         if not text:
             return False, []
 
+        # Remove UUIDs antes do scan: fragments de hex/digit dentro de
+        # UUIDs podem casar com regex de cartão/CPF/CNPJ por coincidência
+        # (e Luhn/mod-11 aceitam ~10% dos números aleatórios). Caso real
+        # 2026-05-04 BRT: pfq-id `...41ad-9042-186801726975` foi parsed
+        # como cartão de crédito válido, mandando doc legítimo pra
+        # quarentena. Substituir por espaço preserva offsets sem afetar
+        # outros detectores que usam contexto de palavra.
+        text = re.sub(
+            r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+            " ",
+            text,
+            flags=re.IGNORECASE,
+        )
+
         only_digits = re.compile(r"\D")
         detected: list[str] = []
 
