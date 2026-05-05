@@ -134,7 +134,7 @@ celery_app.conf.update(
         "watchdog-ingestion-zombies": {
             "task": "app.tasks.pipeline.watchdog_ingestion_zombies",
             "schedule": 120.0,  # 2 minutos — mais agressivo (sessão 2026-05-04)
-            "args": (8,),  # threshold_minutes 8min (cobre stack n8n com timeouts 5min)
+            "args": (15,),  # threshold_minutes 15min — MVP 29.3: conservador pra LLM típico (60-180s) + retries Celery (30s+120s+480s)
         },
         "watchdog-scaffold-zombies": {
             "task": "app.tasks.scaffold.watchdog_scaffold_zombies",
