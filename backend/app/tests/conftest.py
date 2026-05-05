@@ -20,7 +20,7 @@ import re as _re
 # produção mas sem dados). Pydantic Settings lê env no primeiro import de
 # `app.core.config`, então esta atribuição precisa ser a primeira coisa do
 # conftest — antes de qualquer `from app...`.
-_default_test_url = "postgresql+asyncpg://gca:gca_secret@localhost:5432/gca_test"
+_default_test_url = "postgresql+asyncpg://gca:gca_secret@postgres:5432/gca_test"
 _os.environ["DATABASE_URL"] = _os.environ.get("TEST_DATABASE_URL", _default_test_url)
 _os.environ.setdefault("TESTING", "1")
 

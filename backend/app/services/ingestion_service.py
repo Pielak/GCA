@@ -54,7 +54,7 @@ def _estimate_ocg_updating_time(
     provider: Optional[str],
     file_size_bytes: int,
     num_personas: int = 12,
-) -> int:
+) -> tuple[int, int]:
     """Estima tempo de consolidação OCG em segundos.
 
     Baseado em:
