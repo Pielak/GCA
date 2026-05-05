@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 import structlog
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -58,6 +59,40 @@ _PILLAR_COLUMNS: Dict[int, str] = {
     6: "p6_data_score",
     7: "p7_security_score",
 }
+
+
+# Pydantic schemas para validação da resposta do LLM (DT-002: schema validation)
+class OCGDeltaSchema(BaseModel):
+    """Schema de um delta individual."""
+    op: str = Field(..., description="Operação: 'replace' ou 'append'")
+    path: str = Field(..., description="Path em dot-notation (ex: PILLAR_SCORES.P1.score)")
+    old_value: Optional[Any] = Field(None, description="Valor anterior (replace)")
+    new_value: Optional[Any] = Field(None, description="Novo valor (replace)")
+    value: Optional[Any] = Field(None, description="Valor (append)")
+    reasoning: Optional[str] = Field(None, description="Justificativa da mudança")
+
+    class Config:
+        extra = "allow"  # Permite campos adicionais
+
+
+class ContextHealthSchema(BaseModel):
+    """Schema de context_health."""
+    depth: float = Field(0.5, ge=0.0, le=1.0)
+    confidence: float = Field(0.5, ge=0.0, le=1.0)
+    quality: float = Field(0.5, ge=0.0, le=1.0)
+
+    class Config:
+        extra = "allow"
+
+
+class OCGLLMResponseSchema(BaseModel):
+    """Schema da resposta esperada do LLM para consolidação OCG."""
+    deltas: List[OCGDeltaSchema] = Field(default_factory=list, description="Lista de operações")
+    change_type: str = Field("UPDATE", description="Tipo de mudança: EXPAND, CONTRACT, UPDATE")
+    context_health: Optional[ContextHealthSchema] = Field(None, description="Saúde do contexto")
+
+    class Config:
+        extra = "allow"  # Permite campos adicionais não especificados
 
 
 def _filter_negative_score_deltas(
@@ -313,10 +348,26 @@ class OCGUpdaterService:
         current_ocg_data = json.loads(ocg_snapshot.ocg_data) if ocg_snapshot.ocg_data else {}
 
         # 2. Tentar chamar LLM para atualizar OCG.
-        # Se falhar, usar scores das personas como fallback (provider-agnóstico).
+        # Se falhar ou demorar >60s, usar scores das personas como fallback (provider-agnóstico).
+        # DT-002 (perf): Fallback automático evita travamentos em LLM lento (DeepSeek com 25k+ tokens).
+        import asyncio as _asyncio
+        import time as _time_llm
         llm_result = None
+        llm_timeout_secs = 60.0  # Fallback após 60s de LLM call
+        _t0_llm = _time_llm.monotonic()
         try:
-            llm_result = await self._call_llm(current_ocg_data, arguider_analysis, project_id)
+            llm_result = await _asyncio.wait_for(
+                self._call_llm(current_ocg_data, arguider_analysis, project_id),
+                timeout=llm_timeout_secs
+            )
+        except _asyncio.TimeoutError:
+            logger.warning(
+                "ocg_updater.llm_timeout_fallback",
+                project_id=str(project_id),
+                timeout_secs=llm_timeout_secs,
+                llm_duration_secs=_time_llm.monotonic() - _t0_llm,
+            )
+            llm_result = None  # Força fallback
         except Exception as exc:
             logger.error(
                 "ocg_updater.llm_failed",
@@ -1205,7 +1256,7 @@ class OCGUpdaterService:
         self, llm_result: Dict[str, Any]
     ) -> tuple[List[Dict[str, Any]], str, Dict[str, Any]]:
         """
-        Faz parse da resposta do LLM no formato delta.
+        Faz parse da resposta do LLM no formato delta com validação de schema.
 
         Retorna: (deltas, change_type, context_health)
         Em caso de erro de parse, levanta ValueError — caller marca OCG como
@@ -1214,6 +1265,10 @@ class OCGUpdaterService:
         DT-081 hot-fix (2026-05-02): quando llm_result vem do fallback de
         persona_scores (marcador `_from_fallback=True`), os deltas já estão
         no formato canônico — retorna direto sem tentar parse de raw_text.
+
+        DT-002 (2026-05-05): Adiciona validação de schema Pydantic para garantir
+        JSON válido antes de tentar apply_deltas. Lenient parsing: aceita deltas
+        parciais se alguns forem válidos.
         """
         # Fast-path: fallback já produz deltas canônicos
         if llm_result.get("_from_fallback"):
@@ -1238,31 +1293,50 @@ class OCGUpdaterService:
             parsed = json.loads(json_text)
         except json.JSONDecodeError as exc:
             logger.warning(
-                "ocg_updater.parse_failed",
+                "ocg_updater.parse_failed_json",
                 error=str(exc),
                 raw_snippet=raw_text[:200],
             )
             raise ValueError(f"Resposta do LLM não é JSON válido: {exc}") from exc
 
-        deltas: List[Dict[str, Any]] = parsed.get("deltas", [])
-        if not isinstance(deltas, list):
-            logger.warning("ocg_updater.deltas_not_list", got_type=type(deltas).__name__)
-            deltas = []
-        # Cada delta precisa ser dict — descarta items malformados
-        deltas = [d for d in deltas if isinstance(d, dict)]
+        # Validação de schema Pydantic (lenient: tenta validar, mas aceita parcial)
+        try:
+            validated = OCGLLMResponseSchema.model_validate(parsed)
+            deltas = [d.model_dump() for d in validated.deltas] if validated.deltas else []
+            change_type = validated.change_type or "UPDATE"
+            context_health = validated.context_health.model_dump() if validated.context_health else {
+                "depth": 0.5, "confidence": 0.5, "quality": 0.5,
+            }
+            logger.info(
+                "ocg_updater.parsed_with_schema_validation",
+                deltas_count=len(deltas),
+                change_type=change_type,
+            )
+        except ValidationError as ve:
+            # Schema validation failed — lenient parsing: tenta extrair deltas mesmo assim
+            logger.warning(
+                "ocg_updater.schema_validation_failed_lenient_parse",
+                error=str(ve),
+            )
+            deltas_raw: List[Dict[str, Any]] = parsed.get("deltas", [])
+            if not isinstance(deltas_raw, list):
+                logger.warning("ocg_updater.deltas_not_list", got_type=type(deltas_raw).__name__)
+                deltas_raw = []
+            # Filtra apenas dicts válidos
+            deltas = [d for d in deltas_raw if isinstance(d, dict)]
 
-        change_type_raw = parsed.get("change_type", "UPDATE")
-        change_type: str = change_type_raw if isinstance(change_type_raw, str) else "UPDATE"
+            change_type_raw = parsed.get("change_type", "UPDATE")
+            change_type: str = change_type_raw if isinstance(change_type_raw, str) else "UPDATE"
 
-        # Defensive: LLM pode emitir context_health como string ou null
-        ch_raw = parsed.get("context_health")
-        context_health: Dict[str, Any] = {
-            "depth": 0.5,
-            "confidence": 0.5,
-            "quality": 0.5,
-        }
-        if isinstance(ch_raw, dict):
-            context_health.update(ch_raw)
+            # Defensive: LLM pode emitir context_health como string ou null
+            ch_raw = parsed.get("context_health")
+            context_health: Dict[str, Any] = {
+                "depth": 0.5,
+                "confidence": 0.5,
+                "quality": 0.5,
+            }
+            if isinstance(ch_raw, dict):
+                context_health.update(ch_raw)
 
         # Validação básica do change_type
         if change_type not in ("EXPAND", "CONTRACT", "UPDATE"):
