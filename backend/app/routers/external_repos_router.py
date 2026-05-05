@@ -197,14 +197,14 @@ async def trigger_read(
             # Fallback: rodar análise diretamente sem n8n
             logger.info("external_repo.fallback_direct_analysis", repo_id=str(repo_id))
             from app.tasks.pipeline import external_repo_fallback_task
-            external_repo_fallback_task.delay(str(project_id), str(repo_id))
+            external_repo_fallback_task.send(str(project_id), str(repo_id))
 
     except Exception as e:
         logger.warning("external_repo.n8n_trigger_error", error=str(e))
-        # Fallback: rodar análise diretamente sem n8n (via Celery)
+        # Fallback: rodar análise diretamente sem n8n (via Dramatiq)
         logger.info("external_repo.fallback_direct_analysis", repo_id=str(repo_id))
         from app.tasks.pipeline import external_repo_fallback_task
-        external_repo_fallback_task.delay(str(project_id), str(repo_id))
+        external_repo_fallback_task.send(str(project_id), str(repo_id))
 
     logger.info("external_repo.read_triggered",
                 repo_id=str(repo_id),

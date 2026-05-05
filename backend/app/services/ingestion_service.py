@@ -314,7 +314,7 @@ async def dispatch_first_pending_for_project(
         await svc._dispatch_to_n8n(doc_id, project_id, file_type, file_bytes)
     else:
         await db.commit()
-        pipeline_ingest_task.delay(str(doc_id), str(project_id), file_type)
+        pipeline_ingest_task.send(str(doc_id), str(project_id), file_type)
 
     logger.info(
         "ingestion.dispatched_from_queue",
@@ -511,11 +511,11 @@ async def _fire_ocg_change_hooks(
         reevaluate_gatekeeper_task,
     )
     if changes:
-        propagate_task.delay(str(project_id), list(changes), ocg_version)
+        propagate_task.send(str(project_id), list(changes), ocg_version)
     else:
-        regenerate_backlog_task.delay(str(project_id), ocg_version, trigger)
+        regenerate_backlog_task.send(str(project_id), ocg_version, trigger)
 
-    reevaluate_gatekeeper_task.delay(str(project_id), ocg_version, trigger)
+    reevaluate_gatekeeper_task.send(str(project_id), ocg_version, trigger)
 
 
 class IngestionService:
@@ -2687,7 +2687,7 @@ class IngestionService:
                                 propagate_task,
                                 reevaluate_gatekeeper_task,
                             )
-                            propagate_task.delay(
+                            propagate_task.send(
                                 str(project_id),
                                 list(update_result["changes"]),
                                 update_result.get("version_to"),
@@ -2696,7 +2696,7 @@ class IngestionService:
                             # Também fire-and-forget via Celery: grava evento
                             # GATEKEEPER_REEVALUATED no audit_log com
                             # blocking_pillars/derived_status resultantes.
-                            reevaluate_gatekeeper_task.delay(
+                            reevaluate_gatekeeper_task.send(
                                 str(project_id),
                                 update_result.get("version_to"),
                                 "document_ingestion",
@@ -3015,7 +3015,7 @@ class IngestionService:
         # o recompute do OCG + cleanup auxiliar + audit + payload.
         from app.tasks.pipeline import revert_document_propagation_task
 
-        async_result = revert_document_propagation_task.delay(
+        async_result = revert_document_propagation_task.send(
             document_id=str(document_id),
             project_id=str(project_id),
             actor_id=str(actor_id) if actor_id else None,

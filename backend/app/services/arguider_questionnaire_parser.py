@@ -330,7 +330,7 @@ async def apply_parsed_responses(
 
         try:
             from app.tasks.pipeline import propagate_questionnaire_impact_task
-            propagate_questionnaire_impact_task.delay(
+            propagate_questionnaire_impact_task.send(
                 str(project_id), report.to_dict(),
             )
         except Exception as exc:  # noqa: BLE001

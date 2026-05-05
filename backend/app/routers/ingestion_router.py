@@ -448,7 +448,7 @@ async def reanalyze_document(
             raise HTTPException(status_code=502, detail=f"Falha ao redespachar: {str(exc)[:200]}")
     else:
         from app.tasks.pipeline import pipeline_ingest_task
-        pipeline_ingest_task.delay(
+        pipeline_ingest_task.send(
             str(document_id),
             str(project_id),
             doc.file_type or "",

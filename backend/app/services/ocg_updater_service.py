@@ -751,7 +751,7 @@ class OCGUpdaterService:
         # MVP 13 Fase 13.3c: auto-trigger via Celery. Retry bounded +
         # ACK late preservam a execução se worker cair no meio.
         from app.tasks.pipeline import auto_generate_task
-        auto_generate_task.delay(str(project_id), updated_ocg)
+        auto_generate_task.send(str(project_id), updated_ocg)
 
         # Notificar GPs do projeto sobre atualização do OCG
         try:

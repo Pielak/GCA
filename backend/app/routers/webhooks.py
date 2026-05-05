@@ -729,20 +729,20 @@ async def ingestion_complete(
             # F5.1 validado em prod, MUST 4 GP).
             try:
                 from app.tasks.pipeline import process_ingestion_complete_ocg
-                async_result = process_ingestion_complete_ocg.delay(
+                message = process_ingestion_complete_ocg.send(
                     str(doc_id), str(project_id),
                 )
-                # Persistir celery_task_id pra debug via Flower
+                # Persistir message_id pra debug (compatível com celery_task_id coluna)
                 await db.execute(text("""
                     UPDATE ingested_documents SET celery_task_id = :tid
                     WHERE id = :doc_id
-                """), {"doc_id": doc_id, "tid": async_result.id})
+                """), {"doc_id": doc_id, "tid": message.message_id})
                 await db.commit()
                 logger.info(
                     "webhook.ingestion_complete_enqueued",
                     ingestion_id=str(doc_id),
                     project_id=str(project_id),
-                    celery_task_id=async_result.id,
+                    celery_task_id=message.message_id,
                 )
             except Exception as exc:  # noqa: BLE001
                 # Broker offline ou outro erro de enqueue.
