@@ -30,11 +30,11 @@ from dramatiq.middleware import (
 # Broker configurado em Redis DB 3 (isolado de Celery DBs 1-2)
 broker = RedisBroker(url="redis://redis:6379/3")
 
-# Middleware canônico: retries + time limit + age limit
-broker.add_middleware(AgeLimit)
-broker.add_middleware(TimeLimit)
-broker.add_middleware(Retries)
-broker.add_middleware(CurrentMessage)
+# Middleware canônico: retries + time limit + age limit (instanciar as classes)
+broker.add_middleware(AgeLimit())
+broker.add_middleware(TimeLimit())
+broker.add_middleware(Retries())
+broker.add_middleware(CurrentMessage())
 
 # Set global broker
 dramatiq.set_broker(broker)

@@ -85,6 +85,10 @@ slowapi = "^0.1.9"
 # `gca-celery-worker`.
 celery = {extras = ["redis"], version = "^5.3.0"}
 
+# Fase 2 — Dramatiq queue (substituição de Celery para pipeline tasks)
+# Usa Redis DB 3 (isolado de Celery). Worker roda em `gca-dramatiq-worker`.
+dramatiq = {extras = ["redis"], version = "^1.15.0"}
+
 # MVP 14 Fase 14.10 — dashboard Flower (celery monitoring). Serviço
 # `gca-celery-flower` em docker-compose expõe :5555.
 flower = "^2.0.1"
