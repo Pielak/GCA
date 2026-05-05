@@ -147,31 +147,6 @@ services:
   # 2026-04-25 — Celery beat scheduler. Roda tasks periódicas (watchdog
   # de docs zombie a cada 5 min). Sem ele, doc preso em 'processing' só
   # era limpo no restart do backend.
-  celery-beat:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: gca-celery-beat
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql+asyncpg://gca:gca_secret@postgres:5432/gca
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: gca
-      POSTGRES_USER: gca
-      POSTGRES_PASSWORD: gca_secret
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-    command: celery -A app.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule
-
   # MVP 14 Fase 14.10 — Flower (UI de monitoramento do Celery).
   # Expõe dashboard em :5555 com filas, workers, DLQ visual e histórico.
   # Não requer restart: o worker envia eventos; Flower lê do broker.

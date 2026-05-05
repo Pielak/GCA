@@ -82,6 +82,14 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("gca.scheduler_start_failed", error=str(e))
 
+        # Fase 1: watchdog scheduler (APScheduler) para ingestion/scaffold recovery.
+        # Substitui celery-beat para estas duas tasks periódicas.
+        try:
+            from app.scheduler import start_watchdog_scheduler
+            start_watchdog_scheduler()
+        except Exception as e:
+            logger.error("gca.watchdog_scheduler_start_failed", error=str(e))
+
     # MVP 7: sincroniza releases declaradas (backend/releases/*.yaml) com
     # a tabela `releases` e aplica as não-destrutivas automaticamente.
     # Releases destrutivas ficam pending até Admin confirmar.
@@ -165,6 +173,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    try:
+        from app.scheduler import stop_watchdog_scheduler
+        await stop_watchdog_scheduler()
+    except Exception:
+        pass
     try:
         from app.services.backup_scheduler import stop_scheduler
         stop_scheduler()
