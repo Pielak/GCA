@@ -2773,7 +2773,7 @@ class IngestionService:
 
         # Obter provider configurado do projeto (pra estimar tempo OCG updating)
         provider_result = await self.db.execute(
-            select(ProjectSettings.setting_value).where(
+            select(ProjectSettings.settings_json).where(
                 ProjectSettings.project_id == project_id,
                 ProjectSettings.setting_type == "llm",
             )
