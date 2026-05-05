@@ -723,7 +723,7 @@ def external_repo_fallback_task(project_id: str, repo_id: str) -> dict:
         _run_coro_isolated(_run_external_fallback(project_id, repo_id))
     except Exception as exc:  # noqa: BLE001
         logger.error("external_repo_fallback_task.failed", repo_id=repo_id, error=str(exc))
-        raise self.retry(exc=exc, countdown=60 + 60 * self.request.retries)
+        raise
     return {"status": "ok", "repo_id": repo_id}
 
 
