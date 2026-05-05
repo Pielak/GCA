@@ -80,18 +80,9 @@ aiohttp = "^3.9.0"
 # MVP 12 Fase 12.1 — rate limit anti-abuse em endpoints públicos
 slowapi = "^0.1.9"
 
-# MVP 13 Fase 13.1 — fila persistente de tasks (Celery + broker Redis).
-# Redis já está no docker-compose; workers rodam em serviço separado
-# `gca-celery-worker`.
-celery = {extras = ["redis"], version = "^5.3.0"}
-
-# Fase 2 — Dramatiq queue (substituição de Celery para pipeline tasks)
-# Usa Redis DB 3 (isolado de Celery). Worker roda em `gca-dramatiq-worker`.
+# Fase 4 (2026-05-05) — Dramatiq canonical queue manager (Celery removido).
+# Usa Redis DB 3. Worker roda em `gca-dramatiq-worker`.
 dramatiq = {extras = ["redis"], version = "^1.15.0"}
-
-# MVP 14 Fase 14.10 — dashboard Flower (celery monitoring). Serviço
-# `gca-celery-flower` em docker-compose expõe :5555.
-flower = "^2.0.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.3"

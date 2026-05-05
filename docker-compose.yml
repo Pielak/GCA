@@ -101,50 +101,8 @@ services:
       - gca-backups:/var/gca-backups
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 
-  # MVP 13 Fase 13.1 — Celery Worker (fila persistente de tasks do pipeline).
-  # Broker + result backend: Redis (DBs 1 e 2 respectivamente).
-  # Worker roda em processo separado para resiliência: se backend cair,
-  # tasks continuam na fila; se worker cair, tasks rearmadas via ACK late.
-  celery-worker:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: gca-celery-worker
-    restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql+asyncpg://gca:gca_secret@postgres:5432/gca
-      REDIS_URL: redis://redis:6379/0
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-      POSTGRES_HOST: postgres
-      POSTGRES_PORT: 5432
-      POSTGRES_DB: gca
-      POSTGRES_USER: gca
-      POSTGRES_PASSWORD: gca_secret
-      INGESTION_VIA_N8N: "true"
-      INGESTION_MAX_PARALLEL_PER_PROJECT: "${INGESTION_MAX_PARALLEL_PER_PROJECT:-1}"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
-      - gca-uploads-storage:/tmp/gca-storage
-      - gca-backups:/var/gca-backups
-    command: celery -A app.celery_app worker --loglevel=info --concurrency=1
-    # MVP 17 Fase 17.1 (DT-078): healthcheck usa CMD-SHELL pra interpolar
-    # $HOSTNAME no runtime — o hostname real do container é o ID curto do
-    # docker (ex: `982577f2232a`), não o `container_name` do compose. O
-    # `$$` escapa a interpolação do compose para o shell receber `$HOSTNAME`.
-    healthcheck:
-      test: ["CMD-SHELL", "celery -A app.celery_app inspect ping -d celery@$$HOSTNAME"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  # Fase 2 — Dramatiq worker (queue manager para pipeline tasks)
+  # Fase 4 (2026-05-05) — Celery removido, Dramatiq canonical.
+  # Dramatiq worker (queue manager para pipeline tasks)
   # Processa tasks com Redis DB 3 (isolado de Celery DBs 1-2)
   # Roda em paralelo com celery-worker durante transição
   dramatiq-worker:
@@ -171,29 +129,6 @@ services:
       - ./backend:/app
       - gca-uploads-storage:/tmp/gca-storage
     command: python -m dramatiq app.tasks.pipeline --processes 2 --threads 4
-
-  # MVP 14 Fase 14.10 — Flower (UI de monitoramento do Celery).
-  # Expõe dashboard em :5555 com filas, workers, DLQ visual e histórico.
-  # Não requer restart: o worker envia eventos; Flower lê do broker.
-  celery-flower:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    container_name: gca-celery-flower
-    restart: unless-stopped
-    ports:
-      - "5555:5555"
-    environment:
-      CELERY_BROKER_URL: redis://redis:6379/1
-      CELERY_RESULT_BACKEND: redis://redis:6379/2
-    depends_on:
-      redis:
-        condition: service_healthy
-      celery-worker:
-        condition: service_started
-    command: celery -A app.celery_app flower --port=5555 --broker=redis://redis:6379/1 --persistent=True --db=/tmp/flower.db
-    volumes:
-      - gca-flower-data:/tmp
 
   # Frontend (React + Vite)
   frontend:
@@ -235,8 +170,6 @@ volumes:
   # Backup-1: backups por projeto persistem entre restarts. Path no
   # container: /var/gca-backups. Caller: project_backup_service.
   gca-backups:
-  # MVP 14 Fase 14.10 — DB sqlite do Flower persiste histórico entre restarts.
-  gca-flower-data:
 
 networks:
   default:

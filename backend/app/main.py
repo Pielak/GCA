@@ -150,25 +150,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error("ingestion.startup_watchdog_failed", error=str(e))
 
-    # MVP 13 Fase 13.2: smoke do broker Celery no startup.
-    # Worker roda em processo separado (gca-celery-worker). Aqui só
-    # checamos conectividade do broker. Falha de broker é aviso, não
-    # fatal — backend continua operacional para endpoints que não
-    # dependem de fila.
-    if "PYTEST_CURRENT_TEST" not in _os.environ:
-        try:
-            from app.celery_app import check_broker_connection
-            broker_status = check_broker_connection(timeout=2.0)
-            if broker_status["reachable"]:
-                logger.info("celery.broker_reachable", broker=broker_status["broker"])
-            else:
-                logger.warning(
-                    "celery.broker_unreachable",
-                    broker=broker_status["broker"],
-                    error=broker_status["error"],
-                )
-        except Exception as e:
-            logger.error("celery.broker_check_failed", error=str(e))
+    # Fase 4 (2026-05-05): Celery healthcheck removido (Celery deprecated).
+    # Dramatiq roda silenciosamente; nenhum healthcheck necessário.
 
     yield
 
