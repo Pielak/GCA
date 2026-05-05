@@ -39,6 +39,52 @@ EXTENSION_MAP = {
 
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
 
+# Estimativa de tempo OCG updating por provider (em segundos, para 12 personas em paralelo)
+# Baseado em benchmarks dogfood 2026-05-05 com docs ~100KB
+_PROVIDER_TIMING = {
+    "anthropic": 35,    # Opus 4.7: mais rápido, melhor qualidade
+    "openai": 40,       # GPT-4: qualidade similar, latência ligeiramente maior
+    "gemini": 45,       # Gemini 2.5: bom custo-benefício, latência media
+    "deepseek": 50,     # DeepSeek-V4-Pro: tier econômico, latência maior
+    "grok": 55,         # Grok-3: nova API, latência variável
+    "ollama": 120,      # Local: sem latência de rede, mas CPU-bound
+}
+
+def _estimate_ocg_updating_time(
+    provider: Optional[str],
+    file_size_bytes: int,
+    num_personas: int = 12,
+) -> int:
+    """Estima tempo de consolidação OCG em segundos.
+
+    Baseado em:
+    - Provider: latência do LLM (anthropic=35s, ollama=120s para 12 personas em paralelo)
+    - File size: docs maiores = mais contexto = um pouco mais lento (+0.5s por 100KB)
+    - Num personas: paralelo, então não multiplica, mas afeta overhead consolidação
+
+    Retorna segundos de tempo MINIMO até MÁXIMO esperado.
+    """
+    if not provider:
+        provider = "deepseek"  # default conservador
+
+    provider = provider.lower()
+    base_time = _PROVIDER_TIMING.get(provider, 50)  # default se desconhecido
+
+    # Ajuste por tamanho do documento (KB)
+    size_kb = max(1, file_size_bytes // 1024)
+    size_factor = 1 + (size_kb / 200)  # +50% a cada 200KB
+
+    # Ajuste por número de personas (consolidação é O(n) pequeno, não paralelo)
+    personas_factor = 1 + ((num_personas - 12) * 0.05)  # +5% por persona acima de 12
+
+    estimated = int(base_time * size_factor * personas_factor)
+
+    # Retorna range com margem: (min, max)
+    min_time = max(10, estimated - 10)  # sempre >= 10s
+    max_time = estimated + 20  # margem de segurança
+
+    return (min_time, max_time)
+
 
 _M01_MARKER_RE = re.compile(r"gca_iteration_id=([0-9a-fA-F-]{36})")
 
@@ -2723,6 +2769,23 @@ class IngestionService:
     async def list_documents(self, project_id: UUID) -> list[dict]:
         """Lista documentos do projeto com tokens_used da análise Arguidor."""
         from sqlalchemy import outerjoin
+        from app.models.base import ProjectSettings
+
+        # Obter provider configurado do projeto (pra estimar tempo OCG updating)
+        provider_result = await self.db.execute(
+            select(ProjectSettings.setting_value).where(
+                ProjectSettings.project_id == project_id,
+                ProjectSettings.setting_type == "llm",
+            )
+        )
+        provider_row = provider_result.scalar_one_or_none()
+        provider = None
+        if provider_row:
+            try:
+                provider_config = json.loads(provider_row)
+                provider = provider_config.get("provider")
+            except (json.JSONDecodeError, TypeError):
+                pass
 
         # LEFT JOIN com ArguiderAnalysis pra pegar tokens_used.
         # MVP 34: filtra docs soft-deleted — UI lista apenas docs ativos.
@@ -2768,6 +2831,10 @@ class IngestionService:
                 ),
                 # MVP X Fase X.Y — tokens usado na análise Arguidor (custo LLM)
                 "tokens_used": tokens_used,
+                # Estimativa dinâmica de tempo OCG updating baseado em provider + doc size
+                "estimated_ocg_updating_seconds": _estimate_ocg_updating_time(
+                    provider, d.file_size_bytes
+                ),
             }
             for d, tokens_used in rows
         ]

@@ -498,7 +498,12 @@ export function IngestionPage() {
                         <span className="inline-block animate-pulse" aria-hidden="true">🧠 </span>
                         <span className="inline-block animate-pulse">Consolidando OCG...</span>
                         <div className="text-violet-500/70 text-[10px] mt-0.5">
-                          LLM avaliando 12 personas + atualizando pilares. ~30-60s.
+                          {(() => {
+                            const est = (doc as any).estimated_ocg_updating_seconds
+                            if (!est || !Array.isArray(est)) return 'LLM avaliando 12 personas + atualizando pilares. ~30-60s.'
+                            const [min, max] = est
+                            return `LLM avaliando 12 personas + atualizando pilares. ~${min}-${max}s.`
+                          })()}
                         </div>
                       </div>
                     )}
