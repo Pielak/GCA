@@ -29,24 +29,7 @@ from app.celery_app import celery_app
 logger = structlog.get_logger(__name__)
 
 
-def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
-    """Roda corrotina num event loop isolado.
-
-    Substitui `asyncio.run()` que falha em eager mode (pytest-asyncio)
-    quando já há loop rodando. Em worker Celery de verdade (processo
-    separado sem loop), funciona igual a `asyncio.run()`.
-    """
-    try:
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-    except RuntimeError:
-        # Fallback extremo: se mesmo new_event_loop falhar, tenta o
-        # loop atual (caminho pytest-asyncio com loop em execução).
-        loop = asyncio.get_event_loop()
-        return loop.run_until_complete(coro)
+from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated  # noqa: E402,F401
 
 
 # MVP 29 Fase 29.3 — Lease helper canônico para idempotência de tasks

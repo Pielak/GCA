@@ -20,16 +20,7 @@ from app.celery_app import celery_app
 logger = structlog.get_logger(__name__)
 
 
-def _run_coro_isolated(coro: Coroutine[Any, Any, Any]) -> Any:
-    """Roda corrotina num event loop isolado (mesmo padrão de pipeline.py)."""
-    try:
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-    except Exception:
-        raise
+from app.tasks._async_helper import run_coro_isolated as _run_coro_isolated  # noqa: E402,F401
 
 
 @celery_app.task(
