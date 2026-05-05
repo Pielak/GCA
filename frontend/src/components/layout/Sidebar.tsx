@@ -201,7 +201,9 @@ export function Sidebar() {
                         <SubNavItem to={`/projects/${proj.id}/questionnaire`} label="Questionário" icon={<ClipboardList className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/ingestion`} label="Ingestão" icon={<FileText className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/gatekeeper`} label="Gatekeeper" icon={<Shield className="w-3 h-3" />} />
-                        <SubNavItem to={`/projects/${proj.id}/arguider`} label="Arguidor" icon={<Zap className="w-3 h-3" />} />
+                        {/* B8 (Decisão GP 1, 2026-05-04): Arguidor é processo, não tem UI.
+                            Pipeline n8n consome documentos e grava em ocg_individual; não
+                            há tela própria. Página, hook, lib e panel removidos. */}
                         <SubNavItem to={`/projects/${proj.id}/ocg`} label="OCG" icon={<Settings className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/backlog`} label="Backlog" icon={<ClipboardList className="w-3 h-3" />} />
                         <SubNavItem to={`/projects/${proj.id}/roadmap`} label="Roadmap" icon={<Clock className="w-3 h-3" />} />

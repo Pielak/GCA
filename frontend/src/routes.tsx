@@ -32,7 +32,6 @@ import { BacklogPage } from './pages/projects/BacklogPage';
 import { RequireProjectSetup } from './components/guards/RequireProjectSetup';
 import { ProjectSettingsPage } from './pages/projects/ProjectSettingsPage';
 import { ExternalReposPage } from './pages/projects/ExternalReposPage';
-import { ArguiderPage } from './pages/projects/ArguiderPage';
 import { CodeGeneratorPage } from './pages/projects/CodeGeneratorPage';
 import { QAReadinessPage } from './pages/projects/QAReadinessPage';
 import { RoadmapPage } from './pages/projects/RoadmapPage';
@@ -164,7 +163,9 @@ export const router = createBrowserRouter([
           { path: 'iterative-questionnaire', element: <RequireProjectSetup><IterativeQuestionnairePage /></RequireProjectSetup> },
           { path: 'gatekeeper', element: <RequireProjectSetup><GatekeeperPage /></RequireProjectSetup> },
           { path: 'gatekeeper-passada/:id', element: <RequireProjectSetup><GatekeeperPassadaPage /></RequireProjectSetup> },
-          { path: 'arguider', element: <RequireProjectSetup><ArguiderPage /></RequireProjectSetup> },
+          // B8 (Decisão GP 1, 2026-05-04): Arguidor sem UI — rota removida.
+          // Bookmarks antigos: redirect pro Gatekeeper (escopo equivalente).
+          { path: 'arguider', element: <Navigate to="../gatekeeper" replace /> },
           { path: 'applied-defaults', element: <RequireProjectSetup><AppliedDefaultsPage /></RequireProjectSetup> },
           { path: 'codegen', element: <RequireProjectSetup><CodeGeneratorPage /></RequireProjectSetup> },
           // Alias: URL antiga /code-generator redireciona pro path canônico /codegen.
