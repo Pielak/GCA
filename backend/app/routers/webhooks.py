@@ -505,9 +505,33 @@ async def ingestion_complete(
                                     already_in_ocg = True
 
                         if already_in_ocg:
+                            # B4: insere com status já pré-arquivado pra
+                            # auditoria (rastreável que persona perguntou)
+                            # mas não aparece em "Questões em Aberto" ao GP.
+                            # Status canônico: 'archived_in_ocg' (15 chars,
+                            # cabe em VARCHAR(20)).
+                            await db.execute(text("""
+                                INSERT INTO persona_follow_up_questions
+                                    (id, project_id, document_id, ocg_individual_id,
+                                     persona_id, persona_name, question_text, context,
+                                     question_order, status, created_at, updated_at)
+                                VALUES
+                                    (gen_random_uuid(), :project_id, :doc_id, :ocg_id,
+                                     :persona_id, :persona_name, :qtext, :qctx,
+                                     :qorder, 'archived_in_ocg', NOW(), NOW())
+                            """), {
+                                "project_id": project_id,
+                                "doc_id": doc_id,
+                                "ocg_id": ocg_individual_id,
+                                "persona_id": persona_tag,
+                                "persona_name": persona_name,
+                                "qtext": qtext[:5000],
+                                "qctx": (qctx or "")[:500] or None,
+                                "qorder": idx,
+                            })
                             skipped_count += 1
                             logger.info(
-                                "webhook.hitl_question_skipped_already_in_ocg",
+                                "webhook.hitl_question_archived_already_in_ocg",
                                 ingestion_id=str(doc_id),
                                 persona_id=persona_tag,
                                 question_preview=qtext[:80],

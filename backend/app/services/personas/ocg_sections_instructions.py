@@ -134,13 +134,69 @@ _INSTRUCTIONS: dict[str, str] = {
 }
 
 
+# B4 (Decisão GP 2026-05-05): instrução anti-retrabalho HITL.
+# Aplicada a TODAS as 12 personas (não só as com seções estruturadas).
+# Persona deve consultar OCG atual em shared_context.ocg_summary (quando
+# fornecido) ou inferir do próprio normalized_text + analyses anteriores
+# disponíveis ANTES de gerar question. Se o tema já tem resposta canônica
+# no OCG, NÃO repetir. Filtro determinístico no backend webhook complementa
+# (commit 142fc53), mas atacar na origem reduz tokens desperdiçados +
+# evita ruído na UI.
+_ANTI_RETRABALHO_HITL = """
+
+---
+
+## ANTES DE GERAR question[] — VERIFIQUE O OCG
+
+Você está numa cadeia de análise. O documento que você analisa NÃO é o
+único insumo: o OCG (Objeto de Contexto Global) consolidado pode já
+conter respostas para perguntas que você cogitou fazer.
+
+**REGRA OBRIGATÓRIA**: antes de incluir um item em `questions[]`, conferir:
+
+1. **shared_context.ocg_summary** (se fornecido no payload): tem a chave/
+   campo correspondente preenchido? Se sim → NÃO pergunte de novo. Em vez
+   disso, use a info como contexto para análise mais profunda.
+
+2. **shared_context.questionnaire_responses** (respostas do GP no
+   Questionário Técnico): cobre o tema? Se sim → NÃO pergunte.
+
+3. **Conteúdo do próprio documento atual**: mesmo que conciso, talvez
+   responda implicitamente. Releia antes de perguntar.
+
+**Pergunte SOMENTE quando**:
+- O tema pertence ao seu escopo de persona,
+- Não há resposta no OCG, no questionário, nem no documento atual,
+- A informação faltante bloqueia análise determinística do seu pilar.
+
+**Exemplo de retrabalho proibido**:
+- Persona ARQ pergunta "Qual a stack tecnológica?" — mas
+  `ocg_data.STACK_RECOMMENDATION` já lista frontend/backend/banco. ❌
+- Persona LGPD pergunta "Há DPO designado?" — mas
+  `ocg_data.LGPD_COMPLIANCE.dpo` está preenchido. ❌
+
+Em texto livre da pergunta, prefira formulações específicas que indicam
+que você JÁ leu o OCG e identificou a lacuna pontual:
+- "O OCG menciona stack <X> mas não detalha <Y>. Pode esclarecer?" ✅
+- "O documento define <A> mas o pilar P3 exige também <B> — qual o
+  posicionamento?" ✅
+
+A filosofia "Assistida" do GCA permite à persona NÃO saber. Mas exige
+que perguntar seja a ÚLTIMA opção, não a primeira.
+"""
+
+
 def append_ocg_sections(tag: str, base_prompt: str) -> str:
     """Anexa a instrução de seções estruturadas ao prompt da persona.
 
     Personas sem instrução específica (AUD/GP/UX/UI/NEG) recebem o prompt sem
     alteração — não contribuem com seções estruturadas do OCG.
+
+    B4: TODAS as personas recebem o addendum anti-retrabalho HITL.
     """
-    addendum = _INSTRUCTIONS.get(tag.upper())
-    if not addendum:
-        return base_prompt
-    return base_prompt + addendum
+    out = base_prompt
+    structured = _INSTRUCTIONS.get(tag.upper())
+    if structured:
+        out += structured
+    out += _ANTI_RETRABALHO_HITL
+    return out
