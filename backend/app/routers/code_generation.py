@@ -17,7 +17,7 @@ from app.db.database import get_db
 from app.services.ocg_gate import check_ocg_maturity_gate
 from app.services.code_generation_service import CodeGenerationService
 from app.services.llm_service import LLMProvider, LLMServiceFactory
-from app.models.base import OCG, IngestedDocument, ArguiderAnalysis
+from app.models.base import OCG, IngestedDocument, OCGIndividual
 from app.models.base import Project, ProjectGitConfig, BacklogItem, ModuleCandidate
 from app.core.config import settings as app_settings
 from app.dependencies.require_project_setup import assert_project_setup_complete
@@ -521,17 +521,11 @@ async def generate_scaffold(
     )
     ingested_docs = docs_result.scalars().all()
 
-    # Buscar análises do Arguidor para esses documentos
+    # B7 (2026-05-05): migrar de arguider_analyses (deprecado, vazio
+    # após pipeline n8n) pra ocg_individual + module_candidates ativos.
+    # ArguiderAnalysis sobrevive como modelo legado pra docs históricos
+    # mas pipeline novo grava em ocg_individual (fan-out 12 personas).
     doc_ids = [d.id for d in ingested_docs]
-    arguider_analyses = []
-    if doc_ids:
-        analyses_result = await db.execute(
-            select(ArguiderAnalysis).where(
-                (ArguiderAnalysis.document_id.in_(doc_ids)) &
-                (ArguiderAnalysis.project_id == project_id)
-            )
-        )
-        arguider_analyses = analyses_result.scalars().all()
 
     # 4. Construir prompt abrangente
     stack = ocg_data.get("STACK_RECOMMENDATION", {})
@@ -539,27 +533,65 @@ async def generate_scaffold(
     testing = ocg_data.get("TESTING_REQUIREMENTS", {})
     modules = ocg_data.get("MODULE_CANDIDATES", [])
     business_rules = ocg_data.get("BUSINESS_RULES", [])
-    critical_findings = ocg_data.get("CRITICAL_FINDINGS", [])
+    critical_findings = list(ocg_data.get("CRITICAL_FINDINGS", []) or [])
     compliance = ocg_data.get("COMPLIANCE_CHECKLIST", [])
 
-    # Extrair module candidates das análises do Arguidor
-    arguider_modules = []
-    arguider_gaps = []
-    for analysis in arguider_analyses:
-        try:
-            mc = (
-                json.loads(analysis.module_candidates)
-                if isinstance(analysis.module_candidates, str)
-                else analysis.module_candidates
+    # ModuleCandidates ativos (substitui arguider_modules — pipeline n8n
+    # grava direto em module_candidates, não passa mais por AA).
+    arguider_modules: list[dict] = []
+    mc_result = await db.execute(
+        select(ModuleCandidate).where(
+            (ModuleCandidate.project_id == project_id) &
+            (ModuleCandidate.status.notin_(["archived", "rejected"]))
+        )
+    )
+    for mc in mc_result.scalars().all():
+        arguider_modules.append({
+            "name": mc.name,
+            "type": mc.module_type,
+            "description": mc.description or "",
+            "status": mc.status,
+        })
+
+    # Gaps + findings agregados de ocg_individual (parecer.findings, .issues,
+    # .recommendations) — fonte canônica do pipeline n8n B7.
+    arguider_gaps: list[dict] = []
+    if doc_ids:
+        oi_result = await db.execute(
+            select(OCGIndividual).where(
+                (OCGIndividual.document_id.in_(doc_ids)) &
+                (OCGIndividual.project_id == project_id) &
+                (OCGIndividual.status == "completed")
             )
-            arguider_modules.extend(mc if isinstance(mc, list) else [])
-        except (json.JSONDecodeError, TypeError):
-            pass
-        try:
-            gaps = json.loads(analysis.gaps) if isinstance(analysis.gaps, str) else analysis.gaps
-            arguider_gaps.extend(gaps if isinstance(gaps, list) else [])
-        except (json.JSONDecodeError, TypeError):
-            pass
+        )
+        for oi in oi_result.scalars().all():
+            parecer = oi.parecer or {}
+            if not isinstance(parecer, dict):
+                continue
+            # findings: lista de problemas detectados
+            for f in (parecer.get("findings") or [])[:5]:
+                arguider_gaps.append({
+                    "persona": oi.persona_id,
+                    "type": "finding",
+                    "content": f if isinstance(f, str) else (
+                        f.get("description") or f.get("text") or str(f)[:300]
+                    ),
+                })
+            # issues: lista de issues abertos
+            for i in (parecer.get("issues") or [])[:5]:
+                arguider_gaps.append({
+                    "persona": oi.persona_id,
+                    "type": "issue",
+                    "content": i if isinstance(i, str) else (
+                        i.get("description") or str(i)[:300]
+                    ),
+                })
+            # blocking_reason de personas que marcaram blocking=True
+            if parecer.get("blocking") and parecer.get("blocking_reason"):
+                critical_findings.append({
+                    "persona": oi.persona_id,
+                    "reason": parecer["blocking_reason"][:500],
+                })
 
     # Documentos ingeridos como contexto
     doc_context = ""
