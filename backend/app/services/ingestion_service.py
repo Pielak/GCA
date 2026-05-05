@@ -1077,21 +1077,38 @@ class IngestionService:
                     project_id=project_id,
                     text=text_for_marker,
                 )
-                if handled:
+                if handled is not None and handled.get("answered", 0) > 0:
                     logger.info(
                         "ingestion.followup_marker_processed",
                         doc_id=str(doc_id),
                         project_id=str(project_id),
                         answered=handled.get("answered", 0),
                     )
-                    return  # Não envia pra n8n
+                    return  # Não envia pra n8n — HITL foi processado
+                elif handled is None:
+                    # Parse falhou — marker presente mas frontmatter/UUIDs inválidos
+                    doc.arguider_status = "error"
+                    doc.arguider_stage = "failed"
+                    doc.arguider_error_message = (
+                        "Arquivo HITL detectado (gca-followup-marker presente) mas o parse não extraiu "
+                        "respostas válidas. Verifique se o frontmatter tem `project_id` e `persona_id` "
+                        "corretos e se as respostas estão preenchidas no formato esperado (blocos "
+                        "`<!-- pfq-id: UUID -->` seguidos de `**Resposta**:`)."
+                    )
+                    await self.db.commit()
+                    return
             except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "ingestion.followup_marker_failed",
+                logger.error(
+                    "ingestion.followup_marker_exception",
                     doc_id=str(doc_id),
                     error=str(exc),
+                    exc_info=True,
                 )
-                # Fallthrough: trata como doc normal se parsing falhar
+                doc.arguider_status = "error"
+                doc.arguider_stage = "failed"
+                doc.arguider_error_message = f"Falha ao processar HITL: {str(exc)[:200]}"
+                await self.db.commit()
+                return
 
         # Seed do shared_context: respostas do Questionário Técnico aprovado +
         # snapshot do OCG atual. Sem isto cada persona analisa o doc no vácuo
@@ -1185,20 +1202,43 @@ class IngestionService:
         body_bytes = _json.dumps(n8n_payload).encode()
         sig = "sha256=" + hmac.new(webhook_secret.encode(), body_bytes, hashlib.sha256).hexdigest()
 
-        # Marcar status processing
+        # Marcar status processing após validação mínima
         doc.arguider_status = "processing"
         doc.arguider_stage = "n8n_pipeline"
         await self.db.commit()
 
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                f"{n8n_url}/webhook/gca-normalizer",
-                content=body_bytes,
-                headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(
+                    f"{n8n_url}/webhook/gca-normalizer",
+                    content=body_bytes,
+                    headers={"Content-Type": "application/json", "X-GCA-Signature": sig},
+                )
+                if resp.status_code not in (200, 202):
+                    logger.error(
+                        "ingestion.n8n_dispatch_failed",
+                        status=resp.status_code,
+                        body=resp.text[:200],
+                        doc_id=str(doc_id),
+                    )
+                    raise RuntimeError(f"n8n dispatch falhou: {resp.status_code}")
+        except Exception as exc:  # noqa: BLE001
+            # Se dispatch falha (timeout, auth, conexão), marcar error imediatamente
+            # para evitar zombie — não deixa doc em processing indefinidamente
+            doc.arguider_status = "error"
+            doc.arguider_stage = "failed"
+            doc.arguider_error_message = f"Falha ao enviar para pipeline n8n: {str(exc)[:300]}"
+            await self.db.commit()
+            logger.error(
+                "ingestion.dispatch_exception",
+                doc_id=str(doc_id),
+                project_id=str(project_id),
+                error=str(exc),
+                exc_info=True,
             )
-            if resp.status_code not in (200, 202):
-                logger.error("ingestion.n8n_dispatch_failed", status=resp.status_code, body=resp.text[:200])
-                raise RuntimeError(f"n8n dispatch falhou: {resp.status_code}")
+            # Chamar dispatch do próximo doc da fila (evita fila travada)
+            await dispatch_first_pending_for_project(self.db, project_id)
+            return
 
     async def upload_document(
         self,

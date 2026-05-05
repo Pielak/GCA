@@ -1,5 +1,5 @@
 """Projects Router"""
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
@@ -1137,7 +1137,7 @@ async def get_ocg_history(
     # scores não superam o piso MAX-por-persona já consolidado.
     from app.models.base import OCGIndividual
     from sqlalchemy import case as _case, Float
-    doc_ids = [d.document_id for d, _, _ in rows if d.document_id]
+    doc_ids = [d.document_id for d, _ in rows if d.document_id]
     persona_stats: dict = {}
     if doc_ids:
         stats_rows = (await db.execute(
@@ -1539,6 +1539,281 @@ async def get_design_tokens(
 
 class DesignTokensPutBody(BaseModel):
     design_tokens: dict = Field(default_factory=dict)
+
+
+# ============================================================================
+# UI/UX assets — caminho pragmático em vez de design-tokens manual
+# (sessão 2026-05-04). Dev/Tech Lead não preenche hex à mão; sobe logo + CSS
+# OU ingere doc UI/UX OU aplica template plano. Backend extrai paleta do CSS.
+# ============================================================================
+
+
+class UIUXAssetsBody(BaseModel):
+    logo_base64: Optional[str] = None
+    logo_filename: Optional[str] = None  # "logo.svg", "logo.png"
+    css_content: Optional[str] = None
+    # Templates planos: cliente sem identidade visual definida ainda
+    # ('plain_slate', 'plain_violet', 'plain_emerald', None)
+    apply_template: Optional[str] = None
+
+
+_PLAIN_TEMPLATES: dict[str, dict] = {
+    "plain_slate": {
+        "palette": {"by_role": {
+            "primary": "#0f172a", "secondary": "#475569", "accent": "#334155",
+            "success": "#059669", "warning": "#d97706", "danger": "#dc2626",
+            "background": "#f8fafc", "foreground": "#0f172a", "border": "#e2e8f0",
+        }},
+        "typography": {"families": ["Inter", "system-ui", "sans-serif"], "sizes_px": [12, 14, 16, 18, 24, 32]},
+        "spacing_px": [4, 8, 12, 16, 24, 32, 48], "radii_px": [4, 8, 12, 16],
+    },
+    "plain_violet": {
+        "palette": {"by_role": {
+            "primary": "#7c3aed", "secondary": "#6d28d9", "accent": "#a78bfa",
+            "success": "#10b981", "warning": "#f59e0b", "danger": "#ef4444",
+            "background": "#0f0f1a", "foreground": "#e2e8f0", "border": "#27272a",
+        }},
+        "typography": {"families": ["Inter", "system-ui", "sans-serif"], "sizes_px": [12, 14, 16, 18, 24, 32]},
+        "spacing_px": [4, 8, 12, 16, 24, 32, 48], "radii_px": [4, 8, 12, 16],
+    },
+    "plain_emerald": {
+        "palette": {"by_role": {
+            "primary": "#10b981", "secondary": "#047857", "accent": "#34d399",
+            "success": "#22c55e", "warning": "#eab308", "danger": "#f43f5e",
+            "background": "#f0fdf4", "foreground": "#064e3b", "border": "#bbf7d0",
+        }},
+        "typography": {"families": ["Inter", "system-ui", "sans-serif"], "sizes_px": [12, 14, 16, 18, 24, 32]},
+        "spacing_px": [4, 8, 12, 16, 24, 32, 48], "radii_px": [4, 8, 12, 16],
+    },
+}
+
+
+def _parse_css_palette(css: str) -> dict:
+    """Extrai paleta de um CSS via regex (cores hex + rgb/rgba).
+
+    Heurísticas:
+    - Cores em CSS variables (--color-primary, --primary) viram by_role.
+    - Cores soltas (sem variable) entram em `top` por frequência.
+    - Detecta também tipografia básica (font-family, font-size, font-weight)
+      em CSS variables.
+    """
+    import re
+    from collections import Counter
+
+    css = css or ""
+    by_role: dict[str, str] = {}
+    # CSS custom properties: --color-primary: #abc; / --primary-bg: rgb(0,0,0);
+    var_re = re.compile(
+        r"--(?:color-)?(?P<name>[a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(?P<value>#[0-9a-fA-F]{3,8}|rgba?\([^)]+\))",
+        re.MULTILINE,
+    )
+    role_norm = {
+        "primary": "primary", "secondary": "secondary", "accent": "accent",
+        "success": "success", "warning": "warning", "danger": "danger", "error": "danger",
+        "info": "info", "muted": "muted", "background": "background", "bg": "background",
+        "foreground": "foreground", "fg": "foreground", "text": "text", "surface": "surface",
+        "border": "border", "link": "link", "brand": "primary",
+    }
+
+    def _to_hex(value: str) -> str:
+        v = value.strip()
+        if v.startswith("#"):
+            if len(v) == 4:  # #abc → #aabbcc
+                return "#" + "".join(c * 2 for c in v[1:])
+            return v[:7].lower()
+        m = re.match(r"rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)", v)
+        if m:
+            r, g, b = (int(x) for x in m.groups())
+            return f"#{r:02x}{g:02x}{b:02x}"
+        return v
+
+    for m in var_re.finditer(css):
+        name = m.group("name").lower()
+        value = m.group("value")
+        for key, canonical in role_norm.items():
+            if key in name and canonical not in by_role:
+                by_role[canonical] = _to_hex(value)
+                break
+
+    # Cores hex soltas para o "top" (frequência)
+    hex_all = re.findall(r"#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b", css)
+    counter = Counter(_to_hex(h) for h in hex_all)
+    top = [c for c, _ in counter.most_common(8)]
+
+    # Tipografia básica
+    families: list[str] = []
+    family_re = re.compile(r"font-family\s*:\s*([^;]+);", re.IGNORECASE)
+    for m in family_re.finditer(css):
+        for fam in re.split(r",\s*", m.group(1).strip()):
+            fam_clean = fam.strip().strip('"\'')
+            if fam_clean and fam_clean not in families:
+                families.append(fam_clean)
+        if len(families) >= 3:
+            break
+
+    sizes_re = re.compile(r"font-size\s*:\s*(\d+(?:\.\d+)?)px", re.IGNORECASE)
+    sizes_px = sorted({int(float(m)) for m in sizes_re.findall(css)})[:8]
+
+    out: dict = {"palette": {"top": top, "by_role": by_role, "unique_count": len(set(top + list(by_role.values())))}}
+    if families:
+        out["typography"] = {"families": families[:5]}
+        if sizes_px:
+            out["typography"]["sizes_px"] = sizes_px
+    return out
+
+
+@router.post("/{project_id}/ui-ux/assets")
+async def upload_ui_ux_assets(
+    project_id: UUID,
+    body: UIUXAssetsBody,
+    permissions: dict = Depends(require_action("project:manage_team")),
+    db: AsyncSession = Depends(get_db),
+):
+    """Caminho pragmático para popular design_tokens sem editar hex à mão.
+
+    Aceita 3 vetores (qualquer combinação):
+      - `logo_base64` + `logo_filename`: salva como IngestedDocument
+        sintético (file_type='ui_ux_logo'), usado pelo CodeGen.
+      - `css_content`: parseia paleta+tipografia via regex, popula
+        design_tokens (source='css_ingested'). Salva também como
+        IngestedDocument sintético (file_type='ui_ux_css').
+      - `apply_template`: 'plain_slate' | 'plain_violet' | 'plain_emerald'
+        — fallback quando cliente não tem identidade definida.
+
+    Para uploads ricos (documento UI/UX completo com tipografia, espaçamentos,
+    grid system etc), use a aba Ingestão normal — o CodeGen lê do OCG
+    consolidado pelas personas UX/UI.
+    """
+    import base64
+    import hashlib
+    import json as _json
+    from datetime import datetime, timezone
+    from uuid import uuid4
+    from sqlalchemy import select
+    from app.models.base import OCG, IngestedDocument
+    from app.services.design_tokens import validate_tokens_dict
+    from app.utils.ingested_storage import write_ingested
+
+    if not any([body.logo_base64, body.css_content, body.apply_template]):
+        raise HTTPException(
+            status_code=400,
+            detail="Forneça pelo menos um: logo_base64, css_content ou apply_template",
+        )
+
+    user_id = permissions.get("user_id") if isinstance(permissions, dict) else None
+    now = datetime.now(timezone.utc)
+    timestamp_compact = now.strftime("%Y%m%d-%H%M%S")
+    actions: dict[str, dict] = {}
+
+    # 1. Logo
+    if body.logo_base64 and body.logo_filename:
+        try:
+            logo_bytes = base64.b64decode(body.logo_base64)
+        except Exception:  # noqa: BLE001
+            raise HTTPException(status_code=422, detail="logo_base64 inválido")
+        if len(logo_bytes) > 2 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="logo > 2MB")
+        ext = body.logo_filename.rsplit(".", 1)[-1].lower() if "." in body.logo_filename else "bin"
+        if ext not in {"png", "svg", "jpg", "jpeg", "webp"}:
+            raise HTTPException(status_code=415, detail=f"extensão de logo não suportada: {ext}")
+        filename = f"branding-logo-{timestamp_compact}.{ext}"
+        write_ingested(project_id, filename, logo_bytes)
+        doc = IngestedDocument(
+            id=uuid4(), project_id=project_id, uploaded_by=user_id,
+            original_filename=f"Logomarca — {body.logo_filename}",
+            filename=filename, file_type="ui_ux_logo",
+            file_hash=hashlib.sha256(logo_bytes).hexdigest(),
+            file_size_bytes=len(logo_bytes),
+            arguider_status="completed", arguider_stage="ui_ux_synthetic",
+            arguider_progress_percent=100, ocg_updated=False, pii_detected=False,
+        )
+        db.add(doc)
+        await db.flush()
+        actions["logo"] = {"document_id": str(doc.id), "filename": filename, "size_bytes": len(logo_bytes)}
+
+    # 2. CSS — extrai paleta/tipografia via regex
+    extracted_tokens: dict = {}
+    if body.css_content:
+        css_bytes = body.css_content.encode("utf-8")
+        if len(css_bytes) > 1 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="css_content > 1MB")
+        css_filename = f"branding-css-{timestamp_compact}.css"
+        write_ingested(project_id, css_filename, css_bytes)
+        doc = IngestedDocument(
+            id=uuid4(), project_id=project_id, uploaded_by=user_id,
+            original_filename=f"CSS de identidade — {css_filename}",
+            filename=css_filename, file_type="ui_ux_css",
+            file_hash=hashlib.sha256(css_bytes).hexdigest(),
+            file_size_bytes=len(css_bytes),
+            arguider_status="completed", arguider_stage="ui_ux_synthetic",
+            arguider_progress_percent=100, ocg_updated=False, pii_detected=False,
+        )
+        db.add(doc)
+        await db.flush()
+        extracted_tokens = _parse_css_palette(body.css_content)
+        extracted_tokens["source"] = "css_ingested"
+        actions["css"] = {
+            "document_id": str(doc.id), "filename": css_filename,
+            "size_bytes": len(css_bytes),
+            "extracted": {
+                "by_role_count": len((extracted_tokens.get("palette") or {}).get("by_role") or {}),
+                "top_colors_count": len((extracted_tokens.get("palette") or {}).get("top") or []),
+                "families_count": len((extracted_tokens.get("typography") or {}).get("families") or []),
+            },
+        }
+
+    # 3. Template plano (sobreescreve só se nada veio do CSS)
+    if body.apply_template and not extracted_tokens:
+        tpl = _PLAIN_TEMPLATES.get(body.apply_template)
+        if not tpl:
+            raise HTTPException(
+                status_code=422,
+                detail=f"apply_template inválido: '{body.apply_template}'. Use {list(_PLAIN_TEMPLATES.keys())}",
+            )
+        extracted_tokens = dict(tpl)
+        extracted_tokens["source"] = "manual"
+        actions["template"] = {"applied": body.apply_template}
+
+    # 4. Atualiza design_tokens no OCG (se houve CSS ou template)
+    if extracted_tokens:
+        errors = validate_tokens_dict(extracted_tokens)
+        if errors:
+            await db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail={"errors": [{"path": e.path, "message": e.message} for e in errors]},
+            )
+        ocg = (await db.execute(
+            select(OCG).where(OCG.project_id == project_id)
+            .order_by(OCG.created_at.desc()).limit(1)
+        )).scalar_one_or_none()
+        if ocg:
+            try:
+                ocg_data = _json.loads(ocg.ocg_data) if ocg.ocg_data else {}
+            except Exception:  # noqa: BLE001
+                ocg_data = {}
+            stack = ocg_data.setdefault("STACK_RECOMMENDATION", {})
+            if not isinstance(stack, dict):
+                stack = ocg_data["STACK_RECOMMENDATION"] = {}
+            frontend = stack.setdefault("frontend", {})
+            if not isinstance(frontend, dict):
+                frontend = stack["frontend"] = {}
+            extracted_tokens["generated_at"] = now.isoformat()
+            frontend["design_tokens"] = extracted_tokens
+            ocg.ocg_data = _json.dumps(ocg_data, ensure_ascii=False)
+            ocg.updated_at = now
+
+    await db.commit()
+
+    return {
+        "ok": True,
+        "actions": actions,
+        "design_tokens": extracted_tokens or None,
+        "message": (
+            f"{len(actions)} ativo(s) processado(s): {', '.join(actions.keys())}"
+            if actions else "Nenhuma ação aplicada"
+        ),
+    }
 
 
 @router.put("/{project_id}/ocg/design-tokens")
