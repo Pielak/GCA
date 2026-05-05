@@ -64,6 +64,21 @@ const READINESS_BADGE: Record<string, { label: string; cls: string }> = {
   unknown: { label: '? Sem contexto suficiente', cls: 'bg-slate-700/40 border-slate-600 text-slate-400' },
 }
 
+// B5 (Decisão GP 3 — 2026-05-04): payload UX construtivo quando módulo
+// ainda não foi configurado como concreto. Backend retorna 200 com este
+// shape em vez de 404 cego. Frontend renderiza wizard de configuração +
+// botão pra criar PFQ pendente.
+interface NotConfiguredPayload {
+  module_status: 'not_configured'
+  module_id: string
+  project_id: string
+  message: string
+  raw_error?: string
+  suggested_personas: string[]
+  suggested_question_text: string
+  setup_instructions: string
+}
+
 interface Props {
   projectId: string
   moduleId: string
@@ -73,6 +88,9 @@ interface Props {
 
 export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }: Props) {
   const [details, setDetails] = useState<ModuleDetails | null>(null)
+  const [notConfigured, setNotConfigured] = useState<NotConfiguredPayload | null>(null)
+  const [creatingPfq, setCreatingPfq] = useState(false)
+  const [pfqCreated, setPfqCreated] = useState<{ pfq_id: string; persona_id: string } | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
@@ -85,17 +103,19 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
       const url = refresh
         ? `/projects/${projectId}/modules/${moduleId}/details?refresh=true`
         : `/projects/${projectId}/modules/${moduleId}/details`
-      const res = await apiClient.get<ModuleDetails>(url)
-      setDetails(res.data)
-    } catch (err: unknown) {
-      const status = getErrorStatus(err)
-      if (status === 404) {
-        setError('Módulo não encontrado.')
+      const res = await apiClient.get<ModuleDetails | NotConfiguredPayload>(url)
+      // B5: backend pode retornar 200 com module_status='not_configured'
+      // (UX construtivo) em vez de 404 cego.
+      if ((res.data as NotConfiguredPayload).module_status === 'not_configured') {
+        setNotConfigured(res.data as NotConfiguredPayload)
+        setDetails(null)
       } else {
-        // 503 e outros — repassar a mensagem do backend (que agora lista
-        // os 6 providers aceitos em vez de forçar Ollama, commit a9d243b)
-        setError(getErrorMessage(err))
+        setDetails(res.data as ModuleDetails)
+        setNotConfigured(null)
       }
+    } catch (err: unknown) {
+      // 503 e outros erros reais — repassar mensagem
+      setError(getErrorMessage(err))
     } finally {
       setLoading(false)
       setRefreshing(false)
@@ -169,11 +189,82 @@ export function ModuleDetailsModal({ projectId, moduleId, moduleName, onClose }:
           {loading && (
             <div className="flex items-center justify-center py-12 text-slate-500">
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              Gerando via Ollama do projeto…
+              Gerando detalhamento via LLM do projeto…
             </div>
           )}
 
-          {error && (
+          {/* B5 — Wizard UX construtivo quando módulo não está configurado */}
+          {notConfigured && !loading && (
+            <div className="space-y-4">
+              <div className="flex items-start gap-3 bg-amber-500/10 border border-amber-500/30 rounded-lg p-4">
+                <AlertTriangle className="w-5 h-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <div className="flex-1 text-sm text-amber-200 leading-relaxed">
+                  {notConfigured.message}
+                </div>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+                <h4 className="text-xs uppercase tracking-wide text-slate-500 mb-2">Como configurar</h4>
+                <pre className="text-sm text-slate-300 leading-relaxed whitespace-pre-wrap font-sans">
+                  {notConfigured.setup_instructions}
+                </pre>
+              </div>
+
+              <div className="bg-slate-900 border border-slate-800 rounded-lg p-4">
+                <h4 className="text-xs uppercase tracking-wide text-slate-500 mb-2">Persona(s) sugerida(s)</h4>
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {notConfigured.suggested_personas.map(p => (
+                    <span key={p} className="px-2 py-1 bg-violet-500/20 border border-violet-500/40 rounded text-xs text-violet-200 font-mono">
+                      {p}
+                    </span>
+                  ))}
+                </div>
+                <h4 className="text-xs uppercase tracking-wide text-slate-500 mb-2">Pergunta sugerida</h4>
+                <p className="text-sm text-slate-300 leading-relaxed mb-3">
+                  {notConfigured.suggested_question_text}
+                </p>
+                {pfqCreated ? (
+                  <div className="bg-emerald-500/10 border border-emerald-500/30 rounded p-3">
+                    <p className="text-sm text-emerald-300">
+                      ✓ Pergunta criada para persona <strong>{pfqCreated.persona_id}</strong>.
+                      Acompanhe em "Questões em Aberto".
+                    </p>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={creatingPfq}
+                    onClick={async () => {
+                      setCreatingPfq(true)
+                      try {
+                        const res = await apiClient.post<{ pfq_id: string; persona_id: string }>(
+                          `/projects/${projectId}/modules/${moduleId}/clarification-request`,
+                          {
+                            persona_id: notConfigured.suggested_personas[0],
+                            question_text: notConfigured.suggested_question_text,
+                            context: `Roadmap clarification — item "${moduleName}"`,
+                          },
+                        )
+                        setPfqCreated(res.data)
+                      } catch (err) {
+                        setError(getErrorMessage(err))
+                      } finally {
+                        setCreatingPfq(false)
+                      }
+                    }}
+                    className="px-4 py-2 bg-violet-600 hover:bg-violet-500 disabled:opacity-50 disabled:cursor-not-allowed rounded text-sm text-white font-medium transition-colors"
+                    aria-label={`Gerar pergunta para persona ${notConfigured.suggested_personas[0]}`}
+                  >
+                    {creatingPfq
+                      ? <span className="flex items-center gap-2"><Loader2 className="w-4 h-4 animate-spin" /> Criando...</span>
+                      : `Gerar pergunta em Questões em Aberto (${notConfigured.suggested_personas[0]})`}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {error && !notConfigured && (
             <div className="flex items-start gap-3 bg-red-500/10 border border-red-500/30 rounded-lg p-4">
               <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
               <p className="text-sm text-red-300">{error}</p>

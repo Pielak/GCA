@@ -1557,16 +1557,19 @@ class PersonaFollowUpQuestion(Base):
         nullable=False,
         index=True,
     )
+    # Migration 072 (B5 — Roadmap clarification): NULL permitido pra origens
+    # fora do pipeline n8n (ex: GP clica em item de roadmap sem módulo concreto
+    # → cria PFQ vinculada a context texto, sem doc/individual real).
     document_id = Column(
         UUID(as_uuid=True),
         ForeignKey("ingested_documents.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     ocg_individual_id = Column(
         UUID(as_uuid=True),
         ForeignKey("ocg_individual.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     # Tag canônica da persona LLM (ex: "AUD", "GP", "ARQ") — NÃO FK para users.

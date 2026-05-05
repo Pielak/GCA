@@ -46,6 +46,11 @@ async def get_module_details(
 
     Falha explícita quando Ollama não configurado — detalhamento é
     baixa criticidade (§6.2) e não justifica fallback pra premium.
+
+    B5 (Decisão GP 3 — 2026-05-04): quando módulo não existe (item
+    sugerido no roadmap mas sem ModuleCandidate ainda), retorna 200
+    com `module_status='not_configured'` + persona sugerida em vez
+    de 404 cego. UX construtivo.
     """
     from app.services.module_details_service import get_or_generate_details
 
@@ -54,7 +59,27 @@ async def get_module_details(
             db, project_id, module_id, force_regenerate=refresh,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        # B5: módulo não existe — payload estruturado pra wizard UX.
+        # Persona sugerida via heurística determinística no nome/contexto.
+        from app.routers.roadmap_module_clarification import (
+            suggest_personas_for_module_id,
+        )
+        suggested = await suggest_personas_for_module_id(db, module_id, project_id)
+        return {
+            "module_status": "not_configured",
+            "module_id": str(module_id),
+            "project_id": str(project_id),
+            "message": (
+                "Item ainda não configurado como módulo concreto no projeto. "
+                "Pode ser uma sugestão do Gatekeeper ainda não detalhada, "
+                "ou um item órfão do roadmap. UX construtivo: gere uma "
+                "pergunta em Questões em Aberto pra persona apropriada."
+            ),
+            "raw_error": str(exc),
+            "suggested_personas": suggested["personas"],
+            "suggested_question_text": suggested["question_text"],
+            "setup_instructions": suggested["instructions"],
+        }
     except RuntimeError as exc:
         # Ex: Ollama não configurado — devolve 503 com mensagem
         raise HTTPException(status_code=503, detail=str(exc))
