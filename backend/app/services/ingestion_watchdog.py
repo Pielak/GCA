@@ -34,7 +34,7 @@ from app.models.base import IngestedDocument
 
 logger = structlog.get_logger(__name__)
 
-ZOMBIE_THRESHOLD_MINUTES = 8
+ZOMBIE_THRESHOLD_MINUTES = 15
 RECOVERY_MESSAGE = (
     "Análise interrompida por reinício do backend. "
     "Documento liberado para nova tentativa ou exclusão."

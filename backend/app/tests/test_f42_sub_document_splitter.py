@@ -489,14 +489,17 @@ async def test_watchdog_f425_todos_filhos_done_resolve_pai(db_session):
 
     # Mock _maybe_resolve_parent pra não precisar de toda a cadeia
     # O watchdog chama _maybe_resolve_parent(db, parent_doc)
+    mock_maybe_resolve = AsyncMock()
     with patch(
         "app.routers.webhooks._maybe_resolve_parent",
-        new_callable=AsyncMock,
+        mock_maybe_resolve,
     ):
         await _handle_stale_chunking_parent(db_session, pai.id, project.id)
 
-    # O watchdog não muta o pai diretamente; _maybe_resolve_parent é quem faz
-    # Verificar que a função foi chamada (proof that branch 2 executou)
+    # Verificar que _maybe_resolve_parent foi chamado exatamente uma vez
+    # (Branch 2: todos filhos done → resolve pai)
+    mock_maybe_resolve.assert_awaited_once()
+
     # Filhos devem permanecer inalterados
     await db_session.refresh(filho1)
     await db_session.refresh(filho2)
