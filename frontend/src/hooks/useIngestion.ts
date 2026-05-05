@@ -18,7 +18,7 @@ export interface IngestedDocument {
   original_filename: string
   file_type: string
   document_category: string | null
-  arguider_status: 'pending' | 'processing' | 'completed' | 'error' | 'quarantined'
+  arguider_status: 'pending' | 'processing' | 'ocg_updating' | 'ocg_pending' | 'completed' | 'partial' | 'error' | 'quarantined'
   // DT-022: mensagem crua do provider/Arguidor quando arguider_status='error'.
   // A UI humaniza para o GP (ex: 401 → "chave IA rejeitada pelo provedor").
   arguider_error_message?: string | null
@@ -58,7 +58,7 @@ export interface DocumentDetail extends IngestedDocument {
 
 export interface DocumentStatus {
   document_id: string
-  arguider_status: 'pending' | 'processing' | 'completed' | 'error' | 'quarantined'
+  arguider_status: 'pending' | 'processing' | 'ocg_updating' | 'ocg_pending' | 'completed' | 'partial' | 'error' | 'quarantined'
   arguider_started_at: string | null
   arguider_completed_at: string | null
   ocg_updated: boolean
@@ -82,8 +82,12 @@ export const useDocuments = (projectId: string | undefined) => {
     // processando (pra barra avançar visivelmente); 15s caso contrário.
     refetchInterval: (query) => {
       const data = query.state.data as IngestedDocument[] | undefined
+      // F5.2: ocg_updating também conta como "em voo" — task Celery
+      // ainda processando OCG via LLM, status final pode demorar 30-60s.
       const anyProcessing = Array.isArray(data) && data.some(d =>
-        d.arguider_status === 'pending' || d.arguider_status === 'processing'
+        d.arguider_status === 'pending'
+        || d.arguider_status === 'processing'
+        || d.arguider_status === 'ocg_updating'
       )
       return anyProcessing ? 2000 : 15000
     },

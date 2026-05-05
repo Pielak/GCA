@@ -70,6 +70,10 @@ async def recover_zombie_documents(
 
 async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=threshold_minutes)
+    # F5.1 (DBA CO-1): threshold dedicado para `ocg_updating`. Worst-case:
+    # 3 retries Celery exponenciais (30s+120s+480s = 10.5min) + LLM ~60s ≈ 12min.
+    # 15min cobre com margem. NÃO usa o threshold global (8min default).
+    cutoff_ocg_updating = datetime.now(timezone.utc) - timedelta(minutes=15)
 
     # MVP 29 Fase 29.1 + sessão 30: três padrões de zombie cobertos.
     #
@@ -105,6 +109,16 @@ async def _do_recover(db, threshold_minutes: int) -> dict[str, Any]:
             IngestedDocument.arguider_status == "processing",
             IngestedDocument.arguider_stage == "n8n_pipeline",
             IngestedDocument.updated_at < cutoff,
+            IngestedDocument.deleted_at.is_(None),
+        ),
+        # F5.1 (DBA CO-1): docs presos em `ocg_updating` — Celery task
+        # process_ingestion_complete_ocg morreu/travou após handler retornar
+        # 202. Threshold próprio de 15min (cutoff_ocg_updating) — independe
+        # do threshold global de 8min do `processing`. Usa updated_at
+        # como proxy (task não escreve em arguider_started_at).
+        and_(
+            IngestedDocument.arguider_status == "ocg_updating",
+            IngestedDocument.updated_at < cutoff_ocg_updating,
             IngestedDocument.deleted_at.is_(None),
         ),
     )

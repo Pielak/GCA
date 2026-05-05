@@ -485,6 +485,26 @@ export function IngestionPage() {
                         stageUpdatedAt={doc.arguider_stage_updated_at ?? null}
                       />
                     )}
+                    {/* F5.2 — Pipeline n8n concluiu, Celery task processando OCG via LLM.
+                        Estado intermediário antes de virar 'completed' / 'ocg_pending'. */}
+                    {doc.arguider_status === 'ocg_updating' && (
+                      <div className="text-violet-400 text-[11px] leading-tight">
+                        <span className="inline-block animate-pulse">🧠 Consolidando OCG...</span>
+                        <div className="text-violet-500/70 text-[10px] mt-0.5">
+                          LLM avaliando 12 personas + atualizando pilares. ~30-60s.
+                        </div>
+                      </div>
+                    )}
+                    {/* F5.2 — Task Celery falhou após 3 retries (30s/120s/480s).
+                        Doc não corrompeu OCG — operação reentrante via Reanalisar. */}
+                    {doc.arguider_status === 'ocg_pending' && (
+                      <div className="text-amber-400 text-[11px] leading-tight">
+                        <span className="inline-block">⚠ OCG não atualizado</span>
+                        <div className="text-amber-500/70 text-[10px] mt-0.5">
+                          {doc.arguider_error_message || 'Task de consolidação falhou após 3 retries. Use Reanalisar.'}
+                        </div>
+                      </div>
+                    )}
                     {/* MVP X — Aguardando análise (sequencial: na fila esperando sua vez) */}
                     {doc.arguider_status === 'pending' && doc.arguider_stage !== 'completed' && (
                       <div className="text-slate-500 text-[11px] leading-tight">
@@ -530,6 +550,7 @@ export function IngestionPage() {
                         sem apagar o doc). */}
                     {((doc.arguider_status === 'error'
                        || doc.arguider_status === 'completed'
+                       || doc.arguider_status === 'ocg_pending'
                        || doc.arguider_stage === 'failed')
                       && doc.content_status !== 'lost') && (
                       <button

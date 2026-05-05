@@ -372,17 +372,21 @@ async def ingestion_complete(
         project_id = payload.project_id
 
         if payload.status in ("completed", "partial"):
-            # --- Atualizar status do documento ---
+            # F5.1 (Arq CR-2): pipeline n8n concluiu, mas OCG update via LLM
+            # vai pra Celery task. Status intermediário 'ocg_updating' permite
+            # frontend mostrar feedback ("Consolidando OCG…") e watchdog
+            # recuperar caso task morra. Status final 'completed' é gravado
+            # pela task após OCGUpdater retornar.
+            # arguider_completed_at NÃO é gravado aqui — só no fim da task,
+            # pra refletir o tempo real de consolidação.
             await db.execute(text("""
                 UPDATE ingested_documents SET
-                    arguider_status = :status,
-                    arguider_stage = 'completed',
-                    arguider_progress_percent = 100,
-                    arguider_completed_at = NOW(),
-                    ocg_updated = TRUE,
+                    arguider_status = 'ocg_updating',
+                    arguider_stage = 'ocg_updating',
+                    arguider_progress_percent = 90,
                     updated_at = NOW()
                 WHERE id = :doc_id
-            """), {"doc_id": doc_id, "status": "completed"})
+            """), {"doc_id": doc_id})
 
             # --- Persistir histórico imutável por persona (ocg_individual) ---
             # Upsert idempotente: ON CONFLICT garante re-tentativas seguras
@@ -601,41 +605,63 @@ async def ingestion_complete(
             )).first()
             actor_id = actor_id_row[0] if actor_id_row else None
 
-            # Commit do histórico antes de chamar o updater (que usa lock próprio)
+            # F5.1: histórico já gravado (ocg_individual + ocg_global +
+            # PFQs + arguider_status='ocg_updating'). Commit antes de
+            # enfileirar Celery task — task lê do DB.
             await db.commit()
 
-            # --- Delegar ao OCGUpdaterService ---
-            updater = OCGUpdaterService(db)
-            update_result = await updater.update_ocg_from_arguider(
-                project_id=_UUID(project_id),
-                arguider_analysis=arguider_analysis,
-                document_id=_UUID(doc_id),
-                actor_id=actor_id,
-                trigger_source=TRIGGER_N8N,
-            )
-
-            # awaiting_ocg: OCG ainda não existe — tratar como warn (igual caminho Celery)
-            if update_result and update_result.get("status") == "awaiting_ocg":
+            # --- Enfileirar Celery task (F5.1) ---
+            # Handler retorna 202 Accepted; OCG update síncrono (LLM 30-60s)
+            # roda em background. Anti-padrão antigo causava timeout 300s
+            # no nó Callback GCA do n8n.
+            #
+            # CR-4 (Arquiteto): broker offline → 503 explícito, NÃO fallback
+            # silencioso pra síncrono (viola §0 do CLAUDE.md GCA). N8n
+            # retry vai retentar o callback (timeout 900s ainda ativo até
+            # F5.1 validado em prod, MUST 4 GP).
+            try:
+                from app.tasks.pipeline import process_ingestion_complete_ocg
+                async_result = process_ingestion_complete_ocg.delay(
+                    str(doc_id), str(project_id),
+                )
+                # Persistir celery_task_id pra debug via Flower
+                await db.execute(text("""
+                    UPDATE ingested_documents SET celery_task_id = :tid
+                    WHERE id = :doc_id
+                """), {"doc_id": doc_id, "tid": async_result.id})
+                await db.commit()
                 logger.info(
-                    "webhook.ingestion_complete.awaiting_ocg",
+                    "webhook.ingestion_complete_enqueued",
                     ingestion_id=str(doc_id),
                     project_id=str(project_id),
-                    retry_at=update_result.get("retry_at"),
+                    celery_task_id=async_result.id,
                 )
-
-            # Falha de LLM no updater → marca ocg_pending (não corrompe OCG)
-            if update_result and update_result.get("status") == "ocg_pending":
+            except Exception as exc:  # noqa: BLE001
+                # Broker offline ou outro erro de enqueue.
+                # Reverter status pra processing pra n8n retry retomar do zero.
+                logger.error(
+                    "webhook.ingestion_complete_enqueue_failed",
+                    ingestion_id=str(doc_id),
+                    project_id=str(project_id),
+                    error=str(exc),
+                    exc_info=True,
+                )
                 await db.execute(text("""
                     UPDATE ingested_documents SET
-                        arguider_status = 'ocg_pending',
-                        arguider_error_message = :error,
+                        arguider_status = 'processing',
+                        arguider_stage = 'n8n_pipeline',
+                        arguider_error_message = :err,
                         updated_at = NOW()
                     WHERE id = :doc_id
                 """), {
                     "doc_id": doc_id,
-                    "error": update_result.get("error", "OCG update failed"),
+                    "err": f"Falha ao enfileirar task OCG: {str(exc)[:300]}",
                 })
                 await db.commit()
+                raise HTTPException(
+                    status_code=503,
+                    detail="Celery broker indisponível. N8n deve retentar o callback.",
+                )
 
         else:
             await db.execute(text("""
@@ -657,21 +683,27 @@ async def ingestion_complete(
             status=payload.status,
         )
 
-        # Puxa próximo doc da fila (sequencial 1-por-vez por projeto).
-        try:
-            from uuid import UUID as _UUID
-            from app.services.ingestion_service import (
-                dispatch_first_pending_for_project,
-            )
-            await dispatch_first_pending_for_project(db, _UUID(project_id))
-        except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "webhook.dispatch_next_failed",
-                project_id=project_id,
-                error=str(exc),
-            )
+        # F5.1: dispatch_first_pending_for_project foi MOVIDO para dentro
+        # da Celery task process_ingestion_complete_ocg (Arq CR-3, GP MUST 2).
+        # Razão: se ficasse no handler, próximo doc iniciaria pipeline com
+        # OCG ainda na versão N (não N+1 que a task ainda vai gravar) —
+        # personas do doc seguinte receberiam OCG desatualizado.
+        # Para o caminho 'error' (else acima), também não dispatch aqui:
+        # doc não tem successor lógico, próximo upload dispara naturalmente.
 
-        return {"status": "processed", "ingestion_id": doc_id}
+        # F5.1: 202 Accepted — task em background. Frontend faz polling
+        # em GET /ingestion/{id}/status pra ver arguider_status mudar
+        # de 'ocg_updating' para 'completed' / 'ocg_pending'.
+        from fastapi import Response
+        return Response(
+            content=json.dumps({
+                "status": "accepted",
+                "ingestion_id": doc_id,
+                "message": "OCG update enfileirado em background",
+            }),
+            status_code=202,
+            media_type="application/json",
+        )
 
     except Exception as e:
         logger.error("webhook.ingestion_complete_error", error=str(e))

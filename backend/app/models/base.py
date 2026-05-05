@@ -1022,10 +1022,22 @@ class IngestedDocument(Base):
     quarantine_status = Column(String(20), nullable=False, default="none")  # none, quarantined, released, rejected
     pii_detected = Column(Boolean, nullable=False, default=False)
     pii_fields = Column(Text, nullable=True)  # JSON: lista de campos PII detectados
-    arguider_status = Column(String(20), nullable=False, default="pending")  # pending, processing, completed, error
+    # Inventário canônico (DBA CO-2 da migration 071):
+    # pending | processing | ocg_updating | ocg_pending | completed | partial | error
+    # - pending: enfileirado, aguarda dispatch
+    # - processing: pipeline n8n em andamento
+    # - ocg_updating: pipeline n8n concluiu, Celery task processando OCG (F5.1)
+    # - ocg_pending: task Celery falhou após retries — OCG não atualizado
+    # - completed: OCG atualizado com sucesso
+    # - partial: maioria das personas ok mas algumas falharam (degraded)
+    # - error: falha no pipeline antes do OCG
+    arguider_status = Column(String(20), nullable=False, default="pending")
     arguider_started_at = Column(DateTime(timezone=True), nullable=True)
     arguider_completed_at = Column(DateTime(timezone=True), nullable=True)
     arguider_error_message = Column(Text, nullable=True)
+    # F5.1 — task Celery process_ingestion_complete_ocg em voo. Permite
+    # depuração via Flower e correlação log → task.
+    celery_task_id = Column(String(64), nullable=True)
     # Reforma Arguidor #1 (2026-04-25): flag de decisão canônica do owner.
     # Documentos com essa flag têm precedência sobre conteúdo antigo no OCG —
     # substituem valores em vez de gerar gap punitivo. Auto-detectado por
@@ -1390,6 +1402,9 @@ class OCGDeltaLog(Base):
     persona_id = Column(String(20), nullable=True)  # gp, arquiteto, dba, dev_sr, qa
     decision = Column(String(30), nullable=True)  # approved, needs_clarification, rejected
     hash_chain = Column(String(64), nullable=True)  # SHA256 para integridade
+    # F5.1 — telemetria de duração da consolidação OCG (chamada LLM).
+    # Populado pelo OCGUpdaterService no fim do _update_ocg_from_arguider.
+    ocg_update_duration_ms = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

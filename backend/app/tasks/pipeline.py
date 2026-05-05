@@ -494,6 +494,232 @@ async def _run_reevaluate_gatekeeper(project_id: str, ocg_version, trigger: str)
     )
 
 
+# ─── F5.1 — /ingestion-complete async via Celery ─────────────────────────
+# Move chamada LLM síncrona do handler HTTP (causava timeout 300s no nó
+# Callback GCA do n8n) pra task Celery. Handler retorna 202 imediato.
+# Gatekeeper aprovado: GP + Arquiteto + DBA em sessão 2026-05-04 BRT.
+#
+# Invariantes canônicos (vide vereditos):
+# - Idempotência (GP MUST 1): task verifica arguider_status antes do LLM.
+# - Dispatch fila (GP MUST 2): dispatch_first_pending DENTRO da task,
+#   após OCGUpdater completar (não no handler).
+# - acks_late=True: ACK só após task concluir; se worker morre, broker
+#   redistribui ao próximo worker (combina com idempotência).
+# - max_retries=3, countdown exponencial 30/120/480s. Após esgotar:
+#   arguider_status='ocg_pending' com mensagem clara.
+
+@celery_app.task(
+    name="app.tasks.pipeline.process_ingestion_complete_ocg",
+    bind=True,
+    max_retries=3,
+    acks_late=True,
+)
+def process_ingestion_complete_ocg(self, ingestion_id: str, project_id: str) -> dict:
+    """Processa OCG update do callback /ingestion-complete em background.
+
+    Chamada apenas com IDs (Arq CR-1, decisão Opção B): re-lê os dados
+    de ocg_individual + ocg_global do DB. Single source of truth +
+    idempotência limpa.
+
+    Invariante de ordem: handler já fez commit de status='ocg_updating'
+    e gravou ocg_individual/ocg_global rows. Esta task lê de lá.
+    """
+    try:
+        result = _run_coro_isolated(
+            _run_process_ingestion_complete_ocg(ingestion_id, project_id)
+        )
+        return result
+    except Exception as exc:  # noqa: BLE001
+        retries = self.request.retries
+        if retries < 3:
+            # Countdown exponencial — Arq RC-3 confirmou valores: 30s, 120s, 480s.
+            countdown = 30 if retries == 0 else (120 if retries == 1 else 480)
+            logger.warning(
+                "process_ingestion_complete_ocg.retry",
+                ingestion_id=ingestion_id,
+                retries=retries,
+                countdown=countdown,
+                error=str(exc),
+            )
+            raise self.retry(exc=exc, countdown=countdown)
+        # Esgotou retries: marca ocg_pending com mensagem clara.
+        logger.error(
+            "process_ingestion_complete_ocg.exhausted",
+            ingestion_id=ingestion_id,
+            error=str(exc),
+            exc_info=True,
+        )
+        _run_coro_isolated(_mark_ocg_pending(ingestion_id, str(exc)))
+        return {"status": "exhausted", "ingestion_id": ingestion_id, "error": str(exc)[:300]}
+
+
+async def _mark_ocg_pending(ingestion_id: str, error_msg: str) -> None:
+    """Marca doc como ocg_pending após retries exauridos. Permite watchdog
+    encontrar e liberar fila se necessário."""
+    from app.db.database import AsyncSessionLocal
+    from sqlalchemy import text as _text
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            _text("""
+                UPDATE ingested_documents SET
+                    arguider_status = 'ocg_pending',
+                    arguider_error_message = :err,
+                    updated_at = NOW()
+                WHERE id = :doc_id
+            """),
+            {"doc_id": ingestion_id, "err": f"OCG update falhou após 3 retries: {error_msg[:300]}"},
+        )
+        await db.commit()
+
+
+async def _run_process_ingestion_complete_ocg(ingestion_id: str, project_id: str) -> dict:
+    """Implementação real da task. Idempotente, transações curtas."""
+    import json as _json
+    import time as _time
+    from sqlalchemy import select, text as _text
+    from app.db.database import AsyncSessionLocal
+    from app.models.base import IngestedDocument, OCGIndividual, OCGGlobal
+    from app.services.ocg_updater_service import OCGUpdaterService, TRIGGER_N8N
+
+    doc_id_uuid = UUID(ingestion_id)
+    project_id_uuid = UUID(project_id)
+
+    # ── Fase 1: idempotência guard + carregar arguider_analysis (sessão curta) ──
+    async with AsyncSessionLocal() as db:
+        doc = await db.get(IngestedDocument, doc_id_uuid)
+        if not doc:
+            logger.warning("process_ingestion_complete_ocg.doc_not_found", ingestion_id=ingestion_id)
+            return {"status": "not_found", "ingestion_id": ingestion_id}
+
+        # MUST 1 (GP): se status não é ocg_updating, task duplicada ou retry
+        # de algo já concluído. Skip silencioso.
+        if doc.arguider_status != "ocg_updating":
+            logger.info(
+                "process_ingestion_complete_ocg.skip_idempotent",
+                ingestion_id=ingestion_id,
+                current_status=doc.arguider_status,
+            )
+            return {"status": "skipped", "reason": doc.arguider_status, "ingestion_id": ingestion_id}
+
+        actor_id = doc.uploaded_by
+
+        # Re-lê ocg_individual rows do projeto+doc (Opção B)
+        oi_rows = (await db.execute(
+            select(OCGIndividual).where(
+                OCGIndividual.project_id == project_id_uuid,
+                OCGIndividual.document_id == doc_id_uuid,
+            )
+        )).scalars().all()
+        ocg_individual_dict = {
+            row.persona_id: row.parecer or {}
+            for row in oi_rows
+            if row.status != "failed"
+        }
+
+        # Re-lê ocg_global do doc (snapshot consolidado)
+        og_row = (await db.execute(
+            select(OCGGlobal).where(OCGGlobal.document_id == doc_id_uuid)
+        )).scalar_one_or_none()
+        og_payload = {}
+        if og_row and og_row.parecer_consolidated:
+            og_payload = og_row.parecer_consolidated if isinstance(og_row.parecer_consolidated, dict) else {}
+
+        # Adapter formato esperado pelo OCGUpdater (alinhado com handler antigo)
+        arguider_analysis = {
+            "personas_processed": og_payload.get("personas_executed") or list(ocg_individual_dict.keys()),
+            "ocg_individual": ocg_individual_dict,
+            "ocg_global_delta": og_payload.get("ocg_global_delta") or {},
+            "gaps": [
+                f for f in (og_payload.get("consolidated_findings") or [])
+                if isinstance(f, dict) and f.get("type") == "gap"
+            ],
+            "show_stoppers": [
+                f for f in (og_payload.get("consolidated_findings") or [])
+                if isinstance(f, dict) and f.get("type") == "blocker"
+            ],
+            "recommendations": og_payload.get("consolidated_recommendations") or [],
+        }
+
+    # ── Fase 2: chama OCGUpdater (sessão própria — service abre internamente) ──
+    # Mede duração para popular ocg_delta_log.ocg_update_duration_ms (RC-4 Arq).
+    update_result = None
+    _t0 = _time.monotonic()
+    async with AsyncSessionLocal() as db:
+        updater = OCGUpdaterService(db)
+        update_result = await updater.update_ocg_from_arguider(
+            project_id=project_id_uuid,
+            arguider_analysis=arguider_analysis,
+            document_id=doc_id_uuid,
+            actor_id=actor_id,
+            trigger_source=TRIGGER_N8N,
+        )
+    duration_ms = int((_time.monotonic() - _t0) * 1000)
+
+    # ── Fase 3: atualizar status final + popular telemetria + dispatch próximo ──
+    final_status = "completed"
+    err_msg: Optional[str] = None
+    if update_result and update_result.get("status") == "ocg_pending":
+        final_status = "ocg_pending"
+        err_msg = update_result.get("error", "OCG update falhou")
+
+    async with AsyncSessionLocal() as db:
+        await db.execute(
+            _text("""
+                UPDATE ingested_documents SET
+                    arguider_status = :status,
+                    arguider_stage = 'completed',
+                    arguider_progress_percent = 100,
+                    arguider_completed_at = COALESCE(arguider_completed_at, NOW()),
+                    arguider_error_message = :err,
+                    ocg_updated = (:status = 'completed'),
+                    updated_at = NOW()
+                WHERE id = :doc_id AND arguider_status = 'ocg_updating'
+            """),
+            {"doc_id": str(doc_id_uuid), "status": final_status, "err": err_msg},
+        )
+        # Popular ocg_update_duration_ms no delta_log mais recente desse doc
+        await db.execute(
+            _text("""
+                UPDATE ocg_delta_log SET ocg_update_duration_ms = :ms
+                WHERE id = (
+                    SELECT id FROM ocg_delta_log
+                    WHERE document_id = :doc_id
+                    ORDER BY created_at DESC LIMIT 1
+                )
+            """),
+            {"doc_id": str(doc_id_uuid), "ms": duration_ms},
+        )
+        await db.commit()
+
+        # MUST 2 (GP): dispatch fila DENTRO da task, após OCGUpdater.
+        from app.services.ingestion_service import dispatch_first_pending_for_project
+        try:
+            next_doc = await dispatch_first_pending_for_project(db, project_id_uuid)
+            logger.info(
+                "process_ingestion_complete_ocg.next_dispatched",
+                ingestion_id=ingestion_id,
+                next_doc=str(next_doc) if next_doc else None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "process_ingestion_complete_ocg.dispatch_next_failed",
+                ingestion_id=ingestion_id,
+                error=str(exc),
+            )
+
+    logger.info(
+        "process_ingestion_complete_ocg.completed",
+        ingestion_id=ingestion_id,
+        final_status=final_status,
+        duration_ms=duration_ms,
+    )
+    return {
+        "status": final_status,
+        "ingestion_id": ingestion_id,
+        "duration_ms": duration_ms,
+    }
+
+
 # ─── Fase 13.3c: auto_generate (OCG updater) + external_repos fallback ──
 
 

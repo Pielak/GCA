@@ -149,6 +149,16 @@ async def dispatch_first_pending_for_project(
 
     # Quantos já estão processando? Habilita paralelismo configurável.
     # Default=1 preserva FIFO sequencial; N>1 paraleliza até o teto.
+    #
+    # DECISÃO ARQUITETURAL F5.1 (Arq CR-1, DBA CR-1): só conta `processing`
+    # como in_flight, NÃO `ocg_updating`. Doc em `ocg_updating` significa
+    # pipeline n8n já terminou; OCGUpdater está rodando em Celery task.
+    # Concorrência protegida pelo `pg_advisory_xact_lock` em
+    # OCGUpdaterService.update_ocg_from_arguider — duas tasks Celery do
+    # mesmo projeto serializam no advisory lock. Decisão intencional:
+    # mais throughput (próximo doc inicia n8n enquanto OCG do anterior
+    # consolida), com integridade garantida pelo lock cross-process.
+    # NÃO "corrigir" pra incluir `ocg_updating` — sequencializaria sem ganho.
     max_parallel = getattr(settings, "INGESTION_MAX_PARALLEL_PER_PROJECT", 1)
     in_flight = await db.scalar(
         select(func.count(_IngDoc.id)).where(
