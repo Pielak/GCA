@@ -177,7 +177,15 @@ async def dispatch_first_pending_for_project(
     if in_flight and in_flight >= max_parallel:
         return None
 
-    # Próximo pending mais antigo (exclui questionnaire — sintético, não pipeline).
+    # Próximo pending mais antigo.
+    # CO-3 (F4.2): Exclui sub-docs de chunking (parent_document_id IS NOT NULL).
+    # Decisão adotada: Opção A — sub-docs NÃO entram na fila geral.
+    # O pai (em arguider_stage='chunking_parent') despacha filhos sequencialmente
+    # via split_and_enqueue + dispatch_first_pending_for_project em loop.
+    # Filhos retornam ao pai via _maybe_resolve_parent (F4.2.4) no callback.
+    # Vantagem: fila geral permanece simples (1 doc por vez por projeto);
+    # processamento paralelo é gerenciado pelo próprio mecanismo de filhos.
+    # Exclui também questionnaire (sintético, não pipeline).
     res = await db.execute(
         select(_IngDoc).where(
             and_(
@@ -185,6 +193,7 @@ async def dispatch_first_pending_for_project(
                 _IngDoc.arguider_status == "pending",
                 _IngDoc.deleted_at.is_(None),
                 _IngDoc.file_type != "questionnaire",
+                _IngDoc.parent_document_id.is_(None),  # CO-3: exclui sub-docs
             )
         ).order_by(_IngDoc.created_at.asc()).limit(1)
     )
@@ -1177,6 +1186,62 @@ class IngestionService:
             )
         if ocg_summary:
             seed_shared_context["ocg_summary"] = ocg_summary
+
+        # ── F4.2.3 — Chunking de documentos grandes ────────────────────────
+        # Se o texto extraído ultrapassa CHUNK_THRESHOLD_CHARS, o doc é dividido
+        # em sub-docs (filhos). O pai assume arguider_stage='chunking_parent' e
+        # NÃO é enviado ao n8n — cada filho seguirá pelo pipeline individualmente.
+        # Opção A (CO-3): sub-docs não entram na fila geral; o pai os despacha
+        # sequencialmente aqui. Quando todos terminam, _maybe_resolve_parent
+        # (F4.2.4) consolida o status do pai.
+        extracted_text_for_chunk = (payload_bytes or b"").decode("utf-8", errors="ignore") if payload_bytes else ""
+        from app.services.sub_document_splitter import (
+            CHUNK_THRESHOLD_CHARS,
+            split_and_enqueue,
+        )
+        if len(extracted_text_for_chunk) > CHUNK_THRESHOLD_CHARS:
+            # Marca pai como chunking_parent antes de criar filhos
+            doc.arguider_stage = "chunking_parent"
+            await self.db.flush()
+            try:
+                sub_ids = await split_and_enqueue(
+                    self.db, doc, extracted_text_for_chunk, project_id
+                )
+            except ValueError as exc:
+                doc.arguider_status = "error"
+                doc.arguider_stage = "failed"
+                doc.arguider_error_message = str(exc)[:300]
+                await self.db.commit()
+                logger.error(
+                    "ingestion.chunk_split_too_large",
+                    doc_id=str(doc_id),
+                    project_id=str(project_id),
+                    error=str(exc),
+                )
+                return
+            await self.db.commit()
+            logger.info(
+                "ingestion.chunk_split_dispatching_children",
+                parent_doc_id=str(doc_id),
+                project_id=str(project_id),
+                filhos=len(sub_ids),
+            )
+            # Despacha filhos sequencialmente via fila geral (cada um entra como
+            # pending com parent_document_id NOT NULL — mas dispatch_first_pending
+            # filtra parent_document_id IS NULL, então NÃO entra na fila).
+            # Aqui despachamos diretamente: cada filho é marcado processing e
+            # enviado ao n8n individualmente.
+            for sub_id in sub_ids:
+                try:
+                    await self._dispatch_to_n8n(sub_id, project_id, "markdown", None)
+                except Exception as exc_child:  # noqa: BLE001
+                    logger.warning(
+                        "ingestion.chunk_child_dispatch_failed",
+                        sub_id=str(sub_id),
+                        parent_id=str(doc_id),
+                        error=str(exc_child),
+                    )
+            return  # Pai não vai ao n8n
 
         n8n_payload = {
             "ingestion_id": str(doc_id),

@@ -1081,9 +1081,36 @@ class IngestedDocument(Base):
     deleted_reason = Column(String(50), nullable=True)  # 'manual'|'lgpd'|'smoke_cleanup' (CHECK constraint no DB)
     revert_metadata = Column(JSONB, nullable=True)  # payload do Celery job; CHECK schema mínimo no DB
 
+    # ─── F4.2 — Sub-ingestões (migration 073) ─────────────────────────────
+    # Documentos > 256k chars são divididos em partes (filhos). Cada filho
+    # aponta pro pai via parent_document_id. Pai fica em
+    # arguider_stage='chunking_parent' enquanto filhos processam.
+    # ON DELETE CASCADE no DB: hard-delete do pai remove filhos automaticamente.
+    # Soft-delete (deleted_at) é propagado via revert_document_propagation (CO-1).
+    parent_document_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("ingested_documents.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+
     project = relationship("Project", foreign_keys=[project_id])
     uploader = relationship("User", foreign_keys=[uploaded_by])
     route_maps = relationship("DocumentRouteMap", back_populates="document", cascade="all, delete-orphan")
+    # Relacionamento pai → filhos (sub-docs da divisão de chunk)
+    sub_documents = relationship(
+        "IngestedDocument",
+        back_populates="parent",
+        foreign_keys="IngestedDocument.parent_document_id",
+        cascade="all, delete-orphan",
+    )
+    # Relacionamento filho → pai
+    parent = relationship(
+        "IngestedDocument",
+        back_populates="sub_documents",
+        foreign_keys=[parent_document_id],
+        remote_side="IngestedDocument.id",
+    )
 
     __table_args__ = (
         Index("idx_ingested_docs_project", project_id),

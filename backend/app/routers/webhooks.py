@@ -1,13 +1,17 @@
 """Webhooks Router — n8n Integration"""
-from fastapi import APIRouter, HTTPException, Request, status, Depends
-from pydantic import BaseModel
-from typing import Dict, Any, List, Optional
+from __future__ import annotations
+
+from typing import Any, Dict, List, Optional
 from uuid import UUID
-from sqlalchemy.ext.asyncio import AsyncSession
-import structlog
-import json
-import hmac
+
 import hashlib
+import hmac
+import json
+
+import structlog
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.database import get_db
 from app.services.ocg_updater_service import OCGUpdaterService, TRIGGER_N8N
@@ -795,6 +799,22 @@ async def ingestion_complete(
         # Para o caminho 'error' (else acima), também não dispatch aqui:
         # doc não tem successor lógico, próximo upload dispara naturalmente.
 
+        # F4.2.4 — Resolução do pai quando este doc é filho (sub-ingestão).
+        # Verifica se o doc processado tem parent_document_id. Se sim, tenta
+        # resolver o pai: se todos os filhos terminaram, consolida status do pai.
+        # Importação inline pra evitar circular import (webhooks ← ingestion_service).
+        try:
+            from app.models.base import IngestedDocument as _IngDoc
+            doc_for_parent_check = await db.get(_IngDoc, UUID(str(doc_id)))
+            if doc_for_parent_check and doc_for_parent_check.parent_document_id:
+                await _maybe_resolve_parent(db, doc_for_parent_check)
+        except Exception as exc_parent:  # noqa: BLE001
+            logger.warning(
+                "webhook.maybe_resolve_parent_failed",
+                ingestion_id=str(doc_id),
+                error=str(exc_parent),
+            )
+
         # F5.1: 202 Accepted — task em background. Frontend faz polling
         # em GET /ingestion/{id}/status pra ver arguider_status mudar
         # de 'ocg_updating' para 'completed' / 'ocg_pending'.
@@ -816,6 +836,96 @@ async def ingestion_complete(
     except Exception as e:
         logger.error("webhook.ingestion_complete_error", error=str(e))
         raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _maybe_resolve_parent(
+    db: AsyncSession,
+    doc: "Any",  # IngestedDocument — importação inline evita circular
+) -> None:
+    """F4.2.4 — Resolve o pai quando este doc filho completou.
+
+    Verifica se todos os irmãos (sub-docs do mesmo pai) terminaram.
+    Se sim, consolida o status do pai:
+      - Todos ok → pai vira 'completed' / 'completed'
+      - Qualquer filho com erro de Conformidade (CONF) → pai vira 'partial'
+      - Outros erros → pai vira 'partial' com nota
+
+    Chamado ao final do processamento de cada doc filho.
+    """
+    from datetime import datetime, timezone
+    from sqlalchemy import select as _select
+    from app.models.base import IngestedDocument as _IngDoc
+    from app.services.ingestion_service import dispatch_first_pending_for_project
+
+    if doc.parent_document_id is None:
+        return
+
+    parent = await db.get(_IngDoc, doc.parent_document_id)
+    if parent is None or parent.arguider_stage != "chunking_parent":
+        return
+
+    # Carrega todos os irmãos (filhos do mesmo pai, não deletados)
+    siblings_q = await db.execute(
+        _select(_IngDoc).where(
+            _IngDoc.parent_document_id == parent.id,
+            _IngDoc.deleted_at.is_(None),
+        )
+    )
+    siblings = siblings_q.scalars().all()
+
+    # Verifica se todos terminaram (completed, error, partial, ocg_updating, ocg_pending)
+    terminal_statuses = {"completed", "error", "partial", "ocg_updating", "ocg_pending"}
+    all_done = all(s.arguider_status in terminal_statuses for s in siblings)
+    if not all_done:
+        return
+
+    # Todos concluídos — determina status do pai
+    any_error = any(s.arguider_status == "error" for s in siblings)
+    any_conf_error = any(
+        s.arguider_status == "error"
+        and "CONF" in (s.arguider_error_message or "")
+        for s in siblings
+    )
+
+    if any_conf_error:
+        parent.arguider_status = "partial"
+        parent.arguider_stage = "completed_partial"
+        parent.arguider_error_message = (
+            "Documento processado com quarentena parcial: uma ou mais partes "
+            "reprovadas por Conformidade (score < 60)."
+        )
+    elif any_error:
+        parent.arguider_status = "partial"
+        parent.arguider_stage = "completed_partial"
+        parent.arguider_error_message = (
+            "Documento processado com erros parciais: uma ou mais partes "
+            "falharam no pipeline. Verifique os sub-documentos para detalhes."
+        )
+    else:
+        parent.arguider_status = "completed"
+        parent.arguider_stage = "completed"
+        parent.arguider_error_message = None
+
+    parent.arguider_completed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    logger.info(
+        "webhook.chunking_parent_resolved",
+        parent_id=str(parent.id),
+        project_id=str(parent.project_id),
+        status=parent.arguider_status,
+        filhos=len(siblings),
+    )
+
+    # Despacha próximo da fila geral após resolver o pai
+    try:
+        await dispatch_first_pending_for_project(db, parent.project_id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "webhook.dispatch_after_parent_resolve_failed",
+            parent_id=str(parent.id),
+            error=str(exc),
+        )
 
 
 class IngestionErrorPayload(BaseModel):
