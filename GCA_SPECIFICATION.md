@@ -1,291 +1,209 @@
-# GCA_SPECIFICATION.md — Produto + Arquitetura
+# GCA_SPECIFICATION.md — Produto + Decisões
 
-**Versão:** 2.0  
-**Data:** 2026-05-05  
-**Status:** Canônico / soberano para implementação
+**Versão:** 2.0 | **Data:** 2026-05-05 | **Status:** Canônico
 
-> **Workflow do Claude Code:** `CLAUDE.md`  
-> **Detalhes técnicos:** `GCA_TECHNICAL_REFERENCE.md`  
-> **MVPs:** `GCA_MVP_ROADMAP.md`
+> Requisitos técnicos: `GCA_TECHNICAL_REFERENCE.md`  
+> Workflow operacional: `GCA_CLAUDE.md`  
+> MVPs + Roadmap: `GCA_MVP_ROADMAP.md`
 
 ---
 
-## §1. Definição canônica do produto
+## §1. Definição do Produto
 
-**GCA (Gestão de Codificação Assistida)** é uma **meta-plataforma** para construir sistemas, aplicativos e código com:
-- Ingestão estruturada de requisitos
-- Validação assistida por 12 personas LLM
+**GCA (Gestão de Codificação Assistida)** é uma meta-plataforma para construir sistemas com:
+
+- Ingestão estruturada de requisitos (Questionário + Documentos)
+- Validação assistida por 12 personas LLM em paralelo (n8n)
 - OCG (Objeto de Contexto Global) cumulativo como fonte única de verdade
-- CodeGen liberado **somente quando OCG ≥ 95%**
-- **Supervisão humana obrigatória** em toda liberação, revisão e deploy
+- CodeGen liberado **somente quando OCG ≥ 95% em todos 7 pilares**
+- Supervisão humana obrigatória em toda liberação (Gatekeeper 5-porteiros)
 
-### §1.1. Princípio fundamental: GCA NÃO é ponto final
+**GCA NÃO é ponto final**: gera, não decide sozinho. Toda saída crítica requer aprovação + auditoria.
 
-GCA gera, mas **não decide sozinho**. Toda saída crítica (módulos, código, testes, deploy) requer:
-- Aprovação humana (GP, Dev, QA conforme RBAC §3)
-- Gate OCG ≥ 95% (sem exceção, configurável apenas por Admin)
-- Auditoria rastreável de cada decisão
+---
 
-### §1.2. Modelo de deployment
+## §2. Modelo de Deployment
 
-- ✅ GCA é **instalável por cliente** (on-premises). Uma instância por cliente.
-- ❌ Não é SaaS multi-tenant compartilhado.
+- ✅ **Instalável por cliente** (on-premises). Uma instância = um cliente.
+- ❌ NÃO é SaaS multi-tenant compartilhado.
+- ✅ Isolamento **por projeto** dentro da instância.
 - ✅ `gca.code-auditor.com.br` é **dogfood**, não prova de SaaS.
-- ✅ Isolamento principal **por projeto** dentro da instância.
-- ❌ Sem compartilhamento de OCG, artefatos, credenciais ou contexto entre projetos.
-- ✅ Toda query de dado de projeto inclui `project_id` no WHERE. Sem exceção.
+- ✅ Toda query de dado de projeto inclui `project_id` no WHERE.
 
 ---
 
-## §2. Provider de IA — escolha do cliente
+## §3. RBAC Canônico (Conjunto A — 5 papéis humanos)
 
-- ✅ Cliente final usa suas próprias chaves, provedores e modelos.
-- ✅ Sistema oferece análise de adequação antes de fixar default.
-- ❌ Nenhum provedor é "melhor universal".
-- ✅ Modo híbrido por tipo de tarefa permitido (configurável e auditável).
+| Papel | Escopo | Autoridades |
+|-------|--------|-------------|
+| **Admin** | Instância | Configura provedores, aprova projetos, opera globalmente |
+| **GP** | Projeto | Soberano do projeto; opera CodeGen, pipeline |
+| **Dev** | Código | Implementa, ingestão, Arguidor; **não aprova** Gatekeeper |
+| **Tester** | Testes | Cria/executa testes, registra evidências |
+| **QA** | Qualidade | Revisa/aprova resultados, valida maturity |
 
-**Porta única de resolução:** `AIKeyResolver.resolve_project_provider_chain(db, project_id)`. Detalhe: `GCA_TECHNICAL_REFERENCE.md §4`.
-
-### §2.1. Política de criticidade (3 níveis)
-
-- **Baixa** — local/barato (Ollama ou modelo econômico): classificação simples, extração de campos, sumarização curta, normalização.
-- **Média** — qualquer provider configurado: perguntas dirigidas, propostas iniciais, pré-análise.
-- **Alta** — premium obrigatório: consolidação OCG, arbitragem, compliance crítico, codegen crítico, decisões de arquitetura.
-
-❌ Sem rota de criticidade alta passando por modelo barato. Sem fallback automático para modelo inferior.
-
-### §2.2. Separação dev vs operação cliente
-
-- **Construir GCA**: equipe escolhe modelo premium (custo de desenvolvimento).
-- **Operar instância cliente**: cliente escolhe (custo operacional do cliente).
-- **Não acoplamento**: IA do desenvolvimento não vira dependência do cliente.
+**Porta:** `is_active_integrated_member()` filtra `is_active AND joined_at IS NOT NULL`.
 
 ---
 
-## §3. RBAC canônico — Conjunto A (5 papéis humanos)
+## §4. 12 Personas LLM (Conjunto B — agentes de IA)
 
-> **Conjunto A** do glossário (CLAUDE.md §0.5). Não confundir com 12 personas LLM (§4).
+**NÃO são papéis humanos.** Validam documentos no pipeline n8n em paralelo.
 
-**Admin · GP · Dev · Tester · QA**. Imutável. Não inventar outros.
+| Tag | Persona | Papel |
+|-----|---------|-------|
+| AUD | Auditor | Router — classifica doc, despacha para especialistas |
+| GP | Gerente de Projetos | **Orquestrador** — supervisiona equipe |
+| ARQ | Arquiteto | Valida stack, padrões, NFRs |
+| DBA | DBA | Valida schema, migrações, retenção |
+| DEV | Dev Sênior | Valida implementabilidade, dependências |
+| QA | QA | Valida testes, cobertura, BDD |
+| UX | UX Designer | Jornada, acessibilidade, WCAG |
+| UI | UI Designer | Design system, responsividade |
+| SEG | Security | OWASP, AuthN/Z, superfície de ataque |
+| **CONF** | **Conformidade** | **BLOQUEANTE** — score <60 bloqueia ingestão |
+| LGPD | Proteção de Dados | Dados pessoais, base legal, retenção |
+| NEG | Negócio | Valor estratégico, ROI, risco |
 
-### Admin
-- Opera a instância. Configura provedores, políticas, SMTP, thresholds.
-- Aprova/libera projetos.
-- **Não atua dentro de projetos. Não escreve código.**
-
-### GP (Gerente de Projeto)
-- **Soberano do projeto** (emenda 2026-04-19): acima de Dev/Tester/QA dentro do projeto.
-- Acesso a TODAS as funcionalidades do projeto.
-- Pode operar CodeGen, pipeline e testes.
-- Análogo: GP está para o projeto assim como Admin está para a instância.
-
-### Dev
-- Implementa código. Opera ingestão, Arguidor, CodeGen, commits.
-- **Não aprova módulo no Gatekeeper.**
-
-### Tester
-- Cria/edita/executa testes. Registra evidências.
-
-### QA
-- Revisa/aprova resultados. Valida qualidade final.
-- **Não edita conteúdo de teste.**
-
-### Não canônicos (NÃO implementar como roles)
-Tech Lead, Compliance, Stakeholder, Viewer, Dev Sênior/Pleno como papéis distintos. Podem aparecer em docs históricos como ator narrativo, **não no RBAC**.
-
-**Helper canônico:** `is_active_integrated_member()` em `backend/app/services/project_team_service.py`.
+**Orquestração:** n8n fan-out paralelo + Redis accumulator → update OCG único.
 
 ---
 
-## §4. Personas LLM — Conjunto B (12 agentes IA)
+## §5. OCG — Invariantes Canônicas
 
-> **Conjunto B** do glossário. **NÃO** são os 5 papéis humanos. Orquestrados via **n8n** (fan-out paralelo + Redis accumulator), **NÃO** dentro do FastAPI.
+### Regra 1: OCG Não Contrai
+- ✅ OCG cresce com informação útil
+- ❌ OCG não sobrescreve, não descarta
+- Ingestão ruim → **quarentena**, OCG intocado
 
-| Persona | Tag | Tipo | Pilar OCG | Par humano |
-|---|---|---|---|---|
-| **Auditor** | AUD | Router | (sem score) | (interno ao GCA) |
-| **Gerente de Projetos** | GP | **Orquestrador** | p1_business_score | Gerente do cliente |
-| Negócio | NEG | Especialista | p1_business_score | Product Owner |
-| **Conformidade** | CONF | **BLOQUEANTE <60** | p2_rules_score | Compliance Officer |
-| Proteção de Dados | LGPD | Especialista | p2_rules_score | DPO |
-| UX | UX | Especialista | p3_features_score | UX Designer |
-| UI | UI | Especialista | p3_features_score | UI Designer |
-| QA | QA | Especialista | p4_nfr_score | QA Lead |
-| Arquiteto | ARQ | Especialista | p5_architecture_score | Tech Lead |
-| Dev Sr. | DEV | Especialista | p5_architecture_score | Líder técnico |
-| DBA | DBA | Especialista | p6_data_score | DBA do cliente |
-| Segurança | SEG | Especialista | p7_security_score | Security Engineer |
+### Regra 2: OCG Versionado
+- Tabela `ocg_delta_log` — hash chain imutável
+- Cada change: `change_type`, `trigger_source`, versão
+- Auditável, reversível
 
-**Mapping persona → pilar canônico:** `backend/app/services/ocg_consolidator_service.py:34-46`.
-
-### §4.1. Regras das personas
-
-- ✅ **CONF é bloqueante** — score <60 bloqueia ingestão (§6.2).
-- ✅ **GP é orquestrador** — supervisiona resultado da equipe.
-- ✅ Filosofia "Assistida": LLM tem permissão de **não saber**. Atinge limite → gera questionário estruturado para humano e pausa pilar afetado.
-- ✅ Detalhe da arquitetura em 4 camadas, HITL, ConflictDetector, KPIs: skill `gca-personas-engine`.
+### Regra 3: OCG Gate ≥95%
+- **Limiar:** `SCORE_MATURIDADE = 95` em `ocg_gate.py:64`
+- **Decisão GP 2 (2026-05-04):** Todos 7 pilares (P1-P7) ≥95%
+- Um pilar <95% → CodeGen bloqueado
+- 5 níveis de bloqueio: `hard_block`, `insufficient` (<60), `immature` (<95), `pillar_immature`, `no_ocg`
 
 ---
 
-## §5. OCG — fonte única de verdade
+## §6. Criticidade de IA (3 níveis)
 
-### §5.1. Regras invariantes
+| Nível | Exemplos | Provider |
+|-------|----------|----------|
+| **Baixa** | Classificação, extração, normalização | Local/Ollama ✅ |
+| **Média** | Perguntas dirigidas, pré-análise | Qualquer ✅ |
+| **Alta** | OCG consolidação, Gatekeeper, CodeGen | Premium obrigatório ❌ fallback proibido |
 
-- ✅ OCG nasce do questionário aprovado.
-- ✅ OCG é evolutivo e auditável.
-- ✅ **OCG só expande quando recebe informação de valor. Nunca contrai por análise.**
-- ✅ Ingestão ruim ou conflitante → **quarentena**, **não afeta OCG**.
-- ✅ Módulos não podem assumir defaults invisíveis quando OCG incompleto: bloquear ou exigir complementação.
-- ✅ Toda mudança gera versionamento e trilha de auditoria.
-
-### §5.2. Reversão por deleção legítima (MVP 34, 2026-05-03)
-
-Complementa — **não viola** — a regra "OCG não contrai por ingestão". Quando GP soft-deleta `ingested_documents` (smoke fixture, erro de upload, PII em LGPD, doc obsoleto):
-
-- ✅ Endpoint `DELETE /api/v1/projects/{pid}/ingestion/{did}?reason=manual|lgpd|smoke_cleanup`
-- ✅ Retorna **202 Accepted** + `revert_job_id`
-- ✅ Soft-delete imediato (`deleted_at IS NOT NULL`)
-- ✅ Celery job recompute OCG ignorando o doc
-- ✅ Versão OCG incrementa com `change_type='REVERT_DOCUMENT_DELETE'`
-- ✅ Audit event `DOCUMENT_REVERTED` em `audit_log_global` (hash chain íntegro)
-- ⚠ LGPD parcial: `pii_fields`, `parecer` JSONB permanecem (DT-086)
-
-### §5.3. Cascata para `file_type='questionnaire'` (MVP 35, 2026-05-03)
-
-Quando doc deletado é o IngestedDocument sintético do questionário técnico:
-- `TechnicalQuestionnaire.status` → `archived`
-- `Questionnaire.approved` → False
-- `setup_status.questionnaire_approved` → False
-- Pipeline n8n bloqueado até novo questionário
-- Frontend redireciona para `/settings?tab=questionario`
-
-### §5.4. Pipeline canônico de setup (NESTA ORDEM)
-
-1. **Repositório Git** configurado
-2. **Chave LLM** válida e validada
-3. **Questionário técnico** APROVADO E SUBMETIDO
-
-### §5.5. Validação canônica do Questionário (2 camadas)
-
-- **Camada 1 — RulesEvaluator** (`backend/app/services/questionnaire_validation/`): 30 regras DSL JSON em 5 temas. Stateless, determinístico, <50ms.
-- **Camada 2 — LLM sanity check** (apenas no submit): detecta incoerências semânticas. Falha → bloqueia submit (sem fallback silencioso).
-
-### §5.6. Gate de maturidade do CodeGen
-
-CodeGen ganha gate em 3 níveis (entry points HTTP + start_scaffold_run async):
-- `is_blocking=true` → 409 `block_level=hard_block`
-- `overall_score < 60` → 409 `block_level=insufficient`
-- `overall_score < 95` → 409 `block_level=immature`
-
-✅ Liberado quando `overall_score >= 95` AND `is_blocking=false`.
-
-> **Princípios canônicos** (GP, 2026-05-02):
-> - "OCG não sobrescreve, não contrai. Só cresce com informação útil. Informação inútil é descartada."
-> - "CodeGen só é liberado quando OCG está maduro, com >=95% de contexto."
+**Porta única:** `AIKeyResolver.resolve_project_provider_chain(db, project_id)`.
 
 ---
 
-## §6. Gatekeeper — 7 pilares + CONF bloqueante
+## §7. Gatekeeper — 5 Porteiros Sequenciais
 
-| Pilar | Score | Persona principal |
-|---|---|---|
-| P1 | Business | GP, NEG |
-| P2 | Rules/Compliance | CONF (**BLOQUEANTE <60**), LGPD |
-| P3 | Features | UX, UI |
-| P4 | NFRs (Non-Functional) | QA |
-| P5 | Architecture | ARQ, DEV |
-| P6 | Data | DBA |
-| P7 | Security | SEG |
+Ordem fixa, **não pular**.
 
-### §6.1. CONF é blocker
-Score CONF <60 bloqueia ingestão e libera quarentena. Não aceita override automático. Apenas humano (GP+Admin dupla assinatura) pode aceitar risco.
+```
+1. Gerente de Projetos   → Veredito: escopo + viabilidade + negócio
+2. Arquiteto              → Veredito: stack + padrões + NFRs
+3. DBA                    → Veredito: schema + migrações (ou N/A)
+4. Dev Sênior             → Implementação completa
+5. Tester/QA              → Veredito: testes + cobertura + regressão
+   → preparar-release (skill) → checklist final
+```
 
-### §6.2. Política de RNF_CONTRACTS (MVP 23)
-Cada módulo no `RNF_CONTRACTS` do OCG declara: latency_p95, rate_limit, CWEs obrigatórios, regulações (LGPD/GDPR), disponibilidade. Validação estática (grep por middleware/decorator) pós-CodeGen.
-
----
-
-## §7. Pontos arquiteturais — portas únicas
-
-> Detalhes técnicos (assinaturas, paths) em `GCA_TECHNICAL_REFERENCE.md §4`.
-
-### §7.1. Resolução de provider de IA
-**Porta:** `AIKeyResolver.resolve_project_provider_chain(db, project_id)`  
-**Config:** `project_settings`, `setting_type='llm'`. UI: Settings > IA.
-
-❌ Proibido instanciar `AnthropicLLMClient`, `OpenAIClient`, `DeepSeekClient`, `GrokClient`, `OllamaClient` diretamente em rotas, services ou personas.  
-❌ Proibido `provider = "anthropic"` chumbado em código.  
-❌ Proibido fallback automático entre providers em falha de auth.  
-✅ Resolver retorna vazio → `raise HTTPException(400, "Projeto sem LLM configurado. Abra Settings > IA")`.
-
-### §7.2. Secrets e tokens
-**Portas:** `VaultService.store_secret` / `get_secret`.  
-**Cipher:** Fernet. Master key em `/var/lib/gca/secrets/fernet.key`. Prefixo: `fernet:v1:`.  
-**Senhas temporárias:** `generate_temporary_password()` (10 chars, 1 maiúscula, 1 dígito, 1 especial).
-
-⚠ `store_secret` commita internamente — testes que o chamam dentro de `session.begin()` quebram. Use sessões separadas.  
-❌ Proibido logar secret em DEBUG, comentário, mensagem de erro ou response body.
-
-### §7.3. RBAC — listagem de membros
-✅ Filtra `is_active AND joined_at IS NOT NULL`. Use `is_active_integrated_member()`.  
-❌ Filtrar só por `is_active` inclui convite pendente como membro ativo (vaza dado).
-
-### §7.4. OCG operacional
-✅ Toda decisão arquitetural/funcional/código **lê o OCG antes** e **atualiza depois**.  
-❌ Pular leitura porque "a mudança é pequena" — proibido.
+Cada porteiro responde em formato canônico:
+1. Veredito (Aprovado | Reprovado | Ressalvas)
+2. Achados principais
+3. Riscos
+4. Correções obrigatórias
+5. Correções recomendadas
+6. Arquivos impactados
+7. Critério de aceite
+8. Próxima ação
 
 ---
 
-## §8. Pipeline Personas (n8n)
+## §8. Pipeline Canônico (MVP 35 + MVP 34)
 
-### §8.1. Fluxo canônico
-1. **Ingestão** (FastAPI) → cria `ingested_documents` row
-2. **Trigger n8n** via webhook `/webhooks/ingestion-complete`
-3. **Auditor (AUD)** classifica documento + roteia
-4. **Fan-out paralelo** para 11 especialistas (workflows n8n independentes)
-5. **Redis accumulator** agrega scores
-6. **Webhook callback** `/webhooks/ocg-result` retorna ao FastAPI
-7. **OCGUpdaterService.update_ocg_from_arguider** atualiza OCG (delegação obrigatória, MVP 31)
-
-### §8.2. Regras n8n
-- Cada nó precisa `alwaysOutputData=true` (regra dura).
-- If/Switch typeVersion=2.2; cada condição precisa UUID `id` e operator `filter.operator.equals`.
-- INSERT sem RETURNING esvazia item — adicionar Code node após para restaurar payload.
-
-### §8.3. Lixo descartado
-PersonaOutput inválido (G4 reprovou) **não entra** no merge cumulativo, mas fica em `ocg_individual` com `status='failed'` para auditoria.
-
----
-
-## §9. Regras duras de implementação
-
-- Não antecipar feature de MVP futuro.
-- Não expandir RBAC além de 5 papéis.
-- Não promover documento histórico a contrato de implementação.
-- Não reescrever arquitetura quando correção cirúrgica resolver.
-- Não hardcodar provedor de IA.
-- Não assumir que todo fluxo precisa usar mesma IA.
-- Não permitir modelo barato/local tomar decisão crítica sozinho.
-- Não avançar para próximo MVP enquanto gate da fase atual estiver fechado.
+1. **Questionário Técnico** (MVP 35):
+   - Camada 1: RulesEvaluator (30 regras DSL determinísticas)
+   - Camada 2: LLM sanity check (verificação semântica)
+   
+2. **Ingestão Documental:**
+   - Upload + validação conformidade
+   
+3. **Pipeline n8n** (135s com DeepSeek):
+   - AUD classifica → fan-out aos 11 especialistas
+   - 12 personas em paralelo
+   - Redis accumulator → update OCG único
+   
+4. **Soft-delete + Revert** (MVP 34):
+   - GP soft-deleta documento (`deleted_at IS NOT NULL`)
+   - OCGUpdaterService recomputa ignorando doc deletado
+   - `ocg_delta_log` entry → `REVERT_DOCUMENT_DELETE`
+   - Módulos órfãos → `archived`
 
 ---
 
-## §10. Constraint de escopo
+## §9. Compliance & Dados
 
-### §10.1. Faça EXATAMENTE o solicitado
-- Oportunidade de melhoria não-solicitada → comentário TODO, não implementar.
-- Antes de criar arquivo >150 linhas: peça confirmação de escopo.
-- Pergunte se precisa de X, Y, Z antes de assumir.
+### LGPD
+- ✅ Criptografia pgcrypto em `project_secrets`
+- ✅ Audit log global (hash chain)
+- ⚠️ Purge físico pendente (DT-086, future MVP)
 
-### §10.2. Alucinação = bloqueado
-- Não adicionar logs estruturados sem solicitação explícita.
-- Não criar fixtures não pedidas.
-- Não refatorar código vizinho.
-- Não assumir "melhorias óbvias" — diga que viu a oportunidade.
-
-### §10.3. Aplicação
-§10 aplica a TODO ciclo, dentro ou fora de MVP ativo. Violação = implementação silenciosa (proibida por §0). Em dúvida entre "faz" e "pergunta": **pergunta**.
+### Erro Determinístico (Nunca Silencioso)
+```python
+try:
+    # operação
+except Exception as e:
+    logger.error(...); raise  # NUNCA except: pass
+```
 
 ---
 
-**Fim do GCA_SPECIFICATION.md**
+## §10. Provider de IA — Escolha do Cliente
+
+- ✅ Cliente usa suas próprias chaves
+- ✅ Sistema oferece análise de adequação
+- ✅ Modo híbrido por tipo de tarefa (configurável)
+
+**Providers implementados:** Anthropic, OpenAI, DeepSeek  
+**DTs abertas:** DT-079 (hardcode Anthropic em alguns pontos)
+
+---
+
+## §11. Histórico MVPs (Últimos 7)
+
+| MVP | Status | Data | Descrição |
+|-----|--------|------|-----------|
+| 35 | ✅ | 2026-05-03 | Validação canônica Questionário Técnico |
+| 34 | ✅ | 2026-05-03 | Reversão soft-delete + OCG recompute |
+| 33 | ✅ | 2026-05-02 | Expansão para 12 personas |
+| 32 | ✅ | 2026-05-02 | OCG Updater funcional |
+| 31 | ✅ | 2026-05-02 | OCG Cumulativo + CodeGen Gate |
+| 30 | ✅ | 2026-05-02 | Pipeline n8n 12 personas end-to-end |
+| 29 | ✅ | 2026-04-28 | Hardening Celery |
+
+**Baseline:** 35 MVPs fechados, ~245+ testes passing, 0 DTs críticas.
+
+---
+
+## §12. DTs Abertas (8)
+
+| ID | Sev | Tema | Status |
+|----|----|------|--------|
+| DT-079 | Major | Hardcode Anthropic em `module_codegen_service.py` | Aberta |
+| DT-080 | Minor | Formato `arguider_analysis` em `ocg_individual` | Aberta |
+| DT-082 | Minor | Cleanup (não aplicar gate HTTP) | Aberta |
+| DT-083 | Minor | Testes regredidos MVP 31 | Aberta |
+| DT-084 | Major | 5 testes legado falhando (MVP 33) | Aberta |
+| DT-086 | Major | Purge físico LGPD | Future |
+| DT-087 | Minor | FK `ingested_documents.uploaded_by` | Aberta |
+
+---
+
+**Última atualização:** 2026-05-05 (Fase 2)
